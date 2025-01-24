@@ -18,7 +18,8 @@ impl FanosClient {
             socket::AddressFamily::Unix,
             socket::SockType::Stream,
             None,
-            socket::SockFlag::SOCK_NONBLOCK,
+            // socket::SockFlag::SOCK_NONBLOCK,
+            socket::SockFlag::empty(),
         )?;
 
         // async std spawn subprocess
