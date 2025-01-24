@@ -9,25 +9,21 @@ async fn main() -> Result<()> {
 
     let mut client = fanos::FanosClient::new().await?;
 
-    let ui = ui::Ui::new()?;
-    let mut reader = crossterm::event::EventStream::new();
+    let mut ui = ui::Ui::new()?;
+    ui.activate()?;
+    ui.draw_prompt()?;
+    let mut events = crossterm::event::EventStream::new();
 
     loop {
-        let mut delay = std::pin::pin!(async_std::task::sleep(std::time::Duration::from_millis(1_000)).fuse());
-        let mut event = reader.next().fuse();
+        // let mut delay = std::pin::pin!(async_std::task::sleep(std::time::Duration::from_millis(1_000)).fuse());
+        let mut events = events.next().fuse();
 
         select! {
-            _ = delay => { println!(".\r"); },
-            maybe_event = event => {
-                match maybe_event {
+            // _ = delay => { println!(".\r"); },
+            event = events => {
+                match event {
                     Some(Ok(event)) => {
-                        println!("Event::{:?}\r", event);
-
-                        if event == crossterm::event::Event::Key(crossterm::event::KeyCode::Char('c').into()) {
-                            println!("Cursor position: {:?}\r", crossterm::cursor::position());
-                        }
-
-                        if event == crossterm::event::Event::Key(crossterm::event::KeyCode::Esc.into()) {
+                        if !ui.handle_event(event, &mut client).await? {
                             break;
                         }
                     }
@@ -37,9 +33,6 @@ async fn main() -> Result<()> {
             }
         };
     }
-
-    client.send(b"EVAL echo $PWD", None).await?;
-    client.recv().await?;
 
     Ok(())
 }

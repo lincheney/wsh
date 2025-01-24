@@ -1,6 +1,6 @@
 use std::os::fd::{AsRawFd, RawFd};
 use async_std::io::{BufReadExt, ReadExt};
-use nix::sys::socket;
+use nix::sys::{socket, signal};
 use anyhow::Result;
 
 const OSH: &str = "/home/qianli/Documents/oils-for-unix-0.26.0/_bin/cxx-opt-sh/osh";
@@ -27,6 +27,7 @@ impl FanosClient {
             .arg("--headless")
             .stdin(server.try_clone()?)
             .stdout(server)
+            .stderr(std::process::Stdio::null())
             .spawn()?
             ;
 
@@ -62,10 +63,32 @@ impl FanosClient {
     pub async fn recv(&mut self) -> Result<()> {
         let mut buf = vec![];
         self.reader.read_until(b':', &mut buf).await?;
-        let size = std::str::from_utf8(&buf[..buf.len()-1])?.parse::<usize>()?;
+        let size = std::str::from_utf8(&buf[..buf.len()-1])?.parse::<usize>()? + 1;
         buf.resize(size, 0);
         self.reader.read_exact(&mut buf[..size]).await?;
         Ok(())
     }
 
+    pub fn finish(&mut self) -> Result<std::process::ExitStatus> {
+        if let Some(status) = self.child.try_wait()? {
+            Ok(status)
+        } else {
+            self.terminate()?;
+            Ok(self.child.wait()?)
+        }
+    }
+
+    fn terminate(&mut self) -> Result<()> {
+        signal::kill(nix::unistd::Pid::from_raw(self.child.id() as _), signal::Signal::SIGTERM)?;
+        Ok(())
+    }
+
+}
+
+impl Drop for FanosClient {
+    fn drop(&mut self) {
+        if let Err(err) = self.finish() {
+            eprintln!("ERROR: {}", err);
+        }
+    }
 }

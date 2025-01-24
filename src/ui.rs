@@ -3,78 +3,129 @@ use anyhow::Result;
 
 use crossterm::{
     cursor::position,
-    event::{
-        poll,
-        KeyboardEnhancementFlags,
-        PopKeyboardEnhancementFlags,
-        PushKeyboardEnhancementFlags,
-        read,
-        DisableBracketedPaste,
-        DisableFocusChange,
-        DisableMouseCapture,
-        EnableBracketedPaste,
-        EnableFocusChange,
-        EnableMouseCapture,
-        Event,
-        KeyCode,
-    },
+    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
     queue,
 };
 
-const HELP: &str = r#"Blocking read()
- - Keyboard, mouse, focus and terminal resize events enabled
- - Hit "c" to print current cursor position
- - Use Esc to quit
-"#;
+struct StrCommand<'a>(&'a str);
+
+impl crossterm::Command for StrCommand<'_> {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        f.write_str(self.0)
+    }
+}
 
 pub struct Ui {
     stdout: std::io::Stdout,
     enhanced_keyboard: bool,
+    command: String,
+    cursor: (u16, u16),
+    size: (u16, u16),
 }
 
 impl Ui {
     pub fn new() -> Result<Self> {
+        Ok(Self{
+            stdout: std::io::stdout(),
+            enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
+            command: String::new(),
+            cursor: crossterm::cursor::position()?,
+            size: crossterm::terminal::size()?,
+        })
+    }
+
+    pub fn draw_prompt(&mut self) -> Result<()> {
+        execute!(self.stdout, StrCommand(">>> "), StrCommand(&self.command))?;
+        self.cursor = crossterm::cursor::position()?;
+        Ok(())
+    }
+
+    pub async fn handle_event(&mut self, event: Event, fanos: &mut crate::fanos::FanosClient) -> Result<bool> {
+        // println!("Event::{:?}\r", event);
+
+        match event {
+
+            Event::Key(KeyEvent{
+                code: KeyCode::Char(c),
+                modifiers,
+                kind: event::KeyEventKind::Press,
+                state: _,
+            }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
+                self.command.push(c);
+                execute!(self.stdout, StrCommand(&self.command[self.command.len() - 1..]))?;
+            },
+
+            Event::Key(KeyEvent{
+                code: KeyCode::Enter,
+                modifiers,
+                kind: event::KeyEventKind::Press,
+                state: _,
+            }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
+                // time to execute
+                self.command.insert_str(0, "EVAL ");
+                self.deactivate()?;
+                execute!(self.stdout, StrCommand("\r\n"))?;
+                fanos.send(self.command.as_bytes(), None).await?;
+                fanos.recv().await?;
+                self.activate()?;
+                self.command.clear();
+                self.draw_prompt()?;
+            },
+
+            Event::Key(KeyEvent{
+                code: KeyCode::Esc,
+                modifiers,
+                kind: event::KeyEventKind::Press,
+                state: _,
+            }) if modifiers.is_empty() => {
+                return Ok(false)
+            },
+
+            _ => {},
+        }
+
+        // if event == crossterm::event::Event::Key(crossterm::event::KeyCode::Char('c').into()) {
+            // println!("Cursor position: {:?}\r", crossterm::cursor::position());
+        // }
+
+        Ok(true)
+    }
+
+    pub fn activate(&mut self) -> Result<()> {
         crossterm::terminal::enable_raw_mode()?;
 
-        let mut stdout = std::io::stdout();
-
-        let enhanced_keyboard = crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
-        if enhanced_keyboard {
+        if self.enhanced_keyboard {
             queue!(
-                stdout,
-                PushKeyboardEnhancementFlags(
-                    KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-                    | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
-                    | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
-                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                self.stdout,
+                event::PushKeyboardEnhancementFlags(
+                    event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | event::KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+                    | event::KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+                    | event::KeyboardEnhancementFlags::REPORT_EVENT_TYPES
                 )
             )?;
         }
 
         execute!(
-            stdout,
-            EnableBracketedPaste,
-            EnableFocusChange,
-            EnableMouseCapture,
+            self.stdout,
+            event::EnableBracketedPaste,
+            event::EnableFocusChange,
+            // event::EnableMouseCapture,
         )?;
-
-        Ok(Self{
-            stdout,
-            enhanced_keyboard,
-        })
+        Ok(())
     }
 
-    fn finish(&mut self) -> Result<()> {
+    fn deactivate(&mut self) -> Result<()> {
         if self.enhanced_keyboard {
-            queue!(self.stdout, PopKeyboardEnhancementFlags)?;
+            queue!(self.stdout, event::PopKeyboardEnhancementFlags)?;
         }
 
         execute!(
             self.stdout,
-            DisableBracketedPaste,
-            DisableFocusChange,
-            DisableMouseCapture
+            event::DisableBracketedPaste,
+            event::DisableFocusChange,
+            // event::DisableMouseCapture
         )?;
 
         crossterm::terminal::disable_raw_mode()?;
@@ -85,27 +136,29 @@ impl Ui {
 
 impl Drop for Ui {
     fn drop(&mut self) {
-        self.finish();
+        if let Err(err) = self.deactivate() {
+            eprintln!("ERROR: {}", err);
+        };
     }
 }
 
 fn print_events() -> Result<()> {
     loop {
         // Blocking read
-        let event = read()?;
+        let event = event::read()?;
 
         println!("Event: {:?}\r", event);
 
-        if event == Event::Key(KeyCode::Char('c').into()) {
+        if event == event::Event::Key(event::KeyCode::Char('c').into()) {
             println!("Cursor position: {:?}\r", position());
         }
 
-        if let Event::Resize(x, y) = event {
+        if let event::Event::Resize(x, y) = event {
             let (original_size, new_size) = flush_resize_events((x, y));
             println!("Resize from: {:?}, to: {:?}\r", original_size, new_size);
         }
 
-        if event == Event::Key(KeyCode::Esc.into()) {
+        if event == event::Event::Key(event::KeyCode::Esc.into()) {
             break;
         }
     }
@@ -118,8 +171,8 @@ fn print_events() -> Result<()> {
 // This function will keep the first and last resize event.
 fn flush_resize_events(first_resize: (u16, u16)) -> ((u16, u16), (u16, u16)) {
     let mut last_resize = first_resize;
-    while let Ok(true) = poll(Duration::from_millis(50)) {
-        if let Ok(Event::Resize(x, y)) = read() {
+    while let Ok(true) = event::poll(Duration::from_millis(50)) {
+        if let Ok(event::Event::Resize(x, y)) = event::read() {
             last_resize = (x, y);
         }
     }
