@@ -2,9 +2,10 @@ use std::os::fd::{AsRawFd, FromRawFd};
 use async_std::io::BufReadExt;
 use nix::sys::socket;
 use crossterm::event::{self, Event};
+use anyhow::Result;
 
 #[async_std::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<()> {
 
     let (client, server) = socket::socketpair(
         socket::AddressFamily::Unix,
