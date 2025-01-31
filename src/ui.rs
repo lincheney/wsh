@@ -9,6 +9,7 @@ use crossterm::{
 };
 
 use crate::fanos;
+use crate::keybind;
 
 struct StrCommand<'a>(&'a str);
 
@@ -20,7 +21,10 @@ impl crossterm::Command for StrCommand<'_> {
 
 pub struct Ui {
     fanos: fanos::FanosClient,
+    pub lua: mlua::Lua,
+    pub lua_api: mlua::Table,
 
+    pub keybinds: keybind::KeybindMapping,
     stdout: std::io::Stdout,
     enhanced_keyboard: bool,
     command: String,
@@ -30,14 +34,28 @@ pub struct Ui {
 
 impl Ui {
     pub fn new() -> Result<Self> {
-        Ok(Self{
+
+        let lua = mlua::Lua::new();
+        let lua_api = lua.create_table()?;
+        lua.globals().set("wish", &lua_api)?;
+
+        let ui = Self{
             fanos: fanos::FanosClient::new()?,
+            lua,
+            lua_api,
+            keybinds: keybind::KeybindMapping::default(),
             stdout: std::io::stdout(),
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
             command: String::new(),
             cursor: crossterm::cursor::position()?,
             size: crossterm::terminal::size()?,
-        })
+        };
+
+        keybind::init_lua(&ui)?;
+        ui.lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;
+        ui.lua.load("require('wish')").exec()?;
+
+        Ok(ui)
     }
 
     pub fn draw_prompt(&mut self) -> Result<()> {
@@ -72,7 +90,9 @@ impl Ui {
                 self.deactivate()?;
                 execute!(self.stdout, StrCommand("\r\n"))?;
                 self.fanos.send(self.command.as_bytes(), None).await?;
-                self.fanos.recv().await?;
+                if ! self.fanos.recv().await? {
+                    return Ok(false)
+                }
                 self.activate()?;
                 self.command.clear();
                 self.draw_prompt()?;

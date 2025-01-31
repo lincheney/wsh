@@ -60,13 +60,18 @@ impl FanosClient {
         Ok(())
     }
 
-    pub async fn recv(&mut self) -> Result<()> {
+    pub async fn recv(&mut self) -> Result<bool> {
         let mut buf = vec![];
         self.reader.read_until(b':', &mut buf).await?;
-        let size = std::str::from_utf8(&buf[..buf.len()-1])?.parse::<usize>()? + 1;
-        buf.resize(size, 0);
-        self.reader.read_exact(&mut buf[..size]).await?;
-        Ok(())
+
+        Ok(if buf.is_empty() {
+            false
+        } else {
+            let size = std::str::from_utf8(&buf[..buf.len()-1])?.parse::<usize>()? + 1;
+            buf.resize(size, 0);
+            self.reader.read_exact(&mut buf[..size]).await?;
+            true
+        })
     }
 
     pub fn finish(&mut self) -> Result<std::process::ExitStatus> {

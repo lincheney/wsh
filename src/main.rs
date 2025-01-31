@@ -3,6 +3,7 @@ use async_std::stream::StreamExt;
 use futures::{select, future::FutureExt};
 mod fanos;
 mod ui;
+mod keybind;
 
 #[async_std::main]
 async fn main() -> Result<()> {
