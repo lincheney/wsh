@@ -1,9 +1,10 @@
 use std::time::Duration;
-use std::cell::RefCell;
+use std::future::Future;
+use std::cell::{RefCell, Ref, RefMut};
 use std::rc::{Rc, Weak};
+use std::ops::DerefMut;
 use mlua::{IntoLuaMulti, FromLuaMulti, Lua, Result as LuaResult};
 use anyhow::Result;
-use paste::paste;
 
 use crossterm::{
     terminal::{Clear, ClearType, BeginSynchronizedUpdate, EndSynchronizedUpdate},
@@ -24,12 +25,20 @@ impl crossterm::Command for StrCommand<'_> {
     }
 }
 
-pub struct Ui {
+#[derive(Debug, Default)]
+struct UiDirty {
+    buffer: bool,
+}
+
+pub struct UiInner {
     fanos: fanos::FanosClient,
     pub lua: Lua,
     pub lua_api: mlua::Table,
     lua_cache: mlua::Table,
-    state: Rc<RefCell<UiStateInner>>,
+
+    dirty: UiDirty,
+    pub keybinds: keybind::KeybindMapping,
+    pub buffer: crate::buffer::Buffer,
 
     stdout: std::io::Stdout,
     enhanced_keyboard: bool,
@@ -37,126 +46,84 @@ pub struct Ui {
     size: (u16, u16),
 }
 
-pub trait LuaFn<A: FromLuaMulti, R: IntoLuaMulti>: Fn(&UiState, &Lua, A) -> LuaResult<R> + mlua::MaybeSend + 'static {}
-impl<A: FromLuaMulti, R: IntoLuaMulti, F: Fn(&UiState, &Lua, A) -> LuaResult<R> + mlua::MaybeSend + 'static> LuaFn<A, R> for F {}
-
-pub fn set_lua_fn<F: LuaFn<A, R>, A: FromLuaMulti, R: IntoLuaMulti>(
-    state: &UiState,
-    lua: &Lua,
-    table: &mlua::Table,
-    name: &str,
-    func: F,
-) -> LuaResult<()> {
-    let state = Rc::downgrade(&state);
-    table.set(name, lua.create_function(move |lua, value| {
-        if let Some(state) = state.upgrade() {
-            func(&state, lua, value)
-        } else {
-            Err(mlua::Error::RuntimeError("ui not running".to_string()))
-        }
-    })?)
-}
-
-#[derive(Debug, Default)]
-struct UiDirtyState {
-    buffer: bool,
-}
-
-#[derive(Debug, Default)]
-pub struct UiStateInner {
-    pub keybinds: keybind::KeybindMapping,
-    dirty: UiDirtyState,
-
-    pub buffer: crate::buffer::Buffer,
-}
-
-impl UiStateInner {
-
-    fn init_lua(state: &UiState, lua: &Lua, lua_api: &mlua::Table) -> LuaResult<()> {
-        set_lua_fn(state, lua, lua_api, "__get_cursor", |state, _lua, _val: mlua::Value| Ok(state.borrow().buffer.get_cursor()))?;
-        set_lua_fn(state, lua, lua_api, "__get_buffer", |state, _lua, _val: mlua::Value| Ok(state.borrow().buffer.get_contents().clone()))?;
-
-        set_lua_fn(state, lua, lua_api, "__set_cursor", |state, _lua, val: usize| {
-            let mut state = state.borrow_mut();
-            state.buffer.set_cursor(val);
-            state.dirty.buffer = true;
-            Ok(())
-        })?;
-        set_lua_fn(state, lua, lua_api, "__set_buffer", |state, _lua, val: String| {
-            let mut state = state.borrow_mut();
-            state.buffer.set_contents(val);
-            state.dirty.buffer = true;
-            Ok(())
-        })?;
-
-        Ok(())
-    }
-
-    fn clean(&mut self) {
-        self.dirty = UiDirtyState::default();
-    }
-
-}
-
-pub type UiState = Rc<RefCell<UiStateInner>>;
+pub struct Ui(Rc<RefCell<UiInner>>);
 
 impl Ui {
-    pub fn new() -> Result<Self> {
 
+    pub fn new() -> Result<Self> {
         let lua = Lua::new();
         let lua_api = lua.create_table()?;
         lua.globals().set("wish", &lua_api)?;
         let lua_cache = lua.create_table()?;
         lua_api.set("__cache", &lua_cache)?;
 
-        let ui = Self{
+        let ui = Self(Rc::new(RefCell::new(UiInner{
             fanos: fanos::FanosClient::new()?,
             lua,
             lua_api,
             lua_cache,
-            state: Rc::new(RefCell::new(UiStateInner::default())),
+            dirty: UiDirty::default(),
+            buffer: std::default::Default::default(),
+            keybinds: std::default::Default::default(),
             stdout: std::io::stdout(),
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
             cursor: crossterm::cursor::position()?,
             size: crossterm::terminal::size()?,
-        };
+        })));
 
-        init_lua(&ui)?;
+        ui.init_lua()?;
 
         Ok(ui)
     }
 
-    pub fn draw_prompt(&mut self) -> Result<()> {
-        let state = self.state.borrow();
+    pub fn borrow(&self) -> Ref<UiInner> {
+        self.0.borrow()
+    }
+
+    pub fn borrow_mut(&self) -> RefMut<UiInner> {
+        self.0.borrow_mut()
+    }
+
+    pub fn activate(&self) -> Result<()> {
+        self.borrow_mut().activate()
+    }
+
+    pub fn deactivate(&self) -> Result<()> {
+        self.borrow_mut().deactivate()
+    }
+
+    pub fn draw_prompt(&self) -> Result<()> {
+        let mut ui = self.borrow_mut();
+        let ui = ui.deref_mut();
         queue!(
-            self.stdout,
+            ui.stdout,
             BeginSynchronizedUpdate,
             StrCommand("\r"),
             Clear(ClearType::FromCursorDown),
             StrCommand(">>> "),
-            StrCommand(&state.buffer.get_contents()),
+            StrCommand(&ui.buffer.get_contents()),
         )?;
-        let offset = state.buffer.get_contents().len() - state.buffer.get_cursor();
+        let offset = ui.buffer.get_contents().len() - ui.buffer.get_cursor();
         if offset > 0 {
-            queue!(self.stdout, crossterm::cursor::MoveLeft(offset as u16))?;
+            queue!(ui.stdout, crossterm::cursor::MoveLeft(offset as u16))?;
         }
-        queue!(self.stdout, EndSynchronizedUpdate)?;
-        execute!(self.stdout)?;
-        self.cursor = crossterm::cursor::position()?;
+        queue!(ui.stdout, EndSynchronizedUpdate)?;
+        execute!(ui.stdout)?;
+        ui.cursor = crossterm::cursor::position()?;
         Ok(())
     }
 
-    pub async fn handle_event(&mut self, event: Event) -> Result<bool> {
+    pub async fn handle_event(&self, event: Event) -> Result<bool> {
         // println!("Event::{:?}\r", event);
 
         if let Event::Key(KeyEvent{code, modifiers, ..}) = event {
-            let callback = self.state.borrow().keybinds.get(&(code, modifiers)).cloned();
+            let callback = self.borrow().keybinds.get(&(code, modifiers)).cloned();
             if let Some(callback) = callback {
-                if let Err(err) = callback.call::<mlua::Value>(mlua::Nil) {
+                if let Err(err) = callback.call_async::<mlua::Value>(mlua::Nil).await {
                     eprintln!("DEBUG(loaf)  \t{}\t= {:?}", stringify!(err), err);
                 }
                 self.refresh_on_state()?;
-                return Ok(true)
+                return Ok(!self.borrow().fanos.closed)
             }
         }
 
@@ -168,21 +135,20 @@ impl Ui {
                 kind: event::KeyEventKind::Press,
                 state: _,
             }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
-                let need_redraw = {
-                    let mut state = self.state.borrow_mut();
-                    state.buffer.mutate(|contents, cursor| -> Result<bool> {
+                let no_redraw = {
+                    self.borrow_mut().buffer.mutate(|contents, cursor| -> Result<bool> {
                         contents.insert(*cursor, c);
                         *cursor += 1;
-                        if *cursor == contents.len() {
-                            execute!(self.stdout, StrCommand(&contents[contents.len() - 1..]))?;
-                            Ok(false)
-                        } else {
-                            Ok(true)
-                        }
+                        Ok(*cursor == contents.len())
                     })?
                 };
 
-                if need_redraw {
+                if no_redraw {
+                    let mut ui = self.borrow_mut();
+                    let ui = ui.deref_mut();
+                    let contents = ui.buffer.get_contents();
+                    execute!(ui.stdout, StrCommand(&contents[contents.len() - 1 ..]))?;
+                } else {
                     self.draw_prompt()?;
                 }
             },
@@ -193,20 +159,7 @@ impl Ui {
                 kind: event::KeyEventKind::Press,
                 state: _,
             }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
-                self.deactivate()?;
-                // new line
-                execute!(self.stdout, StrCommand("\r\n"))?;
-                // time to execute
-                {
-                    let state = self.state.borrow();
-                    self.fanos.eval(state.buffer.get_contents(), None).await?;
-                    if ! self.fanos.recv().await? {
-                        return Ok(false)
-                    }
-                }
-                self.state.borrow_mut().buffer.reset();
-                self.activate()?;
-                self.draw_prompt()?;
+                return self.accept_line().await;
             },
 
             Event::Key(KeyEvent{
@@ -228,6 +181,118 @@ impl Ui {
         Ok(true)
     }
 
+    async fn accept_line(&self) -> Result<bool> {
+        {
+            let mut ui = self.borrow_mut();
+            let ui = ui.deref_mut();
+            ui.deactivate()?;
+            // new line
+            execute!(ui.stdout, StrCommand("\r\n"))?;
+            // time to execute
+            ui.fanos.eval(ui.buffer.get_contents(), None).await?;
+            if ! ui.fanos.recv().await? {
+                return Ok(false)
+            }
+            ui.buffer.reset();
+            ui.activate()?;
+        }
+
+        self.draw_prompt()?;
+        Ok(true)
+    }
+
+    fn try_upgrade(ui: &Weak<RefCell<UiInner>>) -> LuaResult<Self> {
+        if let Some(ui) = ui.upgrade() {
+            Ok(Ui(ui))
+        } else {
+            Err(mlua::Error::RuntimeError("ui not running".to_string()))
+        }
+    }
+
+    pub fn set_lua_fn<F, A, R>(&self, name: &str, func: F) -> LuaResult<()>
+    where
+        F: Fn(&Self, &Lua, A) -> LuaResult<R> + mlua::MaybeSend + 'static,
+        A: FromLuaMulti,
+        R: IntoLuaMulti,
+    {
+
+        let weak = Rc::downgrade(&self.0);
+        let ui = self.borrow();
+        ui.lua_api.set(name, ui.lua.create_function(move |lua, value| {
+            func(&Ui::try_upgrade(&weak)?, lua, value)
+        })?)
+    }
+
+    pub fn set_lua_async_fn<F, A, R, T>(&self, name: &str, func: F) -> LuaResult<()>
+    where
+        F: Fn(Self, Lua, A) -> T + mlua::MaybeSend + 'static + Clone,
+        A: FromLuaMulti + 'static,
+        R: IntoLuaMulti,
+        T: Future<Output=LuaResult<R>> + mlua::MaybeSend + 'static,
+    {
+        let weak = Rc::downgrade(&self.0);
+        let ui = self.borrow();
+        ui.lua_api.set(name, ui.lua.create_async_function(move |lua, value| {
+            let weak = weak.clone();
+            let func = func.clone();
+            async move {
+                let ui = Ui::try_upgrade(&weak)?;
+                func(ui, lua, value).await
+            }
+        })?)
+    }
+
+    pub fn refresh_on_state(&self) -> Result<()> {
+        if self.borrow().dirty.buffer {
+            self.draw_prompt()?;
+        }
+
+        self.clean();
+        self.borrow_mut().lua_cache.clear()?;
+        Ok(())
+    }
+
+    fn init_lua(&self) -> Result<()> {
+        self.set_lua_fn("__get_cursor", |ui, _lua, _val: mlua::Value| Ok(ui.borrow().buffer.get_cursor()))?;
+        self.set_lua_fn("__get_buffer", |ui, _lua, _val: mlua::Value| Ok(ui.borrow().buffer.get_contents().clone()))?;
+
+        self.set_lua_fn("__set_cursor", |ui, _lua, val: usize| {
+            let mut ui = ui.borrow_mut();
+            ui.buffer.set_cursor(val);
+            ui.dirty.buffer = true;
+            Ok(())
+        })?;
+        self.set_lua_fn("__set_buffer", |ui, _lua, val: String| {
+            let mut ui = ui.borrow_mut();
+            ui.buffer.set_contents(val);
+            ui.dirty.buffer = true;
+            Ok(())
+        })?;
+
+        self.set_lua_async_fn("accept_line", |ui, _lua, _val: mlua::Value| async move {
+            // TODO error handling
+            ui.accept_line().await;
+            Ok(())
+        })?;
+
+        keybind::init_lua(self)?;
+
+        let lua = self.borrow().lua.clone();
+        lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;
+        if let Err(err) = lua.load("require('wish')").exec() {
+            eprintln!("DEBUG(sliver)\t{}\t= {:?}", stringify!(err), err);
+        }
+
+        Ok(())
+    }
+
+    fn clean(&self) {
+        self.borrow_mut().dirty = UiDirty::default();
+    }
+
+}
+
+impl UiInner {
     pub fn activate(&mut self) -> Result<()> {
         crossterm::terminal::enable_raw_mode()?;
 
@@ -267,36 +332,9 @@ impl Ui {
         crossterm::terminal::disable_raw_mode()?;
         Ok(())
     }
-
-    pub fn set_lua_fn<F: LuaFn<A, R>, A: FromLuaMulti, R: IntoLuaMulti>(&self, name: &str, func: F) -> LuaResult<()> {
-        set_lua_fn(&self.state, &self.lua, &self.lua_api, name, func)
-    }
-
-    pub fn refresh_on_state(&mut self) -> Result<()> {
-        if self.state.borrow().dirty.buffer {
-            self.draw_prompt()?;
-        }
-
-        self.state.borrow_mut().clean();
-        self.lua_cache.clear()?;
-        Ok(())
-    }
-
 }
 
-fn init_lua(ui: &Ui) -> Result<()> {
-
-    UiStateInner::init_lua(&ui.state, &ui.lua, &ui.lua_api)?;
-
-    keybind::init_lua(&ui)?;
-    ui.lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;
-    if let Err(err) = ui.lua.load("require('wish')").exec() {
-        eprintln!("DEBUG(sliver)\t{}\t= {:?}", stringify!(err), err);
-    }
-    Ok(())
-}
-
-impl Drop for Ui {
+impl Drop for UiInner {
     fn drop(&mut self) {
         if let Err(err) = self.deactivate() {
             eprintln!("ERROR: {}", err);

@@ -10,7 +10,7 @@ mod buffer;
 #[async_std::main]
 async fn main() -> Result<()> {
 
-    let mut ui = ui::Ui::new()?;
+    let ui = ui::Ui::new()?;
     ui.activate()?;
     ui.draw_prompt()?;
     let mut events = crossterm::event::EventStream::new();

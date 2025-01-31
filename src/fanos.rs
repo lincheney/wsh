@@ -10,6 +10,7 @@ pub struct FanosClient {
     child: std::process::Child,
     writer: RawFd,
     reader: async_std::io::BufReader<async_std::os::unix::net::UnixStream>,
+    pub closed: bool,
 }
 
 impl FanosClient {
@@ -41,6 +42,7 @@ impl FanosClient {
             child,
             reader,
             writer,
+            closed: false,
         })
     }
 
@@ -49,7 +51,7 @@ impl FanosClient {
         let len: usize = cmd.iter().map(|c| c.len()).sum();
 
         let mut cursor = Cursor::new([0u8; 256]);
-        write!(cursor, "{len}:");
+        write!(cursor, "{len}:")?;
         let buffer = &cursor.get_ref()[..cursor.position() as usize];
 
         let fds = fds.unwrap_or(&[0, 1, 2]);
@@ -71,6 +73,7 @@ impl FanosClient {
         self.reader.read_until(b':', &mut buf).await?;
 
         Ok(if buf.is_empty() {
+            self.closed = true;
             false
         } else {
             let size = std::str::from_utf8(&buf[..buf.len()-1])?.parse::<usize>()? + 1;

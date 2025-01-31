@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use anyhow::Result;
 use mlua::{prelude::*, Function};
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
-use crate::ui::UiState;
+use crossterm::event::{KeyCode, KeyModifiers};
+use crate::ui::Ui;
 
 pub type KeybindMapping = HashMap<(KeyCode, KeyModifiers), Function>;
 
 
-fn set_keymap(state: &UiState, _lua: &Lua, (key, callback): (String, Function)) -> LuaResult<()> {
+fn set_keymap(ui: &Ui, _lua: &Lua, (key, callback): (String, Function)) -> LuaResult<()> {
     let mut modifiers = KeyModifiers::empty();
 
     let original = &key;
@@ -61,13 +61,12 @@ fn set_keymap(state: &UiState, _lua: &Lua, (key, callback): (String, Function)) 
         },
     };
 
-    let mut state = state.borrow_mut();
-    state.keybinds.insert((key, modifiers), callback);
+    ui.borrow_mut().keybinds.insert((key, modifiers), callback);
 
     Ok(())
 }
 
-pub fn init_lua(ui: &crate::ui::Ui) -> Result<()> {
+pub fn init_lua(ui: &Ui) -> Result<()> {
 
     ui.set_lua_fn("set_keymap", set_keymap)?;
 

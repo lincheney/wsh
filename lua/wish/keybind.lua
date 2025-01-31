@@ -23,3 +23,11 @@ wish.set_keymap('<c-e>', function() wish.cursor = #wish.buffer end)
 wish.set_keymap('<end>', function() wish.cursor = #wish.buffer end)
 wish.set_keymap('<left>', function() wish.cursor = math.max(0, wish.cursor - 1) end)
 wish.set_keymap('<right>', function() wish.cursor = wish.cursor + 1 end)
+
+-- there ought to be a better way of doing this
+wish.set_keymap('<c-d>', function()
+    if #wish.buffer == 0 then
+        wish.buffer = 'exit'
+        wish.accept_line()
+    end
+end)

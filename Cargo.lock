@@ -520,6 +520,7 @@ checksum = "d3f763c1041eff92ffb5d7169968a327e1ed2ebfe425dac0ee5a35f29082534b"
 dependencies = [
  "bstr",
  "either",
+ "futures-util",
  "mlua-sys",
  "num-traits",
  "parking_lot",
@@ -595,12 +596,6 @@ dependencies = [
  "smallvec",
  "windows-targets",
 ]
-
-[[package]]
-name = "paste"
-version = "1.0.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
 
 [[package]]
 name = "pin-project-lite"
@@ -1044,5 +1039,4 @@ dependencies = [
  "futures",
  "mlua",
  "nix",
- "paste",
 ]
