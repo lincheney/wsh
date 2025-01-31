@@ -288,6 +288,11 @@ impl Ui {
             Ok(())
         })?;
 
+        self.set_lua_async_fn("eval", |ui, lua, (cmd, stderr): (String, bool)| async move {
+            let data = ui.borrow_mut().fanos.eval(&cmd, stderr).await.unwrap();
+            lua.create_string(data)
+        })?;
+
         keybind::init_lua(self)?;
 
         let lua = self.borrow().lua.clone();

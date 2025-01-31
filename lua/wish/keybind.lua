@@ -31,3 +31,7 @@ wish.set_keymap('<c-d>', function()
         wish.accept_line()
     end
 end)
+
+wish.set_keymap('<tab>', function()
+    wish.eval('complete', true)
+end)

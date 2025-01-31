@@ -159,7 +159,6 @@ impl FanosClient {
                 num = reader => match num {
                     Ok(num) => {
                         pos += num;
-                        buf.drain(pos..);
                     },
                     _ => capture_closed = true,
                 },
@@ -170,6 +169,7 @@ impl FanosClient {
             (self.capture_read, self.capture_write) = Self::make_pipe()?;
         }
 
+        buf.drain(pos..);
         Ok(buf)
     }
 
