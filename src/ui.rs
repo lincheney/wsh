@@ -144,7 +144,13 @@ impl Ui {
                 state: _,
             }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
                 let no_redraw = {
-                    self.borrow_mut().buffer.mutate(|contents, cursor| -> Result<bool> {
+                    let mut ui = self.borrow_mut();
+
+                    // flush cache
+                    ui.lua_cache.set("buffer", mlua::Nil)?;
+                    ui.lua_cache.set("cursor", mlua::Nil)?;
+
+                    ui.buffer.mutate(|contents, cursor| -> Result<bool> {
                         contents.insert(*cursor, c);
                         *cursor += 1;
                         Ok(*cursor == contents.len())
@@ -256,7 +262,6 @@ impl Ui {
         }
 
         self.clean();
-        self.borrow_mut().lua_cache.clear()?;
         Ok(())
     }
 
