@@ -1,5 +1,9 @@
 use std::time::Duration;
+use std::cell::RefCell;
+use std::rc::{Rc, Weak};
+use mlua::{IntoLuaMulti, FromLuaMulti, Lua, Result as LuaResult};
 use anyhow::Result;
+use paste::paste;
 
 use crossterm::{
     cursor::position,
@@ -21,21 +25,85 @@ impl crossterm::Command for StrCommand<'_> {
 
 pub struct Ui {
     fanos: fanos::FanosClient,
-    pub lua: mlua::Lua,
+    pub lua: Lua,
     pub lua_api: mlua::Table,
+    state: Rc<RefCell<UiStateInner>>,
 
-    pub keybinds: keybind::KeybindMapping,
     stdout: std::io::Stdout,
     enhanced_keyboard: bool,
-    command: String,
     cursor: (u16, u16),
     size: (u16, u16),
 }
 
+pub trait LuaFn<A: FromLuaMulti, R: IntoLuaMulti>: Fn(&UiState, &Lua, A) -> LuaResult<R> + mlua::MaybeSend + 'static {}
+impl<A: FromLuaMulti, R: IntoLuaMulti, F: Fn(&UiState, &Lua, A) -> LuaResult<R> + mlua::MaybeSend + 'static> LuaFn<A, R> for F {}
+
+pub fn set_lua_fn<F: LuaFn<A, R>, A: FromLuaMulti, R: IntoLuaMulti>(
+    state: &UiState,
+    lua: &Lua,
+    table: &mlua::Table,
+    name: &str,
+    func: F,
+) -> LuaResult<()> {
+    let state = Rc::downgrade(&state);
+    table.set(name, lua.create_function(move |lua, value| {
+        if let Some(state) = state.upgrade() {
+            func(&state, lua, value)
+        } else {
+            Err(mlua::Error::RuntimeError("ui not running".to_string()))
+        }
+    })?)
+}
+
+macro_rules! make_ui_state_struct {
+    ($($field:ident: $type:ty),*) => (
+        paste! {
+
+            #[derive(Debug, Default)]
+            pub struct UiStateInner {
+                pub keybinds: keybind::KeybindMapping,
+                $(
+                    $field: $type,
+                    [<dirty_ $field>]: bool,
+                )*
+            }
+
+            impl UiStateInner {
+
+                fn init_lua(state: &UiState, lua: &Lua, lua_api: &mlua::Table) -> LuaResult<()> {
+                    $(
+                        set_lua_fn(state, lua, lua_api, concat!("get_", stringify!($field)), move |state, _lua, _value: mlua::Value| {
+                            Ok(state.borrow().$field.clone())
+                        })?;
+
+                        set_lua_fn(state, lua, lua_api, concat!("set_", stringify!($field)), move |state, _lua, value| {
+                            let mut state = state.borrow_mut();
+                            state.$field = value;
+                            state.[<dirty_ $field>] = true;
+                            Ok(())
+                        })?;
+                    )*
+                    Ok(())
+                }
+
+                fn clean(&mut self) {
+                    $(
+                    self.[<dirty_ $field>] = false;
+                    )*
+                }
+
+            }
+        }
+    )
+}
+
+make_ui_state_struct!(buffer: String, cursor: u16);
+pub type UiState = Rc<RefCell<UiStateInner>>;
+
 impl Ui {
     pub fn new() -> Result<Self> {
 
-        let lua = mlua::Lua::new();
+        let lua = Lua::new();
         let lua_api = lua.create_table()?;
         lua.globals().set("wish", &lua_api)?;
 
@@ -43,29 +111,41 @@ impl Ui {
             fanos: fanos::FanosClient::new()?,
             lua,
             lua_api,
-            keybinds: keybind::KeybindMapping::default(),
+            state: Rc::new(RefCell::new(UiStateInner::default())),
             stdout: std::io::stdout(),
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
-            command: String::new(),
             cursor: crossterm::cursor::position()?,
             size: crossterm::terminal::size()?,
         };
 
-        keybind::init_lua(&ui)?;
-        ui.lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;
-        ui.lua.load("require('wish')").exec()?;
+        init_lua(&ui)?;
 
         Ok(ui)
     }
 
     pub fn draw_prompt(&mut self) -> Result<()> {
-        execute!(self.stdout, StrCommand(">>> "), StrCommand(&self.command))?;
+        execute!(
+            self.stdout,
+            StrCommand("\r"),
+            crossterm::terminal::Clear(crossterm::terminal::ClearType::FromCursorDown),
+            StrCommand(">>> "),
+            StrCommand(&self.state.borrow().buffer),
+        )?;
         self.cursor = crossterm::cursor::position()?;
         Ok(())
     }
 
     pub async fn handle_event(&mut self, event: Event) -> Result<bool> {
         // println!("Event::{:?}\r", event);
+
+        if let Event::Key(KeyEvent{code, modifiers, ..}) = event {
+            let callback = self.state.borrow().keybinds.get(&(code, modifiers)).cloned();
+            if let Some(callback) = callback {
+                callback.call(mlua::Nil)?;
+                self.refresh_on_state()?;
+                return Ok(true)
+            }
+        }
 
         match event {
 
@@ -75,8 +155,10 @@ impl Ui {
                 kind: event::KeyEventKind::Press,
                 state: _,
             }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
-                self.command.push(c);
-                execute!(self.stdout, StrCommand(&self.command[self.command.len() - 1..]))?;
+                let mut state = self.state.borrow_mut();
+                state.buffer.push(c);
+                state.cursor += 1;
+                execute!(self.stdout, StrCommand(&state.buffer[state.buffer.len() - 1..]))?;
             },
 
             Event::Key(KeyEvent{
@@ -85,16 +167,19 @@ impl Ui {
                 kind: event::KeyEventKind::Press,
                 state: _,
             }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
-                // time to execute
-                self.command.insert_str(0, "EVAL ");
                 self.deactivate()?;
-                execute!(self.stdout, StrCommand("\r\n"))?;
-                self.fanos.send(self.command.as_bytes(), None).await?;
-                if ! self.fanos.recv().await? {
-                    return Ok(false)
+                // time to execute
+                {
+                    let mut state = self.state.borrow_mut();
+                    state.buffer.insert_str(0, "EVAL ");
+                    execute!(self.stdout, StrCommand("\r\n"))?;
+                    self.fanos.send(state.buffer.as_bytes(), None).await?;
+                    if ! self.fanos.recv().await? {
+                        return Ok(false)
+                    }
+                    state.buffer.clear();
                 }
                 self.activate()?;
-                self.command.clear();
                 self.draw_prompt()?;
             },
 
@@ -157,6 +242,32 @@ impl Ui {
         Ok(())
     }
 
+    pub fn set_lua_fn<F: LuaFn<A, R>, A: FromLuaMulti, R: IntoLuaMulti>(&self, name: &str, func: F) -> LuaResult<()> {
+        set_lua_fn(&self.state, &self.lua, &self.lua_api, name, func)
+    }
+
+    pub fn refresh_on_state(&mut self) -> Result<()> {
+        if {
+            let state = self.state.borrow();
+            state.dirty_cursor || state.dirty_buffer
+        } {
+            self.draw_prompt()?;
+        }
+
+        self.state.borrow_mut().clean();
+        Ok(())
+    }
+
+}
+
+fn init_lua(ui: &Ui) -> Result<()> {
+
+    UiStateInner::init_lua(&ui.state, &ui.lua, &ui.lua_api)?;
+
+    keybind::init_lua(&ui)?;
+    ui.lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;
+    ui.lua.load("require('wish')").exec()?;
+    Ok(())
 }
 
 impl Drop for Ui {
