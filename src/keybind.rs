@@ -14,6 +14,7 @@ fn set_keymap(state: &UiState, _lua: &Lua, (key, callback): (String, Function)) 
     let mut key = key.as_str();
     if key.starts_with("<") && key.ends_with(">") && key.contains('-') {
         // this has modifiers
+        key = &key[1..key.len()-1];
         for modifier in key.rsplit('-').skip(1) {
             match modifier {
                 "c" => modifiers |= KeyModifiers::CONTROL,

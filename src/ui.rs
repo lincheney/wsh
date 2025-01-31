@@ -266,7 +266,9 @@ fn init_lua(ui: &Ui) -> Result<()> {
 
     keybind::init_lua(&ui)?;
     ui.lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;
-    ui.lua.load("require('wish')").exec()?;
+    if let Err(err) = ui.lua.load("require('wish')").exec() {
+        eprintln!("DEBUG(sliver)\t{}\t= {:?}", stringify!(err), err);
+    }
     Ok(())
 }
 
