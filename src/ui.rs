@@ -6,6 +6,7 @@ use anyhow::Result;
 use paste::paste;
 
 use crossterm::{
+    terminal::{Clear, ClearType, BeginSynchronizedUpdate, EndSynchronizedUpdate},
     cursor::position,
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     execute,
@@ -127,8 +128,9 @@ impl Ui {
         let state = self.state.borrow();
         queue!(
             self.stdout,
+            BeginSynchronizedUpdate,
             StrCommand("\r"),
-            crossterm::terminal::Clear(crossterm::terminal::ClearType::FromCursorDown),
+            Clear(ClearType::FromCursorDown),
             StrCommand(">>> "),
             StrCommand(&state.buffer),
         )?;
@@ -136,6 +138,7 @@ impl Ui {
         if offset > 0 {
             queue!(self.stdout, crossterm::cursor::MoveLeft(offset))?;
         }
+        queue!(self.stdout, EndSynchronizedUpdate)?;
         execute!(self.stdout)?;
         self.cursor = crossterm::cursor::position()?;
         Ok(())

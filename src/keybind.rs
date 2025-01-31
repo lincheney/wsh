@@ -56,7 +56,7 @@ fn set_keymap(state: &UiState, _lua: &Lua, (key, callback): (String, Function)) 
             KeyCode::F(key[2..key.len()-1].parse::<u8>().unwrap())
         },
 
-        key => {
+        _ => {
             return Err(mlua::Error::RuntimeError(format!("invalid keybind: {original:?}")))
         },
     };
