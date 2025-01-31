@@ -28,6 +28,7 @@ pub struct Ui {
     fanos: fanos::FanosClient,
     pub lua: Lua,
     pub lua_api: mlua::Table,
+    lua_cache: mlua::Table,
     state: Rc<RefCell<UiStateInner>>,
 
     stdout: std::io::Stdout,
@@ -72,16 +73,16 @@ pub struct UiStateInner {
 impl UiStateInner {
 
     fn init_lua(state: &UiState, lua: &Lua, lua_api: &mlua::Table) -> LuaResult<()> {
-        set_lua_fn(state, lua, lua_api, "get_cursor", move |state, _lua, _val: mlua::Value| Ok(state.borrow().buffer.get_cursor()))?;
-        set_lua_fn(state, lua, lua_api, "get_buffer", move |state, _lua, _val: mlua::Value| Ok(state.borrow().buffer.get_contents().clone()))?;
+        set_lua_fn(state, lua, lua_api, "__get_cursor", |state, _lua, _val: mlua::Value| Ok(state.borrow().buffer.get_cursor()))?;
+        set_lua_fn(state, lua, lua_api, "__get_buffer", |state, _lua, _val: mlua::Value| Ok(state.borrow().buffer.get_contents().clone()))?;
 
-        set_lua_fn(state, lua, lua_api, "set_cursor", move |state, _lua, val: usize| {
+        set_lua_fn(state, lua, lua_api, "__set_cursor", |state, _lua, val: usize| {
             let mut state = state.borrow_mut();
             state.buffer.set_cursor(val);
             state.dirty.buffer = true;
             Ok(())
         })?;
-        set_lua_fn(state, lua, lua_api, "set_contents", move |state, _lua, val: String| {
+        set_lua_fn(state, lua, lua_api, "__set_buffer", |state, _lua, val: String| {
             let mut state = state.borrow_mut();
             state.buffer.set_contents(val);
             state.dirty.buffer = true;
@@ -105,11 +106,14 @@ impl Ui {
         let lua = Lua::new();
         let lua_api = lua.create_table()?;
         lua.globals().set("wish", &lua_api)?;
+        let lua_cache = lua.create_table()?;
+        lua_api.set("__cache", &lua_cache)?;
 
         let ui = Self{
             fanos: fanos::FanosClient::new()?,
             lua,
             lua_api,
+            lua_cache,
             state: Rc::new(RefCell::new(UiStateInner::default())),
             stdout: std::io::stdout(),
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
@@ -148,7 +152,9 @@ impl Ui {
         if let Event::Key(KeyEvent{code, modifiers, ..}) = event {
             let callback = self.state.borrow().keybinds.get(&(code, modifiers)).cloned();
             if let Some(callback) = callback {
-                callback.call(mlua::Nil)?;
+                if let Err(err) = callback.call::<mlua::Value>(mlua::Nil) {
+                    eprintln!("DEBUG(loaf)  \t{}\t= {:?}", stringify!(err), err);
+                }
                 self.refresh_on_state()?;
                 return Ok(true)
             }
@@ -197,8 +203,8 @@ impl Ui {
                     if ! self.fanos.recv().await? {
                         return Ok(false)
                     }
-                    self.state.borrow_mut().buffer.reset();
                 }
+                self.state.borrow_mut().buffer.reset();
                 self.activate()?;
                 self.draw_prompt()?;
             },
@@ -272,6 +278,7 @@ impl Ui {
         }
 
         self.state.borrow_mut().clean();
+        self.lua_cache.clear()?;
         Ok(())
     }
 
