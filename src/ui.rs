@@ -92,7 +92,7 @@ impl Ui {
         self.borrow_mut().deactivate()
     }
 
-    pub fn draw_prompt(&self) -> Result<()> {
+    pub fn draw(&self) -> Result<()> {
         let mut ui = self.borrow_mut();
         let ui = ui.deref_mut();
         queue!(
@@ -149,7 +149,7 @@ impl Ui {
                     let contents = ui.buffer.get_contents();
                     execute!(ui.stdout, StrCommand(&contents[contents.len() - 1 ..]))?;
                 } else {
-                    self.draw_prompt()?;
+                    self.draw()?;
                 }
             },
 
@@ -197,7 +197,7 @@ impl Ui {
             ui.activate()?;
         }
 
-        self.draw_prompt()?;
+        self.draw()?;
         Ok(true)
     }
 
@@ -244,7 +244,7 @@ impl Ui {
 
     pub fn refresh_on_state(&self) -> Result<()> {
         if self.borrow().dirty.buffer {
-            self.draw_prompt()?;
+            self.draw()?;
         }
 
         self.clean();
