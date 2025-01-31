@@ -12,7 +12,7 @@ async fn main() -> Result<()> {
 
     let ui = ui::Ui::new()?;
     ui.activate()?;
-    ui.draw()?;
+    ui.draw().await?;
     let mut events = crossterm::event::EventStream::new();
 
     loop {

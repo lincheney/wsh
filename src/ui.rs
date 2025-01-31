@@ -1,6 +1,7 @@
 use std::time::Duration;
 use std::future::Future;
 use std::cell::{RefCell, Ref, RefMut};
+use std::io::{Write};
 use std::rc::{Rc, Weak};
 use std::ops::DerefMut;
 use mlua::{IntoLuaMulti, FromLuaMulti, Lua, Result as LuaResult};
@@ -92,17 +93,20 @@ impl Ui {
         self.borrow_mut().deactivate()
     }
 
-    pub fn draw(&self) -> Result<()> {
+    pub async fn draw(&self) -> Result<()> {
         let mut ui = self.borrow_mut();
         let ui = ui.deref_mut();
-        queue!(
+
+        execute!(
             ui.stdout,
             BeginSynchronizedUpdate,
             StrCommand("\r"),
             Clear(ClearType::FromCursorDown),
-            StrCommand(">>> "),
-            StrCommand(&ui.buffer.get_contents()),
         )?;
+        let prompt = ui.fanos.eval(stringify!(printf %s "${PS1@P}"), false).await?;
+        ui.stdout.write(&prompt)?;
+        ui.stdout.write(ui.buffer.get_contents().as_bytes())?;
+
         let offset = ui.buffer.get_contents().len() - ui.buffer.get_cursor();
         if offset > 0 {
             queue!(ui.stdout, crossterm::cursor::MoveLeft(offset as u16))?;
@@ -122,8 +126,12 @@ impl Ui {
                 if let Err(err) = callback.call_async::<mlua::Value>(mlua::Nil).await {
                     eprintln!("DEBUG(loaf)  \t{}\t= {:?}", stringify!(err), err);
                 }
-                self.refresh_on_state()?;
-                return Ok(!self.borrow().fanos.closed)
+                if self.borrow().fanos.socket.closed {
+                    return Ok(false)
+                } else {
+                    self.refresh_on_state().await?;
+                    return Ok(true)
+                }
             }
         }
 
@@ -149,7 +157,7 @@ impl Ui {
                     let contents = ui.buffer.get_contents();
                     execute!(ui.stdout, StrCommand(&contents[contents.len() - 1 ..]))?;
                 } else {
-                    self.draw()?;
+                    self.draw().await?;
                 }
             },
 
@@ -189,7 +197,7 @@ impl Ui {
             // new line
             execute!(ui.stdout, StrCommand("\r\n"))?;
             // time to execute
-            ui.fanos.eval(ui.buffer.get_contents(), None).await?;
+            ui.fanos.exec(ui.buffer.get_contents(), None).await?;
             if ! ui.fanos.recv().await? {
                 return Ok(false)
             }
@@ -197,7 +205,7 @@ impl Ui {
             ui.activate()?;
         }
 
-        self.draw()?;
+        self.draw().await?;
         Ok(true)
     }
 
@@ -242,9 +250,9 @@ impl Ui {
         })?)
     }
 
-    pub fn refresh_on_state(&self) -> Result<()> {
+    pub async fn refresh_on_state(&self) -> Result<()> {
         if self.borrow().dirty.buffer {
-            self.draw()?;
+            self.draw().await?;
         }
 
         self.clean();
