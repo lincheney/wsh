@@ -8,6 +8,8 @@ use crossterm::{
     queue,
 };
 
+use crate::fanos;
+
 struct StrCommand<'a>(&'a str);
 
 impl crossterm::Command for StrCommand<'_> {
@@ -17,6 +19,8 @@ impl crossterm::Command for StrCommand<'_> {
 }
 
 pub struct Ui {
+    fanos: fanos::FanosClient,
+
     stdout: std::io::Stdout,
     enhanced_keyboard: bool,
     command: String,
@@ -27,6 +31,7 @@ pub struct Ui {
 impl Ui {
     pub fn new() -> Result<Self> {
         Ok(Self{
+            fanos: fanos::FanosClient::new()?,
             stdout: std::io::stdout(),
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
             command: String::new(),
@@ -41,7 +46,7 @@ impl Ui {
         Ok(())
     }
 
-    pub async fn handle_event(&mut self, event: Event, fanos: &mut crate::fanos::FanosClient) -> Result<bool> {
+    pub async fn handle_event(&mut self, event: Event) -> Result<bool> {
         // println!("Event::{:?}\r", event);
 
         match event {
@@ -66,8 +71,8 @@ impl Ui {
                 self.command.insert_str(0, "EVAL ");
                 self.deactivate()?;
                 execute!(self.stdout, StrCommand("\r\n"))?;
-                fanos.send(self.command.as_bytes(), None).await?;
-                fanos.recv().await?;
+                self.fanos.send(self.command.as_bytes(), None).await?;
+                self.fanos.recv().await?;
                 self.activate()?;
                 self.command.clear();
                 self.draw_prompt()?;

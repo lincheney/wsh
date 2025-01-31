@@ -7,8 +7,6 @@ mod ui;
 #[async_std::main]
 async fn main() -> Result<()> {
 
-    let mut client = fanos::FanosClient::new().await?;
-
     let mut ui = ui::Ui::new()?;
     ui.activate()?;
     ui.draw_prompt()?;
@@ -23,7 +21,7 @@ async fn main() -> Result<()> {
             event = events => {
                 match event {
                     Some(Ok(event)) => {
-                        if !ui.handle_event(event, &mut client).await? {
+                        if !ui.handle_event(event).await? {
                             break;
                         }
                     }

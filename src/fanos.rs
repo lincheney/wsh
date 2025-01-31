@@ -13,7 +13,7 @@ pub struct FanosClient {
 
 impl FanosClient {
 
-    pub async fn new() -> Result<Self> {
+    pub fn new() -> Result<Self> {
         let (client, server) = socket::socketpair(
             socket::AddressFamily::Unix,
             socket::SockType::Stream,
