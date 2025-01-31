@@ -124,13 +124,19 @@ impl Ui {
     }
 
     pub fn draw_prompt(&mut self) -> Result<()> {
-        execute!(
+        let state = self.state.borrow();
+        queue!(
             self.stdout,
             StrCommand("\r"),
             crossterm::terminal::Clear(crossterm::terminal::ClearType::FromCursorDown),
             StrCommand(">>> "),
-            StrCommand(&self.state.borrow().buffer),
+            StrCommand(&state.buffer),
         )?;
+        let offset = state.buffer.len() as u16 - state.cursor;
+        if offset > 0 {
+            queue!(self.stdout, crossterm::cursor::MoveLeft(offset))?;
+        }
+        execute!(self.stdout)?;
         self.cursor = crossterm::cursor::position()?;
         Ok(())
     }
@@ -155,10 +161,22 @@ impl Ui {
                 kind: event::KeyEventKind::Press,
                 state: _,
             }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
-                let mut state = self.state.borrow_mut();
-                state.buffer.push(c);
-                state.cursor += 1;
-                execute!(self.stdout, StrCommand(&state.buffer[state.buffer.len() - 1..]))?;
+                let need_redraw = {
+                    let mut state = self.state.borrow_mut();
+                    let cursor = state.cursor as usize;
+                    state.buffer.insert(cursor, c);
+                    state.cursor += 1;
+                    if state.cursor as usize == state.buffer.len() {
+                        execute!(self.stdout, StrCommand(&state.buffer[state.buffer.len() - 1..]))?;
+                        false
+                    } else {
+                        true
+                    }
+                };
+
+                if need_redraw {
+                    self.draw_prompt()?;
+                }
             },
 
             Event::Key(KeyEvent{
@@ -178,6 +196,7 @@ impl Ui {
                         return Ok(false)
                     }
                     state.buffer.clear();
+                    state.cursor = 0;
                 }
                 self.activate()?;
                 self.draw_prompt()?;
@@ -247,6 +266,14 @@ impl Ui {
     }
 
     pub fn refresh_on_state(&mut self) -> Result<()> {
+        {
+            // fix the cursor
+            let mut state = self.state.borrow_mut();
+            if state.cursor > state.buffer.len() as u16 {
+                state.cursor = state.buffer.len() as u16;
+            }
+        }
+
         if {
             let state = self.state.borrow();
             state.dirty_cursor || state.dirty_buffer
