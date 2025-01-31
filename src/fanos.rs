@@ -1,3 +1,4 @@
+use std::io::{Cursor, Write, IoSlice};
 use std::os::fd::{AsRawFd, RawFd};
 use async_std::io::{BufReadExt, ReadExt};
 use nix::sys::{socket, signal};
@@ -43,14 +44,19 @@ impl FanosClient {
         })
     }
 
-    pub async fn send(&self, cmd: &[u8], fds: Option<&[RawFd; 3]>) -> Result<()> {
-        let fds = fds.unwrap_or(&[0, 1, 2]);
+    pub async fn send<'a>(&self, cmd: &[IoSlice<'a>], fds: Option<&[RawFd; 3]>) -> Result<()> {
 
-        let buf = format!("{}:", cmd.len());
-        socket::send(self.writer, buf.as_bytes(), socket::MsgFlags::empty())?;
+        let len: usize = cmd.iter().map(|c| c.len()).sum();
+
+        let mut cursor = Cursor::new([0u8; 256]);
+        write!(cursor, "{len}:");
+        let buffer = &cursor.get_ref()[..cursor.position() as usize];
+
+        let fds = fds.unwrap_or(&[0, 1, 2]);
+        socket::send(self.writer, buffer, socket::MsgFlags::empty())?;
         socket::sendmsg::<()>(
             self.writer,
-            &[std::io::IoSlice::new(cmd)],
+            cmd,
             &[socket::ControlMessage::ScmRights(fds)],
             socket::MsgFlags::empty(),
             None,
@@ -72,6 +78,10 @@ impl FanosClient {
             self.reader.read_exact(&mut buf[..size]).await?;
             true
         })
+    }
+
+    pub async fn eval(&mut self, string: &str, fds: Option<&[RawFd; 3]>) -> Result<()> {
+        self.send(&[IoSlice::new(b"EVAL "), IoSlice::new(string.as_bytes())], fds).await
     }
 
     pub fn finish(&mut self) -> Result<std::process::ExitStatus> {

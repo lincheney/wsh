@@ -1,9 +1,11 @@
 use anyhow::Result;
 use async_std::stream::StreamExt;
 use futures::{select, future::FutureExt};
+
 mod fanos;
 mod ui;
 mod keybind;
+mod buffer;
 
 #[async_std::main]
 async fn main() -> Result<()> {

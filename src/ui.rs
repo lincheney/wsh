@@ -56,49 +56,47 @@ pub fn set_lua_fn<F: LuaFn<A, R>, A: FromLuaMulti, R: IntoLuaMulti>(
     })?)
 }
 
-macro_rules! make_ui_state_struct {
-    ($($field:ident: $type:ty),*) => (
-        paste! {
-
-            #[derive(Debug, Default)]
-            pub struct UiStateInner {
-                pub keybinds: keybind::KeybindMapping,
-                $(
-                    $field: $type,
-                    [<dirty_ $field>]: bool,
-                )*
-            }
-
-            impl UiStateInner {
-
-                fn init_lua(state: &UiState, lua: &Lua, lua_api: &mlua::Table) -> LuaResult<()> {
-                    $(
-                        set_lua_fn(state, lua, lua_api, concat!("get_", stringify!($field)), move |state, _lua, _value: mlua::Value| {
-                            Ok(state.borrow().$field.clone())
-                        })?;
-
-                        set_lua_fn(state, lua, lua_api, concat!("set_", stringify!($field)), move |state, _lua, value| {
-                            let mut state = state.borrow_mut();
-                            state.$field = value;
-                            state.[<dirty_ $field>] = true;
-                            Ok(())
-                        })?;
-                    )*
-                    Ok(())
-                }
-
-                fn clean(&mut self) {
-                    $(
-                    self.[<dirty_ $field>] = false;
-                    )*
-                }
-
-            }
-        }
-    )
+#[derive(Debug, Default)]
+struct UiDirtyState {
+    buffer: bool,
 }
 
-make_ui_state_struct!(buffer: String, cursor: u16);
+#[derive(Debug, Default)]
+pub struct UiStateInner {
+    pub keybinds: keybind::KeybindMapping,
+    dirty: UiDirtyState,
+
+    pub buffer: crate::buffer::Buffer,
+}
+
+impl UiStateInner {
+
+    fn init_lua(state: &UiState, lua: &Lua, lua_api: &mlua::Table) -> LuaResult<()> {
+        set_lua_fn(state, lua, lua_api, "get_cursor", move |state, _lua, _val: mlua::Value| Ok(state.borrow().buffer.get_cursor()))?;
+        set_lua_fn(state, lua, lua_api, "get_buffer", move |state, _lua, _val: mlua::Value| Ok(state.borrow().buffer.get_contents().clone()))?;
+
+        set_lua_fn(state, lua, lua_api, "set_cursor", move |state, _lua, val: usize| {
+            let mut state = state.borrow_mut();
+            state.buffer.set_cursor(val);
+            state.dirty.buffer = true;
+            Ok(())
+        })?;
+        set_lua_fn(state, lua, lua_api, "set_contents", move |state, _lua, val: String| {
+            let mut state = state.borrow_mut();
+            state.buffer.set_contents(val);
+            state.dirty.buffer = true;
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    fn clean(&mut self) {
+        self.dirty = UiDirtyState::default();
+    }
+
+}
+
 pub type UiState = Rc<RefCell<UiStateInner>>;
 
 impl Ui {
@@ -132,11 +130,11 @@ impl Ui {
             StrCommand("\r"),
             Clear(ClearType::FromCursorDown),
             StrCommand(">>> "),
-            StrCommand(&state.buffer),
+            StrCommand(&state.buffer.get_contents()),
         )?;
-        let offset = state.buffer.len() as u16 - state.cursor;
+        let offset = state.buffer.get_contents().len() - state.buffer.get_cursor();
         if offset > 0 {
-            queue!(self.stdout, crossterm::cursor::MoveLeft(offset))?;
+            queue!(self.stdout, crossterm::cursor::MoveLeft(offset as u16))?;
         }
         queue!(self.stdout, EndSynchronizedUpdate)?;
         execute!(self.stdout)?;
@@ -166,15 +164,16 @@ impl Ui {
             }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
                 let need_redraw = {
                     let mut state = self.state.borrow_mut();
-                    let cursor = state.cursor as usize;
-                    state.buffer.insert(cursor, c);
-                    state.cursor += 1;
-                    if state.cursor as usize == state.buffer.len() {
-                        execute!(self.stdout, StrCommand(&state.buffer[state.buffer.len() - 1..]))?;
-                        false
-                    } else {
-                        true
-                    }
+                    state.buffer.mutate(|contents, cursor| -> Result<bool> {
+                        contents.insert(*cursor, c);
+                        *cursor += 1;
+                        if *cursor == contents.len() {
+                            execute!(self.stdout, StrCommand(&contents[contents.len() - 1..]))?;
+                            Ok(false)
+                        } else {
+                            Ok(true)
+                        }
+                    })?
                 };
 
                 if need_redraw {
@@ -189,17 +188,16 @@ impl Ui {
                 state: _,
             }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
                 self.deactivate()?;
+                // new line
+                execute!(self.stdout, StrCommand("\r\n"))?;
                 // time to execute
                 {
-                    let mut state = self.state.borrow_mut();
-                    state.buffer.insert_str(0, "EVAL ");
-                    execute!(self.stdout, StrCommand("\r\n"))?;
-                    self.fanos.send(state.buffer.as_bytes(), None).await?;
+                    let state = self.state.borrow();
+                    self.fanos.eval(state.buffer.get_contents(), None).await?;
                     if ! self.fanos.recv().await? {
                         return Ok(false)
                     }
-                    state.buffer.clear();
-                    state.cursor = 0;
+                    self.state.borrow_mut().buffer.reset();
                 }
                 self.activate()?;
                 self.draw_prompt()?;
@@ -269,18 +267,7 @@ impl Ui {
     }
 
     pub fn refresh_on_state(&mut self) -> Result<()> {
-        {
-            // fix the cursor
-            let mut state = self.state.borrow_mut();
-            if state.cursor > state.buffer.len() as u16 {
-                state.cursor = state.buffer.len() as u16;
-            }
-        }
-
-        if {
-            let state = self.state.borrow();
-            state.dirty_cursor || state.dirty_buffer
-        } {
+        if self.state.borrow().dirty.buffer {
             self.draw_prompt()?;
         }
 
