@@ -15,7 +15,6 @@ use crossterm::{
     queue,
 };
 
-use crate::fanos;
 use crate::keybind;
 
 struct StrCommand<'a>(&'a str);
@@ -32,7 +31,7 @@ struct UiDirty {
 }
 
 pub struct UiInner {
-    fanos: fanos::FanosClient,
+    shell: crate::shell::Shell,
     pub lua: Lua,
     pub lua_api: mlua::Table,
     lua_cache: mlua::Table,
@@ -59,7 +58,7 @@ impl Ui {
         lua_api.set("__cache", &lua_cache)?;
 
         let ui = Self(Rc::new(RefCell::new(UiInner{
-            fanos: fanos::FanosClient::new()?,
+            shell: crate::shell::Shell::new()?,
             lua,
             lua_api,
             lua_cache,
@@ -103,8 +102,10 @@ impl Ui {
             StrCommand("\r"),
             Clear(ClearType::FromCursorDown),
         )?;
-        let prompt = ui.fanos.eval(stringify!(printf %s "${PS1@P}"), false).await?;
-        ui.stdout.write(&prompt)?;
+
+        let prompt = b">>> ";
+        // let prompt = ui.shell.eval(stringify!(printf %s "${PS1@P}"), false).await?;
+        ui.stdout.write(prompt)?;
         ui.stdout.write(ui.buffer.get_contents().as_bytes())?;
 
         let offset = ui.buffer.get_contents().len() - ui.buffer.get_cursor();
@@ -126,7 +127,7 @@ impl Ui {
                 if let Err(err) = callback.call_async::<mlua::Value>(mlua::Nil).await {
                     eprintln!("DEBUG(loaf)  \t{}\t= {:?}", stringify!(err), err);
                 }
-                if self.borrow().fanos.socket.closed {
+                if self.borrow().shell.closed {
                     return Ok(false)
                 } else {
                     self.refresh_on_state().await?;
@@ -203,10 +204,10 @@ impl Ui {
             // new line
             execute!(ui.stdout, StrCommand("\r\n"))?;
             // time to execute
-            ui.fanos.exec(ui.buffer.get_contents(), None).await?;
-            if ! ui.fanos.recv().await? {
-                return Ok(false)
-            }
+            ui.shell.exec(ui.buffer.get_contents(), None).await?;
+            // if ! ui.fanos.recv().await? {
+                // return Ok(false)
+            // }
             ui.buffer.reset();
             ui.activate()?;
         }
@@ -289,7 +290,7 @@ impl Ui {
         })?;
 
         self.set_lua_async_fn("eval", |ui, lua, (cmd, stderr): (String, bool)| async move {
-            let data = ui.borrow_mut().fanos.eval(&cmd, stderr).await.unwrap();
+            let data = ui.borrow_mut().shell.eval(&cmd, stderr).await.unwrap();
             lua.create_string(data)
         })?;
 
