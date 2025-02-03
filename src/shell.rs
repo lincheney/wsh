@@ -1,4 +1,4 @@
-use std::ffi::CString;
+use std::ffi::{CString, CStr};
 use std::os::fd::{AsRawFd, RawFd, OwnedFd};
 use std::default::Default;
 use std::ptr::null_mut;
@@ -27,6 +27,17 @@ fn execstring(cmd: &str, opts: ExecstringOpts) {
     )}
 }
 
+fn getsparam(varname: &str) -> Option<Vec<u8>> {
+    let varname = CString::new(varname).unwrap();
+    let str = unsafe{
+        let var = zsh_sys::getsparam(varname.as_ptr() as *mut _);
+        if var.is_null() {
+            return None
+        }
+        CStr::from_ptr(var)
+    };
+    Some(str.to_bytes().to_owned())
+}
 
 pub struct Shell {
     pub closed: bool,
@@ -49,5 +60,8 @@ impl Shell {
         Ok(vec![])
     }
 
+    pub async fn get_var_string(&mut self, varname: &str) -> Result<Option<Vec<u8>>> {
+        Ok(getsparam(varname))
+    }
 
 }

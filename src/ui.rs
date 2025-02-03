@@ -103,6 +103,12 @@ impl Ui {
             Clear(ClearType::FromCursorDown),
         )?;
 
+        let pwd = ui.shell.get_var_string("PWD").await?;
+        if let Some(pwd) = pwd {
+            let pwd = std::str::from_utf8(&pwd);
+            eprintln!("DEBUG(vocal) \t{}\t= {:?}\r", stringify!(pwd), pwd);
+        }
+
         let prompt = b">>> ";
         // let prompt = ui.shell.eval(stringify!(printf %s "${PS1@P}"), false).await?;
         ui.stdout.write(prompt)?;
