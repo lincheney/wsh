@@ -104,13 +104,10 @@ impl Ui {
             Clear(ClearType::FromCursorDown),
         )?;
 
-        let pwd = zsh::Variable::get("PWD").map(|mut v| v.to_bytes());
-        if let Some(pwd) = pwd {
-            let pwd = std::str::from_utf8(&pwd);
-            eprintln!("DEBUG(vocal) \t{}\t= {:?}\r", stringify!(pwd), pwd);
-        }
+        let prompt = ui.shell.exec("print -v tmpvar -P \"$PROMPT\" 2>/dev/null", None).await.ok()
+            .and_then(|_| zsh::Variable::get("tmpvar").map(|mut v| v.to_bytes()));
 
-        let prompt = b">>> ";
+        let prompt = prompt.as_ref().map(|p| &p[..]).unwrap_or(b">>> ");
         // let prompt = ui.shell.eval(stringify!(printf %s "${PS1@P}"), false).await?;
         ui.stdout.write(prompt)?;
         ui.stdout.write(ui.buffer.get_contents().as_bytes())?;
@@ -211,7 +208,9 @@ impl Ui {
             // new line
             execute!(ui.stdout, StrCommand("\r\n"))?;
             // time to execute
-            ui.shell.exec(ui.buffer.get_contents(), None).await?;
+            if let Err(code) = ui.shell.exec(ui.buffer.get_contents(), None).await {
+                eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
+            }
             // if ! ui.fanos.recv().await? {
                 // return Ok(false)
             // }

@@ -1,4 +1,5 @@
 use std::ffi::{CString};
+use std::os::raw::{c_long};
 use std::default::Default;
 use std::ptr::null_mut;
 
@@ -26,4 +27,8 @@ pub fn execstring(cmd: &str, opts: ExecstringOpts) {
         opts.exiting.into(),
         context.map(|c| c.as_ptr() as *mut _).unwrap_or(null_mut()),
     )}
+}
+
+pub fn get_return_code() -> c_long {
+    unsafe{ zsh_sys::lastval }
 }

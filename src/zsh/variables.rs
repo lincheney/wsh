@@ -84,6 +84,11 @@ impl Variable {
         }
     }
 
+    pub fn unset(name: &str) {
+        let c_varname = CString::new(name).unwrap();
+        unsafe{ zsh_sys::unsetparam(c_varname.as_ptr() as *mut _); }
+    }
+
     pub fn to_bytes(&mut self) -> Vec<u8> {
         let str = unsafe{
             let var = zsh_sys::getstrvalue(&mut self.value as *mut _);
