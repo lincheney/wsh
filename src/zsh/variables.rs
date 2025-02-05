@@ -2,48 +2,7 @@ use std::collections::HashMap;
 use std::ffi::{CString, CStr};
 use std::os::raw::{c_int, c_char};
 use anyhow::Result;
-
-struct CStringArray {
-    ptr: *mut *mut c_char,
-}
-
-impl CStringArray {
-    fn iter_ptr(&self) -> impl Iterator<Item=*mut c_char> {
-        let mut ptr = self.ptr;
-        std::iter::from_fn(move || {
-            if ptr.is_null() {
-                return None
-            }
-
-            let value = unsafe{ *ptr };
-            if value.is_null() {
-                None
-            } else {
-                ptr = unsafe{ ptr.offset(1) };
-                Some(value)
-            }
-        })
-    }
-
-    fn iter(&self) -> impl Iterator<Item=&CStr> {
-        self.iter_ptr().map(|ptr| unsafe{ CStr::from_ptr(ptr) })
-    }
-}
-
-impl Drop for CStringArray {
-    fn drop(&mut self) {
-        let mut len = 0;
-        unsafe{
-            for ptr in self.iter_ptr() {
-                zsh_sys::zsfree(ptr);
-                len += 1;
-            }
-            if !self.ptr.is_null() {
-                zsh_sys::zfree(self.ptr as _, len);
-            }
-        }
-    }
-}
+use crate::c_string_array::CStringArray;
 
 fn pm_type(flags: c_int) -> c_int {
     flags & (zsh_sys::PM_SCALAR | zsh_sys::PM_INTEGER | zsh_sys::PM_EFLOAT | zsh_sys::PM_FFLOAT | zsh_sys::PM_ARRAY | zsh_sys::PM_HASHED) as c_int
@@ -106,9 +65,8 @@ impl Variable {
                 Value::Integer(self.value.start as _)
 
             } else if self.value.isarr != 0 {
-                let array = CStringArray{ ptr: unsafe{ zsh_sys::getarrvalue(&mut self.value as *mut _) } };
-                let array = array.iter().map(|s| s.to_bytes().to_owned()).collect();
-                Value::Array(array)
+                let array: CStringArray = unsafe{ zsh_sys::getarrvalue(&mut self.value as *mut _) }.into();
+                Value::Array(array.to_vec())
 
             } else {
                 let param = unsafe{ &mut *self.value.pm };
@@ -118,8 +76,8 @@ impl Variable {
                     let mut hashmap = HashMap::new();
                     unsafe {
                         let param = (&*param.gsu.h).getfn.ok_or(anyhow::anyhow!("gsu.h.getfn is missing"))?(param);
-                        let keys = CStringArray{ ptr: zsh_sys::paramvalarr(param, zsh_sys::SCANPM_WANTKEYS as c_int) };
-                        let values = CStringArray{ ptr: zsh_sys::paramvalarr(param, zsh_sys::SCANPM_WANTVALS as c_int) };
+                        let keys: CStringArray = zsh_sys::paramvalarr(param, zsh_sys::SCANPM_WANTKEYS as c_int).into();
+                        let values: CStringArray = zsh_sys::paramvalarr(param, zsh_sys::SCANPM_WANTVALS as c_int).into();
 
                         let keys = keys.iter().map(|v| Some(v)).chain(std::iter::repeat(None));
                         let values = values.iter().map(|v| Some(v)).chain(std::iter::repeat(None));

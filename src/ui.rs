@@ -367,6 +367,10 @@ impl Drop for UiInner {
     }
 }
 
+pub fn compadd<F: Fn(&crate::c_string_array::CStringArray) -> i32>(args: &crate::c_string_array::CStringArray, func: F) {
+    func(args);
+}
+
 fn print_events() -> Result<()> {
     loop {
         // Blocking read
