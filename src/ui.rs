@@ -16,6 +16,7 @@ use crossterm::{
 };
 
 use crate::keybind;
+use crate::zsh;
 
 struct StrCommand<'a>(&'a str);
 
@@ -103,7 +104,7 @@ impl Ui {
             Clear(ClearType::FromCursorDown),
         )?;
 
-        let pwd = ui.shell.get_var_string("PWD").await?;
+        let pwd = zsh::Variable::get("PWD").map(|mut v| v.to_bytes());
         if let Some(pwd) = pwd {
             let pwd = std::str::from_utf8(&pwd);
             eprintln!("DEBUG(vocal) \t{}\t= {:?}\r", stringify!(pwd), pwd);

@@ -6,6 +6,7 @@ use std::os::raw::{c_char, c_int};
 use std::ptr::null_mut;
 
 mod shell;
+mod zsh;
 mod ui;
 mod keybind;
 mod buffer;
