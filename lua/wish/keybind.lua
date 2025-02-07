@@ -33,5 +33,5 @@ wish.set_keymap('<c-d>', function()
 end)
 
 wish.set_keymap('<tab>', function()
-    wish.eval('complete', true)
+    wish.john()
 end)

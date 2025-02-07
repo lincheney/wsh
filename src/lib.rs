@@ -58,7 +58,7 @@ unsafe extern "C" fn handlerfunc(nam: *mut c_char, argv: *mut *mut c_char, optio
 }
 
 unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_char, options: zsh_sys::Options, func: c_int) -> c_int {
-    eprintln!("DEBUG(bombay)\t{}\t= {:?}", stringify!(nam), nam);
+    // eprintln!("DEBUG(bombay)\t{}\t= {:?}\r", stringify!(nam), nam);
     let argv = argv.into();
     ui::compadd(&argv, |argv| {
         let compadd = ORIGINAL_COMPADD.get().unwrap().lock().unwrap();
@@ -124,16 +124,14 @@ fn override_compadd() {
         let mut compadd = ORIGINAL_COMPADD.get_or_init(|| Mutex::new(ShareablePointer(null_mut()))).lock().unwrap();
         *compadd = ShareablePointer(zsh::pop_builtin("compadd").unwrap());
 
-        let builtin = zsh_sys::builtin{
-            node: zsh_sys::hashnode{
-                next: null_mut(),
-                nam: CString::new("compadd").unwrap().into_raw(),
-                flags: 0,
-            },
-            handlerfunc: Some(compadd_handlerfunc),
-            ..DEFAULT_BUILTIN
+        let mut compadd = unsafe{ *compadd.0 }.clone();
+        compadd.handlerfunc = Some(compadd_handlerfunc);
+        compadd.node = zsh_sys::hashnode{
+            next: null_mut(),
+            nam: CString::new("compadd").unwrap().into_raw(),
+            flags: 0,
         };
-        zsh::add_builtin("compadd", Box::into_raw(Box::new(builtin)));
+        zsh::add_builtin("compadd", Box::into_raw(Box::new(compadd)));
     }
 }
 

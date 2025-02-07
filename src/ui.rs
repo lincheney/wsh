@@ -300,6 +300,72 @@ impl Ui {
             lua.create_string(data)
         })?;
 
+        self.set_lua_async_fn("john", |ui, lua, _val: mlua::Value| async move {
+            use std::os::raw::{c_char, c_int};
+            unsafe extern "C" {
+                static lincmd: c_int;
+                static mut zlemetaline: *mut c_char;
+                static mut cfargs: *mut *mut c_char;
+                static zlenoargs: *mut *mut c_char;
+                fn menucomplete(args: *mut *mut c_char) -> c_int;
+                static mut zlecs: c_int;
+                static mut zlell: c_int;
+                static mut zleline: *mut c_char;
+                static mut compfunc: *mut c_char;
+                fn set_buffer(pm: zsh_sys::Param, string: *mut c_char);
+                fn makezleparams(ro: c_int);
+                static mut lastchar: c_int;
+            }
+            unsafe {
+
+                // set_buffer(std::ptr::null_mut(), std::ffi::CString::new("ls ").unwrap().into_raw());
+                // zlecs = 2;
+                // zlell = 3;
+                // makezleparams(0);
+                // zsh::execstring("declare -p BUFFER", std::default::Default::default());
+                // zsh::execstring("CURSOR=4", std::default::Default::default());
+
+                zsh_sys::startparamscope();
+                makezleparams(0);
+                // zsh::execstring("declare -p BUFFER", std::default::Default::default());
+                zsh::execstring("BUFFER='setopt '; CURSOR=7", std::default::Default::default());
+                // eprintln!("DEBUG(misty) \t{}\t= {:?}", stringify!(compfunc), compfunc);
+                zsh_sys::endparamscope();
+
+                // let x = [std::ffi::CString::new("").unwrap().into_raw(), std::ptr::null_mut()];
+                let x: [*mut c_char; 1] = [std::ptr::null_mut()];
+                cfargs = x.as_ptr() as _;
+                compfunc = std::ffi::CString::new("_main_complete").unwrap().into_raw();
+                // eprintln!("DEBUG(dodder)\t{}\t= {:?}", stringify!(x), x);
+                // zsh::execstring("set -x", std::default::Default::default());
+                // zsh::execstring("declare -p BUFFER", std::default::Default::default());
+                // zsh::execstring("declare -p CURSOR", std::default::Default::default());
+                // zleline = std::ffi::CString::new("ls ").unwrap().into_raw();
+                // makezleparams(1);
+                menucomplete(std::ptr::null_mut());
+                // zsh::execstring("declare -p compstate", std::default::Default::default());
+
+                // zlemetaline = std::ffi::CString::new("ls ").unwrap().into_raw();
+                // #[repr(C)]
+                // struct compldat {
+                    // s: *mut c_char,
+                    // lst: c_int,
+                    // incmd: c_int,
+                // }
+//
+                // static COMP_COMPLETE: c_int = 0;
+                // let mut data = compldat{
+                    // s: std::ffi::CString::new("ls").unwrap().into_raw(),
+                    // lst: COMP_COMPLETE,
+                    // incmd: lincmd,
+                // };
+//
+                // let hook = zsh_sys::gethookdef(b"complete\0".as_ptr() as *mut _);
+                // zsh_sys::runhookdef(hook, &mut data as *mut compldat as *mut _);
+            }
+            Ok(())
+        })?;
+
         keybind::init_lua(self)?;
 
         let lua = self.borrow().lua.clone();
@@ -369,6 +435,60 @@ impl Drop for UiInner {
 
 pub fn compadd<F: Fn(&crate::c_string_array::CStringArray) -> i32>(args: &crate::c_string_array::CStringArray, func: F) {
     func(args);
+    unsafe {
+
+            use std::os::raw::{c_char, c_int};
+        use nix::libc::mode_t;
+        #[repr(C)]
+        struct cmatch {
+    str: *mut c_char,			/* the match itself */
+    orig: *mut c_char,                 /* the match string unquoted */
+    ipre: *mut c_char,			/* ignored prefix, has to be re-inserted */
+    ripre: *mut c_char,		/* ignored prefix, unquoted */
+    isuf: *mut c_char,			/* ignored suffix */
+    ppre: *mut c_char,			/* the path prefix */
+    psuf: *mut c_char,			/* the path suffix */
+    prpre: *mut c_char,		/* path prefix for opendir */
+    pre: *mut c_char,			/* prefix string from -P */
+    suf: *mut c_char,			/* suffix string from -S */
+    disp: *mut c_char,			/* string to display (compadd -d) */
+    autoq: *mut c_char,		/* closing quote to add automatically */
+    flags: c_int,			/* see CMF_* below */
+    brpl: *mut c_int,			/* places where to put the brace prefixes */
+    brsl: *mut c_int,			/* ...and the suffixes */
+    rems: *mut c_char,			/* when to remove the suffix */
+    remf: *mut c_char,			/* shell function to call for suffix-removal */
+    qipl: c_int,			/* length of quote-prefix */
+    qisl: c_int,			/* length of quote-suffix */
+    rnum: c_int,			/* group relative number */
+    gnum: c_int,			/* global number */
+    mode: mode_t,                /* mode field of a stat */
+    modec: c_char,                 /* LIST_TYPE-character for mode or nul */
+    fmode: mode_t,               /* mode field of a stat, following symlink */
+    fmodec: c_char,                /* LIST_TYPE-character for fmode or nul */
+};
+
+        #[repr(C)]
+        struct cmgroup {
+            name: *mut c_char,
+        }
+
+        unsafe extern "C" {
+            static matches: zsh_sys::LinkList;
+            static amatches: *mut cmgroup;
+        }
+        if !amatches.is_null() && !(*amatches).name.is_null() {
+            let g = std::ffi::CStr::from_ptr((*amatches).name);
+            eprintln!("DEBUG(dachas)\t{}\t= {:?}\r", stringify!(g), g);
+        }
+
+        let mut node = (*matches).list.first;
+        while !node.is_null() {
+            let dat = (*node).dat as *mut cmatch;
+            eprintln!("DEBUG(pucks) \t{}\t= {:?}\r", stringify!(node), (std::ffi::CStr::from_ptr((*dat).str), (*dat).gnum));
+            node = (*node).next;
+        }
+    }
 }
 
 fn print_events() -> Result<()> {
