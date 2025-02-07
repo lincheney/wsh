@@ -124,6 +124,19 @@ unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_cha
     return result
 }
 
+unsafe extern "C" fn cleanup_hook(hook: zsh_sys::Hookdef, dat: *mut c_void) -> c_int {
+    if let Some(compadd) = COMPADD_STATE.get() {
+        let mut compadd = compadd.lock().unwrap();
+        // save everything
+        if let Some(streamer) = &compadd.streamer {
+            for m in streamer.borrow_mut().matches.iter_mut() {
+                *m = Box::into_raw(Box::new((**m).clone()));
+            }
+        }
+    }
+    0
+}
+
 pub fn override_compadd() {
     super::execstring("zmodload zsh/complete", Default::default());
 
@@ -139,6 +152,11 @@ pub fn override_compadd() {
             flags: 0,
         };
         super::add_builtin("compadd", Box::into_raw(Box::new(compadd)));
+
+        unsafe{
+            let name = CString::new(b"compctl_cleanup").unwrap();
+            zsh_sys::addhookfunc(name.as_ptr() as *mut _, Some(cleanup_hook));
+        }
     }
 }
 
@@ -148,6 +166,11 @@ pub fn restore_compadd() {
         if !compadd.original.is_null() {
             super::add_builtin("compadd", compadd.original);
             compadd.original = null_mut();
+        }
+
+        unsafe{
+            let name = CString::new(b"compctl_cleanup").unwrap();
+            zsh_sys::deletehookfunc(name.as_ptr() as *mut _, Some(cleanup_hook));
         }
     }
 }
@@ -178,8 +201,8 @@ pub fn get_completions(line: &str) -> anyhow::Result<Rc<RefCell<StreamConsumer>>
             // set the zle buffer
             zsh_sys::startparamscope();
             bindings::makezleparams(0);
-            super::Variable::set("BUFFER", line);
-            super::Variable::set("CURSOR", &format!("{}", line.len() + 1));
+            super::Variable::set("BUFFER", line).unwrap();
+            super::Variable::set("CURSOR", &format!("{}", line.len() + 1)).unwrap();
             zsh_sys::endparamscope();
 
             // this is kinda what completecall() does

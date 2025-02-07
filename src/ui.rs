@@ -316,7 +316,17 @@ impl Ui {
             let shell = ui.shell.lock().await;
             let completions = shell.get_completions(contents).or_else(|e| lua_error(&format!("{}", e)))?;
             while let Some(c) = completions.borrow_mut().next().await {
-                eprintln!("DEBUG(knells)\t{}\t= {:?}\r", stringify!(c), c);
+                // eprintln!("DEBUG(knells)\t{}\t= {:?}\r", stringify!(c), c);
+                unsafe{
+                    if c.is_null() {
+                        eprintln!("DEBUG(waist) \t{}\t= {:?}", stringify!(c), c);
+                    } else if (*c).orig.is_null() {
+                    eprintln!("DEBUG(cubit) \t{}\t= {:?}", stringify!((*c).orig), (*c).orig);
+                } else {
+                    eprintln!("DEBUG(cubit) \t{}\t= {:?}", stringify!((*c).orig), (*c).orig);
+                    // eprintln!("DEBUG(supply)\t{}\t= {:?}\r", stringify!(unsafe{std::ffi::CStr::from_ptr((*c).orig)}), unsafe{std::ffi::CStr::from_ptr((*c).orig)});
+                }
+                }
             }
             Ok(())
         })?;

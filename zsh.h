@@ -45,6 +45,7 @@ typedef struct cexpl *Cexpl;
 typedef struct cmgroup *Cmgroup;
 typedef struct cmatch *Cmatch;
 
+/// <div rustbindgen nocopy></div>
 struct cmatch {
     char *str;			/* the match itself */
     char *orig;                 /* the match string unquoted */
@@ -115,9 +116,13 @@ mod_export Cmgroup lastmatches, pmatches, amatches, lmatches, lastlmatches;
 mod_export char **cfargs;
 mod_export int cfret;
 mod_export char *compfunc = NULL;
+mod_export int nbrbeg, nbrend;
 
 mod_export int
 menucomplete(char **args);
 
 mod_export void
 makezleparams(int ro);
+
+mod_export int
+permmatches(int last);
