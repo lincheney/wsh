@@ -3,6 +3,7 @@ use std::os::raw::{c_char, c_int, c_long};
 use std::default::Default;
 use std::ptr::null_mut;
 
+mod types;
 mod variables;
 pub use self::variables::*;
 
