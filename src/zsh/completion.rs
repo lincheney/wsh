@@ -33,11 +33,13 @@ unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_cha
         eprintln!("DEBUG(dachas)\t{}\t= {:?}\r", stringify!(g), g);
     }
 
-    let mut node = (*bindings::matches).list.first;
-    while !node.is_null() {
-        let dat = (*node).dat as *mut bindings::cmatch;
-        eprintln!("DEBUG(pucks) \t{}\t= {:?}\r", stringify!(node), (std::ffi::CStr::from_ptr((*dat).str_), (*dat).gnum));
-        node = (*node).next;
+    if !bindings::matches.is_null() {
+        let mut node = (*bindings::matches).list.first;
+        while !node.is_null() {
+            let dat = (*node).dat as *mut bindings::cmatch;
+            eprintln!("DEBUG(pucks) \t{}\t= {:?}\r", stringify!(node), (std::ffi::CStr::from_ptr((*dat).str_), (*dat).gnum));
+            node = (*node).next;
+        }
     }
 
     return result
@@ -77,12 +79,12 @@ pub fn restore_compadd() {
 // the best we can do is emulate completecall()
 pub fn get_completions(line: &str) {
     unsafe {
-
         // set the zle buffer
         zsh_sys::startparamscope();
         bindings::makezleparams(0);
         super::Variable::set("BUFFER", line);
-        super::Variable::set("CURSOR", &format!("{}", line.len()));
+        eprintln!("DEBUG(hinges)\t{}\t= {:?}", stringify!(line), line);
+        super::Variable::set("CURSOR", &format!("{}", line.len() + 1));
         zsh_sys::endparamscope();
 
         // this is kinda what completecall() does

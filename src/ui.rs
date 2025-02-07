@@ -301,20 +301,9 @@ impl Ui {
         })?;
 
         self.set_lua_async_fn("john", |ui, lua, _val: mlua::Value| async move {
-            // unsafe {
-//
-                // zsh_sys::startparamscope();
-                // makezleparams(0);
-                // // zsh::execstring("declare -p BUFFER", std::default::Default::default());
-                // zsh::execstring("BUFFER='setopt '; CURSOR=7", std::default::Default::default());
-                // // eprintln!("DEBUG(misty) \t{}\t= {:?}", stringify!(compfunc), compfunc);
-                // zsh_sys::endparamscope();
-//
-                // let x: [*mut c_char; 1] = [std::ptr::null_mut()];
-                // cfargs = x.as_ptr() as _;
-                // compfunc = std::ffi::CString::new("_main_complete").unwrap().into_raw();
-                // menucomplete(std::ptr::null_mut());
-            // }
+            let mut ui = ui.borrow_mut();
+            let contents = &ui.buffer.contents;
+            ui.shell.get_completions(contents).await;
             Ok(())
         })?;
 

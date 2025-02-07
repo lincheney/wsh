@@ -3,10 +3,12 @@ use std::os::raw::*;
 use std::default::Default;
 use std::ptr::null_mut;
 
+mod string;
 mod bindings;
 mod variables;
 pub mod completion;
-pub use self::variables::*;
+pub use variables::*;
+pub use string::ZString;
 
 // pub type HandlerFunc = unsafe extern "C" fn(name: *mut c_char, argv: *mut *mut c_char, options: *mut zsh_sys::options, func: c_int) -> c_int;
 
@@ -44,6 +46,6 @@ pub fn pop_builtin(name: &str) -> Option<zsh_sys::Builtin> {
 }
 
 pub fn add_builtin(cmd: &str, builtin: zsh_sys::Builtin) {
-    let cmd = CString::new(cmd).unwrap();
+    let cmd: ZString = cmd.into();
     unsafe { zsh_sys::addhashnode(zsh_sys::builtintab, cmd.into_raw(), builtin as _) };
 }

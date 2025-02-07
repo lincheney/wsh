@@ -3,6 +3,7 @@ use std::ffi::{CString, CStr};
 use std::os::raw::{c_int, c_char};
 use anyhow::Result;
 use crate::c_string_array::CStringArray;
+use super::ZString;
 
 fn pm_type(flags: c_int) -> c_int {
     flags & (zsh_sys::PM_SCALAR | zsh_sys::PM_INTEGER | zsh_sys::PM_EFLOAT | zsh_sys::PM_FFLOAT | zsh_sys::PM_ARRAY | zsh_sys::PM_HASHED) as c_int
@@ -45,8 +46,9 @@ impl Variable {
 
     pub fn set(name: &str, value: &str) -> Result<()> {
         let c_name = CString::new(name).unwrap();
-        let c_value = CString::new(value).unwrap();
-        if unsafe{ zsh_sys::setsparam(c_name.as_ptr() as *mut _, c_value.as_ptr() as *mut _) }.is_null() {
+        // setsparam will free the value for us
+        let c_value: ZString = value.into();
+        if unsafe{ zsh_sys::setsparam(c_name.as_ptr() as *mut _, c_value.into_raw()) }.is_null() {
             Err(anyhow::anyhow!("failed to set var {name:?}"))
         } else {
             Ok(())
