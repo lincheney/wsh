@@ -1,6 +1,8 @@
 use std::os::fd::{RawFd};
 use std::os::raw::{c_long};
 use std::default::Default;
+use std::rc::Rc;
+use std::cell::RefCell;
 use crate::zsh;
 
 pub struct Shell {
@@ -26,9 +28,12 @@ impl Shell {
         if code > 0 { Err(code) } else { Ok(vec![]) }
     }
 
-    pub fn get_completions(&self, string: &str) -> anyhow::Result<()> {
-        zsh::completion::get_completions(string);
-        Ok(())
+    pub fn get_completions(&self, string: &str) -> anyhow::Result<Rc<RefCell<zsh::completion::StreamConsumer>>> {
+        zsh::completion::get_completions(string)
+    }
+
+    pub fn clear_completion_cache(&self) {
+        zsh::completion::clear_cache()
     }
 
 }

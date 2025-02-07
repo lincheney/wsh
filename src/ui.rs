@@ -6,6 +6,7 @@ use std::rc::{Rc, Weak};
 use std::ops::DerefMut;
 use mlua::{IntoLuaMulti, FromLuaMulti, Lua, Result as LuaResult};
 use anyhow::Result;
+use futures::StreamExt;
 
 use crossterm::{
     terminal::{Clear, ClearType, BeginSynchronizedUpdate, EndSynchronizedUpdate},
@@ -210,15 +211,19 @@ impl Ui {
             let mut ui = self.borrow_mut();
             let ui = ui.deref_mut();
             ui.deactivate()?;
+
             // new line
             execute!(ui.stdout, StrCommand("\r\n"))?;
-            // time to execute
-            if let Err(code) = ui.shell.lock().await.exec(ui.buffer.get_contents(), None) {
-                eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
+
+            {
+                // time to execute
+                let mut shell = ui.shell.lock().await;
+                shell.clear_completion_cache();
+                if let Err(code) = shell.exec(ui.buffer.get_contents(), None) {
+                    eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
+                }
             }
-            // if ! ui.fanos.recv().await? {
-                // return Ok(false)
-            // }
+
             ui.buffer.reset();
             ui.activate()?;
         }
@@ -306,10 +311,14 @@ impl Ui {
         })?;
 
         self.set_lua_async_fn("john", |ui, _lua, _val: mlua::Value| async move {
-            let mut ui = ui.borrow_mut();
+            let ui = ui.borrow();
             let contents = &ui.buffer.contents;
             let shell = ui.shell.lock().await;
-            shell.get_completions(contents).or_else(|e| lua_error(&format!("{}", e)))
+            let completions = shell.get_completions(contents).or_else(|e| lua_error(&format!("{}", e)))?;
+            while let Some(c) = completions.borrow_mut().next().await {
+                eprintln!("DEBUG(knells)\t{}\t= {:?}\r", stringify!(c), c);
+            }
+            Ok(())
         })?;
 
         keybind::init_lua(self)?;
