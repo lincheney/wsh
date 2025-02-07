@@ -15,13 +15,13 @@ impl Shell {
         })
     }
 
-    pub async fn exec(&mut self, string: &str, fds: Option<&[RawFd; 3]>) -> std::result::Result<(), c_long> {
+    pub async fn exec(&mut self, string: &str, _fds: Option<&[RawFd; 3]>) -> std::result::Result<(), c_long> {
         zsh::execstring(string, Default::default());
         let code = zsh::get_return_code();
         if code > 0 { Err(code) } else { Ok(()) }
     }
 
-    pub async fn eval(&mut self, string: &str, capture_stderr: bool) -> std::result::Result<Vec<u8>, c_long> {
+    pub async fn eval(&mut self, string: &str, _capture_stderr: bool) -> std::result::Result<Vec<u8>, c_long> {
         zsh::execstring(string, Default::default());
         let code = zsh::get_return_code();
         if code > 0 { Err(code) } else { Ok(vec![]) }

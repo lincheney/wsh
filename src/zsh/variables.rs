@@ -25,8 +25,8 @@ pub enum Value {
 impl Variable {
     pub fn get(name: &str) -> Option<Self> {
         let bracks = 1;
-        let c_varname = CString::new(name).unwrap();
-        let mut c_varname_ptr = c_varname.as_ptr() as *mut c_char;
+        let c_name = CString::new(name).unwrap();
+        let mut c_varname_ptr = c_name.as_ptr() as *mut c_char;
         let mut value = unsafe{ std::mem::MaybeUninit::<zsh_sys::value>::zeroed().assume_init() };
         let ptr = unsafe{ zsh_sys::getvalue(
             &mut value as *mut _,
@@ -43,9 +43,19 @@ impl Variable {
         }
     }
 
+    pub fn set(name: &str, value: &str) -> Result<()> {
+        let c_name = CString::new(name).unwrap();
+        let c_value = CString::new(value).unwrap();
+        if unsafe{ zsh_sys::setsparam(c_name.as_ptr() as *mut _, c_value.as_ptr() as *mut _) }.is_null() {
+            Err(anyhow::anyhow!("failed to set var {name:?}"))
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn unset(name: &str) {
-        let c_varname = CString::new(name).unwrap();
-        unsafe{ zsh_sys::unsetparam(c_varname.as_ptr() as *mut _); }
+        let c_name = CString::new(name).unwrap();
+        unsafe{ zsh_sys::unsetparam(c_name.as_ptr() as *mut _); }
     }
 
     pub fn to_bytes(&mut self) -> Vec<u8> {
