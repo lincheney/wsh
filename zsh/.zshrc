@@ -16,6 +16,11 @@ zstyle ':completion:*' format 'Completing %d'
 bindkey '^I' menu-complete
 # compdef ls _dsv
 
+_main_complete() {
+    sleep 5
+    compadd x
+}
+
 wash
 
 # _main_complete() {

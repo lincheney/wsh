@@ -9,11 +9,12 @@ crate-type = ["cdylib"]
 
 [dependencies]
 anyhow = "1.0.95"
+async-lock = "3.4.0"
 async-std = { version = "1.13.0", features = ["attributes"] }
 crossterm = { version = "0.28.1", features = ["event-stream"] }
 futures = "0.3.31"
-mlua = { version = "0.10.3", features = ["luajit", "error-send", "vendored", "async"] }
-nix = { version = "0.29.0", features = ["process", "signal", "socket", "uio"] }
+mlua = { version = "0.10.3", features = ["luajit", "error-send", "vendored", "async", "send"] }
+nix = { version = "0.29.0", features = ["fs", "process", "signal", "socket", "term", "uio"] }
 zsh-sys = "0.1.1"
 
 [build-dependencies]

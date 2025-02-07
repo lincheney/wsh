@@ -1,10 +1,10 @@
 use std::time::Duration;
 use std::future::Future;
-use std::cell::{RefCell, Ref, RefMut};
+use std::sync::{Arc, Weak};
 use std::io::{Write};
-use std::rc::{Rc, Weak};
 use std::ops::DerefMut;
 use mlua::{IntoLuaMulti, FromLuaMulti, Lua, Result as LuaResult};
+use async_std::sync::RwLock;
 use anyhow::Result;
 use futures::StreamExt;
 
@@ -18,6 +18,7 @@ use crossterm::{
 
 use crate::keybind;
 use crate::zsh;
+use crate::shell::Shell;
 
 fn lua_error<T>(msg: &str) -> Result<T, mlua::Error> {
     Err(mlua::Error::RuntimeError(msg.to_string()))
@@ -37,8 +38,6 @@ struct UiDirty {
 }
 
 pub struct UiInner {
-    shell: async_std::sync::Mutex<crate::shell::Shell>,
-
     pub lua: Lua,
     pub lua_api: mlua::Table,
     lua_cache: mlua::Table,
@@ -53,19 +52,19 @@ pub struct UiInner {
     size: (u16, u16),
 }
 
-pub struct Ui(Rc<RefCell<UiInner>>);
+#[derive(Clone)]
+pub struct Ui(Arc<RwLock<UiInner>>);
 
 impl Ui {
 
-    pub fn new() -> Result<Self> {
+    pub async fn new(shell: &Shell) -> Result<Self> {
         let lua = Lua::new();
         let lua_api = lua.create_table()?;
         lua.globals().set("wish", &lua_api)?;
         let lua_cache = lua.create_table()?;
         lua_api.set("__cache", &lua_cache)?;
 
-        let ui = Self(Rc::new(RefCell::new(UiInner{
-            shell: async_std::sync::Mutex::new(crate::shell::Shell::new()?),
+        let ui = Self(Arc::new(RwLock::new(UiInner{
             lua,
             lua_api,
             lua_cache,
@@ -78,29 +77,29 @@ impl Ui {
             size: crossterm::terminal::size()?,
         })));
 
-        ui.init_lua()?;
+        ui.init_lua(shell).await?;
 
         Ok(ui)
     }
 
-    pub fn borrow(&self) -> Ref<UiInner> {
-        self.0.borrow()
+    pub fn borrow(&self) -> async_lock::futures::Read<UiInner> {
+        self.0.read()
     }
 
-    pub fn borrow_mut(&self) -> RefMut<UiInner> {
-        self.0.borrow_mut()
+    pub fn borrow_mut(&self) -> async_lock::futures::Write<UiInner> {
+        self.0.write()
     }
 
-    pub fn activate(&self) -> Result<()> {
-        self.borrow_mut().activate()
+    pub async fn activate(&self) -> Result<()> {
+        self.borrow().await.activate()
     }
 
-    pub fn deactivate(&self) -> Result<()> {
-        self.borrow_mut().deactivate()
+    pub async fn deactivate(&self) -> Result<()> {
+        self.borrow_mut().await.deactivate()
     }
 
-    pub async fn draw(&self) -> Result<()> {
-        let mut ui = self.borrow_mut();
+    pub async fn draw(&self, shell: &Shell) -> Result<()> {
+        let mut ui = self.borrow_mut().await;
         let ui = ui.deref_mut();
 
         execute!(
@@ -110,7 +109,7 @@ impl Ui {
             Clear(ClearType::FromCursorDown),
         )?;
 
-        let prompt = ui.shell.lock().await.exec("print -v tmpvar -P \"$PROMPT\" 2>/dev/null", None).ok()
+        let prompt = shell.lock().await.exec("print -v tmpvar -P \"$PROMPT\" 2>/dev/null", None).ok()
             .and_then(|_| zsh::Variable::get("tmpvar").map(|mut v| v.to_bytes()));
 
         let prompt = prompt.as_ref().map(|p| &p[..]).unwrap_or(b">>> ");
@@ -128,25 +127,38 @@ impl Ui {
         Ok(())
     }
 
-    pub async fn handle_event(&self, event: Event) -> Result<bool> {
+    pub async fn handle_event(&self, event: Event, shell: &Shell) -> Result<bool> {
+        eprintln!("DEBUG(grieve)\t{}\t= {:?}\r", stringify!(event), event);
         // println!("Event::{:?}\r", event);
 
         if let Event::Key(KeyEvent{code, modifiers, ..}) = event {
-            let callback = self.borrow().keybinds.get(&(code, modifiers)).cloned();
+            let callback = self.borrow().await.keybinds.get(&(code, modifiers)).cloned();
             if let Some(callback) = callback {
-                if let Err(err) = callback.call_async::<mlua::Value>(mlua::Nil).await {
-                    eprintln!("DEBUG(loaf)  \t{}\t= {:?}", stringify!(err), err);
-                }
-                if self.borrow().shell.lock().await.closed {
-                    return Ok(false)
-                } else {
-                    self.refresh_on_state().await?;
-                    return Ok(true)
-                }
+                let clone = self.clone();
+                let shell = shell.clone();
+                async_std::task::spawn(async move {
+                    if let Err(err) = callback.call_async::<mlua::Value>(mlua::Nil).await {
+                        eprintln!("DEBUG(loaf)  \t{}\t= {:?}", stringify!(err), err);
+                    }
+                    if shell.lock().await.closed {
+                    } else {
+                        clone.refresh_on_state(&shell).await;
+                    }
+                });
+                return Ok(true)
             }
         }
 
         match event {
+
+            Event::Key(KeyEvent{
+                code: KeyCode::Char('c'),
+                modifiers,
+                kind: event::KeyEventKind::Press,
+                state: _,
+            }) if modifiers == KeyModifiers::CONTROL => {
+                nix::sys::signal::kill(nix::unistd::Pid::this(), nix::sys::signal::Signal::SIGTERM)?;
+            },
 
             Event::Key(KeyEvent{
                 code: KeyCode::Char(c),
@@ -155,7 +167,7 @@ impl Ui {
                 state: _,
             }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
                 let no_redraw = {
-                    let mut ui = self.borrow_mut();
+                    let mut ui = self.borrow_mut().await;
 
                     // flush cache
                     ui.lua_cache.set("buffer", mlua::Nil)?;
@@ -169,12 +181,12 @@ impl Ui {
                 };
 
                 if no_redraw {
-                    let mut ui = self.borrow_mut();
+                    let mut ui = self.borrow_mut().await;
                     let ui = ui.deref_mut();
                     let contents = ui.buffer.get_contents();
                     execute!(ui.stdout, StrCommand(&contents[contents.len() - 1 ..]))?;
                 } else {
-                    self.draw().await?;
+                    self.draw(shell).await?;
                 }
             },
 
@@ -184,7 +196,7 @@ impl Ui {
                 kind: event::KeyEventKind::Press,
                 state: _,
             }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
-                return self.accept_line().await;
+                return self.accept_line(shell).await;
             },
 
             Event::Key(KeyEvent{
@@ -206,9 +218,9 @@ impl Ui {
         Ok(true)
     }
 
-    async fn accept_line(&self) -> Result<bool> {
+    async fn accept_line(&self, shell: &Shell) -> Result<bool> {
         {
-            let mut ui = self.borrow_mut();
+            let mut ui = self.borrow_mut().await;
             let ui = ui.deref_mut();
             ui.deactivate()?;
 
@@ -217,7 +229,7 @@ impl Ui {
 
             {
                 // time to execute
-                let mut shell = ui.shell.lock().await;
+                let mut shell = shell.lock().await;
                 shell.clear_completion_cache();
                 if let Err(code) = shell.exec(ui.buffer.get_contents(), None) {
                     eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
@@ -228,11 +240,11 @@ impl Ui {
             ui.activate()?;
         }
 
-        self.draw().await?;
+        self.draw(shell).await?;
         Ok(true)
     }
 
-    fn try_upgrade(ui: &Weak<RefCell<UiInner>>) -> LuaResult<Self> {
+    fn try_upgrade(ui: &Weak<RwLock<UiInner>>) -> LuaResult<Self> {
         if let Some(ui) = ui.upgrade() {
             Ok(Ui(ui))
         } else {
@@ -240,100 +252,105 @@ impl Ui {
         }
     }
 
-    pub fn set_lua_fn<F, A, R>(&self, name: &str, func: F) -> LuaResult<()>
+    pub async fn set_lua_fn<F, A, R>(&self, name: &str, func: F) -> LuaResult<()>
     where
         F: Fn(&Self, &Lua, A) -> LuaResult<R> + mlua::MaybeSend + 'static,
         A: FromLuaMulti,
         R: IntoLuaMulti,
     {
 
-        let weak = Rc::downgrade(&self.0);
-        let ui = self.borrow();
+        let weak = Arc::downgrade(&self.0);
+        let ui = self.borrow().await;
         ui.lua_api.set(name, ui.lua.create_function(move |lua, value| {
             func(&Ui::try_upgrade(&weak)?, lua, value)
         })?)
     }
 
-    pub fn set_lua_async_fn<F, A, R, T>(&self, name: &str, func: F) -> LuaResult<()>
+    pub async fn set_lua_async_fn<F, A, R, T>(&self, name: &str, shell: &Shell, func: F) -> LuaResult<()>
     where
-        F: Fn(Self, Lua, A) -> T + mlua::MaybeSend + 'static + Clone,
-        A: FromLuaMulti + 'static,
+        F: Fn(Self, Shell, Lua, A) -> T + mlua::MaybeSend + 'static + Clone,
+        A: FromLuaMulti + Send + 'static,
         R: IntoLuaMulti,
         T: Future<Output=LuaResult<R>> + mlua::MaybeSend + 'static,
     {
-        let weak = Rc::downgrade(&self.0);
-        let ui = self.borrow();
+        let weak = Arc::downgrade(&self.0);
+        let ui = self.borrow().await;
+        let shell = Arc::downgrade(&shell.0);
         ui.lua_api.set(name, ui.lua.create_async_function(move |lua, value| {
             let weak = weak.clone();
             let func = func.clone();
+            let shell = shell.clone();
             async move {
                 let ui = Ui::try_upgrade(&weak)?;
-                func(ui, lua, value).await
+                func(ui, Shell(shell.upgrade().unwrap()), lua, value).await
             }
         })?)
     }
 
-    pub async fn refresh_on_state(&self) -> Result<()> {
-        if self.borrow().dirty.buffer {
-            self.draw().await?;
+    pub async fn refresh_on_state(&self, shell: &Shell) -> Result<()> {
+        if self.borrow().await.dirty.buffer {
+            self.draw(shell).await?;
         }
 
-        self.clean();
+        self.clean().await;
         Ok(())
     }
 
-    fn init_lua(&self) -> Result<()> {
-        self.set_lua_fn("__get_cursor", |ui, _lua, _val: mlua::Value| Ok(ui.borrow().buffer.get_cursor()))?;
-        self.set_lua_fn("__get_buffer", |ui, _lua, _val: mlua::Value| Ok(ui.borrow().buffer.get_contents().clone()))?;
+    async fn init_lua(&self, shell: &Shell) -> Result<()> {
+        self.set_lua_async_fn("__get_cursor", shell, |ui, _shell, _lua, _val: mlua::Value| async move { Ok(ui.borrow().await.buffer.get_cursor())} ).await?;
+        self.set_lua_async_fn("__get_buffer", shell, |ui, _shell, _lua, _val: mlua::Value| async move { Ok(ui.borrow().await.buffer.get_contents().clone()) }).await?;
 
-        self.set_lua_fn("__set_cursor", |ui, _lua, val: usize| {
-            let mut ui = ui.borrow_mut();
+        self.set_lua_async_fn("__set_cursor", shell, |ui, _shell, _lua, val: usize| async move {
+            let mut ui = ui.borrow_mut().await;
             ui.buffer.set_cursor(val);
             ui.dirty.buffer = true;
             Ok(())
-        })?;
-        self.set_lua_fn("__set_buffer", |ui, _lua, val: String| {
-            let mut ui = ui.borrow_mut();
+        }).await?;
+        self.set_lua_async_fn("__set_buffer", shell, |ui, _shell, _lua, val: String| async move {
+            let mut ui = ui.borrow_mut().await;
             ui.buffer.set_contents(val);
             ui.dirty.buffer = true;
             Ok(())
-        })?;
+        }).await?;
 
-        self.set_lua_async_fn("accept_line", |ui, _lua, _val: mlua::Value| async move {
+        self.set_lua_async_fn("accept_line", shell, |ui, shell, _lua, _val: mlua::Value| async move {
             // TODO error handling
-            ui.accept_line().await;
+            ui.accept_line(&shell).await;
             Ok(())
-        })?;
+        }).await?;
 
-        self.set_lua_async_fn("eval", |ui, lua, (cmd, stderr): (String, bool)| async move {
-            let data = ui.borrow_mut().shell.lock().await.eval(&cmd, stderr).unwrap();
+        self.set_lua_async_fn("eval", shell, |_ui, shell, lua, (cmd, stderr): (String, bool)| async move {
+            let data = shell.lock().await.eval(&cmd, stderr).unwrap();
             lua.create_string(data)
-        })?;
+        }).await?;
 
-        self.set_lua_async_fn("john", |ui, _lua, _val: mlua::Value| async move {
-            let ui = ui.borrow();
-            let contents = &ui.buffer.contents;
-            let shell = ui.shell.lock().await;
-            let completions = shell.get_completions(contents).or_else(|e| lua_error(&format!("{}", e)))?;
-            while let Some(c) = completions.borrow_mut().next().await {
-                // eprintln!("DEBUG(knells)\t{}\t= {:?}\r", stringify!(c), c);
+        self.set_lua_async_fn("john", shell, |ui, shell, _lua, _val: mlua::Value| async move {
+
+            let contents = ui.borrow().await.buffer.contents.clone();
+            let completions = async_std::task::spawn_blocking(move || {
+                let shell = async_std::task::block_on(async { shell.lock().await });
+                shell.get_completions(&contents)
+            }).await;
+            let completions = completions.or_else(|e| lua_error(&format!("{}", e)))?;
+
+            while let Some(c) = completions.lock().await.next().await {
+                eprintln!("DEBUG(knells)\t{}\t= {:?}\r", stringify!(c), c);
                 unsafe{
                     if c.is_null() {
-                        eprintln!("DEBUG(waist) \t{}\t= {:?}", stringify!(c), c);
+                        // eprintln!("DEBUG(waist) \t{}\t= {:?}", stringify!(c), c);
                     } else if (*c).orig.is_null() {
-                    eprintln!("DEBUG(cubit) \t{}\t= {:?}", stringify!((*c).orig), (*c).orig);
+                    // eprintln!("DEBUG(cubit) \t{}\t= {:?}", stringify!((*c).orig), (*c).orig);
                 } else {
-                    eprintln!("DEBUG(cubit) \t{}\t= {:?}", stringify!((*c).orig), (*c).orig);
-                    // eprintln!("DEBUG(supply)\t{}\t= {:?}\r", stringify!(unsafe{std::ffi::CStr::from_ptr((*c).orig)}), unsafe{std::ffi::CStr::from_ptr((*c).orig)});
+                    eprintln!("DEBUG(supply)\t{}\t= {:?}\r", stringify!(unsafe{std::ffi::CStr::from_ptr((*c).orig)}), unsafe{std::ffi::CStr::from_ptr((*c).orig)});
                 }
                 }
             }
             Ok(())
-        })?;
+        }).await?;
 
-        keybind::init_lua(self)?;
+        keybind::init_lua(self, shell).await?;
 
-        let lua = self.borrow().lua.clone();
+        let lua = self.borrow().await.lua.clone();
         lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;
         if let Err(err) = lua.load("require('wish')").exec() {
             eprintln!("DEBUG(sliver)\t{}\t= {:?}", stringify!(err), err);
@@ -342,19 +359,19 @@ impl Ui {
         Ok(())
     }
 
-    fn clean(&self) {
-        self.borrow_mut().dirty = UiDirty::default();
+    async fn clean(&self) {
+        self.borrow_mut().await.dirty = UiDirty::default();
     }
 
 }
 
 impl UiInner {
-    pub fn activate(&mut self) -> Result<()> {
+    pub fn activate(&self) -> Result<()> {
         crossterm::terminal::enable_raw_mode()?;
 
         if self.enhanced_keyboard {
             queue!(
-                self.stdout,
+                self.stdout.lock(),
                 event::PushKeyboardEnhancementFlags(
                     event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
                     | event::KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
@@ -365,7 +382,7 @@ impl UiInner {
         }
 
         execute!(
-            self.stdout,
+            self.stdout.lock(),
             event::EnableBracketedPaste,
             event::EnableFocusChange,
             // event::EnableMouseCapture,

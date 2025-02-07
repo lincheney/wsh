@@ -1,33 +1,36 @@
-use std::sync::{OnceLock, Mutex};
+use std::sync::{OnceLock, Mutex, Arc};
 use std::ffi::{CString, CStr};
 use std::os::raw::*;
 use std::ptr::null_mut;
 use std::default::Default;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
-use std::cell::RefCell;
-use std::rc::{Rc, Weak};
+use async_std::sync::Mutex as AsyncMutex;
 use futures::Stream;
 use super::bindings;
 
 pub struct StreamConsumer {
-    waker: Option<Waker>,
     index: usize,
-    parent: Rc<RefCell<Streamer>>,
+    parent: Arc<Mutex<Streamer>>,
 }
 
 impl Stream for StreamConsumer {
     type Item = *mut bindings::cmatch;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let cmatch = self.parent.borrow().matches.get(self.index).copied();
+        let (cmatch, finished) = {
+            let parent = self.parent.lock().unwrap();
+            (parent.matches.get(self.index).copied(), parent.finished)
+        };
+
         if let Some(cmatch) = cmatch {
             self.index += 1;
             Poll::Ready(Some(cmatch))
-        } else if self.parent.borrow().finished {
+        } else if finished {
             Poll::Ready(None)
         } else {
-            self.waker = Some(cx.waker().clone());
+            let mut parent = self.parent.lock().unwrap();
+            parent.wakers.push(cx.waker().clone());
             Poll::Pending
         }
     }
@@ -38,38 +41,30 @@ struct Streamer {
     buffer: String,
     finished: bool,
     matches: Vec<*mut bindings::cmatch>,
-    children: Vec<Weak<RefCell<StreamConsumer>>>,
+    wakers: Vec<Waker>,
 }
+unsafe impl Send for Streamer {}
 
 impl Streamer {
-    fn make_consumer(parent: &Rc<RefCell<Self>>) -> Rc<RefCell<StreamConsumer>> {
-        let consumer = Rc::new(RefCell::new(StreamConsumer {
-            waker: None,
+    fn make_consumer(parent: &Arc<Mutex<Self>>) -> Arc<AsyncMutex<StreamConsumer>> {
+        let consumer = Arc::new(AsyncMutex::new(StreamConsumer {
             index: 0,
             parent: parent.clone(),
         }));
-        parent.borrow_mut().children.push(Rc::downgrade(&consumer));
         consumer
     }
 
-    fn wake_children(&mut self) {
-        self.children.retain(|c| {
-            if let Some(c) = c.upgrade() {
-                if let Some(waker) = c.borrow_mut().waker.take() {
-                    waker.wake_by_ref();
-                }
-                true
-            } else {
-                false
-            }
-        });
+    fn wake(&mut self) {
+        for waker in self.wakers.drain(..) {
+            waker.wake()
+        }
     }
 }
 
 #[derive(Debug)]
 struct CompaddState {
     original: zsh_sys::Builtin,
-    streamer: Option<Rc<RefCell<Streamer>>>,
+    streamer: Option<Arc<Mutex<Streamer>>>,
 }
 
 static COMPFUNC: &[u8] = b"_main_complete\0";
@@ -93,7 +88,7 @@ unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_cha
     let result = (*compadd.original).handlerfunc.unwrap()(nam, argv, options, func);
 
     let mut streamer = if let Some(streamer) = compadd.streamer.as_ref() {
-        streamer.borrow_mut()
+        streamer.lock().unwrap()
     } else {
         return result
     };
@@ -116,7 +111,7 @@ unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_cha
         });
         let len = streamer.matches.len();
         streamer.matches.extend(iter.skip(len));
-        streamer.wake_children();
+        streamer.wake();
             // eprintln!("DEBUG(pucks) \t{}\t= {:?}\r", stringify!(node), (std::ffi::CStr::from_ptr((*dat).str_), (*dat).gnum));
         // }
     }
@@ -124,12 +119,12 @@ unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_cha
     return result
 }
 
-unsafe extern "C" fn cleanup_hook(hook: zsh_sys::Hookdef, dat: *mut c_void) -> c_int {
+unsafe extern "C" fn cleanup_hook(_hook: zsh_sys::Hookdef, _dat: *mut c_void) -> c_int {
     if let Some(compadd) = COMPADD_STATE.get() {
-        let mut compadd = compadd.lock().unwrap();
+        let compadd = compadd.lock().unwrap();
         // save everything
         if let Some(streamer) = &compadd.streamer {
-            for m in streamer.borrow_mut().matches.iter_mut() {
+            for m in streamer.lock().unwrap().matches.iter_mut() {
                 *m = Box::into_raw(Box::new((**m).clone()));
             }
         }
@@ -179,18 +174,18 @@ pub fn restore_compadd() {
 // zsh completion is intimately tied to zle
 // so there's no "low-level" function to hook into
 // the best we can do is emulate completecall()
-pub fn get_completions(line: &str) -> anyhow::Result<Rc<RefCell<StreamConsumer>>> {
+pub fn get_completions(line: &str) -> anyhow::Result<Arc<AsyncMutex<StreamConsumer>>> {
     if let Some(compadd) = COMPADD_STATE.get() {
         let consumer = {
             let mut compadd = compadd.lock().unwrap();
-            if let Some(streamer) = compadd.streamer.as_ref().filter(|s| s.borrow().buffer == line) {
+            if let Some(streamer) = compadd.streamer.as_ref().filter(|s| s.lock().unwrap().buffer == line) {
                 return Ok(Streamer::make_consumer(&streamer))
             }
-            let streamer = Rc::new(RefCell::new(Streamer {
+            let streamer = Arc::new(Mutex::new(Streamer {
                 buffer: line.to_owned(),
                 finished: false,
                 matches: vec![],
-                children: vec![],
+                wakers: vec![],
             }));
             let consumer = Streamer::make_consumer(&streamer);
             compadd.streamer = Some(streamer);
@@ -209,11 +204,17 @@ pub fn get_completions(line: &str) -> anyhow::Result<Rc<RefCell<StreamConsumer>>
             let cfargs: [*mut c_char; 1] = [null_mut()];
             bindings::cfargs = cfargs.as_ptr() as _;
             bindings::compfunc = COMPFUNC.as_ptr() as *mut _;
+            // zsh will switch up the pgid if monitor and interactive are set
+            super::execstring("set +o monitor", Default::default());
             bindings::menucomplete(null_mut());
         }
-        consumer.borrow().parent.borrow_mut().finished = true;
+
+        if let Some(streamer) = compadd.lock().unwrap().streamer.as_ref() {
+            streamer.lock().unwrap().finished = true;
+        }
 
         Ok(consumer)
+
     } else {
         Err(anyhow::anyhow!("ui is not running"))
     }

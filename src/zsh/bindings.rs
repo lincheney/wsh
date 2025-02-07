@@ -4,7 +4,6 @@
 #![allow(dead_code)]
 
 use zsh_sys::*;
-use std::os::raw::*;
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 

@@ -1225,6 +1225,7 @@ name = "wish"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-lock",
  "async-std",
  "bindgen 0.71.1",
  "crossterm",

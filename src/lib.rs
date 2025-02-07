@@ -2,6 +2,7 @@ use anyhow::Result;
 use async_std::stream::StreamExt;
 use futures::{select, future::FutureExt};
 use std::ops::Deref;
+use std::os::fd::AsRawFd;
 use std::os::raw::{c_char, c_int};
 use std::ptr::null_mut;
 use std::sync::{LazyLock};
@@ -16,21 +17,33 @@ mod c_string_array;
 
 async fn main() -> Result<()> {
 
-    let ui = ui::Ui::new()?;
-    ui.activate()?;
-    ui.draw().await?;
+    // crossterm will default to opening fd 0
+    // but zsh will mangle this halfway through
+    // so trick crossterm into opening a separate fd to the tty
+    let devnull = std::fs::File::open("/dev/null").unwrap();
+    let old_stdin = nix::unistd::dup(0)?;
+    nix::unistd::dup2(devnull.as_raw_fd(), 0)?;
+
+    let shell = shell::Shell::new();
+    let ui = ui::Ui::new(&shell).await?;
+    ui.activate().await?;
+    ui.draw(&shell).await?;
     let mut events = crossterm::event::EventStream::new();
+
+    drop(devnull);
+    nix::unistd::dup2(old_stdin, 0)?;
+    nix::unistd::close(old_stdin)?;
 
     loop {
         // let mut delay = std::pin::pin!(async_std::task::sleep(std::time::Duration::from_millis(1_000)).fuse());
         let mut events = events.next().fuse();
 
         select! {
-            // _ = delay => { println!(".\r"); },
+            // _ = delay => { println!("."); },
             event = events => {
                 match event {
                     Some(Ok(event)) => {
-                        if !ui.handle_event(event).await? {
+                        if !ui.handle_event(event, &shell).await? {
                             break;
                         }
                     }
@@ -39,8 +52,9 @@ async fn main() -> Result<()> {
                 }
             }
         };
+        // eprintln!("DEBUG(spurns)\t{}\t= {:?}\r", stringify!("loop"), "loop");
     }
-
+    // eprintln!("DEBUG(glad)  \t{}\t= {:?}", stringify!("finish"), "finish");
     Ok(())
 }
 
