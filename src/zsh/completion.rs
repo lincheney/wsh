@@ -207,6 +207,7 @@ pub fn get_completions(line: &str) -> anyhow::Result<Arc<AsyncMutex<StreamConsum
             // zsh will switch up the pgid if monitor and interactive are set
             super::execstring("set +o monitor", Default::default());
             bindings::menucomplete(null_mut());
+            super::execstring("set -o monitor", Default::default());
         }
 
         if let Some(streamer) = compadd.lock().unwrap().streamer.as_ref() {

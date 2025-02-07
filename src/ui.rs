@@ -3,6 +3,7 @@ use std::future::Future;
 use std::sync::{Arc, Weak};
 use std::io::{Write};
 use std::ops::DerefMut;
+use std::collections::HashSet;
 use mlua::{IntoLuaMulti, FromLuaMulti, Lua, Result as LuaResult};
 use async_std::sync::RwLock;
 use anyhow::Result;
@@ -46,6 +47,7 @@ pub struct UiInner {
     pub keybinds: keybind::KeybindMapping,
     pub buffer: crate::buffer::Buffer,
 
+    threads: HashSet<nix::unistd::Pid>,
     stdout: std::io::Stdout,
     enhanced_keyboard: bool,
     cursor: (u16, u16),
@@ -68,6 +70,7 @@ impl Ui {
             lua,
             lua_api,
             lua_cache,
+            threads: HashSet::new(),
             dirty: UiDirty::default(),
             buffer: std::default::Default::default(),
             keybinds: std::default::Default::default(),
@@ -128,8 +131,7 @@ impl Ui {
     }
 
     pub async fn handle_event(&self, event: Event, shell: &Shell) -> Result<bool> {
-        eprintln!("DEBUG(grieve)\t{}\t= {:?}\r", stringify!(event), event);
-        // println!("Event::{:?}\r", event);
+        // eprintln!("DEBUG(grieve)\t{}\t= {:?}\r", stringify!(event), event);
 
         if let Event::Key(KeyEvent{code, modifiers, ..}) = event {
             let callback = self.borrow().await.keybinds.get(&(code, modifiers)).cloned();
@@ -156,8 +158,12 @@ impl Ui {
                 modifiers,
                 kind: event::KeyEventKind::Press,
                 state: _,
-            }) if modifiers == KeyModifiers::CONTROL => {
-                nix::sys::signal::kill(nix::unistd::Pid::this(), nix::sys::signal::Signal::SIGTERM)?;
+            }) => {
+                eprintln!("DEBUG(leaps) \t{}\t= {:?}", stringify!("kill"), "kill");
+                nix::sys::signal::kill(nix::unistd::Pid::from_raw(0), nix::sys::signal::Signal::SIGTERM)?;
+                for pid in self.borrow().await.threads.iter() {
+                    nix::sys::signal::kill(*pid, nix::sys::signal::Signal::SIGINT)?;
+                }
             },
 
             Event::Key(KeyEvent{
@@ -222,15 +228,16 @@ impl Ui {
         {
             let mut ui = self.borrow_mut().await;
             let ui = ui.deref_mut();
-            ui.deactivate()?;
-
-            // new line
-            execute!(ui.stdout, StrCommand("\r\n"))?;
 
             {
                 // time to execute
                 let mut shell = shell.lock().await;
                 shell.clear_completion_cache();
+
+                ui.deactivate()?;
+                // new line
+                execute!(ui.stdout, StrCommand("\r\n"))?;
+
                 if let Err(code) = shell.exec(ui.buffer.get_contents(), None) {
                     eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
                 }
@@ -326,15 +333,25 @@ impl Ui {
 
         self.set_lua_async_fn("john", shell, |ui, shell, _lua, _val: mlua::Value| async move {
 
+            let s = shell.clone();
             let contents = ui.borrow().await.buffer.contents.clone();
+            let u = ui.clone();
             let completions = async_std::task::spawn_blocking(move || {
+                let tid = nix::unistd::gettid();
+                async_std::task::block_on(async {
+                    u.borrow_mut().await.threads.insert(tid);
+                });
                 let shell = async_std::task::block_on(async { shell.lock().await });
-                shell.get_completions(&contents)
+                let result = shell.get_completions(&contents);
+                async_std::task::block_on(async {
+                    u.borrow_mut().await.threads.remove(&tid);
+                });
+                result
             }).await;
             let completions = completions.or_else(|e| lua_error(&format!("{}", e)))?;
 
             while let Some(c) = completions.lock().await.next().await {
-                eprintln!("DEBUG(knells)\t{}\t= {:?}\r", stringify!(c), c);
+                // eprintln!("DEBUG(knells)\t{}\t= {:?}\r", stringify!(c), c);
                 unsafe{
                     if c.is_null() {
                         // eprintln!("DEBUG(waist) \t{}\t= {:?}", stringify!(c), c);
@@ -345,6 +362,7 @@ impl Ui {
                 }
                 }
             }
+                    ui.draw(&s).await;
             Ok(())
         }).await?;
 
