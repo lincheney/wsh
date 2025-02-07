@@ -14,19 +14,19 @@ impl Shell {
         })
     }
 
-    pub async fn exec(&mut self, string: &str, _fds: Option<&[RawFd; 3]>) -> Result<(), c_long> {
+    pub fn exec(&mut self, string: &str, _fds: Option<&[RawFd; 3]>) -> Result<(), c_long> {
         zsh::execstring(string, Default::default());
         let code = zsh::get_return_code();
         if code > 0 { Err(code) } else { Ok(()) }
     }
 
-    pub async fn eval(&mut self, string: &str, _capture_stderr: bool) -> Result<Vec<u8>, c_long> {
+    pub fn eval(&mut self, string: &str, _capture_stderr: bool) -> Result<Vec<u8>, c_long> {
         zsh::execstring(string, Default::default());
         let code = zsh::get_return_code();
         if code > 0 { Err(code) } else { Ok(vec![]) }
     }
 
-    pub async fn get_completions(&self, string: &str) -> anyhow::Result<()> {
+    pub fn get_completions(&self, string: &str) -> anyhow::Result<()> {
         zsh::completion::get_completions(string);
         Ok(())
     }

@@ -18,6 +18,10 @@ use crossterm::{
 use crate::keybind;
 use crate::zsh;
 
+fn lua_error<T>(msg: &str) -> Result<T, mlua::Error> {
+    Err(mlua::Error::RuntimeError(msg.to_string()))
+}
+
 struct StrCommand<'a>(&'a str);
 
 impl crossterm::Command for StrCommand<'_> {
@@ -32,7 +36,8 @@ struct UiDirty {
 }
 
 pub struct UiInner {
-    shell: crate::shell::Shell,
+    shell: async_std::sync::Mutex<crate::shell::Shell>,
+
     pub lua: Lua,
     pub lua_api: mlua::Table,
     lua_cache: mlua::Table,
@@ -59,7 +64,7 @@ impl Ui {
         lua_api.set("__cache", &lua_cache)?;
 
         let ui = Self(Rc::new(RefCell::new(UiInner{
-            shell: crate::shell::Shell::new()?,
+            shell: async_std::sync::Mutex::new(crate::shell::Shell::new()?),
             lua,
             lua_api,
             lua_cache,
@@ -104,7 +109,7 @@ impl Ui {
             Clear(ClearType::FromCursorDown),
         )?;
 
-        let prompt = ui.shell.exec("print -v tmpvar -P \"$PROMPT\" 2>/dev/null", None).await.ok()
+        let prompt = ui.shell.lock().await.exec("print -v tmpvar -P \"$PROMPT\" 2>/dev/null", None).ok()
             .and_then(|_| zsh::Variable::get("tmpvar").map(|mut v| v.to_bytes()));
 
         let prompt = prompt.as_ref().map(|p| &p[..]).unwrap_or(b">>> ");
@@ -131,7 +136,7 @@ impl Ui {
                 if let Err(err) = callback.call_async::<mlua::Value>(mlua::Nil).await {
                     eprintln!("DEBUG(loaf)  \t{}\t= {:?}", stringify!(err), err);
                 }
-                if self.borrow().shell.closed {
+                if self.borrow().shell.lock().await.closed {
                     return Ok(false)
                 } else {
                     self.refresh_on_state().await?;
@@ -208,7 +213,7 @@ impl Ui {
             // new line
             execute!(ui.stdout, StrCommand("\r\n"))?;
             // time to execute
-            if let Err(code) = ui.shell.exec(ui.buffer.get_contents(), None).await {
+            if let Err(code) = ui.shell.lock().await.exec(ui.buffer.get_contents(), None) {
                 eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
             }
             // if ! ui.fanos.recv().await? {
@@ -226,7 +231,7 @@ impl Ui {
         if let Some(ui) = ui.upgrade() {
             Ok(Ui(ui))
         } else {
-            Err(mlua::Error::RuntimeError("ui not running".to_string()))
+            lua_error("ui not running")
         }
     }
 
@@ -296,15 +301,15 @@ impl Ui {
         })?;
 
         self.set_lua_async_fn("eval", |ui, lua, (cmd, stderr): (String, bool)| async move {
-            let data = ui.borrow_mut().shell.eval(&cmd, stderr).await.unwrap();
+            let data = ui.borrow_mut().shell.lock().await.eval(&cmd, stderr).unwrap();
             lua.create_string(data)
         })?;
 
-        self.set_lua_async_fn("john", |ui, lua, _val: mlua::Value| async move {
+        self.set_lua_async_fn("john", |ui, _lua, _val: mlua::Value| async move {
             let mut ui = ui.borrow_mut();
             let contents = &ui.buffer.contents;
-            ui.shell.get_completions(contents).await;
-            Ok(())
+            let shell = ui.shell.lock().await;
+            shell.get_completions(contents).or_else(|e| lua_error(&format!("{}", e)))
         })?;
 
         keybind::init_lua(self)?;
