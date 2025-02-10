@@ -4,10 +4,9 @@ use std::sync::{Arc, Weak};
 use std::io::{Write};
 use std::ops::DerefMut;
 use std::collections::HashSet;
-use mlua::{IntoLuaMulti, FromLuaMulti, Lua, Result as LuaResult};
+use mlua::{IntoLuaMulti, FromLuaMulti, Lua, Result as LuaResult, Value as LuaValue};
 use async_std::sync::RwLock;
 use anyhow::Result;
-use futures::StreamExt;
 
 use crossterm::{
     terminal::{Clear, ClearType, BeginSynchronizedUpdate, EndSynchronizedUpdate},
@@ -18,6 +17,7 @@ use crossterm::{
 };
 
 use crate::keybind;
+use crate::completion;
 use crate::zsh;
 use crate::shell::Shell;
 
@@ -47,7 +47,7 @@ pub struct UiInner {
     pub keybinds: keybind::KeybindMapping,
     pub buffer: crate::buffer::Buffer,
 
-    threads: HashSet<nix::unistd::Pid>,
+    pub threads: HashSet<nix::unistd::Pid>,
     stdout: std::io::Stdout,
     enhanced_keyboard: bool,
     cursor: (u16, u16),
@@ -139,7 +139,7 @@ impl Ui {
                 let clone = self.clone();
                 let shell = shell.clone();
                 async_std::task::spawn(async move {
-                    if let Err(err) = callback.call_async::<mlua::Value>(mlua::Nil).await {
+                    if let Err(err) = callback.call_async::<LuaValue>(mlua::Nil).await {
                         eprintln!("DEBUG(loaf)  \t{}\t= {:?}", stringify!(err), err);
                     }
                     if shell.lock().await.closed {
@@ -278,7 +278,7 @@ impl Ui {
         F: Fn(Self, Shell, Lua, A) -> T + mlua::MaybeSend + 'static + Clone,
         A: FromLuaMulti + Send + 'static,
         R: IntoLuaMulti,
-        T: Future<Output=LuaResult<R>> + mlua::MaybeSend + 'static,
+        T: Future<Output=Result<R>> + mlua::MaybeSend + 'static,
     {
         let weak = Arc::downgrade(&self.0);
         let ui = self.borrow().await;
@@ -290,6 +290,7 @@ impl Ui {
             async move {
                 let ui = Ui::try_upgrade(&weak)?;
                 func(ui, Shell(shell.upgrade().unwrap()), lua, value).await
+                    .or_else(|e| Err(mlua::Error::RuntimeError(format!("{}", e))))
             }
         })?)
     }
@@ -304,8 +305,8 @@ impl Ui {
     }
 
     async fn init_lua(&self, shell: &Shell) -> Result<()> {
-        self.set_lua_async_fn("__get_cursor", shell, |ui, _shell, _lua, _val: mlua::Value| async move { Ok(ui.borrow().await.buffer.get_cursor())} ).await?;
-        self.set_lua_async_fn("__get_buffer", shell, |ui, _shell, _lua, _val: mlua::Value| async move { Ok(ui.borrow().await.buffer.get_contents().clone()) }).await?;
+        self.set_lua_async_fn("__get_cursor", shell, |ui, _shell, _lua, _val: LuaValue| async move { Ok(ui.borrow().await.buffer.get_cursor())} ).await?;
+        self.set_lua_async_fn("__get_buffer", shell, |ui, _shell, _lua, _val: LuaValue| async move { Ok(ui.borrow().await.buffer.get_contents().clone()) }).await?;
 
         self.set_lua_async_fn("__set_cursor", shell, |ui, _shell, _lua, val: usize| async move {
             let mut ui = ui.borrow_mut().await;
@@ -313,6 +314,7 @@ impl Ui {
             ui.dirty.buffer = true;
             Ok(())
         }).await?;
+
         self.set_lua_async_fn("__set_buffer", shell, |ui, _shell, _lua, val: String| async move {
             let mut ui = ui.borrow_mut().await;
             ui.buffer.set_contents(val);
@@ -320,54 +322,18 @@ impl Ui {
             Ok(())
         }).await?;
 
-        self.set_lua_async_fn("accept_line", shell, |ui, shell, _lua, _val: mlua::Value| async move {
+        self.set_lua_async_fn("accept_line", shell, |ui, shell, _lua, _val: LuaValue| async move {
             // TODO error handling
-            ui.accept_line(&shell).await;
-            Ok(())
+            ui.accept_line(&shell).await
         }).await?;
 
         self.set_lua_async_fn("eval", shell, |_ui, shell, lua, (cmd, stderr): (String, bool)| async move {
             let data = shell.lock().await.eval(&cmd, stderr).unwrap();
-            lua.create_string(data)
-        }).await?;
-
-        self.set_lua_async_fn("get_completions", shell, |ui, shell, _lua, val: Option<String>| async move {
-
-            let val = if let Some(val) = val {
-                val
-            } else {
-                ui.borrow().await.buffer.contents.clone()
-            };
-
-            let shell_clone = shell.clone();
-            let ui_clone = ui.clone();
-            let result = shell.lock().await.get_completions(&val);
-            let (completions, starter) = result.or_else(|e| lua_error(&format!("{}", e)))?;
-
-            async_std::task::spawn_blocking(move || {
-                let tid = nix::unistd::gettid();
-                async_std::task::block_on(async {
-                    ui_clone.borrow_mut().await.threads.insert(tid);
-                });
-                let shell = shell_clone.clone();
-                let shell = shell.lock();
-                let shell = async_std::task::block_on(async move {
-                    shell.await
-                });
-                starter.start(&shell);
-                async_std::task::block_on(async {
-                    ui_clone.borrow_mut().await.threads.remove(&tid);
-                });
-            });
-
-            while let Some(c) = completions.lock().await.next().await {
-                eprintln!("DEBUG(tall)  \t{}\t= {:?}\r", stringify!(c.get_orig()), c.get_orig());
-            }
-            ui.draw(&shell).await;
-            Ok(())
+            Ok(lua.create_string(data)?)
         }).await?;
 
         keybind::init_lua(self, shell).await?;
+        completion::init_lua(self, shell).await?;
 
         let lua = self.borrow().await.lua.clone();
         lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;

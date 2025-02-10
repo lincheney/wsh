@@ -72,3 +72,6 @@ impl Clone for cmatch {
         }
     }
 }
+
+unsafe impl Send for cmatch {}
+unsafe impl Sync for cmatch {}

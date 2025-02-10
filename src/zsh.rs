@@ -9,6 +9,7 @@ mod variables;
 pub mod completion;
 pub use variables::*;
 pub use string::ZString;
+pub use bindings::{cmatch};
 
 // pub type HandlerFunc = unsafe extern "C" fn(name: *mut c_char, argv: *mut *mut c_char, options: *mut zsh_sys::options, func: c_int) -> c_int;
 

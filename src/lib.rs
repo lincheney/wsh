@@ -12,6 +12,7 @@ mod shell;
 mod zsh;
 mod ui;
 mod keybind;
+mod completion;
 mod buffer;
 mod c_string_array;
 

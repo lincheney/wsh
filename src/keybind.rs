@@ -8,7 +8,7 @@ use crate::shell::Shell;
 pub type KeybindMapping = HashMap<(KeyCode, KeyModifiers), Function>;
 
 
-async fn set_keymap(ui: Ui, _shell: Shell, _lua: Lua, (key, callback): (String, Function)) -> LuaResult<()> {
+async fn set_keymap(ui: Ui, _shell: Shell, _lua: Lua, (key, callback): (String, Function)) -> Result<()> {
     let mut modifiers = KeyModifiers::empty();
 
     let original = &key;
@@ -21,7 +21,7 @@ async fn set_keymap(ui: Ui, _shell: Shell, _lua: Lua, (key, callback): (String, 
                 "c" => modifiers |= KeyModifiers::CONTROL,
                 "s" => modifiers |= KeyModifiers::SHIFT,
                 "a" => modifiers |= KeyModifiers::ALT,
-                _ => return Err(mlua::Error::RuntimeError(format!("invalid keybind: {original:?}"))),
+                _ => return Err(anyhow::anyhow!("invalid keybind: {:?}", original)),
             }
         }
         key = key.rsplit('-').next().unwrap();
@@ -58,7 +58,7 @@ async fn set_keymap(ui: Ui, _shell: Shell, _lua: Lua, (key, callback): (String, 
         },
 
         _ => {
-            return Err(mlua::Error::RuntimeError(format!("invalid keybind: {original:?}")))
+            return Err(anyhow::anyhow!("invalid keybind: {:?}", original))
         },
     };
 
