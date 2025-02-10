@@ -24,6 +24,17 @@ wish.set_keymap('<end>', function() wish.cursor = #wish.buffer end)
 wish.set_keymap('<left>', function() wish.cursor = math.max(0, wish.cursor - 1) end)
 wish.set_keymap('<right>', function() wish.cursor = wish.cursor + 1 end)
 
+wish.set_keymap('<c-left>', function()
+    if wish.cursor > 0 then
+        local cursor = wish.buffer:sub(1, wish.cursor):find('%S+%s*$')
+        wish.cursor = (cursor or 1) - 1
+    end
+end)
+wish.set_keymap('<c-right>', function()
+    local cursor = wish.buffer:find('%f[%s]', wish.cursor + 2)
+    wish.cursor = (cursor or #wish.buffer + 1) - 1
+end)
+
 -- there ought to be a better way of doing this
 wish.set_keymap('<c-d>', function()
     if #wish.buffer == 0 then

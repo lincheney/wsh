@@ -13,45 +13,50 @@ async fn set_keymap(ui: Ui, _shell: Shell, _lua: Lua, (key, callback): (String, 
 
     let original = &key;
     let mut key = key.as_str();
-    if key.starts_with("<") && key.ends_with(">") && key.contains('-') {
-        // this has modifiers
+    let special = key.starts_with("<") && key.ends_with(">");
+
+    if special {
         key = &key[1..key.len()-1];
-        for modifier in key.rsplit('-').skip(1) {
-            match modifier {
-                "c" => modifiers |= KeyModifiers::CONTROL,
-                "s" => modifiers |= KeyModifiers::SHIFT,
-                "a" => modifiers |= KeyModifiers::ALT,
-                _ => return Err(anyhow::anyhow!("invalid keybind: {:?}", original)),
+
+        if key.contains('-') {
+            // this has modifiers
+            for modifier in key.rsplit('-').skip(1) {
+                match modifier {
+                    "c" => modifiers |= KeyModifiers::CONTROL,
+                    "s" => modifiers |= KeyModifiers::SHIFT,
+                    "a" => modifiers |= KeyModifiers::ALT,
+                    _ => return Err(anyhow::anyhow!("invalid keybind: {:?}", original)),
+                }
             }
+            key = key.rsplit('-').next().unwrap();
         }
-        key = key.rsplit('-').next().unwrap();
     }
 
     let key = match key {
-        "<bs>" => KeyCode::Backspace,
-        "<cr>" => KeyCode::Enter,
-        "<left>" => KeyCode::Left,
-        "<right>" => KeyCode::Right,
-        "<up>" => KeyCode::Up,
-        "<down>" => KeyCode::Down,
-        "<home>" => KeyCode::Home,
-        "<end>" => KeyCode::End,
-        "<pageup>" => KeyCode::PageUp,
-        "<pagedown>" => KeyCode::PageDown,
-        "<tab>" => KeyCode::Tab,
-        "<backtab>" => KeyCode::BackTab,
-        "<delete>" => KeyCode::Delete,
-        "<insert>" => KeyCode::Insert,
-        "<null>" => KeyCode::Null,
-        "<esc>" => KeyCode::Esc,
-        "<capslock>" => KeyCode::CapsLock,
-        "<scrolllock>" => KeyCode::ScrollLock,
-        "<numlock>" => KeyCode::NumLock,
-        "<printscreen>" => KeyCode::PrintScreen,
-        "<pause>" => KeyCode::Pause,
-        "<menu>" => KeyCode::Menu,
+        "bs" if special => KeyCode::Backspace,
+        "cr" if special => KeyCode::Enter,
+        "left" if special => KeyCode::Left,
+        "right" if special => KeyCode::Right,
+        "up" if special => KeyCode::Up,
+        "down" if special => KeyCode::Down,
+        "home" if special => KeyCode::Home,
+        "end" if special => KeyCode::End,
+        "pageup" if special => KeyCode::PageUp,
+        "pagedown" if special => KeyCode::PageDown,
+        "tab" if special => KeyCode::Tab,
+        "backtab" if special => KeyCode::BackTab,
+        "delete" if special => KeyCode::Delete,
+        "insert" if special => KeyCode::Insert,
+        "null" if special => KeyCode::Null,
+        "esc" if special => KeyCode::Esc,
+        "capslock" if special => KeyCode::CapsLock,
+        "scrolllock" if special => KeyCode::ScrollLock,
+        "numlock" if special => KeyCode::NumLock,
+        "printscreen" if special => KeyCode::PrintScreen,
+        "pause" if special => KeyCode::Pause,
+        "menu" if special => KeyCode::Menu,
 
-        "<lt>" => KeyCode::Char('<'),
+        "lt" if special => KeyCode::Char('<'),
         key if key.len() == 1 && &key[0..1] != "<" && key.is_ascii() => KeyCode::Char(key.chars().next().unwrap()),
         key if key.starts_with("<f") && key.ends_with(">") && key[2..key.len()-1].parse::<u8>().is_ok() => {
             KeyCode::F(key[2..key.len()-1].parse::<u8>().unwrap())
