@@ -15,6 +15,8 @@ mod keybind;
 mod completion;
 mod buffer;
 mod c_string_array;
+#[macro_use]
+mod utils;
 
 async fn main() -> Result<()> {
 

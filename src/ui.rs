@@ -8,11 +8,10 @@ use mlua::{IntoLuaMulti, FromLuaMulti, Lua, Result as LuaResult, Value as LuaVal
 use futures::SinkExt;
 use async_std::sync::RwLock;
 use anyhow::Result;
-use iocraft::prelude::*;
 
 use crossterm::{
     terminal::{Clear, ClearType, BeginSynchronizedUpdate, EndSynchronizedUpdate},
-    cursor::{self, position},
+    cursor::{position},
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     style,
     execute,
@@ -24,6 +23,7 @@ use crate::completion;
 use crate::zsh;
 use crate::shell::Shell;
 mod text_popup;
+mod views;
 
 fn lua_error<T>(msg: &str) -> Result<T, mlua::Error> {
     Err(mlua::Error::RuntimeError(msg.to_string()))
@@ -48,7 +48,7 @@ pub struct UiInner {
     pub lua_api: mlua::Table,
     lua_cache: mlua::Table,
 
-    ui_elements: Vec<iocraft::Element<'static, iocraft::components::View>>,
+    pub views: views::Views,
 
     trampoline: futures::channel::mpsc::Sender<TrampolineFut>,
     dirty: UiDirty,
@@ -81,7 +81,7 @@ impl Ui {
             lua_cache,
             trampoline,
             is_running_process: false,
-            ui_elements: vec![],
+            views: std::default::Default::default(),
             threads: HashSet::new(),
             dirty: UiDirty::default(),
             buffer: std::default::Default::default(),
@@ -138,30 +138,9 @@ impl Ui {
         }
 
         // do NOT render ui elements if there is a foreground process
-        if !ui.is_running_process && !ui.ui_elements.is_empty() {
+        if !ui.is_running_process {
             let (width, height) = crossterm::terminal::size()?;
-            let mut output = vec![];
-            let mut canvas_height = 0;
-            for view in ui.ui_elements.iter_mut() {
-                // update the width
-                view.props.max_width = iocraft::Size::Length(width as _);
-
-                let canvas = view.render(Some(width as _));
-                canvas_height += canvas.height();
-                canvas.write_ansi(&mut output)?;
-            }
-            let output = std::str::from_utf8(&output)?;
-            for _ in 0 .. canvas_height as _ {
-                queue!(ui.stdout, style::Print("\n"))?;
-            }
-            queue!(
-                ui.stdout,
-                cursor::MoveUp(canvas_height as _),
-                cursor::SavePosition,
-                cursor::MoveToNextLine(1),
-                style::Print(output.trim_end()),
-                cursor::RestorePosition,
-            )?;
+            ui.views.draw(&mut ui.stdout, width, height)?;
         }
 
         queue!(ui.stdout, EndSynchronizedUpdate)?;
@@ -217,24 +196,6 @@ impl Ui {
                 for pid in self.borrow().await.threads.iter() {
                     nix::sys::signal::kill(*pid, nix::sys::signal::Signal::SIGINT)?;
                 }
-            },
-
-            Event::Key(KeyEvent{
-                code: KeyCode::F(12),
-                modifiers,
-                kind: event::KeyEventKind::Press,
-                state: _,
-            }) => {
-                self.borrow_mut().await.ui_elements.push(element! {
-                    View(
-                        border_style: BorderStyle::Round,
-                        border_color: Color::Blue,
-                        max_height: 10,
-                    ) {
-                        text_popup::TextPopup(content: format!("hello! {:?}", std::time::SystemTime::now()))
-                    }
-                });
-                self.draw(shell, false).await?;
             },
 
             Event::Key(KeyEvent{
@@ -413,6 +374,7 @@ impl Ui {
 
         keybind::init_lua(self, shell).await?;
         completion::init_lua(self, shell).await?;
+        views::init_lua(self, shell).await?;
 
         let lua = self.borrow().await.lua.clone();
         lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;

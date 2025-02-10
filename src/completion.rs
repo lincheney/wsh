@@ -1,0 +1,72 @@
+use anyhow::Result;
+use mlua::{prelude::*, UserData, UserDataMethods, MetaMethod};
+use std::sync::Arc;
+use crate::ui::Ui;
+use crate::shell::Shell;
+use async_std::sync::Mutex;
+use futures::StreamExt;
+
+struct CompletionStream {
+    inner: Arc<Mutex<crate::zsh::completion::StreamConsumer>>,
+}
+
+struct CompletionMatch {
+    inner: Arc<crate::zsh::cmatch>,
+}
+
+impl UserData for CompletionStream {
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_async_meta_method(MetaMethod::Call, |_lua, stream, ()| async move {
+            let x = stream.inner.lock().await.next().await;
+            Ok(x.map(|inner| CompletionMatch{inner}))
+        });
+    }
+}
+
+impl UserData for CompletionMatch {
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_meta_method(MetaMethod::ToString, |_lua, m, ()| {
+            Ok(m.inner.get_orig().map(|s| s.to_string_lossy().into_owned()))
+        });
+    }
+}
+
+async fn get_completions(ui: Ui, shell: Shell, _lua: Lua, val: Option<String>) -> Result<CompletionStream> {
+
+    let val = if let Some(val) = val {
+        val
+    } else {
+        ui.borrow().await.buffer.contents.clone()
+    };
+
+    let result = shell.lock().await.get_completions(&val);
+    let (completions, starter) = result.or_else(|e| Err(mlua::Error::RuntimeError(format!("{}", e))))?;
+
+    let shell_clone = shell.clone();
+    let ui_clone = ui.clone();
+    // run this in a thread
+    async_std::task::spawn_blocking(move || {
+        let tid = nix::unistd::gettid();
+        let shell = shell_clone.lock();
+        let shell = async_std::task::block_on(async {
+            ui_clone.borrow_mut().await.threads.insert(tid);
+            shell.await
+        });
+        starter.start(&shell);
+        drop(shell);
+        async_std::task::block_on(async {
+            let mut ui = ui_clone.borrow_mut().await;
+            ui.threads.remove(&tid);
+            ui.activate();
+        });
+    });
+
+    Ok(CompletionStream{inner: completions})
+}
+
+pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
+
+    ui.set_lua_async_fn("get_completions", shell, get_completions).await?;
+
+    Ok(())
+}

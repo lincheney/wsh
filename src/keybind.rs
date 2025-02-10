@@ -58,8 +58,8 @@ async fn set_keymap(ui: Ui, _shell: Shell, _lua: Lua, (key, callback): (String, 
 
         "lt" if special => KeyCode::Char('<'),
         key if key.len() == 1 && &key[0..1] != "<" && key.is_ascii() => KeyCode::Char(key.chars().next().unwrap()),
-        key if key.starts_with("<f") && key.ends_with(">") && key[2..key.len()-1].parse::<u8>().is_ok() => {
-            KeyCode::F(key[2..key.len()-1].parse::<u8>().unwrap())
+        key if special && key.starts_with("f") && key[1..].parse::<u8>().is_ok() => {
+            KeyCode::F(key[1..].parse::<u8>().unwrap())
         },
 
         _ => {
