@@ -17,6 +17,7 @@ pub struct ChildView(ArcMutex<ChildViewInner>);
 struct ChildViewInner {
     view: Element<'static, View>,
     text: TextPopupProps,
+    persist: bool,
     remove: bool,
 }
 
@@ -35,7 +36,11 @@ impl Views {
         self.children.clear();
     }
 
-    pub fn add(&mut self, string: String) -> ChildView {
+    pub fn clear_non_persistent(&mut self) {
+        self.children.retain(|child| !child.0.lock().unwrap().persist);
+    }
+
+    pub fn add(&mut self, string: String, persist: bool) -> ChildView {
         let view = element! {
             View(
                 border_style: BorderStyle::Round,
@@ -50,6 +55,7 @@ impl Views {
         let view = ChildViewInner{
             view,
             text,
+            persist,
             remove: false,
         };
         let view = ChildView(ArcMutexNew!(view));
@@ -58,7 +64,7 @@ impl Views {
     }
 
     pub fn draw(&mut self, stdout: &mut std::io::Stdout, width: u16, _height: u16) -> Result<()> {
-        self.children.retain(|view| !view.0.lock().unwrap().remove);
+        self.children.retain(|child| !child.0.lock().unwrap().remove);
         if self.is_empty() {
             return Ok(())
         }
@@ -218,8 +224,14 @@ impl UserData for ChildView {
     }
 }
 
-async fn show_message(ui: Ui, _shell: Shell, _lua: Lua, val: String) -> Result<ChildView> {
-    Ok(ui.borrow_mut().await.views.add(val))
+async fn show_message(
+    ui: Ui,
+    _shell: Shell,
+    _lua: Lua,
+    (val, persist): (String, Option<bool>),
+) -> Result<ChildView> {
+    let persist = persist.unwrap_or(true);
+    Ok(ui.borrow_mut().await.views.add(val, persist))
 }
 
 pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {

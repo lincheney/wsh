@@ -263,6 +263,7 @@ impl Ui {
         {
             let mut ui = self.borrow_mut().await;
             let ui = ui.deref_mut();
+            ui.views.clear_non_persistent();
 
             {
                 // time to execute
