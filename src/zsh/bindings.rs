@@ -3,9 +3,37 @@
 #![allow(non_snake_case)]
 #![allow(dead_code)]
 
+use paste::paste;
 use zsh_sys::*;
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+
+macro_rules! make_str_getter {
+    ($field:ident) => (
+        paste! {
+            pub fn [<get_ $field>](&self) -> Option<&std::ffi::CStr> {
+                Some(unsafe{ std::ffi::CStr::from_ptr(self.$field.as_ref()?) })
+            }
+        }
+    )
+}
+
+impl cmatch {
+    make_str_getter!(str_);
+    make_str_getter!(orig);
+    make_str_getter!(ipre);
+    make_str_getter!(ripre);
+    make_str_getter!(isuf);
+    make_str_getter!(ppre);
+    make_str_getter!(psuf);
+    make_str_getter!(prpre);
+    make_str_getter!(pre);
+    make_str_getter!(suf);
+    make_str_getter!(disp);
+    make_str_getter!(autoq);
+    make_str_getter!(rems);
+    make_str_getter!(remf);
+}
 
 impl Clone for cmatch {
     fn clone(&self) -> Self {

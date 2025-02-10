@@ -351,16 +351,9 @@ impl Ui {
             let completions = completions.or_else(|e| lua_error(&format!("{}", e)))?;
 
             while let Some(c) = completions.lock().await.next().await {
-                // eprintln!("DEBUG(knells)\t{}\t= {:?}\r", stringify!(c), c);
-                unsafe{
-                    if (*c).orig.is_null() {
-                    // eprintln!("DEBUG(cubit) \t{}\t= {:?}", stringify!((*c).orig), (*c).orig);
-                } else {
-                    eprintln!("DEBUG(supply)\t{}\t= {:?}\r", stringify!(unsafe{std::ffi::CStr::from_ptr((*c).orig)}), unsafe{std::ffi::CStr::from_ptr((*c).orig)});
-                }
-                }
+                eprintln!("DEBUG(tall)  \t{}\t= {:?}\r", stringify!(c.get_orig()), c.get_orig());
             }
-                    ui.draw(&s).await;
+            ui.draw(&s).await;
             Ok(())
         }).await?;
 
