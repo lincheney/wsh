@@ -50,7 +50,7 @@ pub struct UiInner {
 
     pub views: views::Views,
 
-    trampoline: futures::channel::mpsc::Sender<TrampolineFut>,
+    trampoline: futures::channel::mpsc::UnboundedSender<TrampolineFut>,
     dirty: UiDirty,
     is_running_process: bool,
     pub keybinds: keybind::KeybindMapping,
@@ -68,7 +68,7 @@ pub struct Ui(Arc<RwLock<UiInner>>);
 
 impl Ui {
 
-    pub async fn new(shell: &Shell, trampoline: futures::channel::mpsc::Sender<TrampolineFut>) -> Result<Self> {
+    pub async fn new(shell: &Shell, trampoline: futures::channel::mpsc::UnboundedSender<TrampolineFut>) -> Result<Self> {
         let lua = Lua::new();
         let lua_api = lua.create_table()?;
         lua.globals().set("wish", &lua_api)?;
@@ -140,24 +140,24 @@ impl Ui {
         // do NOT render ui elements if there is a foreground process
         if !ui.is_running_process {
             let (width, height) = crossterm::terminal::size()?;
-            ui.views.draw(&mut ui.stdout, width, height)?;
+            ui.views.draw(&mut ui.stdout, width, height.saturating_sub(5))?;
         }
 
         queue!(ui.stdout, EndSynchronizedUpdate)?;
         execute!(ui.stdout)?;
 
-        if use_trampoline {
-            // refresh_cursor_position needs to get trampolined out
-            // because it doesn't work while an event stream is active
-            let clone = self.clone();
-            ui.trampoline.send(
-                Box::pin(async move {
-                    clone.borrow_mut().await.refresh_cursor_position()
-                })
-            ).await?;
-        } else {
-            ui.refresh_cursor_position()?;
-        }
+        // if use_trampoline {
+            // // refresh_cursor_position needs to get trampolined out
+            // // because it doesn't work while an event stream is active
+            // let clone = self.clone();
+            // ui.trampoline.send(
+                // Box::pin(async move {
+                    // clone.borrow_mut().await.refresh_cursor_position()
+                // })
+            // ).await?;
+        // } else {
+            // ui.refresh_cursor_position()?;
+        // }
 
         Ok(())
     }
@@ -333,7 +333,8 @@ impl Ui {
     }
 
     pub async fn refresh_on_state(&self, shell: &Shell) -> Result<()> {
-        if self.borrow().await.dirty.buffer {
+        let dirty = self.borrow().await.dirty.buffer;
+        if dirty {
             self.draw(shell, true).await?;
         }
 

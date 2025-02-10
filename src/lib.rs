@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
     let old_stdin = nix::unistd::dup(0)?;
     nix::unistd::dup2(devnull.as_raw_fd(), 0)?;
 
-    let (tx, mut rx) = futures::channel::mpsc::channel::<ui::TrampolineFut>(1);
+    let (tx, mut rx) = futures::channel::mpsc::unbounded::<ui::TrampolineFut>();
 
     let shell = shell::Shell::new();
     let ui = ui::Ui::new(&shell, tx).await?;

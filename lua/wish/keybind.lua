@@ -43,15 +43,24 @@ wish.set_keymap('<c-d>', function()
     end
 end)
 
+local messages = {}
 wish.set_keymap('<tab>', function()
-    for cmatch in wish.get_completions() do
-        io.stderr:write("DEBUG(entrap)    ".."cmatch"..(" = %q\r\n"):format(cmatch))
+    for _, msg in ipairs(messages) do
+        msg:remove()
     end
-    wish.redraw()
+    messages = {}
+
+    for cmatch in wish.get_completions() do
+        local msg = wish.show_message(tostring(cmatch))
+        msg:set_border_style('None')
+        msg:set_background_color(0x3f3f3f)
+        table.insert(messages, msg)
+        wish.redraw()
+    end
 end)
 
 wish.set_keymap('<f12>', function()
     local msg = wish.show_message("hello world")
-    msg:set_text_weight('Bold');
+    -- msg:set_text_weight('Bold');
     wish.redraw()
 end)

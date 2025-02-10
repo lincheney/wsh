@@ -15,7 +15,7 @@ use super::text_popup::{TextPopup, TextPopupProps};
 pub struct ChildView(ArcMutex<ChildViewInner>);
 
 struct ChildViewInner {
-    view: Element<'static, View>,
+    view: ViewProps<'static>,
     text: TextPopupProps,
     persist: bool,
     remove: bool,
@@ -41,51 +41,57 @@ impl Views {
     }
 
     pub fn add(&mut self, string: String, persist: bool) -> ChildView {
-        let view = element! {
-            View(
-                border_style: BorderStyle::Round,
-                border_color: Color::Blue,
-                max_height: 10,
-            )
-        };
+        let mut view = ViewProps::default();
+        view.border_style = BorderStyle::Round;
+        view.border_color = Some(Color::Blue);
+        view.max_height = Size::Length(10);
 
         let mut text = TextPopupProps::default();
         text.content = string;
 
-        let view = ChildViewInner{
+        let child = ChildViewInner{
             view,
             text,
             persist,
             remove: false,
         };
-        let view = ChildView(ArcMutexNew!(view));
-        self.children.push(view.clone());
-        view
+        let child = ChildView(ArcMutexNew!(child));
+        self.children.push(child.clone());
+        child
     }
 
-    pub fn draw(&mut self, stdout: &mut std::io::Stdout, width: u16, _height: u16) -> Result<()> {
+    pub fn draw(&mut self, stdout: &mut std::io::Stdout, width: u16, height: u16) -> Result<()> {
         self.children.retain(|child| !child.0.lock().unwrap().remove);
         if self.is_empty() {
             return Ok(())
         }
 
         self.buffer.clear();
+        let mut parent = element! { View(max_height: height, flex_direction: FlexDirection::Column) };
 
-        let mut canvas_height = 0;
         for child in self.children.iter() {
-            let mut child = child.0.lock().unwrap();
+            let child = child.0.lock().unwrap();
+
             let mut text = element! { TextPopup };
             text.props = TextPopupProps{ content: child.text.content.clone(), ..child.text };
 
+            let mut view = element! { View };
+            view.props = ViewProps::default();
+            view.props.children.push(text.into());
             // update the width
-            child.view.props.max_width = iocraft::Size::Length(width as _);
-            child.view.props.children.clear();
-            child.view.props.children.push(text.into());
+            view.props.max_width = Size::Length(width as _);
+            macro_rules! assign {
+                ($($ident:ident),*) => {
+                    $( view.props.$ident = child.view.$ident; )*
+                };
+            }
+            assign!(border_style, border_edges, border_color, background_color, width, height, padding, padding_top, padding_right, padding_bottom, padding_left, position, inset, top, right, bottom, left, margin, margin_top, margin_right, margin_bottom, margin_left);
 
-            let canvas = child.view.render(Some(width as _));
-            canvas_height += canvas.height();
-            canvas.write_ansi(&mut self.buffer)?;
+            parent.props.children.push(view.into());
         }
+        let canvas = parent.render(Some(width as _));
+        let canvas_height = canvas.height();
+        canvas.write_ansi(&mut self.buffer)?;
         let output = std::str::from_utf8(&self.buffer)?;
 
         for _ in 0 .. canvas_height as _ {
@@ -118,7 +124,7 @@ impl UserData for ChildView {
                     (|| {
                         let val = $body;
                         let mut child = child.0.lock().unwrap();
-                        child.view.props.$name = val;
+                        child.view.$name = val;
                         Ok(())
                     })().map_err(|e: $type| {
                         mlua::Error::RuntimeError(format!(concat!("invalid ", stringify!($name), " {:?}"), e))
