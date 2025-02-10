@@ -331,29 +331,39 @@ impl Ui {
             lua.create_string(data)
         }).await?;
 
-        self.set_lua_async_fn("john", shell, |ui, shell, _lua, _val: mlua::Value| async move {
+        self.set_lua_async_fn("get_completions", shell, |ui, shell, _lua, val: Option<String>| async move {
 
-            let s = shell.clone();
-            let contents = ui.borrow().await.buffer.contents.clone();
-            let u = ui.clone();
-            let completions = async_std::task::spawn_blocking(move || {
+            let val = if let Some(val) = val {
+                val
+            } else {
+                ui.borrow().await.buffer.contents.clone()
+            };
+
+            let shell_clone = shell.clone();
+            let ui_clone = ui.clone();
+            let result = shell.lock().await.get_completions(&val);
+            let (completions, starter) = result.or_else(|e| lua_error(&format!("{}", e)))?;
+
+            async_std::task::spawn_blocking(move || {
                 let tid = nix::unistd::gettid();
                 async_std::task::block_on(async {
-                    u.borrow_mut().await.threads.insert(tid);
+                    ui_clone.borrow_mut().await.threads.insert(tid);
                 });
-                let shell = async_std::task::block_on(async { shell.lock().await });
-                let result = shell.get_completions(&contents);
+                let shell = shell_clone.clone();
+                let shell = shell.lock();
+                let shell = async_std::task::block_on(async move {
+                    shell.await
+                });
+                starter.start(&shell);
                 async_std::task::block_on(async {
-                    u.borrow_mut().await.threads.remove(&tid);
+                    ui_clone.borrow_mut().await.threads.remove(&tid);
                 });
-                result
-            }).await;
-            let completions = completions.or_else(|e| lua_error(&format!("{}", e)))?;
+            });
 
             while let Some(c) = completions.lock().await.next().await {
                 eprintln!("DEBUG(tall)  \t{}\t= {:?}\r", stringify!(c.get_orig()), c.get_orig());
             }
-            ui.draw(&s).await;
+            ui.draw(&shell).await;
             Ok(())
         }).await?;
 

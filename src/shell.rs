@@ -26,6 +26,14 @@ impl Shell {
     }
 }
 
+pub struct CompletionStarter(Arc<std::sync::Mutex<zsh::completion::Streamer>>);
+
+impl CompletionStarter {
+    pub fn start(&self, _shell: &ShellInner) {
+        zsh::completion::_get_completions(&*self.0);
+    }
+}
+
 impl ShellInner {
 
     pub fn exec(&mut self, string: &str, _fds: Option<&[RawFd; 3]>) -> Result<(), c_long> {
@@ -40,8 +48,9 @@ impl ShellInner {
         if code > 0 { Err(code) } else { Ok(vec![]) }
     }
 
-    pub fn get_completions(&self, string: &str) -> anyhow::Result<Arc<Mutex<zsh::completion::StreamConsumer>>> {
-        zsh::completion::get_completions(string)
+    pub fn get_completions(&self, string: &str) -> anyhow::Result<(Arc<Mutex<zsh::completion::StreamConsumer>>, CompletionStarter)> {
+        let (consumer, producer) = zsh::completion::get_completions(string)?;
+        Ok((consumer, CompletionStarter(producer)))
     }
 
     pub fn clear_completion_cache(&self) {

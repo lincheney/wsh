@@ -37,7 +37,7 @@ impl Stream for StreamConsumer {
 }
 
 #[derive(Debug)]
-struct Streamer {
+pub struct Streamer {
     buffer: String,
     finished: bool,
     matches: Vec<Arc<bindings::cmatch>>,
@@ -156,51 +156,54 @@ pub fn restore_compadd() {
 // zsh completion is intimately tied to zle
 // so there's no "low-level" function to hook into
 // the best we can do is emulate completecall()
-pub fn get_completions(line: &str) -> anyhow::Result<Arc<AsyncMutex<StreamConsumer>>> {
+pub fn get_completions(line: &str) -> anyhow::Result<(Arc<AsyncMutex<StreamConsumer>>, Arc<Mutex<Streamer>>)> {
     if let Some(compadd) = COMPADD_STATE.get() {
-        let consumer = {
+        let (producer, consumer) = {
             let mut compadd = compadd.lock().unwrap();
-            if let Some(streamer) = compadd.streamer.as_ref().filter(|s| s.lock().unwrap().buffer == line) {
-                return Ok(Streamer::make_consumer(&streamer))
-            }
-            let streamer = Arc::new(Mutex::new(Streamer {
+            // if let Some(streamer) = compadd.streamer.as_ref().filter(|s| s.lock().unwrap().buffer == line) {
+                // return Ok(Streamer::make_consumer(&streamer))
+            // }
+            let producer = Arc::new(Mutex::new(Streamer {
                 buffer: line.to_owned(),
                 finished: false,
                 matches: vec![],
                 wakers: vec![],
             }));
-            let consumer = Streamer::make_consumer(&streamer);
-            compadd.streamer = Some(streamer);
-            consumer
+            let consumer = Streamer::make_consumer(&producer);
+            compadd.streamer = Some(producer.clone());
+            (producer, consumer)
         };
 
-        unsafe {
-            // set the zle buffer
-            zsh_sys::startparamscope();
-            bindings::makezleparams(0);
-            super::Variable::set("BUFFER", line).unwrap();
-            super::Variable::set("CURSOR", &format!("{}", line.len() + 1)).unwrap();
-            zsh_sys::endparamscope();
-
-            // this is kinda what completecall() does
-            let cfargs: [*mut c_char; 1] = [null_mut()];
-            bindings::cfargs = cfargs.as_ptr() as _;
-            bindings::compfunc = COMPFUNC.as_ptr() as *mut _;
-            // zsh will switch up the pgid if monitor and interactive are set
-            super::execstring("set +o monitor", Default::default());
-            bindings::menucomplete(null_mut());
-            super::execstring("set -o monitor", Default::default());
-        }
-
-        if let Some(streamer) = compadd.lock().unwrap().streamer.as_ref() {
-            streamer.lock().unwrap().finished = true;
-        }
-
-        Ok(consumer)
+        Ok((consumer, producer))
 
     } else {
         Err(anyhow::anyhow!("ui is not running"))
     }
+}
+
+pub fn _get_completions(streamer: &Mutex<Streamer>) {
+    unsafe {
+        // set the zle buffer
+        zsh_sys::startparamscope();
+        bindings::makezleparams(0);
+        {
+            let line = &streamer.lock().unwrap().buffer;
+            super::Variable::set("BUFFER", &line).unwrap();
+            super::Variable::set("CURSOR", &format!("{}", line.len() + 1)).unwrap();
+        }
+        zsh_sys::endparamscope();
+
+        // this is kinda what completecall() does
+        let cfargs: [*mut c_char; 1] = [null_mut()];
+        bindings::cfargs = cfargs.as_ptr() as _;
+        bindings::compfunc = COMPFUNC.as_ptr() as *mut _;
+        // zsh will switch up the pgid if monitor and interactive are set
+        super::execstring("set +o monitor", Default::default());
+        bindings::menucomplete(null_mut());
+        super::execstring("set -o monitor", Default::default());
+    }
+
+    streamer.lock().unwrap().finished = true;
 }
 
 pub fn clear_cache() {
