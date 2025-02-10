@@ -117,7 +117,7 @@ impl Ui {
         let mut ui = self.borrow_mut().await;
         let ui = ui.deref_mut();
 
-        execute!(
+        queue!(
             ui.stdout,
             BeginSynchronizedUpdate,
             style::Print("\r"),
@@ -137,11 +137,15 @@ impl Ui {
             queue!(ui.stdout, crossterm::cursor::MoveLeft(offset as u16))?;
         }
 
+        // do NOT render ui elements if there is a foreground process
         if !ui.is_running_process && !ui.ui_elements.is_empty() {
             let (width, height) = crossterm::terminal::size()?;
             let mut output = vec![];
             let mut canvas_height = 0;
             for view in ui.ui_elements.iter_mut() {
+                // update the width
+                view.props.max_width = iocraft::Size::Length(width as _);
+
                 let canvas = view.render(Some(width as _));
                 canvas_height += canvas.height();
                 canvas.write_ansi(&mut output)?;
@@ -221,13 +225,11 @@ impl Ui {
                 kind: event::KeyEventKind::Press,
                 state: _,
             }) => {
-                let (width, height) = crossterm::terminal::size()?;
                 self.borrow_mut().await.ui_elements.push(element! {
                     View(
                         border_style: BorderStyle::Round,
                         border_color: Color::Blue,
                         max_height: 10,
-                        max_width: width,
                     ) {
                         text_popup::TextPopup(content: format!("hello! {:?}", std::time::SystemTime::now()))
                     }
