@@ -15,12 +15,12 @@ pub struct StreamConsumer {
 }
 
 impl Stream for StreamConsumer {
-    type Item = *mut bindings::cmatch;
+    type Item = Arc<bindings::cmatch>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let (cmatch, finished) = {
             let parent = self.parent.lock().unwrap();
-            (parent.matches.get(self.index).copied(), parent.finished)
+            (parent.matches.get(self.index).cloned(), parent.finished)
         };
 
         if let Some(cmatch) = cmatch {
@@ -40,7 +40,7 @@ impl Stream for StreamConsumer {
 struct Streamer {
     buffer: String,
     finished: bool,
-    matches: Vec<*mut bindings::cmatch>,
+    matches: Vec<Arc<bindings::cmatch>>,
     wakers: Vec<Waker>,
 }
 unsafe impl Send for Streamer {}
@@ -101,13 +101,16 @@ unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_cha
     if !bindings::matches.is_null() {
         let mut node = (*bindings::matches).list.first;
         let iter = std::iter::from_fn(|| {
-            if node.is_null() {
-                None
-            } else {
+            while !node.is_null() {
                 let dat = (*node).dat as *mut bindings::cmatch;
                 node = (*node).next;
-                Some(dat)
+                if !dat.is_null() {
+                    let dat = Arc::new((*dat).clone());
+                    return Some(dat)
+                }
             }
+
+            None
         });
         let len = streamer.matches.len();
         streamer.matches.extend(iter.skip(len));
@@ -117,19 +120,6 @@ unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_cha
     }
 
     return result
-}
-
-unsafe extern "C" fn cleanup_hook(_hook: zsh_sys::Hookdef, _dat: *mut c_void) -> c_int {
-    if let Some(compadd) = COMPADD_STATE.get() {
-        let compadd = compadd.lock().unwrap();
-        // save everything
-        if let Some(streamer) = &compadd.streamer {
-            for m in streamer.lock().unwrap().matches.iter_mut() {
-                *m = Box::into_raw(Box::new((**m).clone()));
-            }
-        }
-    }
-    0
 }
 
 pub fn override_compadd() {
@@ -148,10 +138,6 @@ pub fn override_compadd() {
         };
         super::add_builtin("compadd", Box::into_raw(Box::new(compadd)));
 
-        unsafe{
-            let name = CString::new(b"compctl_cleanup").unwrap();
-            zsh_sys::addhookfunc(name.as_ptr() as *mut _, Some(cleanup_hook));
-        }
     }
 }
 
@@ -163,10 +149,6 @@ pub fn restore_compadd() {
             compadd.original = null_mut();
         }
 
-        unsafe{
-            let name = CString::new(b"compctl_cleanup").unwrap();
-            zsh_sys::deletehookfunc(name.as_ptr() as *mut _, Some(cleanup_hook));
-        }
     }
 }
 

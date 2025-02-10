@@ -353,9 +353,7 @@ impl Ui {
             while let Some(c) = completions.lock().await.next().await {
                 // eprintln!("DEBUG(knells)\t{}\t= {:?}\r", stringify!(c), c);
                 unsafe{
-                    if c.is_null() {
-                        // eprintln!("DEBUG(waist) \t{}\t= {:?}", stringify!(c), c);
-                    } else if (*c).orig.is_null() {
+                    if (*c).orig.is_null() {
                     // eprintln!("DEBUG(cubit) \t{}\t= {:?}", stringify!((*c).orig), (*c).orig);
                 } else {
                     eprintln!("DEBUG(supply)\t{}\t= {:?}\r", stringify!(unsafe{std::ffi::CStr::from_ptr((*c).orig)}), unsafe{std::ffi::CStr::from_ptr((*c).orig)});
