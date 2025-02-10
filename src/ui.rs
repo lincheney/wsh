@@ -8,11 +8,13 @@ use mlua::{IntoLuaMulti, FromLuaMulti, Lua, Result as LuaResult, Value as LuaVal
 use futures::SinkExt;
 use async_std::sync::RwLock;
 use anyhow::Result;
+use iocraft::prelude::*;
 
 use crossterm::{
     terminal::{Clear, ClearType, BeginSynchronizedUpdate, EndSynchronizedUpdate},
-    cursor::position,
+    cursor::{self, position},
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    style,
     execute,
     queue,
 };
@@ -21,16 +23,16 @@ use crate::keybind;
 use crate::completion;
 use crate::zsh;
 use crate::shell::Shell;
+mod text_popup;
 
 fn lua_error<T>(msg: &str) -> Result<T, mlua::Error> {
     Err(mlua::Error::RuntimeError(msg.to_string()))
 }
 
-struct StrCommand<'a>(&'a str);
-
-impl crossterm::Command for StrCommand<'_> {
+struct SetScrollRegion(u16, u16);
+impl crossterm::Command for SetScrollRegion {
     fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
-        f.write_str(self.0)
+        write!(f, "\x1b[{};{}r", self.0, self.1)
     }
 }
 
@@ -46,8 +48,11 @@ pub struct UiInner {
     pub lua_api: mlua::Table,
     lua_cache: mlua::Table,
 
+    ui_elements: Vec<iocraft::Element<'static, iocraft::components::View>>,
+
     trampoline: futures::channel::mpsc::Sender<TrampolineFut>,
     dirty: UiDirty,
+    is_running_process: bool,
     pub keybinds: keybind::KeybindMapping,
     pub buffer: crate::buffer::Buffer,
 
@@ -75,6 +80,8 @@ impl Ui {
             lua_api,
             lua_cache,
             trampoline,
+            is_running_process: false,
+            ui_elements: vec![],
             threads: HashSet::new(),
             dirty: UiDirty::default(),
             buffer: std::default::Default::default(),
@@ -113,7 +120,7 @@ impl Ui {
         execute!(
             ui.stdout,
             BeginSynchronizedUpdate,
-            StrCommand("\r"),
+            style::Print("\r"),
             Clear(ClearType::FromCursorDown),
         )?;
 
@@ -129,6 +136,30 @@ impl Ui {
         if offset > 0 {
             queue!(ui.stdout, crossterm::cursor::MoveLeft(offset as u16))?;
         }
+
+        if !ui.is_running_process && !ui.ui_elements.is_empty() {
+            let (width, height) = crossterm::terminal::size()?;
+            let mut output = vec![];
+            let mut canvas_height = 0;
+            for view in ui.ui_elements.iter_mut() {
+                let canvas = view.render(Some(width as _));
+                canvas_height += canvas.height();
+                canvas.write_ansi(&mut output)?;
+            }
+            let output = std::str::from_utf8(&output)?;
+            for _ in 0 .. canvas_height as _ {
+                queue!(ui.stdout, style::Print("\n"))?;
+            }
+            queue!(
+                ui.stdout,
+                cursor::MoveUp(canvas_height as _),
+                cursor::SavePosition,
+                cursor::MoveToNextLine(1),
+                style::Print(output.trim_end()),
+                cursor::RestorePosition,
+            )?;
+        }
+
         queue!(ui.stdout, EndSynchronizedUpdate)?;
         execute!(ui.stdout)?;
 
@@ -145,8 +176,6 @@ impl Ui {
             ui.refresh_cursor_position()?;
         }
 
-        // nix::sys::signal::kill(nix::unistd::Pid::this(), nix::sys::signal::Signal::SIGWINCH)?;
-        // async_std::task::yield_now().await;
         Ok(())
     }
 
@@ -174,16 +203,36 @@ impl Ui {
         match event {
 
             Event::Key(KeyEvent{
-                code: KeyCode::Char('c'),
+                code: KeyCode::Esc,
                 modifiers,
                 kind: event::KeyEventKind::Press,
                 state: _,
             }) => {
-                eprintln!("DEBUG(leaps) \t{}\t= {:?}", stringify!("kill"), "kill");
+                // eprintln!("DEBUG(leaps) \t{}\t= {:?}", stringify!("kill"), "kill");
                 nix::sys::signal::kill(nix::unistd::Pid::from_raw(0), nix::sys::signal::Signal::SIGTERM)?;
                 for pid in self.borrow().await.threads.iter() {
                     nix::sys::signal::kill(*pid, nix::sys::signal::Signal::SIGINT)?;
                 }
+            },
+
+            Event::Key(KeyEvent{
+                code: KeyCode::F(12),
+                modifiers,
+                kind: event::KeyEventKind::Press,
+                state: _,
+            }) => {
+                let (width, height) = crossterm::terminal::size()?;
+                self.borrow_mut().await.ui_elements.push(element! {
+                    View(
+                        border_style: BorderStyle::Round,
+                        border_color: Color::Blue,
+                        max_height: 10,
+                        max_width: width,
+                    ) {
+                        text_popup::TextPopup(content: format!("hello! {:?}", std::time::SystemTime::now()))
+                    }
+                });
+                self.draw(shell, false).await?;
             },
 
             Event::Key(KeyEvent{
@@ -210,7 +259,7 @@ impl Ui {
                     let mut ui = self.borrow_mut().await;
                     let ui = ui.deref_mut();
                     let contents = ui.buffer.get_contents();
-                    execute!(ui.stdout, StrCommand(&contents[contents.len() - 1 ..]))?;
+                    execute!(ui.stdout, style::Print(&contents[contents.len() - 1 ..]))?;
                 } else {
                     self.draw(shell, false).await?;
                 }
@@ -245,6 +294,9 @@ impl Ui {
     }
 
     async fn accept_line(&self, shell: &Shell, use_trampoline: bool) -> Result<bool> {
+        self.borrow_mut().await.is_running_process = true;
+        self.draw(shell, use_trampoline).await?;
+
         {
             let mut ui = self.borrow_mut().await;
             let ui = ui.deref_mut();
@@ -256,11 +308,12 @@ impl Ui {
 
                 ui.deactivate()?;
                 // new line
-                execute!(ui.stdout, StrCommand("\r\n"))?;
+                execute!(ui.stdout, style::Print("\r\n"))?;
 
                 if let Err(code) = shell.exec(ui.buffer.get_contents(), None) {
                     eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
                 }
+                ui.is_running_process = false;
             }
 
             ui.buffer.reset();
