@@ -36,4 +36,5 @@ wish.set_keymap('<tab>', function()
     for cmatch in wish.get_completions() do
         io.stderr:write("DEBUG(entrap)    ".."cmatch"..(" = %q\r\n"):format(cmatch))
     end
+    wish.redraw()
 end)

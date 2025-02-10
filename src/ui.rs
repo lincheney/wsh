@@ -5,6 +5,7 @@ use std::io::{Write};
 use std::ops::DerefMut;
 use std::collections::HashSet;
 use mlua::{IntoLuaMulti, FromLuaMulti, Lua, Result as LuaResult, Value as LuaValue};
+use futures::SinkExt;
 use async_std::sync::RwLock;
 use anyhow::Result;
 
@@ -38,11 +39,14 @@ struct UiDirty {
     buffer: bool,
 }
 
+pub type TrampolineFut = std::pin::Pin<Box<dyn Future<Output=Result<()>> + Send>>;
+
 pub struct UiInner {
     pub lua: Lua,
     pub lua_api: mlua::Table,
     lua_cache: mlua::Table,
 
+    trampoline: futures::channel::mpsc::Sender<TrampolineFut>,
     dirty: UiDirty,
     pub keybinds: keybind::KeybindMapping,
     pub buffer: crate::buffer::Buffer,
@@ -59,7 +63,7 @@ pub struct Ui(Arc<RwLock<UiInner>>);
 
 impl Ui {
 
-    pub async fn new(shell: &Shell) -> Result<Self> {
+    pub async fn new(shell: &Shell, trampoline: futures::channel::mpsc::Sender<TrampolineFut>) -> Result<Self> {
         let lua = Lua::new();
         let lua_api = lua.create_table()?;
         lua.globals().set("wish", &lua_api)?;
@@ -70,6 +74,7 @@ impl Ui {
             lua,
             lua_api,
             lua_cache,
+            trampoline,
             threads: HashSet::new(),
             dirty: UiDirty::default(),
             buffer: std::default::Default::default(),
@@ -101,7 +106,7 @@ impl Ui {
         self.borrow_mut().await.deactivate()
     }
 
-    pub async fn draw(&self, shell: &Shell) -> Result<()> {
+    pub async fn draw(&self, shell: &Shell, use_trampoline: bool) -> Result<()> {
         let mut ui = self.borrow_mut().await;
         let ui = ui.deref_mut();
 
@@ -126,7 +131,22 @@ impl Ui {
         }
         queue!(ui.stdout, EndSynchronizedUpdate)?;
         execute!(ui.stdout)?;
-        ui.cursor = crossterm::cursor::position()?;
+
+        if use_trampoline {
+            // refresh_cursor_position needs to get trampolined out
+            // because it doesn't work while an event stream is active
+            let clone = self.clone();
+            ui.trampoline.send(
+                Box::pin(async move {
+                    clone.borrow_mut().await.refresh_cursor_position()
+                })
+            ).await?;
+        } else {
+            ui.refresh_cursor_position()?;
+        }
+
+        // nix::sys::signal::kill(nix::unistd::Pid::this(), nix::sys::signal::Signal::SIGWINCH)?;
+        // async_std::task::yield_now().await;
         Ok(())
     }
 
@@ -192,7 +212,7 @@ impl Ui {
                     let contents = ui.buffer.get_contents();
                     execute!(ui.stdout, StrCommand(&contents[contents.len() - 1 ..]))?;
                 } else {
-                    self.draw(shell).await?;
+                    self.draw(shell, false).await?;
                 }
             },
 
@@ -202,7 +222,7 @@ impl Ui {
                 kind: event::KeyEventKind::Press,
                 state: _,
             }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
-                return self.accept_line(shell).await;
+                return self.accept_line(shell, false).await;
             },
 
             Event::Key(KeyEvent{
@@ -224,7 +244,7 @@ impl Ui {
         Ok(true)
     }
 
-    async fn accept_line(&self, shell: &Shell) -> Result<bool> {
+    async fn accept_line(&self, shell: &Shell, use_trampoline: bool) -> Result<bool> {
         {
             let mut ui = self.borrow_mut().await;
             let ui = ui.deref_mut();
@@ -247,7 +267,7 @@ impl Ui {
             ui.activate()?;
         }
 
-        self.draw(shell).await?;
+        self.draw(shell, use_trampoline).await?;
         Ok(true)
     }
 
@@ -297,7 +317,7 @@ impl Ui {
 
     pub async fn refresh_on_state(&self, shell: &Shell) -> Result<()> {
         if self.borrow().await.dirty.buffer {
-            self.draw(shell).await?;
+            self.draw(shell, true).await?;
         }
 
         self.clean().await;
@@ -324,7 +344,11 @@ impl Ui {
 
         self.set_lua_async_fn("accept_line", shell, |ui, shell, _lua, _val: LuaValue| async move {
             // TODO error handling
-            ui.accept_line(&shell).await
+            ui.accept_line(&shell, true).await
+        }).await?;
+
+        self.set_lua_async_fn("redraw", shell, |ui, shell, _lua, _val: LuaValue| async move {
+            ui.draw(&shell, true).await
         }).await?;
 
         self.set_lua_async_fn("eval", shell, |_ui, shell, lua, (cmd, stderr): (String, bool)| async move {
@@ -390,6 +414,22 @@ impl UiInner {
         crossterm::terminal::disable_raw_mode()?;
         Ok(())
     }
+
+    fn refresh_cursor_position(&mut self) -> Result<()> {
+        self.cursor = loop {
+            let now = std::time::SystemTime::now();
+            match crossterm::cursor::position() {
+                Ok(pos) => break pos,
+                Err(e) if now.elapsed().unwrap().as_millis() < 1500 && format!("{}", e) == "The cursor position could not be read within a normal duration" => {
+                    // crossterm times out in 2s
+                    // but it also fails on EINTR whereas we would like to retry
+                },
+                Err(e) => return Err(e)?,
+            }
+        };
+        Ok(())
+    }
+
 }
 
 impl Drop for UiInner {

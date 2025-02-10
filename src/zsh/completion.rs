@@ -203,7 +203,9 @@ pub fn _get_completions(streamer: &Mutex<Streamer>) {
         super::execstring("set -o monitor", Default::default());
     }
 
-    streamer.lock().unwrap().finished = true;
+    let mut streamer = streamer.lock().unwrap();
+    streamer.finished = true;
+    streamer.wake();
 }
 
 pub fn clear_cache() {

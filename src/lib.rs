@@ -25,38 +25,49 @@ async fn main() -> Result<()> {
     let old_stdin = nix::unistd::dup(0)?;
     nix::unistd::dup2(devnull.as_raw_fd(), 0)?;
 
+    let (tx, mut rx) = futures::channel::mpsc::channel::<ui::TrampolineFut>(1);
+
     let shell = shell::Shell::new();
-    let ui = ui::Ui::new(&shell).await?;
+    let ui = ui::Ui::new(&shell, tx).await?;
     ui.activate().await?;
-    ui.draw(&shell).await?;
-    let mut events = crossterm::event::EventStream::new();
+    ui.draw(&shell, false).await?;
 
     drop(devnull);
     nix::unistd::dup2(old_stdin, 0)?;
     nix::unistd::close(old_stdin)?;
 
     loop {
-        // let mut delay = std::pin::pin!(async_std::task::sleep(std::time::Duration::from_millis(1_000)).fuse());
-        let mut events = events.next().fuse();
+        // eprintln!("DEBUG(wises) \t{}\t= {:?}", stringify!("create"), "create");
+        let mut events = crossterm::event::EventStream::new();
+        let mut event = events.next().fuse();
+        let mut trampoline = rx.next().fuse();
 
-        select! {
-            // _ = delay => { println!("."); },
-            event = events => {
-                match event {
-                    Some(Ok(event)) => {
-                        if !ui.handle_event(event, &shell).await? {
-                            break;
+        let trampoline_fut = loop {
+            select! {
+                r = trampoline => {
+                    break r.unwrap();
+                },
+
+                e = event => {
+                    match e {
+                        Some(Ok(e)) => {
+                            if !ui.handle_event(e, &shell).await? {
+                                return Ok(());
+                            }
                         }
+                        Some(Err(e)) => println!("Error: {:?}\r", e),
+                        None => return Ok(()),
                     }
-                    Some(Err(e)) => println!("Error: {:?}\r", e),
-                    None => break,
+                    event = events.next().fuse();
                 }
-            }
+            };
         };
-        // eprintln!("DEBUG(spurns)\t{}\t= {:?}\r", stringify!("loop"), "loop");
+
+        drop(events);
+        if let Err(e) = trampoline_fut.await {
+            eprintln!("DEBUG(sludgy)\t{}\t= {:?}", stringify!(e), e);
+        }
     }
-    // eprintln!("DEBUG(glad)  \t{}\t= {:?}", stringify!("finish"), "finish");
-    Ok(())
 }
 
 
