@@ -30,7 +30,7 @@ pub struct CompletionStarter(Arc<std::sync::Mutex<zsh::completion::Streamer>>);
 
 impl CompletionStarter {
     pub fn start(&self, _shell: &ShellInner) {
-        zsh::completion::_get_completions(&*self.0);
+        zsh::completion::_get_completions(&self.0);
     }
 }
 

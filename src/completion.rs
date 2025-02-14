@@ -41,7 +41,7 @@ async fn get_completions(ui: Ui, shell: Shell, _lua: Lua, val: Option<String>) -
     };
 
     let result = shell.lock().await.get_completions(&val);
-    let (completions, starter) = result.or_else(|e| Err(mlua::Error::RuntimeError(format!("{}", e))))?;
+    let (completions, starter) = result.map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))?;
 
     let shell_clone = shell.clone();
     let ui_clone = ui.clone();
@@ -67,7 +67,7 @@ async fn get_completions(ui: Ui, shell: Shell, _lua: Lua, val: Option<String>) -
 
 async fn insert_completion(ui: Ui, shell: Shell, _lua: Lua, val: CompletionMatch) -> Result<()> {
     let buffer = ui.borrow().await.buffer.contents.clone();
-    let (buffer, cursor) = shell.lock().await.insert_completion(&buffer, &*val.inner);
+    let (buffer, cursor) = shell.lock().await.insert_completion(&buffer, &val.inner);
     {
         let mut ui = ui.borrow_mut().await;
         ui.buffer.contents = String::from_utf8(buffer)?;

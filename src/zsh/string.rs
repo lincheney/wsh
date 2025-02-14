@@ -22,7 +22,7 @@ impl From<&[u8]> for ZString {
         let ptr = unsafe {
             let ptr = zsh_sys::zalloc(s.len() + 1) as *mut u8;
             std::ptr::copy_nonoverlapping(s.as_ptr(), ptr, s.len());
-            *(ptr.offset(s.len() as _)) = b'\0' as _;
+            *ptr.add(s.len()) = b'\0' as _;
             ptr
         };
         Self{ ptr: ptr as *mut _ }

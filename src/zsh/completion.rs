@@ -1,5 +1,5 @@
 use std::sync::{OnceLock, Mutex, Arc};
-use std::ffi::{CString, CStr};
+use std::ffi::{CString};
 use std::os::raw::*;
 use std::ptr::null_mut;
 use std::default::Default;
@@ -7,6 +7,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 use async_std::sync::Mutex as AsyncMutex;
 use super::bindings;
+use crate::utils::*;
 
 pub struct WaitForChunk<'a> {
     consumer: &'a mut StreamConsumer,
@@ -34,7 +35,7 @@ impl StreamConsumer {
     }
 }
 
-impl<'a> std::future::Future for WaitForChunk<'a> {
+impl std::future::Future for WaitForChunk<'_> {
     type Output = bool;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -62,11 +63,10 @@ unsafe impl Send for Streamer {}
 
 impl Streamer {
     fn make_consumer(parent: &Arc<Mutex<Self>>) -> Arc<AsyncMutex<StreamConsumer>> {
-        let consumer = Arc::new(AsyncMutex::new(StreamConsumer {
+        Arc::new(AsyncMutex::new(StreamConsumer {
             index: 0,
             parent: parent.clone(),
-        }));
-        consumer
+        }))
     }
 
     fn wake(&mut self) {
@@ -109,7 +109,7 @@ unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_cha
     };
 
     if !bindings::amatches.is_null() && !(*bindings::amatches).name.is_null() {
-        let g = CStr::from_ptr((*bindings::amatches).name);
+        // let g = CStr::from_ptr((*bindings::amatches).name);
         // eprintln!("DEBUG(dachas)\t{}\t= {:?}\r", stringify!(g), g);
     }
 
@@ -134,7 +134,7 @@ unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_cha
         // }
     }
 
-    return result
+    result
 }
 
 pub fn override_compadd() {
@@ -144,7 +144,7 @@ pub fn override_compadd() {
         let mut compadd = COMPADD_STATE.get_or_init(|| Mutex::new(Default::default())).lock().unwrap();
         compadd.original = super::pop_builtin("compadd").unwrap();
 
-        let mut compadd = unsafe{ *compadd.original }.clone();
+        let mut compadd = unsafe{ *compadd.original };
         compadd.handlerfunc = Some(compadd_handlerfunc);
         compadd.node = zsh_sys::hashnode{
             next: null_mut(),
@@ -171,19 +171,19 @@ pub fn restore_compadd() {
 // zsh completion is intimately tied to zle
 // so there's no "low-level" function to hook into
 // the best we can do is emulate completecall()
-pub fn get_completions(line: &str) -> anyhow::Result<(Arc<AsyncMutex<StreamConsumer>>, Arc<Mutex<Streamer>>)> {
+pub fn get_completions(line: &str) -> anyhow::Result<(AsyncArcMutex<StreamConsumer>, ArcMutex<Streamer>)> {
     if let Some(compadd) = COMPADD_STATE.get() {
         let (producer, consumer) = {
             let mut compadd = compadd.lock().unwrap();
             // if let Some(streamer) = compadd.streamer.as_ref().filter(|s| s.lock().unwrap().buffer == line) {
                 // return Ok(Streamer::make_consumer(&streamer))
             // }
-            let producer = Arc::new(Mutex::new(Streamer {
+            let producer = ArcMutexNew!(Streamer {
                 buffer: line.to_owned(),
                 finished: false,
                 matches: vec![],
                 wakers: vec![],
-            }));
+            });
             let consumer = Streamer::make_consumer(&producer);
             compadd.streamer = Some(producer.clone());
             (producer, consumer)
@@ -203,7 +203,7 @@ pub fn _get_completions(streamer: &Mutex<Streamer>) {
         bindings::makezleparams(0);
         {
             let line = &streamer.lock().unwrap().buffer;
-            super::Variable::set("BUFFER", &line).unwrap();
+            super::Variable::set("BUFFER", line).unwrap();
             super::Variable::set("CURSOR", &format!("{}", line.len() + 1)).unwrap();
         }
         zsh_sys::endparamscope();
@@ -234,7 +234,7 @@ pub fn insert_completion(line: &str, m: &bindings::cmatch) -> (Vec<u8>, usize) {
         // set the zle buffer
         zsh_sys::startparamscope();
         bindings::makezleparams(0);
-        super::Variable::set("BUFFER", &line).unwrap();
+        super::Variable::set("BUFFER", line).unwrap();
         super::Variable::set("CURSOR", &format!("{}", line.len() + 1)).unwrap();
         zsh_sys::endparamscope();
 

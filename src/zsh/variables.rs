@@ -35,11 +35,11 @@ impl Variable {
             bracks,
         ) };
         if ptr.is_null() {
-            return None
+            None
         } else {
             Some(Self{
                 value,
-                name_is_digit: name.chars().all(|c| c.is_digit(10)),
+                name_is_digit: name.chars().all(|c| c.is_ascii_digit()),
             })
         }
     }
@@ -60,7 +60,7 @@ impl Variable {
         unsafe{ zsh_sys::unsetparam(c_name.as_ptr() as *mut _); }
     }
 
-    fn param(&self) -> &mut zsh_sys::param {
+    fn param(&mut self) -> &mut zsh_sys::param {
         unsafe{ &mut *self.value.pm }
     }
 
@@ -80,7 +80,7 @@ impl Variable {
             if self.value.flags & zsh_sys::VALFLAG_INV as c_int != 0 {
                 Some(self.value.start as _)
             } else if self.param().node.flags == zsh_sys::PM_INTEGER as c_int {
-                Some(unsafe{ (&*self.param().gsu.i).getfn.ok_or(anyhow::anyhow!("gsu.i.getfn is missing"))?(self.param()) })
+                Some(unsafe{ (*self.param().gsu.i).getfn.ok_or(anyhow::anyhow!("gsu.i.getfn is missing"))?(self.param()) })
             } else {
                 None
             }
@@ -101,12 +101,12 @@ impl Variable {
 
             let mut hashmap = HashMap::new();
             unsafe {
-                let param = (&*self.param().gsu.h).getfn.ok_or(anyhow::anyhow!("gsu.h.getfn is missing"))?(self.param());
+                let param = (*self.param().gsu.h).getfn.ok_or(anyhow::anyhow!("gsu.h.getfn is missing"))?(self.param());
                 let keys: CStringArray = zsh_sys::paramvalarr(param, zsh_sys::SCANPM_WANTKEYS as c_int).into();
                 let values: CStringArray = zsh_sys::paramvalarr(param, zsh_sys::SCANPM_WANTVALS as c_int).into();
 
-                let keys = keys.iter().map(|v| Some(v)).chain(std::iter::repeat(None));
-                let values = values.iter().map(|v| Some(v)).chain(std::iter::repeat(None));
+                let keys = keys.iter().map(Some).chain(std::iter::repeat(None));
+                let values = values.iter().map(Some).chain(std::iter::repeat(None));
 
                 for (k, v) in keys.zip(values) {
                     match (k, v) {
@@ -126,7 +126,7 @@ impl Variable {
     pub fn try_as_float(&mut self) -> Result<Option<f64>> {
         Ok(
             if self.param().node.flags & (zsh_sys::PM_EFLOAT | zsh_sys::PM_FFLOAT) as c_int != 0 {
-                Some(unsafe{ (&*self.param().gsu.f).getfn.ok_or(anyhow::anyhow!("gsu.f.getfn is missing"))?(self.param()) })
+                Some(unsafe{ (*self.param().gsu.f).getfn.ok_or(anyhow::anyhow!("gsu.f.getfn is missing"))?(self.param()) })
             } else {
                 None
             }

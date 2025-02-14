@@ -86,7 +86,7 @@ impl Ui {
             keybinds: Default::default(),
             stdout: std::io::stdout(),
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
-            cursor: cursor,
+            cursor,
             size: crossterm::terminal::size()?,
         })));
 
@@ -127,8 +127,8 @@ impl Ui {
 
         let prompt = prompt.as_ref().map(|p| &p[..]).unwrap_or(b">>> ");
         // let prompt = ui.shell.eval(stringify!(printf %s "${PS1@P}"), false).await?;
-        ui.stdout.write(prompt)?;
-        ui.stdout.write(ui.buffer.get_contents().as_bytes())?;
+        ui.stdout.write_all(prompt)?;
+        ui.stdout.write_all(ui.buffer.get_contents().as_bytes())?;
 
         let offset = ui.buffer.get_contents().len() - ui.buffer.get_cursor();
         if offset > 0 {
@@ -162,13 +162,16 @@ impl Ui {
                 let shell = shell.clone();
                 async_std::task::spawn(async move {
                     if let Err(err) = callback.call_async::<LuaValue>(mlua::Nil).await {
-                        ui.borrow_mut().await.tui.add_error_message(format!("ERROR: {}", err), None);
-                        ui.draw(&shell).await;
-                        // eprintln!("DEBUG(loaf)  \t{}\t= {:?}", stringify!(err), err);
+                        let mut ui = ui.borrow_mut().await;
+                        ui.tui.add_error_message(format!("ERROR: {}", err), None);
+                        ui.dirty.buffer = true;
                     }
                     if shell.lock().await.closed {
-                    } else {
-                        ui.refresh_on_state(&shell).await;
+                        return
+                    }
+
+                    if let Err(err) = ui.refresh_on_state(&shell).await {
+                        eprintln!("DEBUG(armada)\t{}\t= {:?}", stringify!(err), err);
                     }
                 });
                 return Ok(true)
@@ -179,7 +182,7 @@ impl Ui {
 
             Event::Key(KeyEvent{
                 code: KeyCode::Esc,
-                modifiers,
+                modifiers: _,
                 kind: event::KeyEventKind::Press,
                 state: _,
             }) => {
@@ -226,7 +229,7 @@ impl Ui {
                 kind: event::KeyEventKind::Press,
                 state: _,
             }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
-                return self.accept_line(shell, false).await;
+                return self.accept_line(shell).await;
             },
 
             Event::Key(KeyEvent{
@@ -248,7 +251,7 @@ impl Ui {
         Ok(true)
     }
 
-    async fn accept_line(&self, shell: &Shell, use_trampoline: bool) -> Result<bool> {
+    async fn accept_line(&self, shell: &Shell) -> Result<bool> {
         self.borrow_mut().await.is_running_process = true;
         self.draw(shell).await?;
 
@@ -319,7 +322,7 @@ impl Ui {
             async move {
                 let ui = Ui::try_upgrade(&weak)?;
                 func(ui, Shell(shell.upgrade().unwrap()), lua, value).await
-                    .or_else(|e| Err(mlua::Error::RuntimeError(format!("{}", e))))
+                    .map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))
             }
         })?)
     }
@@ -335,8 +338,8 @@ impl Ui {
     }
 
     async fn init_lua(&self, shell: &Shell) -> Result<()> {
-        self.set_lua_async_fn("__get_cursor", shell, |ui, _shell, _lua, _val: LuaValue| async move { Ok(ui.borrow().await.buffer.get_cursor())} ).await?;
-        self.set_lua_async_fn("__get_buffer", shell, |ui, _shell, _lua, _val: LuaValue| async move { Ok(ui.borrow().await.buffer.get_contents().clone()) }).await?;
+        self.set_lua_async_fn("__get_cursor", shell, |ui, _shell, _lua, _val: ()| async move { Ok(ui.borrow().await.buffer.get_cursor())} ).await?;
+        self.set_lua_async_fn("__get_buffer", shell, |ui, _shell, _lua, _val: ()| async move { Ok(ui.borrow().await.buffer.get_contents().clone()) }).await?;
 
         self.set_lua_async_fn("__set_cursor", shell, |ui, _shell, _lua, val: usize| async move {
             let mut ui = ui.borrow_mut().await;
@@ -352,12 +355,11 @@ impl Ui {
             Ok(())
         }).await?;
 
-        self.set_lua_async_fn("accept_line", shell, |ui, shell, _lua, _val: LuaValue| async move {
-            // TODO error handling
-            ui.accept_line(&shell, true).await
+        self.set_lua_async_fn("accept_line", shell, |ui, shell, _lua, _val: ()| async move {
+            ui.accept_line(&shell).await
         }).await?;
 
-        self.set_lua_async_fn("redraw", shell, |ui, shell, _lua, _val: LuaValue| async move {
+        self.set_lua_async_fn("redraw", shell, |ui, shell, _lua, _val: ()| async move {
             ui.draw(&shell).await
         }).await?;
 

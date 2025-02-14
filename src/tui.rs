@@ -9,7 +9,7 @@ use crossterm::{
 };
 use ratatui::{
     *,
-    text::*,
+    // text::*,
     layout::*,
     widgets::*,
     style::*,
@@ -50,12 +50,12 @@ pub struct SerdeConstraint(Constraint);
 impl<'de> Deserialize<'de> for SerdeConstraint {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let data = String::deserialize(deserializer)?;
-        let constraint = if data.starts_with("min:") {
-            Constraint::Min(data[4..].parse::<u16>().map_err(de::Error::custom)?)
-        } else if data.starts_with("max:") {
-            Constraint::Max(data[4..].parse::<u16>().map_err(de::Error::custom)?)
-        } else if data.ends_with("%") {
-            Constraint::Percentage(data[..data.len()-1].parse::<u16>().map_err(de::Error::custom)?)
+        let constraint = if let Some(end) = data.strip_prefix("min:") {
+            Constraint::Min(end.parse::<u16>().map_err(de::Error::custom)?)
+        } else if let Some(end) = data.strip_prefix("max:") {
+            Constraint::Max(end.parse::<u16>().map_err(de::Error::custom)?)
+        } else if let Some(start) = data.strip_suffix("%") {
+            Constraint::Percentage(start.parse::<u16>().map_err(de::Error::custom)?)
         } else {
             Constraint::Length(data.parse::<u16>().map_err(de::Error::custom)?)
         };
@@ -207,15 +207,14 @@ impl Tui {
         self.counter += 1;
         self.dirty = true;
 
-        let mut widget = Widget::default();
-        widget.id = id;
+        let mut widget = Widget{ id, ..Default::default() };
         widget.set_options(options);
         self.widgets.push(widget);
         id
     }
 
     pub fn add_error_message(&mut self, message: String, options: Option<WidgetOptions>) -> usize {
-        let mut options = options.unwrap_or(Default::default());
+        let mut options = options.unwrap_or_default();
         options.text = Some(message);
         // options.border.get_or_insert(Default::default());
         // options.border.as_mut().unwrap().enabled = Some(true);
@@ -227,13 +226,13 @@ impl Tui {
 
     fn get_index(&self, id: usize) -> Option<usize> {
         for (i, w) in self.widgets.iter().enumerate() {
-            if w.id == id {
-                return Some(i)
-            } else if w.id > id {
-                break
+            match w.id.cmp(&id) {
+                std::cmp::Ordering::Equal => return Some(i),
+                std::cmp::Ordering::Greater => break,
+                std::cmp::Ordering::Less => (),
             }
         }
-        return None
+        None
     }
 
     fn get_mut(&mut self, id: usize) -> Option<&mut Widget> {
@@ -368,7 +367,7 @@ impl UserData for WidgetId {
         });
 
         methods.add_async_method("remove", |_lua, id, _val: LuaValue| async move {
-            if let Some(_) = id.0.borrow_mut().await.tui.remove(id.1) {
+            if id.0.borrow_mut().await.tui.remove(id.1).is_some() {
                 Ok(())
             } else {
                 Err(LuaError::RuntimeError(format!("can't find widget with id {}", id.1)))

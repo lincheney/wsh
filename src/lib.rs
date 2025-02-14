@@ -14,7 +14,6 @@ mod completion;
 mod buffer;
 mod c_string_array;
 mod tui;
-mod promise;
 mod event_stream;
 #[macro_use]
 mod utils;
