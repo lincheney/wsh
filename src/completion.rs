@@ -9,6 +9,7 @@ struct CompletionStream {
     inner: Arc<Mutex<crate::zsh::completion::StreamConsumer>>,
 }
 
+#[derive(FromLua, Clone)]
 struct CompletionMatch {
     inner: Arc<crate::zsh::cmatch>,
 }
@@ -57,16 +58,29 @@ async fn get_completions(ui: Ui, shell: Shell, _lua: Lua, val: Option<String>) -
         async_std::task::block_on(async {
             let mut ui = ui_clone.borrow_mut().await;
             ui.threads.remove(&tid);
-            ui.activate();
-        });
+            ui.activate()
+        })
     });
 
     Ok(CompletionStream{inner: completions})
 }
 
+async fn insert_completion(ui: Ui, shell: Shell, _lua: Lua, val: CompletionMatch) -> Result<()> {
+    let buffer = ui.borrow().await.buffer.contents.clone();
+    let (buffer, cursor) = shell.lock().await.insert_completion(&buffer, &*val.inner);
+    {
+        let mut ui = ui.borrow_mut().await;
+        ui.buffer.contents = String::from_utf8(buffer)?;
+        ui.buffer.cursor = cursor;
+    }
+    ui.draw(&shell).await?;
+    Ok(())
+}
+
 pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
 
     ui.set_lua_async_fn("get_completions", shell, get_completions).await?;
+    ui.set_lua_async_fn("insert_completion", shell, insert_completion).await?;
 
     Ok(())
 }

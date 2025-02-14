@@ -111,7 +111,7 @@ impl Ui {
         self.borrow_mut().await.deactivate()
     }
 
-    pub async fn draw(&self, shell: &Shell, use_trampoline: bool) -> Result<()> {
+    pub async fn draw(&self, shell: &Shell) -> Result<()> {
         let mut ui = self.borrow_mut().await;
         let ui = ui.deref_mut();
 
@@ -123,7 +123,7 @@ impl Ui {
         )?;
 
         let prompt = shell.lock().await.exec("print -v tmpvar -P \"$PROMPT\" 2>/dev/null", None).ok()
-            .and_then(|_| zsh::Variable::get("tmpvar").map(|mut v| v.to_bytes()));
+            .and_then(|_| zsh::Variable::get("tmpvar").map(|mut v| v.as_bytes()));
 
         let prompt = prompt.as_ref().map(|p| &p[..]).unwrap_or(b">>> ");
         // let prompt = ui.shell.eval(stringify!(printf %s "${PS1@P}"), false).await?;
@@ -214,7 +214,7 @@ impl Ui {
                     let contents = ui.buffer.get_contents();
                     execute!(ui.stdout, style::Print(&contents[contents.len() - 1 ..]))?;
                 } else {
-                    self.draw(shell, false).await?;
+                    self.draw(shell).await?;
                 }
             },
 
@@ -248,7 +248,7 @@ impl Ui {
 
     async fn accept_line(&self, shell: &Shell, use_trampoline: bool) -> Result<bool> {
         self.borrow_mut().await.is_running_process = true;
-        self.draw(shell, use_trampoline).await?;
+        self.draw(shell).await?;
 
         {
             let mut ui = self.borrow_mut().await;
@@ -274,7 +274,7 @@ impl Ui {
             ui.activate()?;
         }
 
-        self.draw(shell, use_trampoline).await?;
+        self.draw(shell).await?;
         Ok(true)
     }
 
@@ -325,7 +325,7 @@ impl Ui {
     pub async fn refresh_on_state(&self, shell: &Shell) -> Result<()> {
         let dirty = self.borrow().await.dirty.buffer;
         if dirty {
-            self.draw(shell, true).await?;
+            self.draw(shell).await?;
         }
 
         self.clean().await;
@@ -356,7 +356,7 @@ impl Ui {
         }).await?;
 
         self.set_lua_async_fn("redraw", shell, |ui, shell, _lua, _val: LuaValue| async move {
-            ui.draw(&shell, true).await
+            ui.draw(&shell).await
         }).await?;
 
         self.set_lua_async_fn("eval", shell, |_ui, shell, lua, (cmd, stderr): (String, bool)| async move {

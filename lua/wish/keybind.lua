@@ -51,23 +51,36 @@ wish.set_keymap('<tab>', function()
     end
 
     local text = {}
+    local last = nil
 
     for chunk in wish.get_completions() do
         for _, cmatch in ipairs(chunk) do
             table.insert(text, tostring(cmatch))
+            last = cmatch
         end
 
-        msg = msg or wish.show_message{
-            align = 'Left',
-            fg = 'blue',
-            height = 'max:10',
-            -- italic = true,
-            border = {
-                fg = 'white',
-                type = 'Rounded',
-            },
-        }
-        msg:set_options{text = table.concat(text, '\n')}
+        if #text > 1 then
+            msg = msg or wish.show_message{
+                align = 'Left',
+                fg = 'blue',
+                height = 'max:10',
+                -- italic = true,
+                border = {
+                    fg = 'white',
+                    type = 'Rounded',
+                },
+            }
+            msg:set_options{text = table.concat(text, '\n')}
+            wish.redraw()
+        end
+    end
+
+    if #text == 1 then
+        wish.insert_completion(last)
+        if msg then
+            msg:remove()
+            msg = nil
+        end
         wish.redraw()
     end
 

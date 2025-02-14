@@ -228,3 +228,27 @@ pub fn clear_cache() {
         compadd.lock().unwrap().streamer = None;
     }
 }
+
+pub fn insert_completion(line: &str, m: &bindings::cmatch) -> (Vec<u8>, usize) {
+    unsafe {
+        // set the zle buffer
+        zsh_sys::startparamscope();
+        bindings::makezleparams(0);
+        super::Variable::set("BUFFER", &line).unwrap();
+        super::Variable::set("CURSOR", &format!("{}", line.len() + 1)).unwrap();
+        zsh_sys::endparamscope();
+
+        bindings::metafy_line();
+        bindings::do_single(m as *const _ as *mut _);
+        bindings::unmetafy_line();
+
+        zsh_sys::startparamscope();
+        bindings::makezleparams(0);
+        let buffer = super::Variable::get("BUFFER").unwrap().as_bytes();
+        let cursor = super::Variable::get("CURSOR").unwrap().as_bytes();
+        zsh_sys::endparamscope();
+
+        let cursor = std::str::from_utf8(&cursor).ok().and_then(|s| s.parse().ok()).unwrap_or(buffer.len());
+        (buffer, cursor)
+    }
+}

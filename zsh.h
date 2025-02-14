@@ -126,3 +126,11 @@ makezleparams(int ro);
 
 mod_export int
 permmatches(int last);
+
+mod_export void
+do_single(Cmatch m);
+
+mod_export void
+metafy_line(void);
+mod_export void
+unmetafy_line(void);

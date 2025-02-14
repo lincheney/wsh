@@ -33,7 +33,7 @@ async fn main() -> Result<()> {
     let shell = shell::Shell::new();
     let ui = ui::Ui::new(&shell, event_locker).await?;
     ui.activate().await?;
-    ui.draw(&shell, false).await?;
+    ui.draw(&shell).await?;
 
     drop(devnull);
     nix::unistd::dup2(old_stdin, 0)?;

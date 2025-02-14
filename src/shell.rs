@@ -57,4 +57,8 @@ impl ShellInner {
         zsh::completion::clear_cache()
     }
 
+    pub fn insert_completion(&self, string: &str, m: &zsh::cmatch) -> (Vec<u8>, usize) {
+        zsh::completion::insert_completion(string, m)
+    }
+
 }
