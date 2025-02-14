@@ -9,27 +9,43 @@ use async_std::sync::Mutex as AsyncMutex;
 use futures::Stream;
 use super::bindings;
 
+pub struct WaitForChunk<'a> {
+    consumer: &'a mut StreamConsumer,
+}
+
 pub struct StreamConsumer {
     index: usize,
     parent: Arc<Mutex<Streamer>>,
 }
 
-impl Stream for StreamConsumer {
-    type Item = Arc<bindings::cmatch>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let (cmatch, finished) = {
-            let parent = self.parent.lock().unwrap();
-            (parent.matches.get(self.index).cloned(), parent.finished)
-        };
-
-        if let Some(cmatch) = cmatch {
-            self.index += 1;
-            Poll::Ready(Some(cmatch))
-        } else if finished {
-            Poll::Ready(None)
+impl StreamConsumer {
+    pub async fn chunks(&mut self) -> Option<impl Iterator<Item=Arc<bindings::cmatch>> + use<'_>> {
+        if (WaitForChunk{ consumer: self }).await {
+            Some(std::iter::from_fn(move || {
+                let parent = self.parent.lock().unwrap();
+                let result = parent.matches.get(self.index).cloned();
+                if result.is_some() {
+                    self.index += 1;
+                }
+                result
+            }))
         } else {
-            let mut parent = self.parent.lock().unwrap();
+            None
+        }
+    }
+}
+
+impl<'a> std::future::Future for WaitForChunk<'a> {
+    type Output = bool;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut parent = self.consumer.parent.lock().unwrap();
+        if parent.matches.len() > self.consumer.index {
+            drop(parent);
+            Poll::Ready(true)
+        } else if parent.finished {
+            Poll::Ready(false)
+        } else {
             parent.wakers.push(cx.waker().clone());
             Poll::Pending
         }

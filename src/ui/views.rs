@@ -235,9 +235,10 @@ async fn show_message(
     _shell: Shell,
     _lua: Lua,
     (val, persist): (String, Option<bool>),
-) -> Result<ChildView> {
-    let persist = persist.unwrap_or(true);
-    Ok(ui.borrow_mut().await.views.add(val, persist))
+) -> Result<()> {
+    // let persist = persist.unwrap_or(true);
+    // Ok(ui.borrow_mut().await.views.add(val, persist))
+    Ok(())
 }
 
 pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {

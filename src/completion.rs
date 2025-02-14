@@ -17,8 +17,9 @@ struct CompletionMatch {
 impl UserData for CompletionStream {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_async_meta_method(MetaMethod::Call, |_lua, stream, ()| async move {
-            let x = stream.inner.lock().await.next().await;
-            Ok(x.map(|inner| CompletionMatch{inner}))
+            let mut stream = stream.inner.lock().await;
+            let chunks = stream.chunks().await;
+            Ok(chunks.map(|c| c.map(|inner| CompletionMatch{inner}).collect::<Vec<_>>()))
         });
     }
 }

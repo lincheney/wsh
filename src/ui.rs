@@ -4,6 +4,7 @@ use std::sync::{Arc, Weak};
 use std::io::{Write};
 use std::ops::DerefMut;
 use std::collections::HashSet;
+use std::default::Default;
 use mlua::{IntoLuaMulti, FromLuaMulti, Lua, Result as LuaResult, Value as LuaValue};
 use futures::SinkExt;
 use async_std::sync::RwLock;
@@ -41,16 +42,14 @@ struct UiDirty {
     buffer: bool,
 }
 
-pub type TrampolineFut = std::pin::Pin<Box<dyn Future<Output=Result<()>> + Send>>;
-
 pub struct UiInner {
     pub lua: Lua,
     pub lua_api: mlua::Table,
     lua_cache: mlua::Table,
 
-    pub views: views::Views,
+    pub tui: crate::tui::Tui,
 
-    trampoline: futures::channel::mpsc::UnboundedSender<TrampolineFut>,
+    events: crate::event_stream::EventLocker,
     dirty: UiDirty,
     is_running_process: bool,
     pub keybinds: keybind::KeybindMapping,
@@ -68,27 +67,29 @@ pub struct Ui(Arc<RwLock<UiInner>>);
 
 impl Ui {
 
-    pub async fn new(shell: &Shell, trampoline: futures::channel::mpsc::UnboundedSender<TrampolineFut>) -> Result<Self> {
+    pub async fn new(shell: &Shell, mut events: crate::event_stream::EventLocker) -> Result<Self> {
         let lua = Lua::new();
         let lua_api = lua.create_table()?;
         lua.globals().set("wish", &lua_api)?;
         let lua_cache = lua.create_table()?;
         lua_api.set("__cache", &lua_cache)?;
 
+        let cursor = events.get_cursor_position().await?;
+
         let ui = Self(Arc::new(RwLock::new(UiInner{
             lua,
             lua_api,
             lua_cache,
-            trampoline,
+            events,
             is_running_process: false,
-            views: std::default::Default::default(),
+            tui: Default::default(),
             threads: HashSet::new(),
-            dirty: UiDirty::default(),
-            buffer: std::default::Default::default(),
-            keybinds: std::default::Default::default(),
+            dirty: Default::default(),
+            buffer: Default::default(),
+            keybinds: Default::default(),
             stdout: std::io::stdout(),
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
-            cursor: crossterm::cursor::position()?,
+            cursor: cursor,
             size: crossterm::terminal::size()?,
         })));
 
@@ -137,27 +138,18 @@ impl Ui {
             queue!(ui.stdout, crossterm::cursor::MoveLeft(offset as u16))?;
         }
 
+        ui.cursor = ui.events.get_cursor_position().await?;
+
         // do NOT render ui elements if there is a foreground process
         if !ui.is_running_process {
             let (width, height) = crossterm::terminal::size()?;
-            ui.views.draw(&mut ui.stdout, width, height.saturating_sub(5))?;
+            // ui.tui.draw(&mut ui.stdout, width, height, ui.cursor.0)?;
         }
 
         queue!(ui.stdout, EndSynchronizedUpdate)?;
         execute!(ui.stdout)?;
 
-        // if use_trampoline {
-            // // refresh_cursor_position needs to get trampolined out
-            // // because it doesn't work while an event stream is active
-            // let clone = self.clone();
-            // ui.trampoline.send(
-                // Box::pin(async move {
-                    // clone.borrow_mut().await.refresh_cursor_position()
-                // })
-            // ).await?;
-        // } else {
-            // ui.refresh_cursor_position()?;
-        // }
+        ui.cursor = ui.events.get_cursor_position().await?;
 
         Ok(())
     }
@@ -196,6 +188,83 @@ impl Ui {
                 for pid in self.borrow().await.threads.iter() {
                     nix::sys::signal::kill(*pid, nix::sys::signal::Signal::SIGINT)?;
                 }
+            },
+
+            Event::Key(KeyEvent{
+                code: KeyCode::F(11),
+                modifiers,
+                kind: event::KeyEventKind::Press,
+                state: _,
+            }) => {
+                use ratatui::{*, text::*, layout::*, widgets::*, style::*};
+                let mut terminal = ratatui::init_with_options(TerminalOptions{ viewport: Viewport::Inline(0) });
+                let ui = self.borrow_mut().await;
+                let mut stdout = &ui.stdout;
+
+                {
+                    let buffer = terminal.current_buffer_mut();
+                    buffer.resize(Rect{height: 8, ..buffer.area});
+                buffer.area.y = 38;
+                }
+                terminal.swap_buffers();
+                {
+                    let buffer = terminal.current_buffer_mut();
+                    buffer.resize(Rect{height: 8, ..buffer.area});
+                buffer.area.y = 38;
+                }
+                let mut frame = terminal.get_frame();
+                    let mut area = frame.area();
+                area.height = 8;
+                area.y = 38;
+
+                    let done = 1;
+                    let NUM_DOWNLOADS = 3;
+                    let progress = LineGauge::default()
+                        .filled_style(Style::default().fg(Color::Blue))
+                        .label(format!("{done}/{NUM_DOWNLOADS}"))
+                        .ratio(done as f64 / NUM_DOWNLOADS as f64);
+                    frame.render_widget(progress, area);
+                    // eprintln!("DEBUG(poled) \t{}\t= {:?}", stringify!(123), 123);
+
+                    // let block = Block::new().title(Line::from("Progress").centered());
+                    // frame.render_widget(block, area);
+
+                let buffer = terminal.current_buffer_mut();
+                // eprintln!("DEBUG(prams) \t{}\t= {:?}", stringify!(buffer), buffer);
+                let width = buffer.area.width;
+                let mut empty_ends = 0;
+                for chunk in buffer.content().chunks(width as _).rev() {
+                    if chunk.iter().all(|c| *c == ratatui::buffer::Cell::EMPTY) {
+                        empty_ends += 1;
+                    } else {
+                        break
+                    }
+                }
+                // eprintln!("DEBUG(hawked)\t{}\t= {:?}", stringify!(empty_ends), empty_ends);
+                let area = buffer.area;
+                let height = area.height - empty_ends;
+                    use crossterm::{cursor, style};
+        for _ in 0 .. height as _ {
+            queue!(stdout, style::Print("\n"))?;
+        }
+                    queue!(
+                        stdout,
+                        cursor::MoveUp(height),
+                        cursor::SavePosition,
+                        cursor::MoveToNextLine(1),
+                    )?;
+                // terminal.resize(Rect{height: area.height - empty_ends, ..area})?;
+                // eprintln!("DEBUG(rout)  \t{}\t= {:?}", stringify!(buffer), buffer);
+                terminal.flush()?;
+                // use std::{thread, time};
+                // let ten_millis = time::Duration::from_millis(1000);
+                // let now = time::Instant::now();
+                // thread::sleep(ten_millis);
+                terminal.swap_buffers();
+
+                // ratatui::restore();
+                queue!(stdout, cursor::RestorePosition)?;
+                ui.activate()?;
             },
 
             Event::Key(KeyEvent{
@@ -263,7 +332,7 @@ impl Ui {
         {
             let mut ui = self.borrow_mut().await;
             let ui = ui.deref_mut();
-            ui.views.clear_non_persistent();
+            // ui.views.clear_non_persistent();
 
             {
                 // time to execute
@@ -376,7 +445,7 @@ impl Ui {
 
         keybind::init_lua(self, shell).await?;
         completion::init_lua(self, shell).await?;
-        views::init_lua(self, shell).await?;
+        // views::init_lua(self, shell).await?;
 
         let lua = self.borrow().await.lua.clone();
         lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;
@@ -431,21 +500,6 @@ impl UiInner {
         )?;
 
         crossterm::terminal::disable_raw_mode()?;
-        Ok(())
-    }
-
-    fn refresh_cursor_position(&mut self) -> Result<()> {
-        self.cursor = loop {
-            let now = std::time::SystemTime::now();
-            match crossterm::cursor::position() {
-                Ok(pos) => break pos,
-                Err(e) if now.elapsed().unwrap().as_millis() < 1500 && format!("{}", e) == "The cursor position could not be read within a normal duration" => {
-                    // crossterm times out in 2s
-                    // but it also fails on EINTR whereas we would like to retry
-                },
-                Err(e) => return Err(e)?,
-            }
-        };
         Ok(())
     }
 
