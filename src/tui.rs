@@ -34,24 +34,16 @@ struct Widget{
     persist: bool,
 }
 
-macro_rules! make_serde {
-    ($inner:ident) => (
-        paste::paste! {
-            #[derive(Debug, Copy, Clone)]
-            struct [<Serde $inner>]($inner);
-            impl<'de> Deserialize<'de> for [<Serde $inner>] {
-                fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-                    let data = String::deserialize(deserializer)?;
-                    Ok([<Serde $inner>]($inner::from_str(&data).map_err(de::Error::custom)?))
-                }
-            }
-        }
-    )
+#[derive(Debug, Copy, Clone)]
+struct SerdeWrap<T>(T);
+impl<'de, T: FromStr> Deserialize<'de> for SerdeWrap<T>
+    where <T as FromStr>::Err: std::fmt::Display
+{
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let data = String::deserialize(deserializer)?;
+        Ok(Self(T::from_str(&data).map_err(de::Error::custom)?))
+    }
 }
-
-make_serde!(Color);
-make_serde!(Alignment);
-make_serde!(BorderType);
 
 #[derive(Debug, Copy, Clone)]
 struct SerdeConstraint(Constraint);
@@ -67,7 +59,7 @@ impl<'de> Deserialize<'de> for SerdeConstraint {
         } else {
             Constraint::Length(data.parse::<u16>().map_err(de::Error::custom)?)
         };
-        Ok(SerdeConstraint(constraint))
+        Ok(Self(constraint))
     }
 }
 
@@ -76,7 +68,7 @@ impl<'de> Deserialize<'de> for SerdeConstraint {
 struct WidgetOptions {
     text: Option<String>,
     persist: Option<bool>,
-    align: Option<SerdeAlignment>,
+    align: Option<SerdeWrap<Alignment>>,
     #[serde(flatten)]
     style: StyleOptions,
     border: Option<BorderOptions>,
@@ -87,7 +79,7 @@ struct WidgetOptions {
 #[serde(default)]
 struct BorderOptions {
     enabled: Option<bool>,
-    r#type: Option<SerdeBorderType>,
+    r#type: Option<SerdeWrap<BorderType>>,
     title: Option<String>,
     #[serde(flatten)]
     style: StyleOptions,
@@ -96,8 +88,8 @@ struct BorderOptions {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct StyleOptions {
-    fg: Option<SerdeColor>,
-    bg: Option<SerdeColor>,
+    fg: Option<SerdeWrap<Color>>,
+    bg: Option<SerdeWrap<Color>>,
     bold: Option<bool>,
     dim: Option<bool>,
     italic: Option<bool>,
