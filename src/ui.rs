@@ -22,8 +22,6 @@ use crate::keybind;
 use crate::completion;
 use crate::zsh;
 use crate::shell::Shell;
-mod text_popup;
-mod views;
 
 fn lua_error<T>(msg: &str) -> Result<T, mlua::Error> {
     Err(mlua::Error::RuntimeError(msg.to_string()))
