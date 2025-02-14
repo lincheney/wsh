@@ -47,6 +47,7 @@ local messages = {}
 wish.set_keymap('<tab>', function()
     if msg then
         msg:remove()
+        msg = nil
     end
 
     local text = {}
@@ -59,7 +60,11 @@ wish.set_keymap('<tab>', function()
         msg = msg or wish.show_message{
             align = 'Right',
             fg = 'blue',
-            italic = true,
+            -- italic = true,
+            border = {
+                fg = 'white',
+                type = 'Rounded',
+            },
         }
         msg:set_options{text = table.concat(text, '\n')}
         wish.redraw()

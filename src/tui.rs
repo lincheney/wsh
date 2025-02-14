@@ -29,27 +29,29 @@ struct Widget{
     inner: Paragraph<'static>,
     align: Alignment,
     style: Style,
+    border_style: Style,
+    block: Block<'static>,
     persist: bool,
 }
 
-#[derive(Debug)]
-struct SerdeColor(Color);
-impl<'de> Deserialize<'de> for SerdeColor {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let data = String::deserialize(deserializer)?;
-        Ok(SerdeColor(Color::from_str(&data).map_err(de::Error::custom)?))
-    }
+macro_rules! make_serde {
+    ($inner:ident) => (
+        paste::paste! {
+            #[derive(Debug, Copy, Clone)]
+            struct [<Serde $inner>]($inner);
+            impl<'de> Deserialize<'de> for [<Serde $inner>] {
+                fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                    let data = String::deserialize(deserializer)?;
+                    Ok([<Serde $inner>]($inner::from_str(&data).map_err(de::Error::custom)?))
+                }
+            }
+        }
+    )
 }
 
-#[derive(Debug)]
-struct SerdeAlignment(Alignment);
-impl<'de> Deserialize<'de> for SerdeAlignment {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let data = String::deserialize(deserializer)?;
-        Ok(SerdeAlignment(Alignment::from_str(&data).map_err(de::Error::custom)?))
-    }
-}
-
+make_serde!(Color);
+make_serde!(Alignment);
+make_serde!(BorderType);
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -57,9 +59,26 @@ struct WidgetOptions {
     text: Option<String>,
     persist: Option<bool>,
     align: Option<SerdeAlignment>,
+    #[serde(flatten)]
+    style: StyleOptions,
+    border: Option<BorderOptions>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct BorderOptions {
+    enabled: Option<bool>,
+    r#type: Option<SerdeBorderType>,
+    title: Option<String>,
+    #[serde(flatten)]
+    style: StyleOptions,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct StyleOptions {
     fg: Option<SerdeColor>,
     bg: Option<SerdeColor>,
-
     bold: Option<bool>,
     dim: Option<bool>,
     italic: Option<bool>,
@@ -67,6 +86,31 @@ struct WidgetOptions {
     strikethrough: Option<bool>,
     reversed: Option<bool>,
     blink: Option<bool>,
+}
+
+impl StyleOptions {
+    fn apply_to_style(&self, mut style: Style) -> Style {
+        if let Some(fg) = self.fg { style = style.fg(fg.0); }
+        if let Some(bg) = self.bg { style = style.fg(bg.0); }
+
+        macro_rules! set_modifier {
+            ($field:ident, $enum:ident) => (
+                if let Some($field) = self.$field {
+                    let value = Modifier::$enum;
+                    style = if $field { style.add_modifier(value) } else { style.remove_modifier(value) };
+                }
+            )
+        }
+
+        set_modifier!(bold, BOLD);
+        set_modifier!(dim, DIM);
+        set_modifier!(italic, ITALIC);
+        set_modifier!(underline, UNDERLINED);
+        set_modifier!(strikethrough, CROSSED_OUT);
+        set_modifier!(reversed, REVERSED);
+        set_modifier!(blink, SLOW_BLINK);
+        style
+    }
 }
 
 impl Widget {
@@ -81,45 +125,33 @@ impl Widget {
 
         if let Some(text) = options.text {
             // there's no way to set the text on an existing paragraph ...
-            self.inner = Paragraph::new(text)
-                .style(self.style)
-                .alignment(self.align)
-            ;
+            self.inner = Paragraph::new(text);
         }
 
-        if let Some(align) = options.align {
-            self.align = align.0;
-            self.inner = self.take_inner().alignment(align.0);
+        if let Some(align) = options.align { self.align = align.0; }
+        self.style = options.style.apply_to_style(self.style);
+
+        match options.border {
+            // explicitly disabled
+            Some(BorderOptions{enabled: Some(false), ..}) => {
+                self.block = Block::new();
+            },
+            Some(options) => {
+                let mut block = std::mem::replace(&mut self.block, Block::new());
+                block = block.borders(Borders::ALL);
+                block = block.border_style(options.style.apply_to_style(self.border_style));
+                if let Some(t) = options.r#type { block = block.border_type(t.0); }
+                if let Some(t) = options.title { block = block.title(t); }
+                self.block = block;
+            },
+            None => {},
         }
 
-        if let Some(fg) = options.fg {
-            self.style = self.style.fg(fg.0);
-            self.inner = self.take_inner().style(self.style);
-        }
-
-        if let Some(bg) = options.bg {
-            self.style = self.style.fg(bg.0);
-            self.inner = self.take_inner().style(self.style);
-        }
-
-        macro_rules! set_modifier {
-            ($field:ident, $enum:ident) => (
-                if let Some($field) = options.$field {
-                    let value = Modifier::$enum;
-                    self.style = if $field { self.style.add_modifier(value) } else { self.style.remove_modifier(value) };
-                    self.inner = self.take_inner().style(self.style);
-                }
-            )
-        }
-
-        set_modifier!(bold, BOLD);
-        set_modifier!(dim, DIM);
-        set_modifier!(italic, ITALIC);
-        set_modifier!(underline, UNDERLINED);
-        set_modifier!(strikethrough, CROSSED_OUT);
-        set_modifier!(reversed, REVERSED);
-        set_modifier!(blink, SLOW_BLINK);
-
+        self.inner = self.take_inner()
+            .alignment(self.align)
+            .style(self.style)
+            .block(self.block.clone())
+        ;
     }
 }
 
