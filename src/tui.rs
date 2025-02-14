@@ -53,6 +53,24 @@ make_serde!(Color);
 make_serde!(Alignment);
 make_serde!(BorderType);
 
+#[derive(Debug, Copy, Clone)]
+struct SerdeConstraint(Constraint);
+impl<'de> Deserialize<'de> for SerdeConstraint {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let data = String::deserialize(deserializer)?;
+        let constraint = if data.starts_with("min:") {
+            Constraint::Min(data[4..].parse::<u16>().map_err(de::Error::custom)?)
+        } else if data.starts_with("max:") {
+            Constraint::Max(data[4..].parse::<u16>().map_err(de::Error::custom)?)
+        } else if data.ends_with("%") {
+            Constraint::Percentage(data[..data.len()-1].parse::<u16>().map_err(de::Error::custom)?)
+        } else {
+            Constraint::Length(data.parse::<u16>().map_err(de::Error::custom)?)
+        };
+        Ok(SerdeConstraint(constraint))
+    }
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct WidgetOptions {
@@ -62,6 +80,7 @@ struct WidgetOptions {
     #[serde(flatten)]
     style: StyleOptions,
     border: Option<BorderOptions>,
+    height: Option<SerdeConstraint>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -121,6 +140,10 @@ impl Widget {
     fn set_options(&mut self, options: WidgetOptions) {
         if let Some(persist) = options.persist {
             self.persist = persist;
+        }
+
+        if let Some(constraint) = options.height {
+            self.constraint = constraint.0;
         }
 
         if let Some(text) = options.text {

@@ -58,8 +58,9 @@ wish.set_keymap('<tab>', function()
         end
 
         msg = msg or wish.show_message{
-            align = 'Right',
+            align = 'Left',
             fg = 'blue',
+            height = 'max:10',
             -- italic = true,
             border = {
                 fg = 'white',
