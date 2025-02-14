@@ -34,10 +34,17 @@ wish.set_keymap('<c-right>', function()
     local cursor = wish.buffer:find('%f[%s]', wish.cursor + 2)
     wish.cursor = (cursor or #wish.buffer + 1) - 1
 end)
+wish.set_keymap('<c-w>', function()
+    if wish.cursor > 0 then
+        local cursor = wish.buffer:sub(1, wish.cursor):find('%S+%s*$')
+        wish.buffer = wish.buffer:sub(1, cursor - 1) .. wish.buffer:sub(wish.cursor + 1)
+        wish.cursor = (cursor or 1) - 1
+    end
+end)
 
 -- there ought to be a better way of doing this
 wish.set_keymap('<c-d>', function()
-    if #wish.buffer == 0 then
+    if not wish.buffer:find('%S') then
         wish.buffer = 'exit'
         wish.accept_line()
     end
