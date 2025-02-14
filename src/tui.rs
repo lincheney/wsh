@@ -255,7 +255,7 @@ impl Tui {
         self.width = width;
         self.height = height;
 
-        let area = Rect{
+        let mut area = Rect{
             x: 0,
             y: 0,
             width,
@@ -270,6 +270,16 @@ impl Tui {
 
         // assume each widget needs at least 1 line
         let widgets = &self.widgets[..self.widgets.len().min(area.height as _)];
+
+        let mut max_height = 0;
+        for w in widgets.iter() {
+            max_height += w.inner.line_count(width);
+            if max_height >= area.height as _ {
+                break
+            }
+        }
+        area.height = area.height.min(max_height as _);
+
         let layout = Layout::vertical(widgets.iter().map(|w| w.constraint));
         let layouts = layout.split(area);
 
@@ -321,16 +331,15 @@ impl Tui {
 
             let updates = self.old_buffer.diff(&self.new_buffer);
             if !updates.is_empty() {
-                queue!(stdout, crossterm::terminal::BeginSynchronizedUpdate)?;
                 if allocate_more_space > 0 {
                     for _ in 0 .. actual_height as _ {
                         queue!(stdout, style::Print("\n"))?;
                     }
-                    queue!(stdout, cursor::MoveUp(actual_height), cursor::SavePosition)?;
+                    queue!(stdout, cursor::MoveUp(actual_height))?;
                 }
-                queue!(stdout, cursor::MoveToNextLine(1))?;
+                queue!(stdout, cursor::SavePosition, cursor::MoveToNextLine(1))?;
                 self.terminal.backend_mut().draw(updates.into_iter())?;
-                queue!(stdout, cursor::RestorePosition, crossterm::terminal::EndSynchronizedUpdate)?;
+                queue!(stdout, cursor::RestorePosition)?;
             }
         }
 
