@@ -9,6 +9,13 @@ struct Lock {
     outer: RwLock<()>,
 }
 
+impl Lock {
+    async fn lock_exclusive(&self) -> MutexGuard<UnlockedEvents> {
+        let _outer = self.outer.write().await;
+        self.inner.lock().await
+    }
+}
+
 pub struct EventStream {
     lock: Arc<Lock>,
     receiver: mpsc::UnboundedReceiver<()>,
@@ -38,7 +45,7 @@ pub struct EventLocker {
 
 impl EventLocker {
     pub async fn lock(&mut self) -> MutexGuard<UnlockedEvents> {
-        let _outer_lock = self.lock.outer.read().await;
+        let _outer = self.lock.outer.read().await;
         if let Some(lock) = self.lock.inner.try_lock() {
             return lock;
         }
@@ -68,11 +75,7 @@ impl EventStream {
             T: Future<Output=Option<O>>
     {
         loop {
-            // get an exclusive lock
-            let mut lock = Some({
-                let _outer = self.lock.outer.write().await;
-                self.lock.inner.lock().await
-            });
+            let mut lock = None;
             let mut waker = self.receiver.next().fuse();
 
             let mut events = crossterm::event::EventStream::new();
@@ -80,6 +83,11 @@ impl EventStream {
 
             // keep looping over events until woken up
             loop {
+                if lock.is_none() {
+                    // get an exclusive lock
+                    lock = Some(self.lock.lock_exclusive().await);
+                }
+
                 select! {
                     _ = waker => {
                         break;
@@ -90,10 +98,7 @@ impl EventStream {
                             return value
                         }
                         event = events.next().fuse();
-                        lock = Some({
-                            let _outer = self.lock.outer.write().await;
-                            self.lock.inner.lock().await
-                        });
+                        lock = Some(self.lock.lock_exclusive().await);
                     }
                 };
             };
