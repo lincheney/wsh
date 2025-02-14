@@ -4,7 +4,6 @@ use std::sync::Arc;
 use crate::ui::Ui;
 use crate::shell::Shell;
 use async_std::sync::Mutex;
-use futures::StreamExt;
 
 struct CompletionStream {
     inner: Arc<Mutex<crate::zsh::completion::StreamConsumer>>,

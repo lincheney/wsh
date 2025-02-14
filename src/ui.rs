@@ -6,7 +6,6 @@ use std::ops::DerefMut;
 use std::collections::HashSet;
 use std::default::Default;
 use mlua::{IntoLuaMulti, FromLuaMulti, Lua, Result as LuaResult, Value as LuaValue};
-use futures::SinkExt;
 use async_std::sync::RwLock;
 use anyhow::Result;
 
@@ -369,7 +368,7 @@ impl Ui {
 
         keybind::init_lua(self, shell).await?;
         completion::init_lua(self, shell).await?;
-        // views::init_lua(self, shell).await?;
+        crate::tui::init_lua(self, shell).await?;
 
         let lua = self.borrow().await.lua.clone();
         lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;

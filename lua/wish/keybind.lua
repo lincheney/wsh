@@ -68,7 +68,7 @@ wish.set_keymap('<tab>', function()
 end)
 
 wish.set_keymap('<f12>', function()
-    local msg = wish.show_message("hello world")
+    local msg = wish.show_message("hello world " .. math.random())
     -- msg:set_text_weight('Bold');
     wish.redraw()
 end)
