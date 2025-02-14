@@ -15,10 +15,11 @@ bstr = { version = "1.11.3", features = ["unicode"] }
 crossterm = { version = "0.28.1", features = ["event-stream"] }
 futures = "0.3.31"
 iocraft = "0.6.2"
-mlua = { version = "0.10.3", features = ["luajit", "error-send", "vendored", "async", "send"] }
+mlua = { version = "0.10.3", features = ["luajit", "error-send", "vendored", "async", "send", "serialize"] }
 nix = { version = "0.29.0", features = ["fs", "process", "signal", "socket", "term", "uio"] }
 paste = "1.0.15"
 ratatui = "0.29.0"
+serde = { version = "1.0.217", features = ["derive"] }
 taffy = "0.5.2"
 textwrap = "0.16.1"
 unicode-width = "0.1.14"

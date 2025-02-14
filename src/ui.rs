@@ -143,7 +143,7 @@ impl Ui {
         // do NOT render ui elements if there is a foreground process
         if !ui.is_running_process {
             let (width, height) = crossterm::terminal::size()?;
-            ui.tui.draw(&mut ui.stdout, width, height, ui.cursor.0)?;
+            ui.tui.draw(&mut ui.stdout, width, height, ui.cursor.1)?;
         }
 
         queue!(ui.stdout, EndSynchronizedUpdate)?;

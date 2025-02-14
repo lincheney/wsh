@@ -43,8 +43,7 @@ wish.set_keymap('<c-d>', function()
     end
 end)
 
-local msg = nil
-local text = {}
+local messages = {}
 wish.set_keymap('<tab>', function()
     if msg then
         msg:remove()
@@ -55,20 +54,21 @@ wish.set_keymap('<tab>', function()
     for chunk in wish.get_completions() do
         for _, cmatch in ipairs(chunk) do
             table.insert(text, tostring(cmatch))
+            -- io.stderr:write("DEBUG(rags)      ".."cmatch"..(" = %q\n"):format(cmatch))
+            table.insert(messages, wish.show_message{text = tostring(cmatch)})
         end
-        if not msg then
-            msg = wish.show_message('')
-            msg:set_border_style('None')
-            msg:set_background_color(0x3f3f3f)
-        end
-        msg:set_text_content(table.concat(text, '\n'))
+        -- if not msg then
+            -- msg:set_border_style('None')
+            -- msg:set_background_color(0x3f3f3f)
+        -- end
+        -- msg:set_text_content(table.concat(text, '\n'))
         wish.redraw()
     end
 
 end)
 
 wish.set_keymap('<f12>', function()
-    local msg = wish.show_message("hello world " .. math.random())
+    local msg = wish.show_message{text="hello world " .. math.random()}
     -- msg:set_text_weight('Bold');
     wish.redraw()
 end)
