@@ -246,6 +246,10 @@ impl Tui {
         })
     }
 
+    pub fn clear_non_persistent(&mut self) {
+        self.widgets.retain(|w| w.persist);
+    }
+
     fn refresh(&mut self, width: u16, height: u16) {
         self.dirty = false;
         self.width = width;
