@@ -1,5 +1,6 @@
 use std::default::Default;
-use serde::{Deserialize};
+use std::str::FromStr;
+use serde::{Deserialize, Deserializer, de};
 use anyhow::Result;
 use crossterm::{
     cursor,
@@ -19,21 +20,107 @@ use mlua::{prelude::*, UserData, UserDataMethods};
 use crate::ui::Ui;
 use crate::shell::Shell;
 
-#[derive(Copy, Clone, PartialEq)]
-pub struct WidgetId(usize);
+pub struct WidgetId(Ui, usize);
 
+#[derive(Default)]
 struct Widget{
-    id: WidgetId,
+    id: usize,
     constraint: Constraint,
     inner: Paragraph<'static>,
+    align: Alignment,
+    style: Style,
+    persist: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
+struct SerdeColor(Color);
+impl<'de> Deserialize<'de> for SerdeColor {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let data = String::deserialize(deserializer)?;
+        Ok(SerdeColor(Color::from_str(&data).map_err(de::Error::custom)?))
+    }
+}
+
+#[derive(Debug)]
+struct SerdeAlignment(Alignment);
+impl<'de> Deserialize<'de> for SerdeAlignment {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let data = String::deserialize(deserializer)?;
+        Ok(SerdeAlignment(Alignment::from_str(&data).map_err(de::Error::custom)?))
+    }
+}
+
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 struct WidgetOptions {
-    #[serde(default)]
-    text: String,
-    #[serde(default)]
-    persist: bool,
+    text: Option<String>,
+    persist: Option<bool>,
+    align: Option<SerdeAlignment>,
+    fg: Option<SerdeColor>,
+    bg: Option<SerdeColor>,
+
+    bold: Option<bool>,
+    dim: Option<bool>,
+    italic: Option<bool>,
+    underline: Option<bool>,
+    strikethrough: Option<bool>,
+    reversed: Option<bool>,
+    blink: Option<bool>,
+}
+
+impl Widget {
+    fn take_inner(&mut self) -> Paragraph<'static> {
+        std::mem::replace(&mut self.inner, Paragraph::new(""))
+    }
+
+    fn set_options(&mut self, options: WidgetOptions) {
+        if let Some(persist) = options.persist {
+            self.persist = persist;
+        }
+
+        if let Some(text) = options.text {
+            // there's no way to set the text on an existing paragraph ...
+            self.inner = Paragraph::new(text)
+                .style(self.style)
+                .alignment(self.align)
+            ;
+        }
+
+        if let Some(align) = options.align {
+            self.align = align.0;
+            self.inner = self.take_inner().alignment(align.0);
+        }
+
+        if let Some(fg) = options.fg {
+            self.style = self.style.fg(fg.0);
+            self.inner = self.take_inner().style(self.style);
+        }
+
+        if let Some(bg) = options.bg {
+            self.style = self.style.fg(bg.0);
+            self.inner = self.take_inner().style(self.style);
+        }
+
+        macro_rules! set_modifier {
+            ($field:ident, $enum:ident) => (
+                if let Some($field) = options.$field {
+                    let value = Modifier::$enum;
+                    self.style = if $field { self.style.add_modifier(value) } else { self.style.remove_modifier(value) };
+                    self.inner = self.take_inner().style(self.style);
+                }
+            )
+        }
+
+        set_modifier!(bold, BOLD);
+        set_modifier!(dim, DIM);
+        set_modifier!(italic, ITALIC);
+        set_modifier!(underline, UNDERLINED);
+        set_modifier!(strikethrough, CROSSED_OUT);
+        set_modifier!(reversed, REVERSED);
+        set_modifier!(blink, SLOW_BLINK);
+
+    }
 }
 
 pub struct Tui {
@@ -67,17 +154,41 @@ impl std::default::Default for Tui {
 
 impl Tui {
 
-    pub fn add(&mut self, options: WidgetOptions) -> WidgetId {
-        let id = WidgetId(self.counter);
+    fn add(&mut self, options: WidgetOptions) -> usize {
+        let id = self.counter;
         self.counter += 1;
         self.dirty = true;
-        let inner = Paragraph::new(options.text);
-        self.widgets.push(Widget{
-            id,
-            inner,
-            constraint: Constraint::Max(1),
-        });
+
+        let mut widget = Widget::default();
+        widget.id = id;
+        widget.set_options(options);
+        self.widgets.push(widget);
         id
+    }
+
+    fn get_index(&self, id: usize) -> Option<usize> {
+        for (i, w) in self.widgets.iter().enumerate() {
+            if w.id == id {
+                return Some(i)
+            } else if w.id > id {
+                break
+            }
+        }
+        return None
+    }
+
+    fn get_mut(&mut self, id: usize) -> Option<&mut Widget> {
+        self.get_index(id).map(|i| {
+            self.dirty = true;
+            &mut self.widgets[i]
+        })
+    }
+
+    fn remove(&mut self, id: usize) -> Option<Widget> {
+        self.get_index(id).map(|i| {
+            self.dirty = true;
+            self.widgets.remove(i)
+        })
     }
 
     fn refresh(&mut self, width: u16, height: u16) {
@@ -99,7 +210,7 @@ impl Tui {
         std::mem::swap(frame.buffer_mut(), &mut self.new_buffer);
 
         // assume each widget needs at least 1 line
-        let widgets = &self.widgets[..area.height as _];
+        let widgets = &self.widgets[..self.widgets.len().min(area.height as _)];
         let layout = Layout::vertical(widgets.iter().map(|w| w.constraint));
         let layouts = layout.split(area);
 
@@ -159,9 +270,7 @@ impl Tui {
                     queue!(stdout, cursor::MoveUp(actual_height), cursor::SavePosition)?;
                 }
                 queue!(stdout, cursor::MoveToNextLine(1))?;
-
                 self.terminal.backend_mut().draw(updates.into_iter())?;
-
                 queue!(stdout, cursor::RestorePosition, crossterm::terminal::EndSynchronizedUpdate)?;
             }
         }
@@ -173,6 +282,24 @@ impl Tui {
 
 impl UserData for WidgetId {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+
+        methods.add_async_method("set_options", |lua, id, val: LuaValue| async move {
+            if let Some(widget) = id.0.borrow_mut().await.tui.get_mut(id.1) {
+                let options: WidgetOptions = lua.from_value(val)?;
+                widget.set_options(options);
+                Ok(())
+            } else {
+                Err(LuaError::RuntimeError(format!("can't find widget with id {}", id.1)))
+            }
+        });
+
+        methods.add_async_method("remove", |_lua, id, _val: LuaValue| async move {
+            if let Some(_) = id.0.borrow_mut().await.tui.remove(id.1) {
+                Ok(())
+            } else {
+                Err(LuaError::RuntimeError(format!("can't find widget with id {}", id.1)))
+            }
+        });
     }
 }
 
@@ -183,7 +310,8 @@ async fn show_message(
     val: LuaValue,
 ) -> Result<WidgetId> {
     let options: WidgetOptions = lua.from_value(val)?;
-    Ok(ui.borrow_mut().await.tui.add(options))
+    let id = ui.borrow_mut().await.tui.add(options);
+    Ok(WidgetId(ui, id))
 }
 
 pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {

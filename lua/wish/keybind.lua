@@ -48,20 +48,20 @@ wish.set_keymap('<tab>', function()
     if msg then
         msg:remove()
     end
-    msg = nil
-    text = {}
+
+    local text = {}
 
     for chunk in wish.get_completions() do
         for _, cmatch in ipairs(chunk) do
             table.insert(text, tostring(cmatch))
-            -- io.stderr:write("DEBUG(rags)      ".."cmatch"..(" = %q\n"):format(cmatch))
-            table.insert(messages, wish.show_message{text = tostring(cmatch)})
         end
-        -- if not msg then
-            -- msg:set_border_style('None')
-            -- msg:set_background_color(0x3f3f3f)
-        -- end
-        -- msg:set_text_content(table.concat(text, '\n'))
+
+        msg = msg or wish.show_message{
+            align = 'Right',
+            fg = 'blue',
+            italic = true,
+        }
+        msg:set_options{text = table.concat(text, '\n')}
         wish.redraw()
     end
 
