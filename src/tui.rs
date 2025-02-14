@@ -35,7 +35,7 @@ struct Widget{
 }
 
 #[derive(Debug, Copy, Clone)]
-struct SerdeWrap<T>(T);
+pub struct SerdeWrap<T>(T);
 impl<'de, T: FromStr> Deserialize<'de> for SerdeWrap<T>
     where <T as FromStr>::Err: std::fmt::Display
 {
@@ -46,7 +46,7 @@ impl<'de, T: FromStr> Deserialize<'de> for SerdeWrap<T>
 }
 
 #[derive(Debug, Copy, Clone)]
-struct SerdeConstraint(Constraint);
+pub struct SerdeConstraint(Constraint);
 impl<'de> Deserialize<'de> for SerdeConstraint {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let data = String::deserialize(deserializer)?;
@@ -65,44 +65,44 @@ impl<'de> Deserialize<'de> for SerdeConstraint {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-struct WidgetOptions {
-    text: Option<String>,
-    persist: Option<bool>,
-    align: Option<SerdeWrap<Alignment>>,
+pub struct WidgetOptions {
+    pub text: Option<String>,
+    pub persist: Option<bool>,
+    pub align: Option<SerdeWrap<Alignment>>,
     #[serde(flatten)]
-    style: StyleOptions,
-    border: Option<BorderOptions>,
-    height: Option<SerdeConstraint>,
+    pub style: StyleOptions,
+    pub border: Option<BorderOptions>,
+    pub height: Option<SerdeConstraint>,
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-struct BorderOptions {
-    enabled: Option<bool>,
-    r#type: Option<SerdeWrap<BorderType>>,
-    title: Option<String>,
+pub struct BorderOptions {
+    pub enabled: Option<bool>,
+    pub r#type: Option<SerdeWrap<BorderType>>,
+    pub title: Option<String>,
     #[serde(flatten)]
-    style: StyleOptions,
+    pub style: StyleOptions,
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-struct StyleOptions {
-    fg: Option<SerdeWrap<Color>>,
-    bg: Option<SerdeWrap<Color>>,
-    bold: Option<bool>,
-    dim: Option<bool>,
-    italic: Option<bool>,
-    underline: Option<bool>,
-    strikethrough: Option<bool>,
-    reversed: Option<bool>,
-    blink: Option<bool>,
+pub struct StyleOptions {
+    pub fg: Option<SerdeWrap<Color>>,
+    pub bg: Option<SerdeWrap<Color>>,
+    pub bold: Option<bool>,
+    pub dim: Option<bool>,
+    pub italic: Option<bool>,
+    pub underline: Option<bool>,
+    pub strikethrough: Option<bool>,
+    pub reversed: Option<bool>,
+    pub blink: Option<bool>,
 }
 
 impl StyleOptions {
     fn apply_to_style(&self, mut style: Style) -> Style {
         if let Some(fg) = self.fg { style = style.fg(fg.0); }
-        if let Some(bg) = self.bg { style = style.fg(bg.0); }
+        if let Some(bg) = self.bg { style = style.bg(bg.0); }
 
         macro_rules! set_modifier {
             ($field:ident, $enum:ident) => (
@@ -140,7 +140,7 @@ impl Widget {
 
         if let Some(text) = options.text {
             // there's no way to set the text on an existing paragraph ...
-            self.inner = Paragraph::new(text);
+            self.inner = Paragraph::new(text.replace('\t', "    "));
         }
 
         if let Some(align) = options.align { self.align = align.0; }
@@ -166,6 +166,7 @@ impl Widget {
             .alignment(self.align)
             .style(self.style)
             .block(self.block.clone())
+            .wrap(Wrap{trim: false})
         ;
     }
 }
@@ -201,7 +202,7 @@ impl std::default::Default for Tui {
 
 impl Tui {
 
-    fn add(&mut self, options: WidgetOptions) -> usize {
+    pub fn add(&mut self, options: WidgetOptions) -> usize {
         let id = self.counter;
         self.counter += 1;
         self.dirty = true;
@@ -211,6 +212,17 @@ impl Tui {
         widget.set_options(options);
         self.widgets.push(widget);
         id
+    }
+
+    pub fn add_error_message(&mut self, message: String, options: Option<WidgetOptions>) -> usize {
+        let mut options = options.unwrap_or(Default::default());
+        options.text = Some(message);
+        // options.border.get_or_insert(Default::default());
+        // options.border.as_mut().unwrap().enabled = Some(true);
+        // options.border.as_mut().unwrap().style.fg = Some(SerdeWrap(Color::Red));
+        // options.style.bg.get_or_insert(SerdeWrap(Color::Rgb(0x30, 0x30, 0x30)));
+        options.style.fg.get_or_insert(SerdeWrap(Color::Red));
+        self.add(options)
     }
 
     fn get_index(&self, id: usize) -> Option<usize> {
@@ -306,7 +318,9 @@ impl Tui {
             let trailing_empty_lines = self.new_buffer.content()
                 .chunks(self.new_buffer.area.width as _)
                 .rev()
-                .take_while(|line| line.iter().all(|c| *c == ratatui::buffer::Cell::EMPTY))
+                .take_while(|line| line.iter().all(|c| {
+                    c.symbol() == " " && c.bg == Color::Reset && !c.modifier.intersects(Modifier::UNDERLINED | Modifier::REVERSED)
+                }))
                 .count();
             self.new_buffer.area.height - trailing_empty_lines as u16
         };

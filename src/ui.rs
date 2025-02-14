@@ -158,15 +158,17 @@ impl Ui {
         if let Event::Key(KeyEvent{code, modifiers, ..}) = event {
             let callback = self.borrow().await.keybinds.get(&(code, modifiers)).cloned();
             if let Some(callback) = callback {
-                let clone = self.clone();
+                let ui = self.clone();
                 let shell = shell.clone();
                 async_std::task::spawn(async move {
                     if let Err(err) = callback.call_async::<LuaValue>(mlua::Nil).await {
-                        eprintln!("DEBUG(loaf)  \t{}\t= {:?}", stringify!(err), err);
+                        ui.borrow_mut().await.tui.add_error_message(format!("ERROR: {}", err), None);
+                        ui.draw(&shell).await;
+                        // eprintln!("DEBUG(loaf)  \t{}\t= {:?}", stringify!(err), err);
                     }
                     if shell.lock().await.closed {
                     } else {
-                        clone.refresh_on_state(&shell).await;
+                        ui.refresh_on_state(&shell).await;
                     }
                 });
                 return Ok(true)
