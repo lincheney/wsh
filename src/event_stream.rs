@@ -24,7 +24,7 @@ pub struct EventStream {
 pub struct UnlockedEvents();
 
 impl UnlockedEvents {
-    pub fn get_cursor_position(&mut self) -> Result<(u16, u16), std::io::Error> {
+    pub fn get_cursor_position(&self) -> Result<(u16, u16), std::io::Error> {
         loop {
             let now = std::time::SystemTime::now();
             match crossterm::cursor::position() {

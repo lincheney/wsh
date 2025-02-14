@@ -138,18 +138,19 @@ impl Ui {
             queue!(ui.stdout, crossterm::cursor::MoveLeft(offset as u16))?;
         }
 
-        ui.cursor = ui.events.get_cursor_position().await?;
+        let events = ui.events.lock().await;
+        ui.cursor = events.get_cursor_position()?;
 
         // do NOT render ui elements if there is a foreground process
         if !ui.is_running_process {
             let (width, height) = crossterm::terminal::size()?;
-            // ui.tui.draw(&mut ui.stdout, width, height, ui.cursor.0)?;
+            ui.tui.draw(&mut ui.stdout, width, height, ui.cursor.0)?;
         }
 
         queue!(ui.stdout, EndSynchronizedUpdate)?;
         execute!(ui.stdout)?;
 
-        ui.cursor = ui.events.get_cursor_position().await?;
+        ui.cursor = events.get_cursor_position()?;
 
         Ok(())
     }
@@ -188,83 +189,6 @@ impl Ui {
                 for pid in self.borrow().await.threads.iter() {
                     nix::sys::signal::kill(*pid, nix::sys::signal::Signal::SIGINT)?;
                 }
-            },
-
-            Event::Key(KeyEvent{
-                code: KeyCode::F(11),
-                modifiers,
-                kind: event::KeyEventKind::Press,
-                state: _,
-            }) => {
-                use ratatui::{*, text::*, layout::*, widgets::*, style::*};
-                let mut terminal = ratatui::init_with_options(TerminalOptions{ viewport: Viewport::Inline(0) });
-                let ui = self.borrow_mut().await;
-                let mut stdout = &ui.stdout;
-
-                {
-                    let buffer = terminal.current_buffer_mut();
-                    buffer.resize(Rect{height: 8, ..buffer.area});
-                buffer.area.y = 38;
-                }
-                terminal.swap_buffers();
-                {
-                    let buffer = terminal.current_buffer_mut();
-                    buffer.resize(Rect{height: 8, ..buffer.area});
-                buffer.area.y = 38;
-                }
-                let mut frame = terminal.get_frame();
-                    let mut area = frame.area();
-                area.height = 8;
-                area.y = 38;
-
-                    let done = 1;
-                    let NUM_DOWNLOADS = 3;
-                    let progress = LineGauge::default()
-                        .filled_style(Style::default().fg(Color::Blue))
-                        .label(format!("{done}/{NUM_DOWNLOADS}"))
-                        .ratio(done as f64 / NUM_DOWNLOADS as f64);
-                    frame.render_widget(progress, area);
-                    // eprintln!("DEBUG(poled) \t{}\t= {:?}", stringify!(123), 123);
-
-                    // let block = Block::new().title(Line::from("Progress").centered());
-                    // frame.render_widget(block, area);
-
-                let buffer = terminal.current_buffer_mut();
-                // eprintln!("DEBUG(prams) \t{}\t= {:?}", stringify!(buffer), buffer);
-                let width = buffer.area.width;
-                let mut empty_ends = 0;
-                for chunk in buffer.content().chunks(width as _).rev() {
-                    if chunk.iter().all(|c| *c == ratatui::buffer::Cell::EMPTY) {
-                        empty_ends += 1;
-                    } else {
-                        break
-                    }
-                }
-                // eprintln!("DEBUG(hawked)\t{}\t= {:?}", stringify!(empty_ends), empty_ends);
-                let area = buffer.area;
-                let height = area.height - empty_ends;
-                    use crossterm::{cursor, style};
-        for _ in 0 .. height as _ {
-            queue!(stdout, style::Print("\n"))?;
-        }
-                    queue!(
-                        stdout,
-                        cursor::MoveUp(height),
-                        cursor::SavePosition,
-                        cursor::MoveToNextLine(1),
-                    )?;
-                // terminal.resize(Rect{height: area.height - empty_ends, ..area})?;
-                // eprintln!("DEBUG(rout)  \t{}\t= {:?}", stringify!(buffer), buffer);
-                terminal.flush()?;
-                // use std::{thread, time};
-                // let ten_millis = time::Duration::from_millis(1000);
-                // let now = time::Instant::now();
-                // thread::sleep(ten_millis);
-                terminal.swap_buffers();
-
-                // ratatui::restore();
-                queue!(stdout, cursor::RestorePosition)?;
-                ui.activate()?;
             },
 
             Event::Key(KeyEvent{

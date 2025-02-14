@@ -6,7 +6,6 @@ use std::default::Default;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 use async_std::sync::Mutex as AsyncMutex;
-use futures::Stream;
 use super::bindings;
 
 pub struct WaitForChunk<'a> {
