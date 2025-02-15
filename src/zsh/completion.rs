@@ -6,6 +6,7 @@ use std::default::Default;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
 use async_std::sync::Mutex as AsyncMutex;
+use bstr::{BStr, BString};
 use super::bindings;
 use crate::utils::*;
 
@@ -54,7 +55,7 @@ impl std::future::Future for WaitForChunk<'_> {
 
 #[derive(Debug)]
 pub struct Streamer {
-    buffer: String,
+    buffer: BString,
     finished: bool,
     matches: Vec<Arc<bindings::cmatch>>,
     wakers: Vec<Waker>,
@@ -167,7 +168,7 @@ pub fn restore_compadd() {
 // zsh completion is intimately tied to zle
 // so there's no "low-level" function to hook into
 // the best we can do is emulate completecall()
-pub fn get_completions(line: &str) -> anyhow::Result<(AsyncArcMutex<StreamConsumer>, ArcMutex<Streamer>)> {
+pub fn get_completions(line: &BStr) -> anyhow::Result<(AsyncArcMutex<StreamConsumer>, ArcMutex<Streamer>)> {
     if let Some(compadd) = COMPADD_STATE.get() {
         let (producer, consumer) = {
             let mut compadd = compadd.lock().unwrap();
@@ -200,7 +201,7 @@ pub fn _get_completions(streamer: &Mutex<Streamer>) {
         {
             let line = &streamer.lock().unwrap().buffer;
             super::Variable::set("BUFFER", line).unwrap();
-            super::Variable::set("CURSOR", &format!("{}", line.len() + 1)).unwrap();
+            super::Variable::set("CURSOR", format!("{}", line.len() + 1)).unwrap();
         }
         zsh_sys::endparamscope();
 
@@ -225,13 +226,13 @@ pub fn clear_cache() {
     }
 }
 
-pub fn insert_completion(line: &str, m: &bindings::cmatch) -> (Vec<u8>, usize) {
+pub fn insert_completion(line: &BStr, m: &bindings::cmatch) -> (BString, usize) {
     unsafe {
         // set the zle buffer
         zsh_sys::startparamscope();
         bindings::makezleparams(0);
         super::Variable::set("BUFFER", line).unwrap();
-        super::Variable::set("CURSOR", &format!("{}", line.len() + 1)).unwrap();
+        super::Variable::set("CURSOR", format!("{}", line.len() + 1)).unwrap();
         zsh_sys::endparamscope();
 
         bindings::metafy_line();
@@ -245,6 +246,6 @@ pub fn insert_completion(line: &str, m: &bindings::cmatch) -> (Vec<u8>, usize) {
         zsh_sys::endparamscope();
 
         let cursor = std::str::from_utf8(&cursor).ok().and_then(|s| s.parse().ok()).unwrap_or(buffer.len());
-        (buffer, cursor)
+        (buffer.into(), cursor)
     }
 }

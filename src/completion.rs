@@ -35,12 +35,12 @@ impl UserData for CompletionMatch {
 async fn get_completions(ui: Ui, shell: Shell, _lua: Lua, val: Option<String>) -> Result<CompletionStream> {
 
     let val = if let Some(val) = val {
-        val
+        val.into()
     } else {
-        ui.borrow().await.buffer.contents.clone()
+        ui.borrow().await.buffer.get_contents().clone()
     };
 
-    let result = shell.lock().await.get_completions(&val);
+    let result = shell.lock().await.get_completions(val.as_ref());
     let (completions, starter) = result.map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))?;
 
     let shell_clone = shell.clone();
@@ -66,13 +66,12 @@ async fn get_completions(ui: Ui, shell: Shell, _lua: Lua, val: Option<String>) -
 }
 
 async fn insert_completion(ui: Ui, shell: Shell, _lua: Lua, val: CompletionMatch) -> Result<()> {
-    let buffer = ui.borrow().await.buffer.contents.clone();
-    let (buffer, cursor) = shell.lock().await.insert_completion(&buffer, &val.inner);
-    {
-        let mut ui = ui.borrow_mut().await;
-        ui.buffer.contents = String::from_utf8(buffer)?;
-        ui.buffer.cursor = cursor;
-    }
+    let buffer = ui.borrow().await.buffer.get_contents().clone();
+    let (buffer, pos) = shell.lock().await.insert_completion(buffer.as_ref(), &val.inner);
+    ui.borrow_mut().await.buffer.mutate(move |contents, cursor, byte_pos| {
+        *contents = buffer;
+        *cursor = pos;
+    });
     ui.draw(&shell).await?;
     Ok(())
 }

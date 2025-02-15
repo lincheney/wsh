@@ -37,6 +37,9 @@
 typedef size_t LinkList;
 typedef uint32_t mode_t;
 
+#define Inpar		((char) 0x88)
+#define Outpar		((char) 0x8a)
+
 typedef struct cmatcher  *Cmatcher;
 typedef struct cmlist    *Cmlist;
 typedef struct cpattern  *Cpattern;

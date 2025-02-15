@@ -4,6 +4,7 @@ use std::os::raw::{c_int, c_char};
 use anyhow::Result;
 use crate::c_string_array::CStringArray;
 use super::ZString;
+use bstr::{BStr, BString};
 
 fn pm_type(flags: c_int) -> c_int {
     flags & (zsh_sys::PM_SCALAR | zsh_sys::PM_INTEGER | zsh_sys::PM_EFLOAT | zsh_sys::PM_FFLOAT | zsh_sys::PM_ARRAY | zsh_sys::PM_HASHED) as c_int
@@ -18,15 +19,15 @@ pub struct Variable{
 pub enum Value {
     Integer(i64),
     Float(f64),
-    Array(Vec<Vec<u8>>),
-    String(Vec<u8>),
-    HashMap(HashMap<Vec<u8>, Vec<u8>>),
+    Array(Vec<BString>),
+    String(BString),
+    HashMap(HashMap<BString, BString>),
 }
 
 impl Variable {
-    pub fn get(name: &str) -> Option<Self> {
+    pub fn get<S: AsRef<BStr>>(name: S) -> Option<Self> {
         let bracks = 1;
-        let c_name = CString::new(name).unwrap();
+        let c_name = CString::new(name.as_ref().to_vec()).unwrap();
         let mut c_varname_ptr = c_name.as_ptr() as *mut c_char;
         let mut value = unsafe{ std::mem::MaybeUninit::<zsh_sys::value>::zeroed().assume_init() };
         let ptr = unsafe{ zsh_sys::getvalue(
@@ -39,15 +40,19 @@ impl Variable {
         } else {
             Some(Self{
                 value,
-                name_is_digit: name.chars().all(|c| c.is_ascii_digit()),
+                name_is_digit: name
+                    .as_ref()
+                    .utf8_chunks()
+                    .flat_map(|chunk| chunk.valid().chars())
+                    .all(|c| c.is_ascii_digit()),
             })
         }
     }
 
-    pub fn set(name: &str, value: &str) -> Result<()> {
+    pub fn set<S: AsRef<[u8]>>(name: &str, value: S) -> Result<()> {
         let c_name = CString::new(name).unwrap();
         // setsparam will free the value for us
-        let c_value: ZString = value.into();
+        let c_value: ZString = value.as_ref().into();
         if unsafe{ zsh_sys::setsparam(c_name.as_ptr() as *mut _, c_value.into_raw()) }.is_null() {
             Err(anyhow::anyhow!("failed to set var {name:?}"))
         } else {
@@ -64,15 +69,15 @@ impl Variable {
         unsafe{ &mut *self.value.pm }
     }
 
-    pub fn as_bytes(&mut self) -> Vec<u8> {
+    pub fn as_bytes(&mut self) -> BString {
         let str = unsafe{
             let var = zsh_sys::getstrvalue(&mut self.value as *mut _);
             if var.is_null() {
-                return vec![];
+                return BString::new(vec![]);
             }
             CStr::from_ptr(var)
         };
-        str.to_bytes().to_owned()
+        str.to_bytes().into()
     }
 
     pub fn try_as_int(&mut self) -> Result<Option<i64>> {
@@ -87,7 +92,7 @@ impl Variable {
         )
     }
 
-    pub fn try_as_array(&mut self) -> Option<Vec<Vec<u8>>> {
+    pub fn try_as_array(&mut self) -> Option<Vec<BString>> {
         if self.value.isarr != 0 {
             let array: CStringArray = unsafe{ zsh_sys::getarrvalue(&mut self.value as *mut _) }.into();
             Some(array.to_vec())
@@ -96,7 +101,7 @@ impl Variable {
         }
     }
 
-    pub fn try_as_hashmap(&mut self) -> Result<Option<HashMap<Vec<u8>, Vec<u8>>>> {
+    pub fn try_as_hashmap(&mut self) -> Result<Option<HashMap<BString, BString>>> {
         if pm_type(self.param().node.flags) == zsh_sys::PM_HASHED as c_int && !self.name_is_digit {
 
             let mut hashmap = HashMap::new();
@@ -110,8 +115,8 @@ impl Variable {
 
                 for (k, v) in keys.zip(values) {
                     match (k, v) {
-                        (Some(k), Some(v)) => hashmap.insert(k.to_bytes().to_owned(), v.to_bytes().to_owned()),
-                        (Some(k), None)    => hashmap.insert(k.to_bytes().to_owned(), vec![]),
+                        (Some(k), Some(v)) => hashmap.insert(k.to_bytes().into(), v.to_bytes().into()),
+                        (Some(k), None)    => hashmap.insert(k.to_bytes().into(), vec![].into()),
                         (None, Some(_))    => return Err(anyhow::anyhow!("hashmap has more values than keys")),
                         _ => break,
                     };

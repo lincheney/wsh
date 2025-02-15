@@ -11,7 +11,7 @@ use anyhow::Result;
 
 use crossterm::{
     terminal::{Clear, ClearType, BeginSynchronizedUpdate, EndSynchronizedUpdate},
-    cursor::{position},
+    cursor::{position, MoveUp, MoveDown, MoveToColumn, SavePosition, RestorePosition},
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     style,
     execute,
@@ -20,7 +20,6 @@ use crossterm::{
 
 use crate::keybind;
 use crate::completion;
-use crate::zsh;
 use crate::shell::Shell;
 
 fn lua_error<T>(msg: &str) -> Result<T, mlua::Error> {
@@ -34,11 +33,6 @@ impl crossterm::Command for SetScrollRegion {
     }
 }
 
-#[derive(Debug, Default)]
-struct UiDirty {
-    buffer: bool,
-}
-
 pub struct UiInner {
     pub lua: Lua,
     pub lua_api: mlua::Table,
@@ -47,10 +41,12 @@ pub struct UiInner {
     pub tui: crate::tui::Tui,
 
     events: crate::event_stream::EventLocker,
-    dirty: UiDirty,
     is_running_process: bool,
+    dirty: bool,
+    cursory: u16,
     pub keybinds: keybind::KeybindMapping,
     pub buffer: crate::buffer::Buffer,
+    pub prompt: crate::prompt::Prompt,
 
     pub threads: HashSet<nix::unistd::Pid>,
     stdout: std::io::Stdout,
@@ -79,10 +75,12 @@ impl Ui {
             lua_cache,
             events,
             is_running_process: false,
+            dirty: true,
+            cursory: 0,
             tui: Default::default(),
             threads: HashSet::new(),
-            dirty: Default::default(),
             buffer: Default::default(),
+            prompt: crate::prompt::Prompt::new(shell, None).await,
             keybinds: Default::default(),
             stdout: std::io::stdout(),
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
@@ -115,38 +113,75 @@ impl Ui {
         let mut ui = self.borrow_mut().await;
         let ui = ui.deref_mut();
 
-        queue!(
-            ui.stdout,
-            BeginSynchronizedUpdate,
-            style::Print("\r"),
-            Clear(ClearType::FromCursorDown),
-        )?;
+        // if ui.dirty it means redraw everything from scratch
+        if ui.dirty {
+            queue!(ui.stdout, Clear(ClearType::FromCursorDown))?;
+        }
 
+        // do NOT render ui elements if there is a foreground process
+        if !(ui.dirty || ui.buffer.dirty || ui.prompt.dirty || ui.tui.dirty) || ui.is_running_process {
+            return Ok(())
+        }
 
-        let prompt = shell.lock().await.get_prompt(None);
-        let prompt = prompt.as_ref().map(|p| p.to_bytes()).unwrap_or(b">>> ");
-        ui.stdout.write_all(prompt)?;
-        ui.stdout.write_all(ui.buffer.get_contents().as_bytes())?;
+        crossterm::terminal::disable_raw_mode()?;
+        queue!(ui.stdout, BeginSynchronizedUpdate)?;
+        let size = crossterm::terminal::size()?;
 
-        let offset = ui.buffer.get_contents().len() - ui.buffer.get_cursor();
-        if offset > 0 {
-            queue!(ui.stdout, crossterm::cursor::MoveLeft(offset as u16))?;
+        if ui.dirty || ui.prompt.needs_redraw() {
+            if ui.cursory > 0 {
+                // move back to top of drawing area
+                queue!(ui.stdout, MoveUp(ui.cursory))?;
+            }
+            let key = (ui.prompt.width, ui.prompt.height);
+            ui.prompt.draw(&mut ui.stdout, shell, size).await?;
+
+            // prompt has shifted so need to redraw everything below
+            if key != (ui.prompt.width, ui.prompt.height) {
+                ui.dirty = true;
+            }
+        } else if ui.buffer.cursory > 0 {
+            // move back to line of the prompt
+            queue!(ui.stdout, MoveUp(ui.buffer.cursory as _))?;
+        }
+
+        if ui.dirty || ui.buffer.needs_redraw() {
+            // move to end of prompt
+            queue!(ui.stdout, MoveToColumn(ui.prompt.width as _))?;
+            let key = ui.buffer.height;
+            ui.buffer.draw(&mut ui.stdout, size, ui.prompt.width)?;
+            // buffer has shifted  so need to redraw everything below
+            if key != ui.buffer.height {
+                ui.dirty = true;
+            }
+        } else if ui.buffer.cursory > 0 {
+            // move to cursor
+            queue!(ui.stdout, MoveDown(ui.buffer.cursory as _))?;
         }
 
         let events = ui.events.lock().await;
-        ui.cursor = events.get_cursor_position()?;
 
-        // do NOT render ui elements if there is a foreground process
-        if !ui.is_running_process {
-            let (width, height) = crossterm::terminal::size()?;
-            ui.tui.draw(&mut ui.stdout, width, height, ui.cursor.1)?;
+        if ui.dirty || ui.tui.needs_redraw() {
+            // move to last line of buffer
+            let yoffset = (ui.buffer.height - ui.buffer.cursory - 1) as u16;
+            if yoffset > 0 {
+                queue!(ui.stdout, MoveDown(yoffset))?;
+            }
+            // tui needs to know exactly where it is
+            ui.cursor = events.get_cursor_position()?;
+            ui.tui.draw(&mut ui.stdout, size, ui.cursor.1)?;
+            // then back
+            if yoffset > 0 {
+                queue!(ui.stdout, MoveUp(yoffset))?;
+            }
         }
 
-        queue!(ui.stdout, EndSynchronizedUpdate)?;
-        execute!(ui.stdout)?;
-
+        execute!(ui.stdout, EndSynchronizedUpdate)?;
+        ui.cursory = (ui.prompt.height + ui.buffer.height) as u16;
         ui.cursor = events.get_cursor_position()?;
+        crossterm::terminal::enable_raw_mode()?;
 
+        ui.cursory = 0;
+        ui.dirty = false;
         Ok(())
     }
 
@@ -159,13 +194,12 @@ impl Ui {
                 let ui = self.clone();
                 let shell = shell.clone();
 
-                if let Err(err) = callback.call::<LuaValue>(mlua::Nil) {
+                if let Err(err) = callback.call_async::<LuaValue>(mlua::Nil).await {
                     let mut ui = ui.borrow_mut().await;
                     ui.tui.add_error_message(format!("ERROR: {}", err), None);
-                    ui.dirty.buffer = true;
                 }
 
-                if let Err(err) = ui.refresh_on_state(&shell).await {
+                if let Err(err) = ui.draw(&shell).await {
                     eprintln!("DEBUG(armada)\t{}\t= {:?}", stringify!(err), err);
                 }
 
@@ -194,28 +228,20 @@ impl Ui {
                 kind: event::KeyEventKind::Press,
                 state: _,
             }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
-                let no_redraw = {
+                {
                     let mut ui = self.borrow_mut().await;
-
                     // flush cache
                     ui.lua_cache.set("buffer", mlua::Nil)?;
                     ui.lua_cache.set("cursor", mlua::Nil)?;
 
-                    ui.buffer.mutate(|contents, cursor| -> Result<bool> {
-                        contents.insert(*cursor, c);
+                    ui.buffer.mutate(|contents, cursor, byte_pos| {
+                        let mut buf = [0; 4];
+                        contents.splice(byte_pos .. byte_pos, c.encode_utf8(&mut buf).as_bytes().iter().copied());
                         *cursor += 1;
-                        Ok(*cursor == contents.len())
-                    })?
-                };
-
-                if no_redraw {
-                    let mut ui = self.borrow_mut().await;
-                    let ui = ui.deref_mut();
-                    let contents = ui.buffer.get_contents();
-                    execute!(ui.stdout, style::Print(&contents[contents.len() - 1 ..]))?;
-                } else {
-                    self.draw(shell).await?;
+                    });
                 }
+
+                self.draw(shell).await?;
             },
 
             Event::Key(KeyEvent{
@@ -233,7 +259,7 @@ impl Ui {
                 kind: event::KeyEventKind::Press,
                 state: _,
             }) => {
-                let (complete, tokens) = shell.lock().await.parse("echo $(");
+                // let (complete, tokens) = shell.lock().await.parse("echo $(");
             },
 
             _ => {},
@@ -247,7 +273,11 @@ impl Ui {
     }
 
     async fn accept_line(&self, shell: &Shell) -> Result<bool> {
-        self.borrow_mut().await.is_running_process = true;
+        {
+            let mut ui = self.borrow_mut().await;
+            ui.is_running_process = true;
+            ui.dirty = true;
+        }
         self.draw(shell).await?;
 
         {
@@ -255,11 +285,10 @@ impl Ui {
             let ui = ui.deref_mut();
             ui.tui.clear_non_persistent();
 
-
             {
                 // time to execute
                 let mut shell = shell.lock().await;
-                let (complete, _tokens) = shell.parse(ui.buffer.get_contents());
+                let (complete, _tokens) = shell.parse(ui.buffer.get_contents().as_ref());
                 if complete {
                     shell.clear_completion_cache();
 
@@ -267,16 +296,18 @@ impl Ui {
                     // new line
                     execute!(ui.stdout, style::Print("\r\n"))?;
 
-                    if let Err(code) = shell.exec(ui.buffer.get_contents(), None) {
+                    if let Err(code) = shell.exec(ui.buffer.get_contents().as_ref(), None) {
                         eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
                     }
                     ui.buffer.reset();
+                    ui.prompt.dirty = true;
                 } else {
                     eprintln!("DEBUG(lunch) \t{}\t= {:?}", stringify!("invalid command"), "invalid command");
                 }
                 ui.is_running_process = false;
             }
 
+            (*ui).dirty = true;
             ui.activate()?;
         }
 
@@ -328,31 +359,21 @@ impl Ui {
         })?)
     }
 
-    pub async fn refresh_on_state(&self, shell: &Shell) -> Result<()> {
-        let dirty = self.borrow().await.dirty.buffer;
-        if dirty {
-            self.draw(shell).await?;
-        }
-
-        self.clean().await;
-        Ok(())
-    }
-
     async fn init_lua(&self, shell: &Shell) -> Result<()> {
-        self.set_lua_async_fn("__get_cursor", shell, |ui, _shell, _lua, _val: ()| async move { Ok(ui.borrow().await.buffer.get_cursor())} ).await?;
-        self.set_lua_async_fn("__get_buffer", shell, |ui, _shell, _lua, _val: ()| async move { Ok(ui.borrow().await.buffer.get_contents().clone()) }).await?;
+        self.set_lua_async_fn("__get_cursor", shell, |ui, _shell, _lua, _val: ()| async move {
+            Ok(ui.borrow().await.buffer.get_cursor())
+        } ).await?;
+        self.set_lua_async_fn("__get_buffer", shell, |ui, _shell, lua, _val: ()| async move {
+            Ok(lua.create_string(&ui.borrow().await.buffer.get_contents())?)
+        }).await?;
 
         self.set_lua_async_fn("__set_cursor", shell, |ui, _shell, _lua, val: usize| async move {
-            let mut ui = ui.borrow_mut().await;
-            ui.buffer.set_cursor(val);
-            ui.dirty.buffer = true;
+            ui.borrow_mut().await.buffer.set_cursor(val);
             Ok(())
         }).await?;
 
-        self.set_lua_async_fn("__set_buffer", shell, |ui, _shell, _lua, val: String| async move {
-            let mut ui = ui.borrow_mut().await;
-            ui.buffer.set_contents(val);
-            ui.dirty.buffer = true;
+        self.set_lua_async_fn("__set_buffer", shell, |ui, _shell, _lua, val: mlua::String| async move {
+            ui.borrow_mut().await.buffer.set_contents((*val.as_bytes()).into());
             Ok(())
         }).await?;
 
@@ -364,8 +385,8 @@ impl Ui {
             ui.draw(&shell).await
         }).await?;
 
-        self.set_lua_async_fn("eval", shell, |_ui, shell, lua, (cmd, stderr): (String, bool)| async move {
-            let data = shell.lock().await.eval(&cmd, stderr).unwrap();
+        self.set_lua_async_fn("eval", shell, |_ui, shell, lua, (cmd, stderr): (mlua::String, bool)| async move {
+            let data = shell.lock().await.eval((*cmd.as_bytes()).into(), stderr).unwrap();
             Ok(lua.create_string(data)?)
         }).await?;
 
@@ -382,8 +403,19 @@ impl Ui {
         Ok(())
     }
 
-    async fn clean(&self) {
-        self.borrow_mut().await.dirty = UiDirty::default();
+    pub fn allocate_height(stdout: &mut std::io::Stdout, height: u16) -> Result<()> {
+        // the y will be wrong but at least the x will be right
+        queue!(stdout, SavePosition)?;
+        for _ in 0 .. height {
+            queue!(stdout, style::Print("\n"))?;
+        }
+        queue!(
+            stdout,
+            RestorePosition,
+            MoveDown(height),
+            MoveUp(height),
+        )?;
+        Ok(())
     }
 
 }

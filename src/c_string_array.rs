@@ -1,5 +1,6 @@
 use std::ffi::{CStr};
 use std::os::raw::{c_char};
+use bstr::BString;
 
 pub struct CStringArray {
     pub ptr: *mut *mut c_char,
@@ -27,8 +28,8 @@ impl CStringArray {
         self.iter_ptr().map(|ptr| unsafe{ CStr::from_ptr(ptr) })
     }
 
-    pub fn to_vec(&self) -> Vec<Vec<u8>> {
-        self.iter().map(|s| s.to_bytes().to_owned()).collect()
+    pub fn to_vec(&self) -> Vec<BString> {
+        self.iter().map(|s| s.to_bytes().to_owned()).map(BString::new).collect()
     }
 
 }

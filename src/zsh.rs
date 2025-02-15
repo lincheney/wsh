@@ -1,4 +1,4 @@
-use std::ffi::{CString};
+use std::ffi::{CString, CStr};
 use std::os::raw::*;
 use std::default::Default;
 use std::ptr::null_mut;
@@ -27,8 +27,8 @@ impl Default for ExecstringOpts<'_> {
     }
 }
 
-pub fn execstring(cmd: &str, opts: ExecstringOpts) {
-    let cmd = CString::new(cmd).unwrap();
+pub fn execstring<S: AsRef<BStr>>(cmd: S, opts: ExecstringOpts) {
+    let cmd = CString::new(cmd.as_ref().to_vec()).unwrap();
     let context = opts.context.map(|c| CString::new(c).unwrap());
     unsafe{ zsh_sys::execstring(
         cmd.as_ptr() as _,
@@ -64,7 +64,7 @@ pub(crate) fn iter_linked_list(list: zsh_sys::LinkList) -> impl Iterator<Item=*m
     }
 }
 
-pub fn get_prompt(prompt: Option<&BStr>) -> Option<CString> {
+pub fn get_prompt(prompt: Option<&BStr>, escaped: bool) -> Option<CString> {
     let prompt = if let Some(prompt) = prompt {
         CString::new(prompt.to_vec()).unwrap()
     } else {
@@ -77,8 +77,19 @@ pub fn get_prompt(prompt: Option<&BStr>) -> Option<CString> {
     let r = null_mut();
     #[allow(non_snake_case)]
     let R = null_mut();
+    let glitch = if escaped { 1 } else { 0 };
     unsafe {
-        let ptr = zsh_sys::promptexpand(prompt.as_ptr() as _, 0, r, R, null_mut());
+        let ptr = zsh_sys::promptexpand(prompt.as_ptr() as _, glitch, r, R, null_mut());
         Some(CString::from_raw(ptr))
     }
+}
+
+pub fn get_prompt_size(prompt: &CStr) -> (c_int, c_int) {
+    let mut width = 0;
+    let mut height = 0;
+    let overflow = 0;
+    unsafe {
+        zsh_sys::countprompt(prompt.as_ptr() as _, &mut width as _, &mut height as _, overflow);
+    }
+    (width, height)
 }

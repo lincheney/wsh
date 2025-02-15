@@ -77,15 +77,20 @@ wish.set_keymap('<tab>', function()
                     type = 'Rounded',
                 },
             }
-            msg:set_options{text = table.concat(text, '\n')}
+            msg:set_options{text = '...\n' .. table.concat(text, '\n')}
             wish.redraw()
         end
+    end
+
+    if msg then
+        msg:set_options{text = 'done\n' .. table.concat(text, '\n')}
+        wish.redraw()
     end
 
     if #text == 1 then
         wish.insert_completion(last)
         if msg then
-            msg:remove()
+            pcall(function() msg:remove() end)
             msg = nil
         end
         wish.redraw()

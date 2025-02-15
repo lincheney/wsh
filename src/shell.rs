@@ -1,10 +1,11 @@
 use std::os::fd::{RawFd};
 use std::os::raw::{c_long};
-use std::ffi::CString;
+use std::ffi::{CString, CStr};
 use std::default::Default;
 use std::sync::Arc;
 use async_std::sync::Mutex;
 use async_lock::futures::Lock;
+use bstr::{BStr, BString};
 
 use crate::zsh;
 
@@ -37,19 +38,19 @@ impl CompletionStarter {
 
 impl ShellInner {
 
-    pub fn exec(&mut self, string: &str, _fds: Option<&[RawFd; 3]>) -> Result<(), c_long> {
+    pub fn exec(&mut self, string: &BStr, _fds: Option<&[RawFd; 3]>) -> Result<(), c_long> {
         zsh::execstring(string, Default::default());
         let code = zsh::get_return_code();
         if code > 0 { Err(code) } else { Ok(()) }
     }
 
-    pub fn eval(&mut self, string: &str, _capture_stderr: bool) -> Result<Vec<u8>, c_long> {
+    pub fn eval(&mut self, string: &BStr, _capture_stderr: bool) -> Result<BString, c_long> {
         zsh::execstring(string, Default::default());
         let code = zsh::get_return_code();
-        if code > 0 { Err(code) } else { Ok(vec![]) }
+        if code > 0 { Err(code) } else { Ok(BString::new(vec![])) }
     }
 
-    pub fn get_completions(&self, string: &str) -> anyhow::Result<(Arc<Mutex<zsh::completion::StreamConsumer>>, CompletionStarter)> {
+    pub fn get_completions(&self, string: &BStr) -> anyhow::Result<(Arc<Mutex<zsh::completion::StreamConsumer>>, CompletionStarter)> {
         let (consumer, producer) = zsh::completion::get_completions(string)?;
         Ok((consumer, CompletionStarter(producer)))
     }
@@ -58,16 +59,21 @@ impl ShellInner {
         zsh::completion::clear_cache()
     }
 
-    pub fn insert_completion(&self, string: &str, m: &zsh::cmatch) -> (Vec<u8>, usize) {
+    pub fn insert_completion(&self, string: &BStr, m: &zsh::cmatch) -> (BString, usize) {
         zsh::completion::insert_completion(string, m)
     }
 
-    pub fn parse(&mut self, string: &str) -> (bool, Vec<zsh::parser::Token>) {
-        zsh::parser::parse(string.into())
+    pub fn parse(&mut self, string: &BStr) -> (bool, Vec<zsh::parser::Token>) {
+        zsh::parser::parse(string)
     }
 
-    pub fn get_prompt(&mut self, prompt: Option<&str>) -> Option<CString> {
-        zsh::get_prompt(prompt.map(|p| p.into()))
+    pub fn get_prompt(&mut self, prompt: Option<&str>, escaped: bool) -> Option<CString> {
+        zsh::get_prompt(prompt.map(|p| p.into()), escaped)
+    }
+
+    pub fn get_prompt_size(&mut self, prompt: &CStr) -> (usize, usize) {
+        let (width, height) = zsh::get_prompt_size(prompt);
+        (width as _, height as _)
     }
 
 }

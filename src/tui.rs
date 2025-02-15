@@ -4,8 +4,8 @@ use serde::{Deserialize, Deserializer, de};
 use anyhow::Result;
 use crossterm::{
     cursor,
-    style,
     queue,
+    terminal::{Clear, ClearType},
 };
 use ratatui::{
     *,
@@ -176,7 +176,7 @@ pub struct Tui {
     counter: usize,
     widgets: Vec<Widget>,
 
-    dirty: bool,
+    pub dirty: bool,
     width: u16,
     height: u16,
 
@@ -296,14 +296,23 @@ impl Tui {
         std::mem::swap(&mut self.new_buffer, &mut self.old_buffer);
     }
 
-    pub fn draw(&mut self, stdout: &mut std::io::Stdout, width: u16, height: u16, cursory: u16) -> Result<()> {
+    pub fn needs_redraw(&self) -> bool {
+        self.dirty
+    }
+
+    pub fn draw(
+        &mut self,
+        stdout: &mut std::io::Stdout,
+        (width, height): (u16, u16),
+        cursory: u16,
+    ) -> Result<()> {
+
         if self.widgets.is_empty() {
             return Ok(())
         }
 
         let max_height = height * 2 / 3;
-
-        if self.dirty || max_height != self.height || width != self.width {
+        if max_height != self.height || width != self.width {
             self.swap_buffers();
             self.new_buffer.reset();
             self.refresh(width, max_height);
@@ -328,6 +337,7 @@ impl Tui {
 
             let allocate_more_space = (cursory + actual_height + 1).saturating_sub(height);
             if allocate_more_space > 0 {
+                // adjust cursory if new lines will be added below
                 let y = self.old_buffer.area.y.saturating_sub(allocate_more_space - 1);
                 self.old_buffer.area.y = y;
                 self.new_buffer.area.y = y;
@@ -337,17 +347,20 @@ impl Tui {
             let updates = self.old_buffer.diff(&self.new_buffer);
             if !updates.is_empty() {
                 if allocate_more_space > 0 {
-                    for _ in 0 .. actual_height as _ {
-                        queue!(stdout, style::Print("\n"))?;
-                    }
-                    queue!(stdout, cursor::MoveUp(actual_height))?;
+                    Ui::allocate_height(stdout, actual_height)?;
                 }
-                queue!(stdout, cursor::SavePosition, cursor::MoveToNextLine(1))?;
+                queue!(
+                    stdout,
+                    cursor::SavePosition,
+                    cursor::MoveToNextLine(1),
+                    cursor::MoveToColumn(0),
+                )?;
                 self.terminal.backend_mut().draw(updates.into_iter())?;
                 queue!(stdout, cursor::RestorePosition)?;
             }
         }
 
+        self.dirty = false;
         Ok(())
     }
 
