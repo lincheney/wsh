@@ -296,10 +296,6 @@ impl Tui {
         std::mem::swap(&mut self.new_buffer, &mut self.old_buffer);
     }
 
-    pub fn needs_redraw(&self) -> bool {
-        self.dirty
-    }
-
     pub fn draw(
         &mut self,
         stdout: &mut std::io::Stdout,

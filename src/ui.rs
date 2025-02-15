@@ -149,7 +149,7 @@ impl Ui {
         queue!(ui.stdout, BeginSynchronizedUpdate)?;
         let size = crossterm::terminal::size()?;
 
-        if ui.dirty || ui.prompt.needs_redraw() {
+        if ui.dirty || ui.prompt.dirty {
             // move back to top of drawing area
             queue!(ui.stdout, MoveUp(ui.cursory))?;
             ui.dirty = ui.prompt.draw(&mut ui.stdout, &mut *shell.lock().await, size)? || ui.dirty;
@@ -158,7 +158,7 @@ impl Ui {
             queue!(ui.stdout, MoveUp(ui.buffer.cursory as _))?;
         }
 
-        if ui.dirty || ui.buffer.needs_redraw() {
+        if ui.dirty || ui.buffer.dirty {
             // MUST start on same line as prompt
             ui.dirty = ui.buffer.draw(&mut ui.stdout, size, ui.prompt.width)? || ui.dirty;
         } else {
@@ -168,7 +168,7 @@ impl Ui {
 
         let events = ui.events.lock().await;
 
-        if ui.dirty || ui.tui.needs_redraw() {
+        if ui.dirty || ui.tui.dirty {
             // move to last line of buffer
             let yoffset = (ui.buffer.height - ui.buffer.cursory - 1) as u16;
             queue!(ui.stdout, MoveDown(yoffset))?;

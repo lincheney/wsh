@@ -34,10 +34,6 @@ impl Prompt {
         self.height = size.1;
     }
 
-    pub fn needs_redraw(&self) -> bool {
-        self.dirty
-    }
-
     pub fn draw(
         &mut self,
         stdout: &mut std::io::Stdout,
