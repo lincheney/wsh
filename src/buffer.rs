@@ -129,6 +129,17 @@ impl Buffer {
         self.fix_cursor();
     }
 
+    pub fn insert(&mut self, data: &[u8]) {
+        let byte_pos = self.cursor_byte_pos();
+        self.contents.splice(byte_pos .. byte_pos, data.iter().copied());
+        self.len = None;
+
+        // calculate the new cursor
+        let byte_pos = byte_pos + data.len();
+        self.cursor = self.contents.grapheme_indices().take_while(|(s, _, _)| *s < byte_pos).count();
+        self.fix_cursor();
+    }
+
     pub fn reset(&mut self) {
         self.contents.clear();
         self.len = None;

@@ -237,11 +237,8 @@ impl Ui {
                     ui.lua_cache.set("buffer", mlua::Nil)?;
                     ui.lua_cache.set("cursor", mlua::Nil)?;
 
-                    ui.buffer.mutate(|contents, cursor, byte_pos| {
-                        let mut buf = [0; 4];
-                        contents.splice(byte_pos .. byte_pos, c.encode_utf8(&mut buf).as_bytes().iter().copied());
-                        *cursor += 1;
-                    });
+                    let mut buf = [0; 4];
+                    ui.buffer.insert(c.encode_utf8(&mut buf).as_bytes());
                 }
 
                 self.draw(shell).await?;
@@ -263,6 +260,12 @@ impl Ui {
                 state: _,
             }) => {
                 // let (complete, tokens) = shell.lock().await.parse("echo $(");
+            },
+
+            Event::Paste(data) => {
+                // insert this into the buffer
+                self.borrow_mut().await.buffer.insert(data.as_bytes());
+                self.draw(shell).await?;
             },
 
             _ => {},
@@ -301,10 +304,7 @@ impl Ui {
                     ui.buffer.reset();
                     ui.dirty = true;
                 } else {
-                    ui.buffer.mutate(|contents, cursor, byte_pos| {
-                        contents.splice(byte_pos .. byte_pos, [b'\n']);
-                        *cursor += 1;
-                    });
+                    ui.buffer.insert(&[b'\n']);
                 }
                 ui.is_running_process = false;
             }
