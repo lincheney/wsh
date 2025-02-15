@@ -3,7 +3,7 @@ use std::io::Write;
 use bstr::BStr;
 use anyhow::Result;
 use crossterm::queue;
-use crate::shell::Shell;
+use crate::shell::ShellInner;
 
 #[derive(Default)]
 pub struct Prompt {
@@ -18,26 +18,18 @@ pub struct Prompt {
 impl Prompt {
     const DEFAULT: &str = ">>> ";
 
-    pub async fn new(shell: &Shell, default: Option<&BStr>) -> Self {
+    pub fn new(default: Option<&BStr>) -> Self {
         let mut prompt = Self::default();
         prompt.default_prompt = default
             .map(|s| CString::new(s.to_vec()))
             .unwrap_or_else(|| CString::new(Prompt::DEFAULT)).unwrap();
-
-        prompt.refresh_prompt(shell).await;
         prompt
     }
 
-    async fn refresh_prompt(&mut self, shell: &Shell) {
-        let mut shell = shell.lock().await;
-        let size = if let Some(prompt) = shell.get_prompt(None, false) {
-            self.prompt = prompt;
-            let prompt = shell.get_prompt(None, true).unwrap();
-            shell.get_prompt_size(&prompt)
-        } else {
-            self.prompt = self.default_prompt.clone();
-            shell.get_prompt_size(&self.prompt)
-        };
+    fn refresh_prompt(&mut self, shell: &mut ShellInner) {
+        let prompt = shell.get_prompt(None, true).unwrap_or_else(|| self.default_prompt.clone());
+        let size = shell.get_prompt_size(&prompt);
+        self.prompt = ShellInner::remove_invisible_chars(&prompt).into();
         self.width = size.0;
         self.height = size.1;
     }
@@ -46,15 +38,15 @@ impl Prompt {
         self.dirty
     }
 
-    pub async fn draw(
+    pub fn draw(
         &mut self,
         stdout: &mut std::io::Stdout,
-        shell: &Shell,
+        shell: &mut ShellInner,
         _: (u16, u16),
     ) -> Result<bool> {
 
         let old = (self.width, self.height);
-        self.refresh_prompt(shell).await;
+        self.refresh_prompt(shell);
 
         queue!(stdout, crossterm::cursor::MoveToColumn(0))?;
         stdout.write_all(self.prompt.as_bytes())?;

@@ -76,4 +76,15 @@ impl ShellInner {
         (width as _, height as _)
     }
 
+    pub fn remove_invisible_chars(string: &CStr) -> std::borrow::Cow<CStr> {
+        let bytes = string.to_bytes();
+        if bytes.contains(&(zsh::Inpar as _)) || bytes.contains(&(zsh::Outpar as _)) {
+            let mut bytes = bytes.to_owned();
+            bytes.retain(|c| *c != zsh::Inpar as _ && *c != zsh::Outpar as _);
+            std::borrow::Cow::Owned(CString::new(bytes).unwrap())
+        } else {
+            std::borrow::Cow::Borrowed(string)
+        }
+    }
+
 }

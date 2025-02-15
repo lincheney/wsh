@@ -102,7 +102,7 @@ impl Ui {
             tui: Default::default(),
             threads: HashSet::new(),
             buffer: Default::default(),
-            prompt: crate::prompt::Prompt::new(shell, None).await,
+            prompt: crate::prompt::Prompt::new(None),
             keybinds: Default::default(),
             stdout: std::io::stdout(),
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
@@ -152,7 +152,7 @@ impl Ui {
         if ui.dirty || ui.prompt.needs_redraw() {
             // move back to top of drawing area
             queue!(ui.stdout, MoveUp(ui.cursory))?;
-            ui.dirty = ui.prompt.draw(&mut ui.stdout, shell, size).await? || ui.dirty;
+            ui.dirty = ui.prompt.draw(&mut ui.stdout, &mut *shell.lock().await, size)? || ui.dirty;
         } else {
             // move back to prompt line
             queue!(ui.stdout, MoveUp(ui.buffer.cursory as _))?;

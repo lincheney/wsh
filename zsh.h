@@ -37,8 +37,8 @@
 typedef size_t LinkList;
 typedef uint32_t mode_t;
 
-#define Inpar		((char) 0x88)
-#define Outpar		((char) 0x8a)
+mod_export static char Inpar = ((char) 0x88);
+mod_export static char Outpar = ((char) 0x8a);
 
 typedef struct cmatcher  *Cmatcher;
 typedef struct cmlist    *Cmlist;
