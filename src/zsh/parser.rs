@@ -5,9 +5,9 @@ use bstr::{BStr, ByteSlice};
 
 #[derive(Debug, Copy, Clone)]
 pub enum StringType {
-    DoubleQuoted,
-    SingleQuoted,
-    DollarQuoted, // $'...'
+    Double,
+    Single,
+    Dollar, // $'...'
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -15,7 +15,7 @@ pub enum TokenKind {
     Generic,
     String(StringType),
     CommandSeparator,
-    CommandSubstitution,
+    // CommandSubstitution,
     Subshell(bool),
     Block(bool),
 }
@@ -27,16 +27,16 @@ pub struct Token {
 }
 
 impl Token {
-    fn new(string: &BStr, range: Range<usize>, prev_kind: TokenKind) -> Self {
+    fn new(string: &BStr, range: Range<usize>, _prev_kind: TokenKind) -> Self {
         let kind = match string.as_bytes() {
             b";" | b"&" | b"&&" | b"|" | b"||"  => TokenKind::CommandSeparator,
             b"(" => TokenKind::Subshell(true),
             b")" => TokenKind::Subshell(false),
             b"{" => TokenKind::Block(true),
             b"}" => TokenKind::Block(false),
-            s if s.starts_with(b"\"") => TokenKind::String(StringType::DoubleQuoted),
-            s if s.starts_with(b"'") => TokenKind::String(StringType::SingleQuoted),
-            s if s.starts_with(b"$'") => TokenKind::String(StringType::DollarQuoted),
+            s if s.starts_with(b"\"") => TokenKind::String(StringType::Double),
+            s if s.starts_with(b"'") => TokenKind::String(StringType::Single),
+            s if s.starts_with(b"$'") => TokenKind::String(StringType::Dollar),
             _ => TokenKind::Generic,
         };
 

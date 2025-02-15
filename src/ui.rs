@@ -1,7 +1,6 @@
 use std::time::Duration;
 use std::future::Future;
 use std::sync::{Arc, Weak};
-use std::io::{Write};
 use std::ops::DerefMut;
 use std::collections::HashSet;
 use std::default::Default;
@@ -259,7 +258,7 @@ impl Ui {
 
             Event::Key(KeyEvent{
                 code: KeyCode::F(11),
-                modifiers,
+                modifiers: _,
                 kind: event::KeyEventKind::Press,
                 state: _,
             }) => {
@@ -307,7 +306,7 @@ impl Ui {
                 ui.is_running_process = false;
             }
 
-            (*ui).dirty = true;
+            ui.dirty = true;
             ui.activate()?;
         }
 
@@ -364,7 +363,7 @@ impl Ui {
             Ok(ui.borrow().await.buffer.get_cursor())
         } ).await?;
         self.set_lua_async_fn("__get_buffer", shell, |ui, _shell, lua, _val: ()| async move {
-            Ok(lua.create_string(&ui.borrow().await.buffer.get_contents())?)
+            Ok(lua.create_string(ui.borrow().await.buffer.get_contents())?)
         }).await?;
 
         self.set_lua_async_fn("__set_cursor", shell, |ui, _shell, _lua, val: usize| async move {

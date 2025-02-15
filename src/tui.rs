@@ -5,7 +5,6 @@ use anyhow::Result;
 use crossterm::{
     cursor,
     queue,
-    terminal::{Clear, ClearType},
 };
 use ratatui::{
     *,

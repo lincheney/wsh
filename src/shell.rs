@@ -10,7 +10,7 @@ use bstr::{BStr, BString};
 use crate::zsh;
 
 pub struct ShellInner {
-    pub closed: bool,
+    // pub closed: bool,
 }
 
 #[derive(Clone)]
@@ -19,7 +19,7 @@ pub struct Shell(pub Arc<Mutex<ShellInner>>);
 impl Shell {
     pub fn new() -> Self {
         Self(Arc::new(Mutex::new(ShellInner{
-            closed: false,
+            // closed: false,
         })))
     }
 

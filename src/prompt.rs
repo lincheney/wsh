@@ -19,11 +19,11 @@ impl Prompt {
     const DEFAULT: &str = ">>> ";
 
     pub fn new(default: Option<&BStr>) -> Self {
-        let mut prompt = Self::default();
-        prompt.default_prompt = default
+        let default_prompt = default
             .map(|s| CString::new(s.to_vec()))
-            .unwrap_or_else(|| CString::new(Prompt::DEFAULT)).unwrap();
-        prompt
+            .unwrap_or_else(|| CString::new(Prompt::DEFAULT))
+            .unwrap();
+        Self{ default_prompt, ..Self::default() }
     }
 
     fn refresh_prompt(&mut self, shell: &mut ShellInner) {

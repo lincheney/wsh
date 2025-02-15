@@ -1,5 +1,3 @@
-use std::io::Write;
-use std::fmt::{Write as FmtWrite};
 use bstr::{BString, ByteSlice, BStr};
 use anyhow::Result;
 use unicode_width::UnicodeWidthStr;
@@ -142,8 +140,7 @@ impl Buffer {
     pub fn cursor_byte_pos(&mut self) -> usize {
         self.contents
             .grapheme_indices()
-            .skip(self.cursor)
-            .next()
+            .nth(self.cursor)
             .map(|(s, _, _)| s)
             .unwrap_or_else(|| self.get_len())
     }

@@ -246,6 +246,6 @@ pub fn insert_completion(line: &BStr, m: &bindings::cmatch) -> (BString, usize) 
         zsh_sys::endparamscope();
 
         let cursor = std::str::from_utf8(&cursor).ok().and_then(|s| s.parse().ok()).unwrap_or(buffer.len());
-        (buffer.into(), cursor)
+        (buffer, cursor)
     }
 }
