@@ -302,12 +302,8 @@ impl Tui {
         cursory: u16,
     ) -> Result<()> {
 
-        if self.widgets.is_empty() {
-            return Ok(())
-        }
-
         let max_height = height * 2 / 3;
-        if max_height != self.height || width != self.width {
+        if self.dirty || max_height != self.height || width != self.width {
             self.swap_buffers();
             self.new_buffer.reset();
             self.refresh(width, max_height);
