@@ -160,20 +160,17 @@ impl Ui {
             if let Some(callback) = callback {
                 let ui = self.clone();
                 let shell = shell.clone();
-                async_std::task::spawn(async move {
-                    if let Err(err) = callback.call_async::<LuaValue>(mlua::Nil).await {
-                        let mut ui = ui.borrow_mut().await;
-                        ui.tui.add_error_message(format!("ERROR: {}", err), None);
-                        ui.dirty.buffer = true;
-                    }
-                    if shell.lock().await.closed {
-                        return
-                    }
 
-                    if let Err(err) = ui.refresh_on_state(&shell).await {
-                        eprintln!("DEBUG(armada)\t{}\t= {:?}", stringify!(err), err);
-                    }
-                });
+                if let Err(err) = callback.call::<LuaValue>(mlua::Nil) {
+                    let mut ui = ui.borrow_mut().await;
+                    ui.tui.add_error_message(format!("ERROR: {}", err), None);
+                    ui.dirty.buffer = true;
+                }
+
+                if let Err(err) = ui.refresh_on_state(&shell).await {
+                    eprintln!("DEBUG(armada)\t{}\t= {:?}", stringify!(err), err);
+                }
+
                 return Ok(true)
             }
         }
