@@ -285,7 +285,6 @@ impl Ui {
         {
             let mut ui = self.borrow_mut().await;
             let ui = ui.deref_mut();
-            ui.tui.clear_non_persistent();
 
             {
                 // time to execute
@@ -294,6 +293,7 @@ impl Ui {
                 if complete {
                     shell.clear_completion_cache();
 
+                    ui.tui.clear_non_persistent();
                     ui.deactivate()?;
                     // new line
                     execute!(ui.stdout, style::Print("\r\n"))?;
@@ -303,6 +303,7 @@ impl Ui {
                     }
                     ui.buffer.reset();
                     ui.dirty = true;
+
                 } else {
                     ui.buffer.insert(&[b'\n']);
                 }

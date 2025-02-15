@@ -250,10 +250,10 @@ impl Tui {
 
     pub fn clear_non_persistent(&mut self) {
         self.widgets.retain(|w| w.persist);
+        self.dirty = true;
     }
 
     fn refresh(&mut self, width: u16, height: u16) {
-        self.dirty = false;
         self.width = width;
         self.height = height;
 
@@ -303,9 +303,12 @@ impl Tui {
     ) -> Result<()> {
 
         let max_height = height * 2 / 3;
-        if self.dirty || max_height != self.height || width != self.width {
+        if max_height != self.height || width != self.width {
+            self.old_buffer.reset();
+            self.dirty = true;
+        }
+        if self.dirty {
             self.swap_buffers();
-            self.new_buffer.reset();
             self.refresh(width, max_height);
         }
 
