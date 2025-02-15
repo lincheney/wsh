@@ -1,5 +1,6 @@
 use std::os::fd::{RawFd};
 use std::os::raw::{c_long};
+use std::ffi::CString;
 use std::default::Default;
 use std::sync::Arc;
 use async_std::sync::Mutex;
@@ -63,6 +64,10 @@ impl ShellInner {
 
     pub fn parse(&mut self, string: &str) -> (bool, Vec<zsh::parser::Token>) {
         zsh::parser::parse(string.into())
+    }
+
+    pub fn get_prompt(&mut self, prompt: Option<&str>) -> Option<CString> {
+        zsh::get_prompt(prompt.map(|p| p.into()))
     }
 
 }

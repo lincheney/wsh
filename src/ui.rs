@@ -122,11 +122,9 @@ impl Ui {
             Clear(ClearType::FromCursorDown),
         )?;
 
-        let prompt = shell.lock().await.exec("print -v tmpvar -P \"$PROMPT\" 2>/dev/null", None).ok()
-            .and_then(|_| zsh::Variable::get("tmpvar").map(|mut v| v.as_bytes()));
 
-        let prompt = prompt.as_ref().map(|p| &p[..]).unwrap_or(b">>> ");
-        // let prompt = ui.shell.eval(stringify!(printf %s "${PS1@P}"), false).await?;
+        let prompt = shell.lock().await.get_prompt(None);
+        let prompt = prompt.as_ref().map(|p| p.to_bytes()).unwrap_or(b">>> ");
         ui.stdout.write_all(prompt)?;
         ui.stdout.write_all(ui.buffer.get_contents().as_bytes())?;
 

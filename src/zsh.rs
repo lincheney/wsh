@@ -2,6 +2,7 @@ use std::ffi::{CString};
 use std::os::raw::*;
 use std::default::Default;
 use std::ptr::null_mut;
+use bstr::BStr;
 
 mod string;
 mod bindings;
@@ -60,5 +61,24 @@ pub(crate) fn iter_linked_list(list: zsh_sys::LinkList) -> impl Iterator<Item=*m
             node = n.next.as_mut();
             Some(n.dat)
         })
+    }
+}
+
+pub fn get_prompt(prompt: Option<&BStr>) -> Option<CString> {
+    let prompt = if let Some(prompt) = prompt {
+        CString::new(prompt.to_vec()).unwrap()
+    } else {
+        let prompt = variables::Variable::get("PROMPT")?.as_bytes();
+        CString::new(prompt).unwrap()
+    };
+
+    // The prompt used for spelling correction.  The sequence `%R' expands to the string which presumably needs  spelling  correction,  and
+    // `%r' expands to the proposed correction.  All other prompt escapes are also allowed.
+    let r = null_mut();
+    #[allow(non_snake_case)]
+    let R = null_mut();
+    unsafe {
+        let ptr = zsh_sys::promptexpand(prompt.as_ptr() as _, 0, r, R, null_mut());
+        Some(CString::from_raw(ptr))
     }
 }
