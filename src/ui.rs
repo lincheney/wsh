@@ -230,12 +230,12 @@ impl Ui {
             },
 
             Event::Key(KeyEvent{
-                code: KeyCode::Esc,
+                code: KeyCode::F(11),
                 modifiers,
                 kind: event::KeyEventKind::Press,
                 state: _,
-            }) if modifiers.is_empty() => {
-                return Ok(false)
+            }) => {
+                let (complete, tokens) = shell.lock().await.parse("echo $(");
             },
 
             _ => {},
@@ -257,22 +257,28 @@ impl Ui {
             let ui = ui.deref_mut();
             ui.tui.clear_non_persistent();
 
+
             {
                 // time to execute
                 let mut shell = shell.lock().await;
-                shell.clear_completion_cache();
+                let (complete, _tokens) = shell.parse(ui.buffer.get_contents());
+                if complete {
+                    shell.clear_completion_cache();
 
-                ui.deactivate()?;
-                // new line
-                execute!(ui.stdout, style::Print("\r\n"))?;
+                    ui.deactivate()?;
+                    // new line
+                    execute!(ui.stdout, style::Print("\r\n"))?;
 
-                if let Err(code) = shell.exec(ui.buffer.get_contents(), None) {
-                    eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
+                    if let Err(code) = shell.exec(ui.buffer.get_contents(), None) {
+                        eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
+                    }
+                    ui.buffer.reset();
+                } else {
+                    eprintln!("DEBUG(lunch) \t{}\t= {:?}", stringify!("invalid command"), "invalid command");
                 }
                 ui.is_running_process = false;
             }
 
-            ui.buffer.reset();
             ui.activate()?;
         }
 

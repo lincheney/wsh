@@ -15,7 +15,7 @@ pub struct WaitForChunk<'a> {
 
 pub struct StreamConsumer {
     index: usize,
-    parent: Arc<Mutex<Streamer>>,
+    parent: ArcMutex<Streamer>,
 }
 
 impl StreamConsumer {
@@ -62,7 +62,7 @@ pub struct Streamer {
 unsafe impl Send for Streamer {}
 
 impl Streamer {
-    fn make_consumer(parent: &Arc<Mutex<Self>>) -> Arc<AsyncMutex<StreamConsumer>> {
+    fn make_consumer(parent: &ArcMutex<Self>) -> Arc<AsyncMutex<StreamConsumer>> {
         Arc::new(AsyncMutex::new(StreamConsumer {
             index: 0,
             parent: parent.clone(),
@@ -79,7 +79,7 @@ impl Streamer {
 #[derive(Debug)]
 struct CompaddState {
     original: zsh_sys::Builtin,
-    streamer: Option<Arc<Mutex<Streamer>>>,
+    streamer: Option<ArcMutex<Streamer>>,
 }
 
 static COMPFUNC: &[u8] = b"_main_complete\0";
@@ -114,21 +114,17 @@ unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_cha
     }
 
     if !bindings::matches.is_null() {
-        let mut node = (*bindings::matches).list.first;
-        let iter = std::iter::from_fn(|| {
-            while !node.is_null() {
-                let dat = (*node).dat as *mut bindings::cmatch;
-                node = (*node).next;
-                if !dat.is_null() {
-                    let dat = Arc::new((*dat).clone());
-                    return Some(dat)
-                }
-            }
-
-            None
-        });
         let len = streamer.matches.len();
-        streamer.matches.extend(iter.skip(len));
+        let iter = super::iter_linked_list(bindings::matches)
+            .filter_map(|ptr| {
+                let ptr = ptr as *mut bindings::cmatch;
+                if ptr.is_null() {
+                    None
+                } else {
+                    Some(Arc::new((*ptr).clone()))
+                }
+            }).skip(len);
+        streamer.matches.extend(iter);
         streamer.wake();
             // eprintln!("DEBUG(pucks) \t{}\t= {:?}\r", stringify!(node), (std::ffi::CStr::from_ptr((*dat).str_), (*dat).gnum));
         // }

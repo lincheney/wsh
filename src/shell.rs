@@ -61,4 +61,8 @@ impl ShellInner {
         zsh::completion::insert_completion(string, m)
     }
 
+    pub fn parse(&mut self, string: &str) -> (bool, Vec<zsh::parser::Token>) {
+        zsh::parser::parse(string.into())
+    }
+
 }
