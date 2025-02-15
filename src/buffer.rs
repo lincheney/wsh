@@ -90,15 +90,18 @@ impl Buffer {
     pub fn draw(
         &mut self,
         stdout: &mut std::io::Stdout,
-        (width, height): (u16, u16),
-        offset: usize,
-    ) -> Result<()> {
+        (width, _height): (u16, u16),
+        prompt_width: usize,
+    ) -> Result<bool> {
+
+        let old = self.height;
         let byte_pos = self.cursor_byte_pos();
         let prefix = format!("{}", BufferContents(self.contents[..byte_pos].into()));
         let suffix = format!("{}", BufferContents(self.contents[byte_pos..].into()));
 
         queue!(
             stdout,
+            cursor::MoveToColumn(prompt_width as _),
             crossterm::style::Print(&prefix),
             cursor::SavePosition,
             crossterm::style::Print(&suffix),
@@ -107,7 +110,7 @@ impl Buffer {
         )?;
 
         // the offset represents the prompt width
-        let prefix = " ".repeat(offset) + &prefix;
+        let prefix = " ".repeat(prompt_width) + &prefix;
 
         let prefix = prefix + &suffix[0 .. suffix.len().min(1)];
         self.cursory = wrap(&prefix, width as _).len() - 1;
@@ -116,7 +119,7 @@ impl Buffer {
         self.height = wrap(&prefix, width as _).len();
 
         self.dirty = false;
-        Ok(())
+        Ok(old != self.height)
     }
 
 }

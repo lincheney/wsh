@@ -51,12 +51,16 @@ impl Prompt {
         stdout: &mut std::io::Stdout,
         shell: &Shell,
         _: (u16, u16),
-    ) -> Result<()> {
-        queue!(stdout, crossterm::cursor::MoveToColumn(0))?;
+    ) -> Result<bool> {
+
+        let old = (self.width, self.height);
         self.refresh_prompt(shell).await;
+
+        queue!(stdout, crossterm::cursor::MoveToColumn(0))?;
         stdout.write_all(self.prompt.as_bytes())?;
         self.dirty = false;
-        Ok(())
+
+        Ok(old != (self.width, self.height))
     }
 
 }

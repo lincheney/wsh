@@ -11,7 +11,7 @@ use anyhow::Result;
 
 use crossterm::{
     terminal::{Clear, ClearType, BeginSynchronizedUpdate, EndSynchronizedUpdate},
-    cursor::{position, MoveUp, MoveDown, MoveToColumn, SavePosition, RestorePosition},
+    cursor::{self, position, SavePosition, RestorePosition},
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     style,
     execute,
@@ -30,6 +30,28 @@ struct SetScrollRegion(u16, u16);
 impl crossterm::Command for SetScrollRegion {
     fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
         write!(f, "\x1b[{};{}r", self.0, self.1)
+    }
+}
+
+struct MoveUp(u16);
+impl crossterm::Command for MoveUp {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        if self.0 > 0 {
+            cursor::MoveUp(self.0).write_ansi(f)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+struct MoveDown(u16);
+impl crossterm::Command for MoveDown {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        if self.0 > 0 {
+            cursor::MoveDown(self.0).write_ansi(f)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -114,7 +136,7 @@ impl Ui {
         let ui = ui.deref_mut();
 
         // if ui.dirty it means redraw everything from scratch
-        if ui.dirty {
+        if ui.dirty || ui.is_running_process {
             queue!(ui.stdout, Clear(ClearType::FromCursorDown))?;
         }
 
@@ -128,32 +150,18 @@ impl Ui {
         let size = crossterm::terminal::size()?;
 
         if ui.dirty || ui.prompt.needs_redraw() {
-            if ui.cursory > 0 {
-                // move back to top of drawing area
-                queue!(ui.stdout, MoveUp(ui.cursory))?;
-            }
-            let key = (ui.prompt.width, ui.prompt.height);
-            ui.prompt.draw(&mut ui.stdout, shell, size).await?;
-
-            // prompt has shifted so need to redraw everything below
-            if key != (ui.prompt.width, ui.prompt.height) {
-                ui.dirty = true;
-            }
-        } else if ui.buffer.cursory > 0 {
-            // move back to line of the prompt
+            // move back to top of drawing area
+            queue!(ui.stdout, MoveUp(ui.cursory))?;
+            ui.dirty = ui.prompt.draw(&mut ui.stdout, shell, size).await? || ui.dirty;
+        } else {
+            // move back to prompt line
             queue!(ui.stdout, MoveUp(ui.buffer.cursory as _))?;
         }
 
         if ui.dirty || ui.buffer.needs_redraw() {
-            // move to end of prompt
-            queue!(ui.stdout, MoveToColumn(ui.prompt.width as _))?;
-            let key = ui.buffer.height;
-            ui.buffer.draw(&mut ui.stdout, size, ui.prompt.width)?;
-            // buffer has shifted  so need to redraw everything below
-            if key != ui.buffer.height {
-                ui.dirty = true;
-            }
-        } else if ui.buffer.cursory > 0 {
+            // MUST start on same line as prompt
+            ui.dirty = ui.buffer.draw(&mut ui.stdout, size, ui.prompt.width)? || ui.dirty;
+        } else {
             // move to cursor
             queue!(ui.stdout, MoveDown(ui.buffer.cursory as _))?;
         }
@@ -163,16 +171,12 @@ impl Ui {
         if ui.dirty || ui.tui.needs_redraw() {
             // move to last line of buffer
             let yoffset = (ui.buffer.height - ui.buffer.cursory - 1) as u16;
-            if yoffset > 0 {
-                queue!(ui.stdout, MoveDown(yoffset))?;
-            }
+            queue!(ui.stdout, MoveDown(yoffset))?;
             // tui needs to know exactly where it is
             ui.cursor = events.get_cursor_position()?;
             ui.tui.draw(&mut ui.stdout, size, ui.cursor.1)?;
-            // then back
-            if yoffset > 0 {
-                queue!(ui.stdout, MoveUp(yoffset))?;
-            }
+            // then move back
+            queue!(ui.stdout, MoveUp(yoffset))?;
         }
 
         execute!(ui.stdout, EndSynchronizedUpdate)?;
@@ -273,11 +277,7 @@ impl Ui {
     }
 
     async fn accept_line(&self, shell: &Shell) -> Result<bool> {
-        {
-            let mut ui = self.borrow_mut().await;
-            ui.is_running_process = true;
-            ui.dirty = true;
-        }
+        self.borrow_mut().await.is_running_process = true;
         self.draw(shell).await?;
 
         {
