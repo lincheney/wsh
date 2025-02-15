@@ -299,14 +299,16 @@ impl Ui {
                         eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
                     }
                     ui.buffer.reset();
-                    ui.prompt.dirty = true;
+                    ui.dirty = true;
                 } else {
-                    eprintln!("DEBUG(lunch) \t{}\t= {:?}", stringify!("invalid command"), "invalid command");
+                    ui.buffer.mutate(|contents, cursor, byte_pos| {
+                        contents.splice(byte_pos .. byte_pos, [b'\n']);
+                        *cursor += 1;
+                    });
                 }
                 ui.is_running_process = false;
             }
 
-            ui.dirty = true;
             ui.activate()?;
         }
 

@@ -48,7 +48,7 @@ impl std::fmt::Display for BufferContents<'_> {
                 // invalid
                 start_escape(fmt, &mut escaped)?;
                 write!(fmt, "<{:02x}>", self.0[start])?;
-            } else if c.width() > 0 {
+            } else if c.width() > 0 || c == "\n" {
                 end_escape(fmt, &mut escaped)?;
                 fmt.write_str(c)?;
             } else {
