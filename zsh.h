@@ -37,6 +37,7 @@
 typedef size_t LinkList;
 typedef uint32_t mode_t;
 
+mod_export static char Meta = ((char) 0x83);
 mod_export static char Inpar = ((char) 0x88);
 mod_export static char Outpar = ((char) 0x8a);
 

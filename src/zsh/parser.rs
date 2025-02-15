@@ -52,13 +52,14 @@ pub fn parse(mut cmd: &BStr) -> (bool, Vec<Token>) {
     let dummy = b" x";
     let mut c_cmd = cmd.to_vec();
     c_cmd.extend(dummy);
-
     let c_cmd = CString::new(c_cmd).unwrap();
+    let ptr = super::metafy(&c_cmd);
+
     let flags = zsh_sys::LEXFLAGS_ACTIVE | zsh_sys::LEXFLAGS_COMMENTS_KEEP;
     let split: Vec<_> = unsafe {
-        let result = zsh_sys::bufferwords(null_mut(), c_cmd.as_ptr() as _, null_mut(), flags as _);
+        let result = zsh_sys::bufferwords(null_mut(), ptr, null_mut(), flags as _);
         // these strings are allocated on the zsh arena
-        super::iter_linked_list(result).map(|s| CStr::from_ptr(s as _)).collect()
+        super::iter_linked_list(result).map(|ptr| super::unmetafy(ptr as _)).collect()
     };
 
     // if the command is syntactically complete, then the last token should be a standalone 'x'

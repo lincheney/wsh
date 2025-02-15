@@ -153,7 +153,7 @@ impl Buffer {
             .grapheme_indices()
             .nth(self.cursor)
             .map(|(s, _, _)| s)
-            .unwrap_or_else(|| self.get_len())
+            .unwrap_or_else(|| self.contents.len())
     }
 
     pub fn draw(

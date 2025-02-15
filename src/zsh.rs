@@ -11,7 +11,7 @@ pub mod completion;
 pub mod parser;
 pub use variables::*;
 pub use string::ZString;
-pub use bindings::{cmatch, Inpar, Outpar};
+pub use bindings::{cmatch, Inpar, Outpar, Meta};
 
 // pub type HandlerFunc = unsafe extern "C" fn(name: *mut c_char, argv: *mut *mut c_char, options: *mut zsh_sys::options, func: c_int) -> c_int;
 
@@ -30,12 +30,14 @@ impl Default for ExecstringOpts<'_> {
 pub fn execstring<S: AsRef<BStr>>(cmd: S, opts: ExecstringOpts) {
     let cmd = CString::new(cmd.as_ref().to_vec()).unwrap();
     let context = opts.context.map(|c| CString::new(c).unwrap());
-    unsafe{ zsh_sys::execstring(
-        cmd.as_ptr() as _,
-        opts.dont_change_job.into(),
-        opts.exiting.into(),
-        context.map(|c| c.as_ptr() as _).unwrap_or(null_mut()),
-    )}
+    unsafe{
+        zsh_sys::execstring(
+            metafy(&cmd),
+            opts.dont_change_job.into(),
+            opts.exiting.into(),
+            context.map(|c| c.as_ptr() as _).unwrap_or(null_mut()),
+        )
+    }
 }
 
 pub fn get_return_code() -> c_long {
@@ -92,4 +94,17 @@ pub fn get_prompt_size(prompt: &CStr) -> (c_int, c_int) {
         zsh_sys::countprompt(prompt.as_ptr() as _, &mut width as _, &mut height as _, overflow);
     }
     (width, height)
+}
+
+pub fn metafy(string: &CStr) -> *mut c_char {
+    unsafe {
+        zsh_sys::metafy(string.as_ptr() as _, -1, zsh_sys::META_USEHEAP as _)
+    }
+}
+
+pub fn unmetafy<'a>(ptr: *mut u8) -> &'a CStr {
+    unsafe {
+        zsh_sys::unmetafy(ptr as _, null_mut());
+        CStr::from_ptr(ptr as _)
+    }
 }
