@@ -98,7 +98,14 @@ pub fn get_prompt_size(prompt: &CStr) -> (c_int, c_int) {
 
 pub fn metafy(value: &[u8]) -> *mut c_char {
     unsafe {
-        zsh_sys::metafy(value.as_ptr() as _, value.len() as _, zsh_sys::META_USEHEAP as _)
+        if value.is_empty() {
+            // make an empty string on the arena
+            let ptr = zsh_sys::zhalloc(1) as *mut c_char;
+            *ptr = 0;
+            ptr
+        } else {
+            zsh_sys::metafy(value.as_ptr() as _, value.len() as _, zsh_sys::META_USEHEAP as _)
+        }
     }
 }
 
