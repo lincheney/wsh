@@ -198,7 +198,7 @@ impl Ui {
                 let ui = self.clone();
                 let shell = shell.clone();
 
-                if let Err(err) = callback.call_async::<LuaValue>(mlua::Nil).await {
+                if let Err(err) = callback.call_async::<LuaValue>(()).await {
                     let mut ui = ui.borrow_mut().await;
                     ui.tui.add_error_message(format!("ERROR: {}", err), None);
                 }
@@ -234,10 +234,6 @@ impl Ui {
             }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
                 {
                     let mut ui = self.borrow_mut().await;
-                    // flush cache
-                    ui.lua_cache.set("buffer", mlua::Nil)?;
-                    ui.lua_cache.set("cursor", mlua::Nil)?;
-
                     let mut buf = [0; 4];
                     ui.buffer.insert(c.encode_utf8(&mut buf).as_bytes());
                 }
