@@ -66,7 +66,7 @@ wish.set_keymap('<tab>', function()
             last = cmatch
         end
 
-        if #text > 1 then
+        if #text > 0 then
             msg = msg or wish.show_message{
                 align = 'Left',
                 fg = 'blue',

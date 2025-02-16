@@ -89,4 +89,8 @@ impl ShellInner {
         }
     }
 
+    pub fn get_history(&mut self) -> Vec<zsh::history::Entry> {
+        zsh::history::get_history().collect()
+    }
+
 }

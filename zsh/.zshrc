@@ -1,5 +1,7 @@
 module_path+=( "$ZDOTDIR" )
 >&2 printf "DEBUG(puff)  \t%s\n" "$(declare -p module_path)"
+HISTFILE=~/.zsh_history
+
 zmodload zsh/complete
 # zmodload zsh/zle
 zmodload zsh/compctl

@@ -259,6 +259,7 @@ impl Ui {
                 kind: event::KeyEventKind::Press,
                 state: _,
             }) => {
+                eprintln!("DEBUG(feign) \t{}\t= {:?}", stringify!(shell.lock().await.get_history()), shell.lock().await.get_history());
                 // let (complete, tokens) = shell.lock().await.parse("echo $(");
             },
 

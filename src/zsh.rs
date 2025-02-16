@@ -7,6 +7,7 @@ use bstr::BStr;
 mod string;
 mod bindings;
 mod variables;
+pub mod history;
 pub mod completion;
 pub mod parser;
 pub use variables::*;
@@ -116,4 +117,17 @@ pub fn unmetafy<'a>(ptr: *mut u8) -> &'a [u8] {
         zsh_sys::unmetafy(ptr as _, &mut len as _);
         std::slice::from_raw_parts(ptr, len as _)
     }
+}
+
+pub fn unmetafy_owned<'a>(value: &mut Vec<u8>) {
+    // threadsafe!
+    let mut len = 0i32;
+    // MUST end with null byte
+    if value.last().is_none_or(|c| *c != 0) {
+        value.push(0);
+    }
+    unsafe {
+        zsh_sys::unmetafy(value.as_mut_ptr() as _, &mut len as _);
+    }
+    value.truncate(len as _);
 }
