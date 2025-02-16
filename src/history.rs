@@ -52,6 +52,7 @@ async fn goto_history(ui: Ui, shell: Shell, lua: Lua, val: usize) -> Result<(usi
     ui.borrow_mut().await.buffer.mutate(|buffer, cursor, _| {
         buffer.clear();
         if let Some(text) = &text {
+            buffer.resize(text.len(), 0);
             buffer.clone_from_slice(text.as_bytes());
         }
         *cursor = buffer.len();
