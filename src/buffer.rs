@@ -120,15 +120,24 @@ impl Buffer {
         self.cursor
     }
 
-    pub fn set_contents(&mut self, contents: BString) {
-        self.contents = contents;
-        self.len = None;
+    pub fn set(&mut self, contents: Option<&[u8]>, cursor: Option<usize>) {
+        if let Some(contents) = contents {
+            self.contents.resize(contents.len(), 0);
+            self.contents.copy_from_slice(contents);
+            self.len = None;
+        }
+        if let Some(cursor) = cursor {
+            self.cursor = cursor;
+        }
         self.fix_cursor();
     }
 
+    pub fn set_contents(&mut self, contents: &[u8]) {
+        self.set(Some(contents), None);
+    }
+
     pub fn set_cursor(&mut self, cursor: usize) {
-        self.cursor = cursor;
-        self.fix_cursor();
+        self.set(None, Some(cursor));
     }
 
     pub fn insert(&mut self, data: &[u8]) {

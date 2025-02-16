@@ -373,7 +373,7 @@ impl Ui {
         }).await?;
 
         self.set_lua_async_fn("__set_buffer", shell, |ui, _shell, _lua, val: mlua::String| async move {
-            ui.borrow_mut().await.buffer.set_contents((*val.as_bytes()).into());
+            ui.borrow_mut().await.buffer.set_contents(&val.as_bytes());
             Ok(())
         }).await?;
 

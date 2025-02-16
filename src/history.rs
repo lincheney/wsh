@@ -55,11 +55,7 @@ async fn goto_history(ui: Ui, shell: Shell, _lua: Lua, val: usize) -> Result<(us
     }
 
     if let Some(text) = &text {
-        ui.buffer.mutate(|buffer, cursor| {
-            buffer.resize(text.len(), 0);
-            buffer.copy_from_slice(text.as_bytes());
-            *cursor = buffer.len();
-        });
+        ui.buffer.set(Some(text), Some(text.len()));
     } else {
         // restore history if off history
         ui.buffer.restore();
