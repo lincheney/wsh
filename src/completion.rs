@@ -68,7 +68,7 @@ async fn get_completions(ui: Ui, shell: Shell, _lua: Lua, val: Option<String>) -
 async fn insert_completion(ui: Ui, shell: Shell, _lua: Lua, val: CompletionMatch) -> Result<()> {
     let buffer = ui.borrow().await.buffer.get_contents().clone();
     let (buffer, pos) = shell.lock().await.insert_completion(buffer.as_ref(), &val.inner);
-    ui.borrow_mut().await.buffer.mutate(move |contents, cursor, _byte_pos| {
+    ui.borrow_mut().await.buffer.mutate(move |contents, cursor| {
         *contents = buffer;
         *cursor = pos;
     });

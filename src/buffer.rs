@@ -14,6 +14,9 @@ pub struct Buffer {
     len: Option<usize>,
     cursor: usize,
 
+    saved_contents: BString,
+    saved_cursor: usize,
+
     pub dirty: bool,
 
     pub height: usize,
@@ -102,9 +105,8 @@ impl Buffer {
         self.dirty = true;
     }
 
-    pub fn mutate<F: FnOnce(&mut BString, &mut usize, usize)->R, R>(&mut self, func: F) -> R {
-        let byte_pos = self.cursor_byte_pos();
-        let value = func(&mut self.contents, &mut self.cursor, byte_pos);
+    pub fn mutate<F: FnOnce(&mut BString, &mut usize)->R, R>(&mut self, func: F) -> R {
+        let value = func(&mut self.contents, &mut self.cursor);
         self.len = None;
         self.fix_cursor();
         value
@@ -140,11 +142,26 @@ impl Buffer {
         self.fix_cursor();
     }
 
+    pub fn save(&mut self) {
+        self.saved_contents.resize(self.contents.len(), 0);
+        self.saved_contents.copy_from_slice(&self.contents);
+        self.saved_cursor = self.cursor;
+    }
+
+    pub fn restore(&mut self) {
+        std::mem::swap(&mut self.contents, &mut self.saved_contents);
+        std::mem::swap(&mut self.cursor, &mut self.saved_cursor);
+        self.len = None;
+        self.fix_cursor();
+    }
+
     pub fn reset(&mut self) {
         self.contents.clear();
         self.len = None;
         self.cursor = 0;
         self.cursory = 0;
+        self.saved_contents.clear();
+        self.saved_cursor = 0;
         self.dirty = true;
     }
 
