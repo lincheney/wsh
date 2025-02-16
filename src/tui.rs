@@ -304,6 +304,11 @@ impl Tui {
         })
     }
 
+    pub fn clear_all(&mut self) {
+        self.widgets.clear();
+        self.dirty = true;
+    }
+
     pub fn clear_non_persistent(&mut self) {
         self.widgets.retain(|w| w.persist);
         self.dirty = true;
@@ -432,6 +437,10 @@ impl Tui {
 impl UserData for WidgetId {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
 
+        methods.add_async_method("exists", |_lua, id, _val: LuaValue| async move {
+            Ok(id.0.borrow().await.tui.get_index(id.1).is_some())
+        });
+
         methods.add_async_method("set_options", |lua, id, val: LuaValue| async move {
             if let Some(widget) = id.0.borrow_mut().await.tui.get_mut(id.1) {
                 let options: WidgetOptions = lua.from_value(val)?;
@@ -452,20 +461,26 @@ impl UserData for WidgetId {
     }
 }
 
-async fn show_message(
-    ui: Ui,
-    _shell: Shell,
-    lua: Lua,
-    val: LuaValue,
-) -> Result<WidgetId> {
+async fn show_message(ui: Ui, _shell: Shell, lua: Lua, val: LuaValue) -> Result<WidgetId> {
     let options: WidgetOptions = lua.from_value(val)?;
     let id = ui.borrow_mut().await.tui.add(options);
     Ok(WidgetId(ui, id))
 }
 
+async fn clear_messages(ui: Ui, _shell: Shell, _lua: Lua, all: bool) -> Result<()> {
+    let tui = &mut ui.borrow_mut().await.tui;
+    if all {
+        tui.clear_all();
+    } else {
+        tui.clear_non_persistent();
+    }
+    Ok(())
+}
+
 pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
 
     ui.set_lua_async_fn("show_message", shell, show_message).await?;
+    ui.set_lua_async_fn("clear_messages", shell, clear_messages).await?;
 
     Ok(())
 }
