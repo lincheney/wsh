@@ -9,7 +9,7 @@ pub struct Entry {
     pub text: BString,
     pub start_time: zsh_sys::time_t,
     pub finish_time: zsh_sys::time_t,
-    histnum: c_long,
+    pub histnum: c_long,
 }
 
 impl Entry {
@@ -77,6 +77,10 @@ impl EntryIter {
         Some(Entry::from_histent(unsafe{ self.ptr?.as_ref() }))
     }
 
+    pub fn histnum(&self) -> Option<c_long> {
+        Some(unsafe{ self.ptr?.as_ref() }.histnum)
+    }
+
     pub fn iter(&self) -> impl Iterator<Item=Self> {
         let mut iter = self.clone();
         std::iter::from_fn(move || {
@@ -87,6 +91,10 @@ impl EntryIter {
 
     pub fn entries(&self) -> impl Iterator<Item=Entry> {
         self.iter().map(|i| i.as_entry().unwrap())
+    }
+
+    pub fn enumerate(&self) -> impl Iterator<Item=(c_long, EntryIter)> {
+        self.iter().map(|e| (e.histnum().unwrap(), e))
     }
 }
 

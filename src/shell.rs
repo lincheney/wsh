@@ -98,4 +98,34 @@ impl ShellInner {
         zsh::history::get_history()
     }
 
+    pub fn get_curhist(&mut self) -> (c_long, Option<zsh::history::EntryIter>) {
+        let curhist = unsafe{ zsh_sys::curhist };
+        self.set_curhist(curhist)
+    }
+
+    pub fn set_curhist(&mut self, curhist: c_long) -> (c_long, Option<zsh::history::EntryIter>) {
+        let history = self.get_history();
+
+        let value = history
+            .enumerate()
+            .take_while(|(h, _)| *h >= curhist)
+            .last();
+
+        if let Some((h, e)) = value {
+            // found a good enough match
+            unsafe{ zsh_sys::curhist = h; }
+            (h, Some(e))
+
+        } else if let Some(h) = history.histnum() {
+            // after all history
+            unsafe{ zsh_sys::curhist = h + 1; }
+            (h+1, None)
+
+        } else {
+            // no history
+            unsafe{ zsh_sys::curhist = 0; }
+            (0, None)
+        }
+    }
+
 }

@@ -66,7 +66,6 @@ pub struct UiInner {
     dirty: bool,
     cursory: u16,
     pub keybinds: keybind::KeybindMapping,
-    pub history_index: usize, // this is the index from BOTTOM
 
     pub buffer: crate::buffer::Buffer,
     pub prompt: crate::prompt::Prompt,
@@ -105,7 +104,6 @@ impl Ui {
             buffer: Default::default(),
             prompt: crate::prompt::Prompt::new(None),
             keybinds: Default::default(),
-            history_index: 0,
             stdout: std::io::stdout(),
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
             cursor,
@@ -466,7 +464,6 @@ impl UiInner {
 
     fn reset(&mut self) {
         self.buffer.reset();
-        self.history_index = 0;
         self.dirty = true;
     }
 
