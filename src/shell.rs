@@ -129,7 +129,7 @@ impl ShellInner {
     }
 
     pub fn push_history(&mut self, string: &BStr) -> zsh::history::EntryIter {
-        let string = CString::new(string.to_vec()).unwrap();
+        let string = unsafe{ CStr::from_ptr(zsh::metafy(string)) }.to_owned();
         zsh::history::push_history(string)
     }
 
