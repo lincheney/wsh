@@ -110,6 +110,7 @@ impl Ui {
         })));
 
         ui.init_lua(shell).await?;
+        shell.lock().await.readhistfile();
 
         Ok(ui)
     }
@@ -259,7 +260,7 @@ impl Ui {
                 kind: event::KeyEventKind::Press,
                 state: _,
             }) => {
-                eprintln!("DEBUG(feign) \t{}\t= {:?}", stringify!(shell.lock().await.get_history()), shell.lock().await.get_history());
+                // eprintln!("DEBUG(feign) \t{}\t= {:?}", stringify!(shell.lock().await.get_history().collect::<Vec<_>>()), shell.lock().await.get_history().collect::<Vec<_>>());
                 // let (complete, tokens) = shell.lock().await.parse("echo $(");
             },
 

@@ -3,6 +3,7 @@ use std::os::raw::{c_long};
 use std::ffi::{CString, CStr};
 use std::default::Default;
 use std::sync::Arc;
+use std::ptr::null_mut;
 use async_std::sync::Mutex;
 use async_lock::futures::Lock;
 use bstr::{BStr, BString};
@@ -89,8 +90,12 @@ impl ShellInner {
         }
     }
 
-    pub fn get_history(&mut self) -> Vec<zsh::history::Entry> {
-        zsh::history::get_history().collect()
+    pub fn readhistfile(&mut self) {
+        unsafe{ zsh_sys::readhistfile(null_mut(), 0, zsh_sys::HFILE_USE_OPTIONS as _); }
+    }
+
+    pub fn get_history(&mut self) -> zsh::history::EntryIter {
+        zsh::history::get_history()
     }
 
 }

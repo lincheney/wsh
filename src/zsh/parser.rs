@@ -1,4 +1,3 @@
-use std::ffi::{CString, CStr};
 use std::ops::Range;
 use std::ptr::null_mut;
 use bstr::{BStr, ByteSlice};
