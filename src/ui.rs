@@ -178,7 +178,7 @@ impl Ui {
             queue!(ui.stdout, MoveDown(yoffset))?;
             // tui needs to know exactly where it is
             ui.cursor = events.get_cursor_position()?;
-            ui.tui.draw(&mut ui.stdout, size, ui.cursor.1)?;
+            ui.tui.draw(&mut ui.stdout, size, ui.cursor.1, ui.dirty)?;
             // then move back
             queue!(ui.stdout, MoveUp(yoffset))?;
         }

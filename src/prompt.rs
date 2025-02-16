@@ -2,7 +2,10 @@ use std::ffi::CString;
 use std::io::Write;
 use bstr::BStr;
 use anyhow::Result;
-use crossterm::queue;
+use crossterm::{
+    queue,
+    terminal::{Clear, ClearType},
+};
 use crate::shell::ShellInner;
 
 #[derive(Default)]
@@ -43,12 +46,16 @@ impl Prompt {
 
         let old = (self.width, self.height);
         self.refresh_prompt(shell);
+        let changed = old != (self.width, self.height);
 
+        if changed {
+            queue!(stdout, Clear(ClearType::FromCursorDown))?;
+        }
         queue!(stdout, crossterm::cursor::MoveToColumn(0))?;
         stdout.write_all(self.prompt.as_bytes())?;
         self.dirty = false;
 
-        Ok(old != (self.width, self.height))
+        Ok(changed)
     }
 
 }

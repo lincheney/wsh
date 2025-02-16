@@ -356,12 +356,21 @@ impl Tui {
         stdout: &mut std::io::Stdout,
         (width, height): (u16, u16),
         cursory: u16,
+        clear: bool,
     ) -> Result<()> {
+
+        if clear {
+            self.new_buffer.reset();
+            self.old_buffer.reset();
+            queue!(stdout, Clear(ClearType::FromCursorDown))?;
+            self.dirty = true;
+        }
 
         let max_height = height * 2 / 3;
         if max_height != self.height || width != self.width {
             self.dirty = true;
         }
+
         if self.dirty {
             self.swap_buffers();
             self.new_buffer.reset();

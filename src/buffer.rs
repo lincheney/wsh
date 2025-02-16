@@ -199,13 +199,29 @@ impl Buffer {
             prefix += " ";
         }
 
-        queue!(
-            stdout,
-            cursor::MoveToColumn(prompt_width as _),
-            crossterm::style::Print(&prefix),
-        )?;
+        // calculate heights
+        let mut text = " ".repeat(prompt_width) + &prefix;
+        strip_colours(&mut text);
+        self.cursory = wrap(&text, width as _).len() - 1;
+
+        if suffix.is_empty() {
+            self.height = self.cursory + 1;
+        } else {
+            // pop the space from the end
+            text.pop();
+            text += &suffix;
+            strip_colours(&mut text);
+            self.height = wrap(&text, width as _).len();
+        }
+        let changed = old != self.height;
+
+        queue!(stdout, cursor::MoveToColumn(prompt_width as _))?;
+        if changed {
+            queue!(stdout, Clear(ClearType::FromCursorDown))?;
+        }
+        queue!(stdout, crossterm::style::Print(&prefix))?;
         if !suffix.is_empty() {
-            // then move back over it
+            // move back over the space
             queue!(stdout, cursor::MoveLeft(1))?;
         }
         queue!(
@@ -216,22 +232,8 @@ impl Buffer {
             cursor::RestorePosition,
         )?;
 
-        let mut prefix = " ".repeat(prompt_width) + &prefix;
-        strip_colours(&mut prefix);
-        self.cursory = wrap(&prefix, width as _).len() - 1;
-
-        if suffix.is_empty() {
-            self.height = self.cursory + 1;
-        } else {
-            // pop the space from the end
-            prefix.pop();
-            prefix += &suffix;
-            strip_colours(&mut prefix);
-            self.height = wrap(&prefix, width as _).len();
-        }
-
         self.dirty = false;
-        Ok(old != self.height)
+        Ok(changed)
     }
 
 }
