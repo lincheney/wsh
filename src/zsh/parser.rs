@@ -55,6 +55,7 @@ pub fn parse(mut cmd: &BStr) -> (bool, Vec<Token>) {
 
     let flags = zsh_sys::LEXFLAGS_ACTIVE | zsh_sys::LEXFLAGS_COMMENTS_KEEP;
     let split: Vec<_> = unsafe {
+        // zsh_sys::untokenize(ptr);
         let result = zsh_sys::bufferwords(null_mut(), ptr, null_mut(), flags as _);
         // these strings are allocated on the zsh arena
         super::iter_linked_list(result).map(|ptr| super::unmetafy(ptr as _)).collect()
@@ -79,7 +80,12 @@ pub fn parse(mut cmd: &BStr) -> (bool, Vec<Token>) {
                 &token[..token.len() - dummy.len()]
             });
 
-            let start = cmd.find(token).unwrap();
+            let start = if token == b";" {
+                cmd.iter().position(|&c| c == b';' || c == b'\n').unwrap()
+            } else {
+                cmd.find(token).unwrap()
+            };
+
             let end = start + token.len();
             cmd = &cmd[end..];
             let token = Token::new(token, start..end, prev_kind);
@@ -93,7 +99,7 @@ pub fn parse(mut cmd: &BStr) -> (bool, Vec<Token>) {
         for t in tokens.iter() {
             match t.kind {
                 TokenKind::Subshell(true) => { stack.push(true); },
-                TokenKind::Block(true) => { stack.push(true); },
+                TokenKind::Block(true) => { stack.push(false); },
                 TokenKind::Subshell(false) if stack.last() == Some(&true) => { stack.pop(); },
                 TokenKind::Block(false) if stack.last() == Some(&false) => { stack.pop(); },
                 TokenKind::Subshell(false) | TokenKind::Block(false) => {
