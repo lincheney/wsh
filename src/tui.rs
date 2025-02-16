@@ -9,7 +9,7 @@ use crossterm::{
 };
 use ratatui::{
     *,
-    // text::*,
+    text::*,
     layout::*,
     widgets::*,
     style::*,
@@ -65,12 +65,34 @@ impl<'de> Deserialize<'de> for SerdeConstraint {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-pub struct WidgetOptions {
-    pub text: Option<String>,
-    pub persist: Option<bool>,
+pub struct TextStyleOptions {
     pub align: Option<SerdeWrap<Alignment>>,
     #[serde(flatten)]
     pub style: StyleOptions,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct TextOptions {
+    pub text: String,
+    #[serde(flatten)]
+    pub style: TextStyleOptions,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum TextParts {
+    Single(String),
+    Many(Vec<TextOptions>),
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct WidgetOptions {
+    pub persist: Option<bool>,
+    pub text: Option<TextParts>,
+    #[serde(flatten)]
+    pub style: TextStyleOptions,
     pub border: Option<BorderOptions>,
     pub height: Option<SerdeConstraint>,
 }
@@ -139,12 +161,45 @@ impl Widget {
         }
 
         if let Some(text) = options.text {
+
+            fn replace_tabs(mut text: String) -> String {
+                let tab = "    ";
+                if text.contains('\t') {
+                    text = text.replace('\t', tab)
+                }
+                text
+            }
+
             // there's no way to set the text on an existing paragraph ...
-            self.inner = Paragraph::new(text.replace('\t', "    "));
+            let mut lines: Vec<_> = match text {
+                TextParts::Single(text) => {
+                    let text = replace_tabs(text);
+                    text.split('\n').map(|l| l.to_owned()).map(Line::from).collect()
+                },
+                TextParts::Many(parts) => {
+                    let mut lines = vec![Line::default()];
+                    for part in parts.into_iter() {
+                        let style = part.style.style.apply_to_style(Style::default());
+                        let text = replace_tabs(part.text);
+                        for (i, text) in text.split('\n').enumerate() {
+                            if i > 0 {
+                                lines.push(Line::default());
+                            }
+                            let line = lines.last_mut().unwrap();
+                            line.spans.push(Span::styled(text.to_owned(), style));
+                            line.alignment = part.style.align.map(|a| a.0);
+                        }
+                    }
+                    lines
+                },
+            };
+
+            lines.truncate(100);
+            self.inner = Paragraph::new(lines);
         }
 
-        if let Some(align) = options.align { self.align = align.0; }
-        self.style = options.style.apply_to_style(self.style);
+        if let Some(align) = options.style.align { self.align = align.0; }
+        self.style = options.style.style.apply_to_style(self.style);
 
         match options.border {
             // explicitly disabled
@@ -215,12 +270,12 @@ impl Tui {
 
     pub fn add_error_message(&mut self, message: String, options: Option<WidgetOptions>) -> usize {
         let mut options = options.unwrap_or_default();
-        options.text = Some(message);
+        options.text = Some(TextParts::Single(message));
         // options.border.get_or_insert(Default::default());
         // options.border.as_mut().unwrap().enabled = Some(true);
         // options.border.as_mut().unwrap().style.fg = Some(SerdeWrap(Color::Red));
         // options.style.bg.get_or_insert(SerdeWrap(Color::Rgb(0x30, 0x30, 0x30)));
-        options.style.fg.get_or_insert(SerdeWrap(Color::Red));
+        options.style.style.fg.get_or_insert(SerdeWrap(Color::Red));
         self.add(options)
     }
 
