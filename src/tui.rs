@@ -308,8 +308,8 @@ impl Tui {
             self.dirty = true;
         }
         if self.dirty {
-            self.old_buffer.reset();
             self.swap_buffers();
+            self.new_buffer.reset();
             self.refresh(width, max_height);
         }
 
@@ -333,13 +333,14 @@ impl Tui {
 
         } else {
 
-            let allocate_more_space = (cursory + actual_height + 1).saturating_sub(height);
+            let allocate_more_space = (cursory + actual_height).saturating_sub(height);
             if allocate_more_space > 0 {
                 // adjust cursory if new lines will be added below
-                let y = self.old_buffer.area.y.saturating_sub(allocate_more_space - 1);
+                let y = self.old_buffer.area.y.saturating_sub(allocate_more_space);
                 self.old_buffer.area.y = y;
                 self.new_buffer.area.y = y;
                 self.old_buffer.reset();
+                queue!(stdout, Clear(ClearType::FromCursorDown))?;
             }
 
             let updates = self.old_buffer.diff(&self.new_buffer);
