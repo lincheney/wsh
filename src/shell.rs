@@ -119,7 +119,7 @@ impl ShellInner {
         } else if let Some(h) = history.iter().next().map(|h| h.histnum) {
             // after all history
             unsafe{ zsh_sys::curhist = h + 1; }
-            (h+1, None)
+            (h + 1, None)
 
         } else {
             // no history

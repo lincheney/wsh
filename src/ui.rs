@@ -19,7 +19,7 @@ use crossterm::{
 
 use crate::keybind;
 use crate::completion;
-use crate::shell::Shell;
+use crate::shell::{Shell, ShellInner};
 
 fn lua_error<T>(msg: &str) -> Result<T, mlua::Error> {
     Err(mlua::Error::RuntimeError(msg.to_string()))
@@ -91,7 +91,7 @@ impl Ui {
 
         let cursor = events.get_cursor_position().await?;
 
-        let ui = Self(Arc::new(RwLock::new(UiInner{
+        let mut ui = UiInner{
             lua,
             lua_api,
             lua_cache,
@@ -108,10 +108,13 @@ impl Ui {
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
             cursor,
             size: crossterm::terminal::size()?,
-        })));
+        };
 
-        ui.init_lua(shell).await?;
         shell.lock().await.readhistfile();
+        ui.reset(&mut *shell.lock().await);
+
+        let ui = Self(Arc::new(RwLock::new(ui)));
+        ui.init_lua(shell).await?;
 
         Ok(ui)
     }
@@ -301,7 +304,7 @@ impl Ui {
                     if let Err(code) = shell.exec(ui.buffer.get_contents().as_ref(), None) {
                         eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
                     }
-                    ui.reset();
+                    ui.reset(&mut *shell);
 
                 } else {
                     ui.buffer.insert(&[b'\n']);
@@ -463,9 +466,10 @@ impl UiInner {
         Ok(())
     }
 
-    fn reset(&mut self) {
+    fn reset(&mut self, shell: &mut ShellInner) {
         self.buffer.reset();
         self.dirty = true;
+        shell.set_curhist(i64::MAX);
     }
 
 }
