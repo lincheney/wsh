@@ -10,7 +10,7 @@ async fn get_history(_ui: Ui, shell: Shell, _lua: Lua, _val: ()) -> Result<(usiz
     let mut histnums = vec![];
     let mut text = vec![];
 
-    for e in shell.get_history().entries().take(5) {
+    for e in shell.get_history().entries() {
         histnums.push(e.histnum as _);
         text.push(e.text);
     }
