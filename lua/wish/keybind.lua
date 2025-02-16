@@ -129,11 +129,7 @@ wish.set_keymap('<c-r>', function()
         msg = nil
     end
 
-    local history, index = wish.get_history()
-    -- reverse a table in lua
-    for i = 0, math.floor(#history / 2) - 1 do
-        history[i+1], history[#history - i] = history[#history - i], history[i+1]
-    end
+    local index, _, history = wish.get_history()
 
     msg = wish.show_message{
         align = 'Left',

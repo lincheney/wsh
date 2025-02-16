@@ -98,12 +98,12 @@ impl ShellInner {
         zsh::history::get_history()
     }
 
-    pub fn get_curhist(&mut self) -> (c_long, Option<zsh::history::EntryIter>) {
+    pub fn get_curhist(&mut self) -> (c_long, Option<&zsh_sys::histent>) {
         let curhist = unsafe{ zsh_sys::curhist };
         self.set_curhist(curhist)
     }
 
-    pub fn set_curhist(&mut self, curhist: c_long) -> (c_long, Option<zsh::history::EntryIter>) {
+    pub fn set_curhist(&mut self, curhist: c_long) -> (c_long, Option<&zsh_sys::histent>) {
         let history = self.get_history();
 
         let value = history
@@ -116,7 +116,7 @@ impl ShellInner {
             unsafe{ zsh_sys::curhist = h; }
             (h, Some(e))
 
-        } else if let Some(h) = history.histnum() {
+        } else if let Some(h) = history.iter().next().map(|h| h.histnum) {
             // after all history
             unsafe{ zsh_sys::curhist = h + 1; }
             (h+1, None)
@@ -126,6 +126,11 @@ impl ShellInner {
             unsafe{ zsh_sys::curhist = 0; }
             (0, None)
         }
+    }
+
+    pub fn push_history(&mut self, string: &BStr) -> zsh::history::EntryIter {
+        let string = CString::new(string.to_vec()).unwrap();
+        zsh::history::push_history(string)
     }
 
 }

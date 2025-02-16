@@ -291,6 +291,7 @@ impl Ui {
                 let (complete, _tokens) = shell.parse(ui.buffer.get_contents().as_ref());
                 if complete {
                     shell.clear_completion_cache();
+                    shell.push_history(ui.buffer.get_contents().as_ref());
 
                     ui.tui.clear_non_persistent();
                     ui.deactivate()?;

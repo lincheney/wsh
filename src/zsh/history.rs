@@ -1,4 +1,4 @@
-use std::ffi::{CStr};
+use std::ffi::{CStr, CString};
 use std::cmp::Ordering;
 use std::os::raw::*;
 use std::ptr::NonNull;
@@ -12,8 +12,8 @@ pub struct Entry {
     pub histnum: c_long,
 }
 
-impl Entry {
-    fn from_histent(histent: &zsh_sys::histent) -> Self {
+impl From<&zsh_sys::histent> for Entry {
+    fn from(histent: &zsh_sys::histent) -> Self {
         let text_ptr = if !histent.zle_text.is_null() {
             histent.zle_text
         } else {
@@ -46,20 +46,20 @@ impl EntryIter {
         Self{ up: false, ..*self }
     }
 
-    fn end(&self) -> Option<NonNull<zsh_sys::histent>> {
+    fn end(&self) -> Self {
         let mut iter = self.clone();
         while let Some(ptr) = iter.next_ptr() {
             iter.ptr = Some(ptr);
         }
-        iter.ptr
+        iter
     }
 
     pub fn top(&self) -> Self {
-        Self{ up: false, ptr: self.up().end() }
+        Self{ up: false, ptr: self.up().end().ptr }
     }
 
     pub fn bottom(&self) -> Self {
-        Self{ up: true, ptr: self.down().end() }
+        Self{ up: true, ptr: self.down().end().ptr }
     }
 
     fn next_ptr(&self) -> Option<NonNull<zsh_sys::histent>> {
@@ -73,31 +73,44 @@ impl EntryIter {
         }
     }
 
-    pub fn as_entry(&self) -> Option<Entry> {
-        Some(Entry::from_histent(unsafe{ self.ptr?.as_ref() }))
+    fn next(&self) -> Option<Self> {
+        self.next_ptr().map(|ptr| Self{ptr: Some(ptr), up: self.up})
     }
 
-    pub fn histnum(&self) -> Option<c_long> {
-        Some(unsafe{ self.ptr?.as_ref() }.histnum)
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item=Self> {
+    pub fn iter(&self) -> impl Iterator<Item=&'static zsh_sys::histent> {
         let mut iter = self.clone();
         std::iter::from_fn(move || {
+            let ptr = iter.ptr;
             iter.ptr = iter.next_ptr();
-            iter.ptr.map(|_| iter.clone())
+            ptr.map(|ptr| unsafe{ ptr.as_ref() })
         })
     }
 
     pub fn entries(&self) -> impl Iterator<Item=Entry> {
-        self.iter().map(|i| i.as_entry().unwrap())
+        self.iter().map(|e| e.into())
     }
 
-    pub fn enumerate(&self) -> impl Iterator<Item=(c_long, EntryIter)> {
-        self.iter().map(|e| (e.histnum().unwrap(), e))
+    pub fn enumerate(&self) -> impl Iterator<Item=(c_long, &'static zsh_sys::histent)> {
+        self.iter().map(|e| (e.histnum, e))
     }
 }
 
 pub fn get_history() -> EntryIter {
     EntryIter{ ptr: NonNull::new(unsafe{ zsh_sys::hist_ring }), up: true }
+}
+
+pub fn push_history(string: CString) -> EntryIter {
+    let flags = 0; // TODO
+    let entry = EntryIter{ ptr: NonNull::new(unsafe{ zsh_sys::prepnexthistent() }), up: true };
+    let hist = unsafe{ entry.ptr.unwrap().as_mut() };
+    hist.node.nam = string.into_raw();
+    hist.ftim = 0;
+    hist.node.flags = flags;
+
+    if flags & zsh_sys::HIST_TMPSTORE as i32 != 0 {
+        // uuhhhh what is this for?
+        unsafe{ zsh_sys::addhistnode(zsh_sys::histtab, hist.node.nam, hist as *mut _ as _); }
+    }
+
+    entry
 }
