@@ -1,7 +1,9 @@
 wish.set_keymap('<bs>', function()
-    if wish.cursor > 0 then
-        wish.buffer = wish.buffer:sub(1, wish.cursor - 1) .. wish.buffer:sub(wish.cursor + 1)
-        wish.cursor = wish.cursor - 1
+    local cursor = wish.cursor
+    if cursor > 0 then
+        local buffer = wish.buffer
+        wish.buffer = buffer:sub(1, cursor - 1) .. buffer:sub(cursor + 1)
+        cursor = cursor - 1
     end
 end)
 
