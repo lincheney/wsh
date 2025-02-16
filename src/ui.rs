@@ -66,6 +66,8 @@ pub struct UiInner {
     dirty: bool,
     cursory: u16,
     pub keybinds: keybind::KeybindMapping,
+    pub history_index: usize, // this is the index from BOTTOM
+
     pub buffer: crate::buffer::Buffer,
     pub prompt: crate::prompt::Prompt,
 
@@ -103,6 +105,7 @@ impl Ui {
             buffer: Default::default(),
             prompt: crate::prompt::Prompt::new(None),
             keybinds: Default::default(),
+            history_index: 0,
             stdout: std::io::stdout(),
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
             cursor,
@@ -299,8 +302,7 @@ impl Ui {
                     if let Err(code) = shell.exec(ui.buffer.get_contents().as_ref(), None) {
                         eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
                     }
-                    ui.buffer.reset();
-                    ui.dirty = true;
+                    ui.reset();
 
                 } else {
                     ui.buffer.insert(&[b'\n']);
@@ -460,6 +462,12 @@ impl UiInner {
 
         crossterm::terminal::disable_raw_mode()?;
         Ok(())
+    }
+
+    fn reset(&mut self) {
+        self.buffer.reset();
+        self.history_index = 0;
+        self.dirty = true;
     }
 
 }

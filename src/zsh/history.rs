@@ -72,18 +72,23 @@ impl EntryIter {
             _ => None,
         }
     }
-}
 
-impl Iterator for EntryIter {
-    type Item = Entry;
-    fn next(&mut self) -> Option<Self::Item> {
-        let entry = Entry::from_histent(unsafe{ self.ptr?.as_ref() });
-        self.ptr = self.next_ptr();
-        Some(entry)
+    pub fn as_entry(&self) -> Option<Entry> {
+        Some(Entry::from_histent(unsafe{ self.ptr?.as_ref() }))
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item=Self> {
+        let mut iter = self.clone();
+        std::iter::from_fn(move || {
+            iter.ptr = iter.next_ptr();
+            iter.ptr.map(|_| iter.clone())
+        })
+    }
+
+    pub fn entries(&self) -> impl Iterator<Item=Entry> {
+        self.iter().map(|i| i.as_entry().unwrap())
     }
 }
-
-impl std::iter::FusedIterator for EntryIter {}
 
 pub fn get_history() -> EntryIter {
     EntryIter{ ptr: NonNull::new(unsafe{ zsh_sys::hist_ring }), up: true }

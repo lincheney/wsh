@@ -102,28 +102,25 @@ wish.set_keymap('<tab>', function()
 
 end)
 
-local history, index
 wish.set_keymap('<up>', function()
-    if not history then
-        history, index = wish.get_history()
-    end
-    if index > 1 then
-        index = index - 1
-        wish.buffer = history[index]
+    local index = wish.get_history_index()
+    local newindex, value = wish.set_history_index(index + 1)
+    if index ~= newindex then
+        wish.buffer = value or ''
         wish.cursor = #wish.buffer
+        wish.redraw()
     end
 end)
 
 wish.set_keymap('<down>', function()
-    if not history then
-        history, index = wish.get_history()
-    end
-    if index < #history then
-        index = index + 1
-        wish.buffer = history[index]
-        wish.cursor = #wish.buffer
-    else
-        wish.buffer = ''
+    local index = wish.get_history_index()
+    if index > 0 then
+        local newindex, value = wish.set_history_index(index - 1)
+        if index ~= newindex then
+            wish.buffer = value or ''
+            wish.cursor = #wish.buffer
+            wish.redraw()
+        end
     end
 end)
 
@@ -135,11 +132,6 @@ wish.set_keymap('<c-r>', function()
     end
 
     local history, index = wish.get_history()
-    -- reverse a table in lua
-    for i = 1, math.floor(#history/2) do
-        history[i], history[#history + 1 - i] = history[#history + 1 - i], history[i]
-    end
-
     msg = wish.show_message{
         align = 'Left',
         height = 'min:10',
