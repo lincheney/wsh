@@ -52,7 +52,6 @@ pub fn parse(mut cmd: &BStr) -> (bool, Vec<Token>) {
     let dummy = b" x";
     let mut c_cmd = cmd.to_vec();
     c_cmd.extend(dummy);
-    let c_cmd = CString::new(c_cmd).unwrap();
     let ptr = super::metafy(&c_cmd);
 
     let flags = zsh_sys::LEXFLAGS_ACTIVE | zsh_sys::LEXFLAGS_COMMENTS_KEEP;
@@ -63,7 +62,7 @@ pub fn parse(mut cmd: &BStr) -> (bool, Vec<Token>) {
     };
 
     // if the command is syntactically complete, then the last token should be a standalone 'x'
-    let mut complete = split.last().is_some_and(|x| x.to_bytes() == b"x");
+    let mut complete = split.last().is_some_and(|x| x == b"x");
 
     let mut prev_kind = TokenKind::Generic;
     let num_tokens = split.len();
@@ -71,9 +70,8 @@ pub fn parse(mut cmd: &BStr) -> (bool, Vec<Token>) {
         .iter()
         .enumerate()
         .filter_map(|(i, token)| {
-            let token = token.to_bytes();
             let token = BStr::new(if i != num_tokens - 1 {
-                token
+                *token
             } else if complete {
                 // skip the last complete token
                 return None

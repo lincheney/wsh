@@ -28,7 +28,7 @@ impl Default for ExecstringOpts<'_> {
 }
 
 pub fn execstring<S: AsRef<BStr>>(cmd: S, opts: ExecstringOpts) {
-    let cmd = CString::new(cmd.as_ref().to_vec()).unwrap();
+    let cmd = cmd.as_ref().to_vec();
     let context = opts.context.map(|c| CString::new(c).unwrap());
     unsafe{
         zsh_sys::execstring(
@@ -96,15 +96,17 @@ pub fn get_prompt_size(prompt: &CStr) -> (c_int, c_int) {
     (width, height)
 }
 
-pub fn metafy(string: &CStr) -> *mut c_char {
+pub fn metafy(value: &[u8]) -> *mut c_char {
     unsafe {
-        zsh_sys::metafy(string.as_ptr() as _, -1, zsh_sys::META_USEHEAP as _)
+        zsh_sys::metafy(value.as_ptr() as _, value.len() as _, zsh_sys::META_USEHEAP as _)
     }
 }
 
-pub fn unmetafy<'a>(ptr: *mut u8) -> &'a CStr {
+pub fn unmetafy<'a>(ptr: *mut u8) -> &'a [u8] {
+    // threadsafe!
+    let mut len = 0i32;
     unsafe {
-        zsh_sys::unmetafy(ptr as _, null_mut());
-        CStr::from_ptr(ptr as _)
+        zsh_sys::unmetafy(ptr as _, &mut len as _);
+        std::slice::from_raw_parts(ptr, len as _)
     }
 }
