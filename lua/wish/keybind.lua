@@ -47,13 +47,17 @@ wish.set_keymap('<c-d>', function()
     if not wish.buffer:find('%S') then
         wish.buffer = 'exit'
         wish.accept_line()
+    else
+        io.stderr:write("DEBUG(hull)      ".."wish.buffer"..(" = %q\n"):format(wish.buffer))
     end
 end)
 
-local messages = {}
+local msg = nil
+
 wish.set_keymap('<tab>', function()
     if msg then
-        msg:remove()
+        pcall(function() msg:remove() end)
+        wish.redraw()
         msg = nil
     end
 
@@ -77,13 +81,13 @@ wish.set_keymap('<tab>', function()
                     type = 'Rounded',
                 },
             }
-            msg:set_options{text = '...\n' .. table.concat(text, '\n')}
+            msg:set_options{text = '...' .. #text .. '\n' .. table.concat(text, '\n')}
             wish.redraw()
         end
     end
 
     if msg then
-        msg:set_options{text = 'done\n' .. table.concat(text, '\n')}
+        msg:set_options{text = 'done ' .. #text .. '\n' .. table.concat(text, '\n')}
         wish.redraw()
     end
 
@@ -96,6 +100,57 @@ wish.set_keymap('<tab>', function()
         wish.redraw()
     end
 
+end)
+
+local history, index
+wish.set_keymap('<up>', function()
+    if not history then
+        history, index = wish.get_history()
+    end
+    if index > 1 then
+        index = index - 1
+        wish.buffer = history[index]
+        wish.cursor = #wish.buffer
+    end
+end)
+
+wish.set_keymap('<down>', function()
+    if not history then
+        history, index = wish.get_history()
+    end
+    if index < #history then
+        index = index + 1
+        wish.buffer = history[index]
+        wish.cursor = #wish.buffer
+    else
+        wish.buffer = ''
+    end
+end)
+
+wish.set_keymap('<c-r>', function()
+    if msg then
+        pcall(function() msg:remove() end)
+        wish.redraw()
+        msg = nil
+    end
+
+    local history, index = wish.get_history()
+    -- reverse a table in lua
+    for i = 1, math.floor(#history/2) do
+        history[i], history[#history + 1 - i] = history[#history + 1 - i], history[i]
+    end
+
+    msg = wish.show_message{
+        align = 'Left',
+        height = 'min:10',
+        -- italic = true,
+        border = {
+            fg = 'green',
+            type = 'Rounded',
+        },
+        text = table.concat(history, '\n'),
+    }
+    wish.redraw()
 end)
 
 wish.set_keymap('<f12>', function()

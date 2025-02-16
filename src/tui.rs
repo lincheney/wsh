@@ -5,6 +5,7 @@ use anyhow::Result;
 use crossterm::{
     cursor,
     queue,
+    terminal::{Clear, ClearType},
 };
 use ratatui::{
     *,
@@ -304,10 +305,10 @@ impl Tui {
 
         let max_height = height * 2 / 3;
         if max_height != self.height || width != self.width {
-            self.old_buffer.reset();
             self.dirty = true;
         }
         if self.dirty {
+            self.old_buffer.reset();
             self.swap_buffers();
             self.refresh(width, max_height);
         }
@@ -327,7 +328,10 @@ impl Tui {
             self.new_buffer.area.height - trailing_empty_lines as u16
         };
 
-        if actual_height > 0 {
+        if actual_height == 0 {
+            queue!(stdout, Clear(ClearType::FromCursorDown))?;
+
+        } else {
 
             let allocate_more_space = (cursory + actual_height + 1).saturating_sub(height);
             if allocate_more_space > 0 {

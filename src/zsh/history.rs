@@ -1,7 +1,7 @@
 use std::ffi::{CStr};
 use std::cmp::Ordering;
 use std::os::raw::*;
-use std::ptr::null_mut;
+use std::ptr::NonNull;
 use bstr::BString;
 
 #[derive(Debug)]
@@ -31,39 +31,60 @@ impl Entry {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
 pub struct EntryIter {
-    ptr: *const zsh_sys::histent,
+    ptr: Option<NonNull<zsh_sys::histent>>,
     up: bool,
 }
 
 impl EntryIter {
-    pub fn rev(&self) -> Self {
-        Self{ ptr: self.ptr, up: !self.up }
+    pub fn up(&self) -> Self {
+        Self{ up: true, ..*self }
+    }
+
+    pub fn down(&self) -> Self {
+        Self{ up: false, ..*self }
+    }
+
+    fn end(&self) -> Option<NonNull<zsh_sys::histent>> {
+        let mut iter = self.clone();
+        while let Some(ptr) = iter.next_ptr() {
+            iter.ptr = Some(ptr);
+        }
+        iter.ptr
+    }
+
+    pub fn top(&self) -> Self {
+        Self{ up: false, ptr: self.up().end() }
+    }
+
+    pub fn bottom(&self) -> Self {
+        Self{ up: true, ptr: self.down().end() }
+    }
+
+    fn next_ptr(&self) -> Option<NonNull<zsh_sys::histent>> {
+        let hist = unsafe{ self.ptr?.as_ref() };
+        let ptr = NonNull::new(if self.up { hist.up } else { hist.down })?;
+
+        match unsafe{ ptr.as_ref() }.histnum.cmp(&hist.histnum) {
+            Ordering::Greater if !self.up => Some(ptr),
+            Ordering::Less if self.up => Some(ptr),
+            _ => None,
+        }
     }
 }
 
 impl Iterator for EntryIter {
     type Item = Entry;
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some(hist) = unsafe{ self.ptr.as_ref() } {
-
-            self.ptr = if self.up { hist.up } else { hist.down };
-
-            match unsafe{ self.ptr.as_ref() }.map(|h| h.histnum.cmp(&hist.histnum)) {
-                Some(Ordering::Greater) if !self.up => {},
-                Some(Ordering::Less) if self.up => {},
-                _ => { self.ptr = null_mut(); },
-            }
-
-            Some(Entry::from_histent(hist))
-        } else {
-            None
-        }
+        let entry = Entry::from_histent(unsafe{ self.ptr?.as_ref() });
+        self.ptr = self.next_ptr();
+        Some(entry)
     }
 }
 
 impl std::iter::FusedIterator for EntryIter {}
 
 pub fn get_history() -> EntryIter {
-    EntryIter{ ptr: unsafe{ zsh_sys::hist_ring }, up: true }
+    EntryIter{ ptr: NonNull::new(unsafe{ zsh_sys::hist_ring }), up: true }
 }

@@ -397,6 +397,7 @@ impl Ui {
         keybind::init_lua(self, shell).await?;
         completion::init_lua(self, shell).await?;
         crate::tui::init_lua(self, shell).await?;
+        crate::history::init_lua(self, shell).await?;
 
         let lua = self.borrow().await.lua.clone();
         lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;
