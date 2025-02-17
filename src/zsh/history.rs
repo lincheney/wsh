@@ -101,19 +101,19 @@ pub fn get_history() -> EntryIter {
 
 pub fn push_history(string: &BStr) -> EntryIter {
     let flags = 0; // TODO
-    let histnum = unsafe{ zsh_sys::hist_ring.as_ref() }.map(|h| h.histnum).unwrap_or(0);
-    let entry = EntryIter{ ptr: NonNull::new(unsafe{ zsh_sys::prepnexthistent() }), up: true };
-    let hist = unsafe{ entry.ptr.unwrap().as_mut() };
-    hist.histnum = histnum + 1;
     let string = unsafe{ CStr::from_ptr(super::metafy(string)) }.to_owned();
+
+    let ptr = unsafe{ zsh_sys::prepnexthistent() };
+    let hist = unsafe{ ptr.as_mut().unwrap() };
+    hist.histnum = unsafe{ hist.up.as_ref() }.map(|h| h.histnum).unwrap_or(0) + 1;
     hist.node.nam = string.into_raw();
     hist.ftim = 0;
     hist.node.flags = flags;
 
     if flags & zsh_sys::HIST_TMPSTORE as i32 != 0 {
         // uuhhhh what is this for?
-        unsafe{ zsh_sys::addhistnode(zsh_sys::histtab, hist.node.nam, hist as *mut _ as _); }
+        unsafe{ zsh_sys::addhistnode(zsh_sys::histtab, hist.node.nam, ptr as _); }
     }
 
-    entry
+    EntryIter{ ptr: NonNull::new(ptr), up: true }
 }
