@@ -105,7 +105,7 @@ wish.set_keymap('<tab>', function()
 end)
 
 local function show_history(size)
-    msg = msg or wish.show_message{
+    msg = msg and msg:exists() and msg or wish.show_message{
         align = 'Left',
         -- italic = true,
         border = {
