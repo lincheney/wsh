@@ -46,7 +46,7 @@ async fn get_prev_history(_ui: Ui, shell: Shell, _lua: Lua, val: usize) -> Resul
     Ok(value.unzip())
 }
 
-async fn goto_history(ui: Ui, shell: Shell, _lua: Lua, val: usize) -> Result<(usize, Option<BString>)> {
+async fn goto_history(mut ui: Ui, shell: Shell, _lua: Lua, val: usize) -> Result<(usize, Option<BString>)> {
     let mut shell = shell.lock().await;
 
     let save = shell.get_curhist().1.is_none();

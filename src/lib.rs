@@ -32,7 +32,7 @@ async fn main() -> Result<()> {
     let (mut events, event_locker) = event_stream::EventStream::new();
 
     let shell = shell::Shell::new();
-    let ui = ui::Ui::new(&shell, event_locker).await?;
+    let mut ui = ui::Ui::new(&shell, event_locker).await?;
     ui.activate().await?;
     ui.draw(&shell).await?;
 
@@ -40,19 +40,7 @@ async fn main() -> Result<()> {
     nix::unistd::dup2(old_stdin, 0)?;
     nix::unistd::close(old_stdin)?;
 
-    events.run(|event| async {
-        match event {
-            Some(Ok(event)) => {
-                match ui.handle_event(event, &shell).await {
-                    Ok(true) => None,
-                    Ok(false) => Some(Ok(())),
-                    Err(e) => Some(Err(e)),
-                }
-            }
-            Some(Err(event)) => { println!("Error: {:?}\r", event); None },
-            None => Some(Ok(())),
-        }
-    }).await?;
+    events.run(&mut ui, &shell).await?;
 
     Ok(())
 }

@@ -44,7 +44,7 @@ async fn get_completions(ui: Ui, shell: Shell, _lua: Lua, val: Option<String>) -
     let (completions, starter) = result.map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))?;
 
     let shell_clone = shell.clone();
-    let ui_clone = ui.clone();
+    let mut ui_clone = ui.clone();
     // run this in a thread
     async_std::task::spawn_blocking(move || {
         let tid = nix::unistd::gettid();
@@ -65,7 +65,7 @@ async fn get_completions(ui: Ui, shell: Shell, _lua: Lua, val: Option<String>) -
     Ok(CompletionStream{inner: completions})
 }
 
-async fn insert_completion(ui: Ui, shell: Shell, _lua: Lua, val: CompletionMatch) -> Result<()> {
+async fn insert_completion(mut ui: Ui, shell: Shell, _lua: Lua, val: CompletionMatch) -> Result<()> {
     let buffer = ui.borrow().await.buffer.get_contents().clone();
     let (buffer, pos) = shell.lock().await.insert_completion(buffer.as_ref(), &val.inner);
     ui.borrow_mut().await.buffer.set(Some(&buffer), Some(pos));

@@ -8,7 +8,7 @@ use crate::shell::Shell;
 pub type KeybindMapping = HashMap<(KeyCode, KeyModifiers), Function>;
 
 
-async fn set_keymap(ui: Ui, _shell: Shell, _lua: Lua, (key, callback): (String, Function)) -> Result<()> {
+async fn set_keymap(mut ui: Ui, _shell: Shell, _lua: Lua, (key, callback): (String, Function)) -> Result<()> {
     let mut modifiers = KeyModifiers::empty();
 
     let original = &key;

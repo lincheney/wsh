@@ -70,10 +70,7 @@ impl EventStream {
         (stream, locker)
     }
 
-    pub async fn run<F, T, O>(&mut self, func: F) -> O
-        where F: Fn(Option<Result<crossterm::event::Event, std::io::Error>>) -> T,
-            T: Future<Output=Option<O>>
-    {
+    pub async fn run(&mut self, ui: &mut crate::ui::Ui, shell: &crate::shell::Shell) -> anyhow::Result<()> {
         loop {
             let mut lock = None;
             let mut waker = self.receiver.next().fuse();
@@ -94,8 +91,15 @@ impl EventStream {
                     },
                     e = event => {
                         drop(lock.take());
-                        if let Some(value) = func(e).await {
-                            return value
+
+                        match e {
+                            Some(Ok(event)) => {
+                                if !ui.handle_event(event, &shell).await? {
+                                    return Ok(())
+                                }
+                            }
+                            Some(Err(event)) => { println!("Error: {:?}\r", event); },
+                            None => return Ok(()),
                         }
                         event = events.next().fuse();
                         lock = Some(self.lock.lock_exclusive().await);

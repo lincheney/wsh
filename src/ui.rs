@@ -123,7 +123,7 @@ impl Ui {
         self.0.read()
     }
 
-    pub fn borrow_mut(&self) -> async_lock::futures::Write<UiInner> {
+    pub fn borrow_mut(&mut self) -> async_lock::futures::Write<UiInner> {
         self.0.write()
     }
 
@@ -131,11 +131,11 @@ impl Ui {
         self.borrow().await.activate()
     }
 
-    pub async fn deactivate(&self) -> Result<()> {
+    pub async fn deactivate(&mut self) -> Result<()> {
         self.borrow_mut().await.deactivate()
     }
 
-    pub async fn draw(&self, shell: &Shell) -> Result<()> {
+    pub async fn draw(&mut self, shell: &Shell) -> Result<()> {
         let mut ui = self.borrow_mut().await;
         let ui = ui.deref_mut();
 
@@ -170,12 +170,13 @@ impl Ui {
             queue!(ui.stdout, MoveDown(ui.buffer.cursory as _))?;
         }
 
+        crossterm::terminal::enable_raw_mode()?;
         let events = ui.events.lock().await;
 
         if ui.dirty || ui.tui.dirty {
             // move to last line of buffer
             let yoffset = (ui.buffer.height - ui.buffer.cursory - 1) as u16;
-            queue!(ui.stdout, MoveDown(yoffset))?;
+            execute!(ui.stdout, MoveDown(yoffset))?;
             // tui needs to know exactly where it is
             ui.cursor = events.get_cursor_position()?;
             ui.tui.draw(&mut ui.stdout, size, ui.cursor.1, ui.dirty)?;
@@ -186,20 +187,19 @@ impl Ui {
         execute!(ui.stdout, EndSynchronizedUpdate)?;
         ui.cursory = (ui.prompt.height + ui.buffer.height) as u16;
         ui.cursor = events.get_cursor_position()?;
-        crossterm::terminal::enable_raw_mode()?;
 
         ui.cursory = 0;
         ui.dirty = false;
         Ok(())
     }
 
-    pub async fn handle_event(&self, event: Event, shell: &Shell) -> Result<bool> {
+    pub async fn handle_event(&mut self, event: Event, shell: &Shell) -> Result<bool> {
         // eprintln!("DEBUG(grieve)\t{}\t= {:?}\r", stringify!(event), event);
 
         if let Event::Key(KeyEvent{code, modifiers, ..}) = event {
             let callback = self.borrow().await.keybinds.get(&(code, modifiers)).cloned();
             if let Some(callback) = callback {
-                let ui = self.clone();
+                let mut ui = self.clone();
                 let shell = shell.clone();
 
                 if let Err(err) = callback.call_async::<LuaValue>(()).await {
@@ -280,7 +280,7 @@ impl Ui {
         Ok(true)
     }
 
-    async fn accept_line(&self, shell: &Shell) -> Result<bool> {
+    async fn accept_line(&mut self, shell: &Shell) -> Result<bool> {
         self.borrow_mut().await.is_running_process = true;
         self.draw(shell).await?;
 
@@ -371,21 +371,21 @@ impl Ui {
             Ok(lua.create_string(ui.borrow().await.buffer.get_contents())?)
         }).await?;
 
-        self.set_lua_async_fn("__set_cursor", shell, |ui, _shell, _lua, val: usize| async move {
+        self.set_lua_async_fn("__set_cursor", shell, |mut ui, _shell, _lua, val: usize| async move {
             ui.borrow_mut().await.buffer.set_cursor(val);
             Ok(())
         }).await?;
 
-        self.set_lua_async_fn("__set_buffer", shell, |ui, _shell, _lua, val: mlua::String| async move {
+        self.set_lua_async_fn("__set_buffer", shell, |mut ui, _shell, _lua, val: mlua::String| async move {
             ui.borrow_mut().await.buffer.set_contents(&val.as_bytes());
             Ok(())
         }).await?;
 
-        self.set_lua_async_fn("accept_line", shell, |ui, shell, _lua, _val: ()| async move {
+        self.set_lua_async_fn("accept_line", shell, |mut ui, shell, _lua, _val: ()| async move {
             ui.accept_line(&shell).await
         }).await?;
 
-        self.set_lua_async_fn("redraw", shell, |ui, shell, _lua, _val: ()| async move {
+        self.set_lua_async_fn("redraw", shell, |mut ui, shell, _lua, _val: ()| async move {
             ui.draw(&shell).await
         }).await?;
 
