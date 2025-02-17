@@ -1,8 +1,8 @@
-use std::ffi::{CStr, CString};
+use std::ffi::{CStr};
 use std::cmp::Ordering;
 use std::os::raw::*;
 use std::ptr::NonNull;
-use bstr::BString;
+use bstr::*;
 
 #[derive(Debug)]
 pub struct Entry {
@@ -99,12 +99,13 @@ pub fn get_history() -> EntryIter {
     EntryIter{ ptr: NonNull::new(unsafe{ zsh_sys::hist_ring }), up: true }
 }
 
-pub fn push_history(string: CString) -> EntryIter {
+pub fn push_history(string: &BStr) -> EntryIter {
     let flags = 0; // TODO
     let histnum = unsafe{ zsh_sys::hist_ring.as_ref() }.map(|h| h.histnum).unwrap_or(0);
     let entry = EntryIter{ ptr: NonNull::new(unsafe{ zsh_sys::prepnexthistent() }), up: true };
     let hist = unsafe{ entry.ptr.unwrap().as_mut() };
     hist.histnum = histnum + 1;
+    let string = unsafe{ CStr::from_ptr(super::metafy(string)) }.to_owned();
     hist.node.nam = string.into_raw();
     hist.ftim = 0;
     hist.node.flags = flags;
