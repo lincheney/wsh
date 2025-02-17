@@ -8,6 +8,10 @@ use zsh_sys::*;
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
+pub fn isset(setting: usize) -> bool {
+    unsafe{ zsh_sys::opts[setting] != 0 }
+}
+
 macro_rules! make_str_getter {
     ($field:ident) => (
         paste! {
