@@ -40,9 +40,9 @@ async fn main() -> Result<()> {
     nix::unistd::dup2(old_stdin, 0)?;
     nix::unistd::close(old_stdin)?;
 
-    events.run(&mut ui, &shell).await?;
-
-    Ok(())
+    let result = events.run(&mut ui, &shell).await;
+    let _ = ui.deactivate().await;
+    result
 }
 
 
@@ -105,14 +105,16 @@ pub extern fn setup_() -> c_int {
 }
 
 #[no_mangle]
-pub extern fn features_(module: zsh_sys::Module, features: *mut *mut *mut c_char) -> c_int {
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern fn features_(module: zsh_sys::Module, features: *mut *mut *mut c_char) -> c_int {
     let module_features: &zsh_sys::features = &MODULE_FEATURES.deref().0;
     unsafe{ *features = zsh_sys::featuresarray(module, module_features as *const _ as *mut _); }
     0
 }
 
 #[no_mangle]
-pub extern fn enables_(module: zsh_sys::Module, enables: *mut *mut c_int) -> c_int {
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern fn enables_(module: zsh_sys::Module, enables: *mut *mut c_int) -> c_int {
     let module_features: &zsh_sys::features = &MODULE_FEATURES.deref().0;
     unsafe{ zsh_sys::handlefeatures(module, module_features as *const _ as *mut _, enables) }
 }
@@ -124,7 +126,8 @@ pub extern fn boot_() -> c_int {
 }
 
 #[no_mangle]
-pub extern fn cleanup_(module: zsh_sys::Module) -> c_int {
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern fn cleanup_(module: zsh_sys::Module) -> c_int {
     zsh::completion::restore_compadd();
     let module_features: &zsh_sys::features = &MODULE_FEATURES.deref().0;
     unsafe{ zsh_sys::setfeatureenables(module, module_features as *const _ as *mut _, null_mut()) }

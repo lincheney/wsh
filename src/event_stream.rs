@@ -1,4 +1,3 @@
-use std::future::Future;
 use std::sync::Arc;
 use futures::channel::mpsc;
 use futures::{select, SinkExt, StreamExt, FutureExt};
@@ -94,7 +93,7 @@ impl EventStream {
 
                         match e {
                             Some(Ok(event)) => {
-                                if !ui.handle_event(event, &shell).await? {
+                                if !ui.handle_event(event, shell).await? {
                                     return Ok(())
                                 }
                             }

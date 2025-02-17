@@ -304,10 +304,10 @@ impl Ui {
                     if let Err(code) = shell.exec(ui.buffer.get_contents().as_ref(), None) {
                         eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
                     }
-                    ui.reset(&mut *shell);
+                    ui.reset(&mut shell);
 
                 } else {
-                    ui.buffer.insert(&[b'\n']);
+                    ui.buffer.insert(b"\n");
                 }
                 ui.is_running_process = false;
             }

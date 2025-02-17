@@ -47,7 +47,7 @@ impl EntryIter {
     }
 
     fn end(&self) -> Self {
-        let mut iter = self.clone();
+        let mut iter = *self;
         while let Some(ptr) = iter.next_ptr() {
             iter.ptr = Some(ptr);
         }
@@ -78,7 +78,7 @@ impl EntryIter {
     }
 
     pub fn iter(&self) -> impl Iterator<Item=&'static zsh_sys::histent> {
-        let mut iter = self.clone();
+        let mut iter = *self;
         std::iter::from_fn(move || {
             let ptr = iter.ptr;
             iter.ptr = iter.next_ptr();

@@ -119,7 +119,7 @@ pub fn unmetafy<'a>(ptr: *mut u8) -> &'a [u8] {
     }
 }
 
-pub fn unmetafy_owned<'a>(value: &mut Vec<u8>) {
+pub fn unmetafy_owned(value: &mut Vec<u8>) {
     // threadsafe!
     let mut len = 0i32;
     // MUST end with null byte

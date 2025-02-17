@@ -12,7 +12,7 @@ macro_rules! ArcMutexNew {
 
 macro_rules! AsyncArcMutexNew {
     ($expr:expr) => (
-        ::std::sync::Arc::new(::async_std::sync::AsyncMutex::new($expr))
+        ::std::sync::Arc::new(::async_std::sync::Mutex::new($expr))
     )
 }
 

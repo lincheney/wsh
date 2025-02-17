@@ -64,10 +64,10 @@ unsafe impl Send for Streamer {}
 
 impl Streamer {
     fn make_consumer(parent: &ArcMutex<Self>) -> Arc<AsyncMutex<StreamConsumer>> {
-        Arc::new(AsyncMutex::new(StreamConsumer {
+        AsyncArcMutexNew!(StreamConsumer {
             index: 0,
             parent: parent.clone(),
-        }))
+        })
     }
 
     fn wake(&mut self) {
