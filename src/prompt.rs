@@ -41,11 +41,17 @@ impl Prompt {
         &mut self,
         stdout: &mut std::io::Stdout,
         shell: &mut ShellInner,
-        _: (u16, u16),
+        (width, _height): (u16, u16),
     ) -> Result<bool> {
 
         let old = (self.width, self.height);
         self.refresh_prompt(shell);
+
+        // actually takes up whole line
+        if self.width >= width as _ {
+            self.height += 1;
+        }
+
         let changed = old != (self.width, self.height);
 
         if changed {

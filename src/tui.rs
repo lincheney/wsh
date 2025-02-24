@@ -255,7 +255,8 @@ pub struct Tui {
 
     pub dirty: bool,
     width: u16,
-    height: u16,
+    max_height: u16,
+    pub height: u16,
 
     old_buffer: Buffer,
     new_buffer: Buffer,
@@ -270,6 +271,7 @@ impl std::default::Default for Tui {
             dirty: false,
             width: 0,
             height: 0,
+            max_height: 0,
 
             old_buffer: Default::default(),
             new_buffer: Default::default(),
@@ -338,7 +340,7 @@ impl Tui {
 
     fn refresh(&mut self, width: u16, height: u16) {
         self.width = width;
-        self.height = height;
+        self.max_height = height;
 
         let mut area = Rect{
             x: 0,
@@ -405,7 +407,7 @@ impl Tui {
         }
 
         let max_height = height * 2 / 3;
-        if max_height != self.height || width != self.width {
+        if max_height != self.max_height || width != self.width {
             self.dirty = true;
         }
 
@@ -419,7 +421,7 @@ impl Tui {
         self.old_buffer.area.y = cursory;
         self.new_buffer.area.y = cursory;
 
-        let actual_height = {
+       self.height = {
             let trailing_empty_lines = self.new_buffer.content()
                 .chunks(self.new_buffer.area.width as _)
                 .rev()
@@ -430,12 +432,12 @@ impl Tui {
             self.new_buffer.area.height - trailing_empty_lines as u16
         };
 
-        if actual_height == 0 {
+        if self.height == 0 {
             queue!(stdout, Clear(ClearType::FromCursorDown))?;
 
         } else {
 
-            let allocate_more_space = (cursory + actual_height) as isize - height as isize;
+            let allocate_more_space = (cursory + self.height) as isize - height as isize;
             if allocate_more_space > 0 {
                 // adjust cursory if new lines will be added below
                 let y = self.old_buffer.area.y.saturating_sub(allocate_more_space as _);
@@ -449,7 +451,7 @@ impl Tui {
 
             if !updates.is_empty() {
                 if allocate_more_space > 0 {
-                    Ui::allocate_height(stdout, actual_height)?;
+                    Ui::allocate_height(stdout, self.height)?;
                 }
                 queue!(
                     stdout,
@@ -458,7 +460,7 @@ impl Tui {
                     cursor::MoveToColumn(0),
                 )?;
 
-                let limit = self.old_buffer.area.y + actual_height + (-allocate_more_space.min(0) as u16);
+                let limit = self.old_buffer.area.y + self.height + (-allocate_more_space.min(0) as u16);
                 let updates = updates.into_iter().filter(|(_, y, _)| *y < limit);
                 self.terminal.backend_mut().draw(updates)?;
                 queue!(stdout, cursor::RestorePosition)?;

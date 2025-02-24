@@ -64,7 +64,7 @@ pub struct UiInner {
     events: crate::event_stream::EventLocker,
     is_running_process: bool,
     dirty: bool,
-    cursory: u16,
+    y_offset: u16,
     pub keybinds: keybind::KeybindMapping,
     pub event_callbacks: crate::events::EventCallbacks,
 
@@ -99,7 +99,7 @@ impl Ui {
             events,
             is_running_process: false,
             dirty: true,
-            cursory: 0,
+            y_offset: 0,
             tui: Default::default(),
             threads: HashSet::new(),
             buffer: Default::default(),
@@ -155,44 +155,44 @@ impl Ui {
 
         crossterm::terminal::disable_raw_mode()?;
         queue!(ui.stdout, BeginSynchronizedUpdate)?;
-        let size = crossterm::terminal::size()?;
+        ui.size = crossterm::terminal::size()?;
 
         if ui.dirty || ui.prompt.dirty {
-            // move back to top of drawing area
-            queue!(ui.stdout, MoveUp(ui.cursory))?;
-            ui.dirty = ui.prompt.draw(&mut ui.stdout, &mut *shell.lock().await, size)? || ui.dirty;
+            // move back to top of drawing area and redraw prompt
+            queue!(ui.stdout, MoveUp(ui.y_offset))?;
+            ui.dirty = ui.prompt.draw(&mut ui.stdout, &mut *shell.lock().await, ui.size)? || ui.dirty;
         } else {
             // move back to prompt line
-            queue!(ui.stdout, MoveUp(ui.buffer.cursory as _))?;
+            queue!(ui.stdout, MoveUp(ui.buffer.y_offset as _))?;
         }
 
         if ui.dirty || ui.buffer.dirty {
             // MUST start on same line as prompt
-            ui.dirty = ui.buffer.draw(&mut ui.stdout, size, ui.prompt.width)? || ui.dirty;
+            ui.dirty = ui.buffer.draw(&mut ui.stdout, ui.size, ui.prompt.width)? || ui.dirty;
         } else {
             // move to cursor
-            queue!(ui.stdout, MoveDown(ui.buffer.cursory as _))?;
+            queue!(ui.stdout, MoveDown(ui.buffer.y_offset as _))?;
         }
 
-        let events = ui.events.lock().await;
+        ui.y_offset = (ui.prompt.height + ui.buffer.height) as u16;
 
         if ui.dirty || ui.tui.dirty {
             // move to last line of buffer
-            let yoffset = (ui.buffer.height - ui.buffer.cursory - 1) as u16;
-            execute!(ui.stdout, MoveDown(yoffset))?;
+            let y_offset = (ui.buffer.height - ui.buffer.y_offset - 1) as u16;
+            execute!(ui.stdout, MoveDown(y_offset))?;
             // tui needs to know exactly where it is
-            ui.cursor = events.get_cursor_position()?;
-            ui.tui.draw(&mut ui.stdout, size, ui.cursor.1, ui.dirty)?;
+            // printing the prompt and buffer may have shifted cursor up
+            ui.cursor.1 = ui.cursor.1.min(ui.size.1 - (ui.prompt.height + ui.buffer.height - 1) as u16);
+            let cursory = ui.cursor.1 + ui.y_offset + y_offset;
+            ui.tui.draw(&mut ui.stdout, ui.size, cursory, ui.dirty)?;
             // then move back
-            queue!(ui.stdout, MoveUp(yoffset))?;
+            queue!(ui.stdout, MoveUp(y_offset))?;
         }
 
         execute!(ui.stdout, EndSynchronizedUpdate)?;
         crossterm::terminal::enable_raw_mode()?;
-        ui.cursory = (ui.prompt.height + ui.buffer.height) as u16;
-        ui.cursor = events.get_cursor_position()?;
+        ui.cursor.1 = ui.cursor.1.min(ui.size.1 - (ui.prompt.height + ui.buffer.height - 1) as u16 + ui.tui.height);
 
-        ui.cursory = 0;
         ui.dirty = false;
         Ok(())
     }
@@ -333,6 +333,15 @@ impl Ui {
                         eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
                     }
                     ui.reset(&mut shell);
+                    ui.is_running_process = false;
+
+                    // move down one line if not at start of line
+                    ui.cursor = ui.events.lock().await.get_cursor_position()?;
+                    if ui.cursor.0 != 0 {
+                        ui.size = crossterm::terminal::size()?;
+                        ui.cursor.1 = (ui.cursor.1 + 1).min(ui.size.1 - 1);
+                        queue!(ui.stdout, style::Print("\r\n"))?;
+                    }
 
                 } else {
                     ui.buffer.insert(b"\n");

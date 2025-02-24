@@ -20,7 +20,7 @@ pub struct Buffer {
     pub dirty: bool,
 
     pub height: usize,
-    pub cursory: usize,
+    pub y_offset: usize,
 }
 
 struct BufferContents<'a>(&'a BStr);
@@ -168,7 +168,7 @@ impl Buffer {
         self.contents.clear();
         self.len = None;
         self.cursor = 0;
-        self.cursory = 0;
+        self.y_offset = 0;
         self.saved_contents.clear();
         self.saved_cursor = 0;
         self.dirty = true;
@@ -202,10 +202,10 @@ impl Buffer {
         // calculate heights
         let mut text = " ".repeat(prompt_width) + &prefix;
         strip_colours(&mut text);
-        self.cursory = wrap(&text, width as _).len() - 1;
+        self.y_offset = wrap(&text, width as _).len() - 1;
 
         if suffix.is_empty() {
-            self.height = self.cursory + 1;
+            self.height = self.y_offset + 1;
         } else {
             // pop the space from the end
             text.pop();

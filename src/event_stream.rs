@@ -27,10 +27,11 @@ impl UnlockedEvents {
         loop {
             let now = std::time::SystemTime::now();
             match crossterm::cursor::position() {
-                Err(e) if now.elapsed().unwrap().as_millis() < 1500 && format!("{}", e) == "The cursor position could not be read within a normal duration" => {
-                    // crossterm times out in 2s
-                    // but it also fails on EINTR whereas we would like to retry
-                },
+                // Err(e) if now.elapsed().unwrap().as_millis() < 1500 && format!("{}", e) == "The cursor position could not be read within a normal duration" => {
+                    // // crossterm times out in 2s
+                    // // but it also fails on EINTR whereas we would like to retry
+                    // log::debug!("{:?}", e);
+                // },
                 x => return x,
             }
         }
