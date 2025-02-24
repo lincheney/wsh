@@ -511,6 +511,7 @@ impl UiInner {
 
     fn reset(&mut self, shell: &mut ShellInner) {
         self.buffer.reset();
+        self.y_offset = 0;
         self.dirty = true;
         shell.set_curhist(i64::MAX);
     }
