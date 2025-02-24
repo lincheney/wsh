@@ -201,7 +201,7 @@ impl Ui {
         let mut ui = self.clone();
         async_std::task::spawn(async move {
             if let Err(err) = callback.call_async::<LuaValue>(arg).await {
-                log::error!("{:?}", err);
+                log::error!("{}", err);
                 ui.show_error_message(&shell, format!("ERROR: {}", err)).await;
             } else if draw {
                 if let Err(err) = ui.draw(&shell).await {
