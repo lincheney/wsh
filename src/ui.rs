@@ -388,19 +388,19 @@ impl Ui {
     }
 
     async fn init_lua(&self, shell: &Shell) -> Result<()> {
-        self.set_lua_async_fn("__get_cursor", shell, |ui, _shell, _lua, _val: ()| async move {
+        self.set_lua_async_fn("get_cursor", shell, |ui, _shell, _lua, _val: ()| async move {
             Ok(ui.borrow().await.buffer.get_cursor())
         } ).await?;
-        self.set_lua_async_fn("__get_buffer", shell, |ui, _shell, lua, _val: ()| async move {
+        self.set_lua_async_fn("get_buffer", shell, |ui, _shell, lua, _val: ()| async move {
             Ok(lua.create_string(ui.borrow().await.buffer.get_contents())?)
         }).await?;
 
-        self.set_lua_async_fn("__set_cursor", shell, |mut ui, _shell, _lua, val: usize| async move {
+        self.set_lua_async_fn("set_cursor", shell, |mut ui, _shell, _lua, val: usize| async move {
             ui.borrow_mut().await.buffer.set_cursor(val);
             Ok(())
         }).await?;
 
-        self.set_lua_async_fn("__set_buffer", shell, |mut ui, _shell, _lua, val: mlua::String| async move {
+        self.set_lua_async_fn("set_buffer", shell, |mut ui, _shell, _lua, val: mlua::String| async move {
             ui.borrow_mut().await.buffer.set_contents(&val.as_bytes());
             Ok(())
         }).await?;
@@ -424,6 +424,7 @@ impl Ui {
         crate::history::init_lua(self, shell).await?;
         crate::events::init_lua(self, shell).await?;
         crate::lua::init_lua(self, shell).await?;
+        crate::string::init_lua(self, shell).await?;
 
         let lua = self.borrow().await.lua.clone();
         lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;

@@ -18,6 +18,7 @@ mod event_stream;
 mod events;
 mod prompt;
 mod lua;
+mod string;
 mod history;
 #[macro_use]
 mod utils;
