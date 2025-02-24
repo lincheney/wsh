@@ -428,11 +428,7 @@ impl Tui {
             self.refresh(width, max_height);
         }
 
-        let cursory = cursory + 1;
-        self.old_buffer.area.y = cursory;
-        self.new_buffer.area.y = cursory;
-
-       self.height = {
+        self.height = {
             let trailing_empty_lines = self.new_buffer.content()
                 .chunks(self.new_buffer.area.width as _)
                 .rev()
@@ -447,6 +443,8 @@ impl Tui {
             queue!(stdout, Clear(ClearType::FromCursorDown))?;
 
         } else {
+            self.old_buffer.area.y = cursory;
+            self.new_buffer.area.y = cursory;
 
             let allocate_more_space = (cursory + self.height) as isize - height as isize;
             if allocate_more_space > 0 {
@@ -471,9 +469,20 @@ impl Tui {
                     cursor::MoveToColumn(0),
                 )?;
 
-                let limit = self.old_buffer.area.y + self.height + (-allocate_more_space.min(0) as u16);
-                let updates = updates.into_iter().filter(|(_, y, _)| *y < limit);
-                self.terminal.backend_mut().draw(updates)?;
+                let mut height = height;
+                if allocate_more_space < 0 {
+                    height += -allocate_more_space as u16;
+                }
+
+                self.terminal.backend_mut().draw(updates.into_iter())?;
+                if self.old_buffer.area.y + self.height < height {
+                    queue!(
+                        stdout,
+                        cursor::MoveToRow(self.old_buffer.area.y + self.height),
+                        cursor::MoveToColumn(0),
+                        Clear(ClearType::FromCursorDown),
+                    )?;
+                }
                 queue!(stdout, cursor::RestorePosition)?;
             }
         }
@@ -493,9 +502,11 @@ impl UserData for WidgetId {
 
         methods.add_async_method_mut("set_options", |lua, mut id, val: LuaValue| async move {
             let id = id.deref_mut();
-            if let Some(widget) = id.0.borrow_mut().await.tui.get_mut(id.1) {
+            let tui = &mut id.0.borrow_mut().await.tui;
+            if let Some(widget) = tui.get_mut(id.1) {
                 let options: WidgetOptions = lua.from_value(val)?;
                 widget.set_options(options);
+                tui.dirty = true;
                 Ok(())
             } else {
                 Err(LuaError::RuntimeError(format!("can't find widget with id {}", id.1)))
@@ -504,7 +515,9 @@ impl UserData for WidgetId {
 
         methods.add_async_method_mut("remove", |_lua, mut id, _val: LuaValue| async move {
             let id = id.deref_mut();
-            if id.0.borrow_mut().await.tui.remove(id.1).is_some() {
+            let tui = &mut id.0.borrow_mut().await.tui;
+            if tui.remove(id.1).is_some() {
+                tui.dirty = true;
                 Ok(())
             } else {
                 Err(LuaError::RuntimeError(format!("can't find widget with id {}", id.1)))

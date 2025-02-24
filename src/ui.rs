@@ -174,7 +174,7 @@ impl Ui {
             queue!(ui.stdout, MoveDown(ui.buffer.y_offset as _))?;
         }
 
-        ui.y_offset = (ui.prompt.height + ui.buffer.height) as u16;
+        ui.y_offset = (ui.prompt.height + ui.buffer.y_offset) as u16;
 
         if ui.dirty || ui.tui.dirty {
             // move to last line of buffer
@@ -191,7 +191,7 @@ impl Ui {
 
         execute!(ui.stdout, EndSynchronizedUpdate)?;
         crossterm::terminal::enable_raw_mode()?;
-        ui.cursor.1 = ui.cursor.1.min(ui.size.1 - (ui.prompt.height + ui.buffer.height - 1) as u16 + ui.tui.height);
+        ui.cursor.1 = ui.cursor.1.min(ui.size.1 - (ui.prompt.height + ui.buffer.height - 1) as u16 - ui.tui.height);
 
         ui.dirty = false;
         Ok(())
