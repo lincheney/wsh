@@ -34,6 +34,16 @@ impl StreamConsumer {
             None
         }
     }
+
+    pub fn cancel(&self) -> anyhow::Result<()> {
+        let parent = self.parent.lock().unwrap();
+        if !parent.finished {
+            if let Some(pid) = parent.thread {
+                nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGINT)?;
+            }
+        }
+        Ok(())
+    }
 }
 
 impl std::future::Future for WaitForChunk<'_> {
@@ -59,6 +69,7 @@ pub struct Streamer {
     finished: bool,
     matches: Vec<Arc<bindings::cmatch>>,
     wakers: Vec<Waker>,
+    thread: Option<nix::unistd::Pid>,
 }
 unsafe impl Send for Streamer {}
 
@@ -180,6 +191,7 @@ pub fn get_completions(line: &BStr) -> anyhow::Result<(AsyncArcMutex<StreamConsu
                 finished: false,
                 matches: vec![],
                 wakers: vec![],
+                thread: None,
             });
             let consumer = Streamer::make_consumer(&producer);
             compadd.streamer = Some(producer.clone());
@@ -194,6 +206,8 @@ pub fn get_completions(line: &BStr) -> anyhow::Result<(AsyncArcMutex<StreamConsu
 }
 
 pub fn _get_completions(streamer: &Mutex<Streamer>) {
+    streamer.lock().unwrap().thread = Some(nix::unistd::gettid());
+
     unsafe {
         // set the zle buffer
         zsh_sys::startparamscope();

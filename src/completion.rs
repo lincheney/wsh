@@ -21,6 +21,10 @@ impl UserData for CompletionStream {
             let chunks = stream.chunks().await;
             Ok(chunks.map(|c| c.map(|inner| CompletionMatch{inner}).collect::<Vec<_>>()))
         });
+
+        methods.add_async_method("cancel", |_lua, stream, ()| async move {
+            stream.inner.lock().await.cancel().map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))
+        });
     }
 }
 
@@ -41,7 +45,7 @@ async fn get_completions(ui: Ui, shell: Shell, _lua: Lua, val: Option<String>) -
     };
 
     let result = shell.lock().await.get_completions(val.as_ref());
-    let (completions, starter) = result.map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))?;
+    let (consumer, producer) = result.map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))?;
 
     let shell_clone = shell.clone();
     let mut ui_clone = ui.clone();
@@ -53,7 +57,7 @@ async fn get_completions(ui: Ui, shell: Shell, _lua: Lua, val: Option<String>) -
             ui_clone.borrow_mut().await.threads.insert(tid);
             shell.await
         });
-        starter.start(&shell);
+        producer.start(&shell);
         drop(shell);
         async_std::task::block_on(async {
             let mut ui = ui_clone.borrow_mut().await;
@@ -62,7 +66,7 @@ async fn get_completions(ui: Ui, shell: Shell, _lua: Lua, val: Option<String>) -
         })
     });
 
-    Ok(CompletionStream{inner: completions})
+    Ok(CompletionStream{inner: consumer})
 }
 
 async fn insert_completion(mut ui: Ui, shell: Shell, _lua: Lua, val: CompletionMatch) -> Result<()> {
