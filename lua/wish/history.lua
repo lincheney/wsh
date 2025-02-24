@@ -1,19 +1,26 @@
 local M = {}
 
-local function show_history()
+local SELECTION = require('wish/selection-widget')
+local HISTORY_MENU = {}
+local HISTORY_SEARCH = {}
+
+local function show_history(data)
     local index, histnums, history = wish.get_history()
 
-    local ix = #history + 1
+    local ix = 0
     local text = {}
-    -- reverse
-    for i = #history, 1, -1 do
+    for i = 1, #history do
         table.insert(text, {text = history[i] .. '\n'})
         if histnums[i] == index then
             ix = #text
         end
     end
 
-    require('wish/selection-widget').show{
+    if data == HISTORY_MENU then
+        ix = #history + 1 - ix
+    end
+
+    SELECTION.show{
         align = 'Left',
         border = {
             fg = 'green',
@@ -24,32 +31,51 @@ local function show_history()
         },
         selected = ix,
         text = text,
+        reverse = data == HISTORY_MENU,
+        filter = data == HISTORY_SEARCH,
+        data = data,
+        callback = function(i)
+            wish.goto_history(histnums[i])
+            SELECTION.stop()
+        end,
     }
 end
 
 
 function M.history_up()
-    local index = wish.get_history_index()
-    local newindex, value = wish.get_prev_history(index)
-    if index ~= newindex and newindex then
-        wish.goto_history(newindex)
-        show_history()
-        wish.redraw()
+    if not SELECTION.is_active() or SELECTION.get_data() == HISTORY_MENU then
+        local index = wish.get_history_index()
+        local newindex, value = wish.get_prev_history(index)
+        if index ~= newindex and newindex then
+            wish.goto_history(newindex)
+            if SELECTION.is_active() then
+                SELECTION.up()
+            else
+                show_history(HISTORY_MENU)
+            end
+        end
+        return true
     end
 end
 
 function M.history_down()
-    local index = wish.get_history_index()
-    local newindex, value = wish.get_next_history(index)
-    if index ~= newindex then
-        wish.goto_history(newindex or index + 1)
-        show_history()
-        wish.redraw()
+    if not SELECTION.is_active() or SELECTION.get_data() == HISTORY_MENU then
+        local index = wish.get_history_index()
+        local newindex, value = wish.get_next_history(index)
+        if index ~= newindex then
+            wish.goto_history(newindex or index + 1)
+            if SELECTION.is_active() then
+                SELECTION.down()
+            else
+                show_history(HISTORY_MENU)
+            end
+        end
+        return true
     end
 end
 
 function M.history_search()
-    show_history()
+    show_history(HISTORY_SEARCH)
 end
 
 return M

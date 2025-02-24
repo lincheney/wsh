@@ -70,55 +70,22 @@ end)
 local msg = nil
 
 wish.set_keymap('<tab>', function()
-    if msg then
-        pcall(function() msg:remove() end)
-        wish.redraw()
-        msg = nil
+    if require('wish/selection-widget').is_active() then
+        require('wish/selection-widget').trigger()
+    else
+        require('wish/completion').complete()
     end
-
-    local text = {}
-    local last = nil
-
-    for chunk in wish.get_completions() do
-        for _, cmatch in ipairs(chunk) do
-            table.insert(text, tostring(cmatch))
-            last = cmatch
-        end
-
-        if #text > 0 then
-            msg = msg or wish.show_message{
-                align = 'Left',
-                fg = 'blue',
-                height = 'max:10',
-                -- italic = true,
-                border = {
-                    fg = 'white',
-                    type = 'Rounded',
-                },
-            }
-            msg:set_options{text = '...' .. #text .. '\n' .. table.concat(text, '\n')}
-            wish.redraw()
-        end
-    end
-
-    if msg then
-        msg:set_options{text = 'done ' .. #text .. '\n' .. table.concat(text, '\n')}
-        wish.redraw()
-    end
-
-    if #text == 1 then
-        wish.insert_completion(last)
-        if msg then
-            pcall(function() msg:remove() end)
-            msg = nil
-        end
-        wish.redraw()
-    end
-
 end)
-
-wish.set_keymap('<up>', require('wish/history').history_up)
-wish.set_keymap('<down>', require('wish/history').history_down)
+wish.set_keymap('<up>', function()
+    if not require('wish/history').history_up() then
+        require('wish/selection-widget').up()
+    end
+end)
+wish.set_keymap('<down>', function()
+    if not require('wish/history').history_down() then
+        require('wish/selection-widget').down()
+    end
+end)
 wish.set_keymap('<c-r>', require('wish/history').history_search)
 
 wish.set_keymap('<f12>', function()

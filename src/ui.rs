@@ -259,9 +259,13 @@ impl Ui {
                 state: _,
             }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
                 {
+                    let clone = self.clone();
                     let mut ui = self.borrow_mut().await;
                     let mut buf = [0; 4];
                     ui.buffer.insert(c.encode_utf8(&mut buf).as_bytes());
+                    if ui.event_callbacks.has_buffer_change_callbacks() {
+                        ui.event_callbacks.trigger_buffer_change_callbacks(&clone, shell, &ui.lua, ());
+                    }
                 }
 
                 self.draw(shell).await?;
@@ -345,6 +349,9 @@ impl Ui {
 
                 } else {
                     ui.buffer.insert(b"\n");
+                    if ui.event_callbacks.has_buffer_change_callbacks() {
+                        ui.event_callbacks.trigger_buffer_change_callbacks(&clone, shell, &ui.lua, ());
+                    }
                 }
                 ui.is_running_process = false;
             }
@@ -416,8 +423,13 @@ impl Ui {
             Ok(())
         }).await?;
 
-        self.set_lua_async_fn("set_buffer", shell, |mut ui, _shell, _lua, val: mlua::String| async move {
-            ui.borrow_mut().await.buffer.set_contents(&val.as_bytes());
+        self.set_lua_async_fn("set_buffer", shell, |mut ui, shell, _lua, val: mlua::String| async move {
+            let clone = ui.clone();
+            let mut ui = ui.borrow_mut().await;
+            ui.buffer.set_contents(&val.as_bytes());
+            if ui.event_callbacks.has_buffer_change_callbacks() {
+                ui.event_callbacks.trigger_buffer_change_callbacks(&clone, &shell, &ui.lua, ());
+            }
             Ok(())
         }).await?;
 
