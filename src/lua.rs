@@ -20,6 +20,16 @@ pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
 
     ui.set_lua_fn("__async_spawn", shell, async_spawn).await?;
     ui.set_lua_async_fn("__async_sleep", shell, async_sleep).await?;
+    ui.set_lua_fn("__async_spawn", shell, async_spawn).await?;
+
+    let ui = ui.borrow().await;
+    let log = ui.lua.create_table()?;
+    ui.lua_api.set("log", &log)?;
+
+    log.set("debug", ui.lua.create_function(|_, val: LuaValue| { log::debug!("{:?}", val); Ok(()) })?)?;
+    log.set("info", ui.lua.create_function(|_, val: LuaValue| { log::info!("{:?}", val); Ok(()) })?)?;
+    log.set("warn", ui.lua.create_function(|_, val: LuaValue| { log::warn!("{:?}", val); Ok(()) })?)?;
+    log.set("error", ui.lua.create_function(|_, val: LuaValue| { log::error!("{:?}", val); Ok(()) })?)?;
 
     Ok(())
 }
