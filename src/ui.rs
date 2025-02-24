@@ -418,7 +418,7 @@ impl Ui {
         // the y will be wrong but at least the x will be right
         queue!(stdout, SavePosition)?;
         for _ in 0 .. height {
-            queue!(stdout, style::Print("\v"))?;
+            queue!(stdout, style::Print("\x0b"))?;
         }
         queue!(
             stdout,
