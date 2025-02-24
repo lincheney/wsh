@@ -428,6 +428,7 @@ impl Tui {
             }
 
             let updates = self.old_buffer.diff(&self.new_buffer);
+
             if !updates.is_empty() {
                 if allocate_more_space > 0 {
                     Ui::allocate_height(stdout, actual_height)?;
@@ -438,7 +439,10 @@ impl Tui {
                     cursor::MoveToNextLine(1),
                     cursor::MoveToColumn(0),
                 )?;
-                self.terminal.backend_mut().draw(updates.into_iter())?;
+
+                let starty = self.old_buffer.area.y;
+                let updates = updates.into_iter().filter(|(_, y, _)| *y < starty + actual_height);
+                self.terminal.backend_mut().draw(updates)?;
                 queue!(stdout, cursor::RestorePosition)?;
             }
         }
