@@ -1,9 +1,7 @@
 use anyhow::Result;
 use mlua::{prelude::*, Function};
-use serde::{Deserialize, Serialize};
 use crate::ui::Ui;
 use crate::shell::Shell;
-use crossterm::event;
 
 
 fn async_spawn(ui: &Ui, shell: &Shell, _lua: &Lua, cb: Function) -> Result<()> {
