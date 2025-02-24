@@ -195,27 +195,35 @@ impl Ui {
         Ok(())
     }
 
-    pub fn call_lua_fn<T: IntoLuaMulti + mlua::MaybeSend + 'static>(&self, callback: mlua::Function, arg: T) {
+    pub fn call_lua_fn<T: IntoLuaMulti + mlua::MaybeSend + 'static>(&self, shell: Shell, callback: mlua::Function, arg: T) {
         let mut ui = self.clone();
         async_std::task::spawn(async move {
             if let Err(err) = callback.call_async::<LuaValue>(arg).await {
-                let mut ui = ui.borrow_mut().await;
-                ui.tui.add_error_message(format!("ERROR: {}", err), None);
+                ui.show_error_message(&shell, format!("ERROR: {}", err)).await;
             }
         });
+    }
+
+    pub async fn show_error_message(&mut self, shell: &Shell, msg: String) {
+        {
+            let mut ui = self.borrow_mut().await;
+            ui.tui.add_error_message(msg, None);
+        }
+
+        if let Err(err) = self.draw(&shell).await {
+            eprintln!("DEBUG(armada)\t{}\t= {:?}", stringify!(err), err);
+        }
     }
 
     pub async fn handle_event(&mut self, event: Event, shell: &Shell) -> Result<bool> {
         // eprintln!("DEBUG(grieve)\t{}\t= {:?}\r", stringify!(event), event);
 
+        self.borrow().await.event_callbacks.trigger_key(self, shell, ());
+
         if let Event::Key(KeyEvent{code, modifiers, ..}) = event {
             let callback = self.borrow().await.keybinds.get(&(code, modifiers)).cloned();
             if let Some(callback) = callback {
-                self.call_lua_fn(callback, ());
-                if let Err(err) = self.draw(&shell).await {
-                    eprintln!("DEBUG(armada)\t{}\t= {:?}", stringify!(err), err);
-                }
-
+                self.call_lua_fn(shell.clone(), callback, ());
                 return Ok(true)
             }
         }

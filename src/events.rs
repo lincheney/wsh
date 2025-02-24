@@ -24,9 +24,9 @@ macro_rules! event_types {
 
         impl EventCallbacks {
         $(
-            pub fn [<trigger_ $name>](&self, ui: Ui, val: ($($arg),*)) {
+            pub fn [<trigger_ $name>](&self, ui: &Ui, shell: &Shell, val: ($($arg),*)) {
                 for cb in self.[<callbacks_ $name>].iter() {
-                    ui.call_lua_fn(cb.clone(), val);
+                    ui.call_lua_fn(shell.clone(), cb.clone(), val);
                 }
             }
         ),*
