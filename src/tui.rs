@@ -31,6 +31,8 @@ struct Widget{
     align: Alignment,
     style: Style,
     border_style: Style,
+    border_title_style: Style,
+    border_type: BorderType,
     block: Block<'static>,
     persist: bool,
     hidden: bool,
@@ -224,16 +226,25 @@ impl Widget {
                 self.block = Block::new();
             },
             Some(options) => {
-                let mut block = Block::new();
-                block = block.borders(Borders::ALL);
-                block = block.border_style(options.style.apply_to_style(self.border_style));
-                if let Some(t) = options.r#type { block = block.border_type(t.0); }
-                if let Some(title) = options.title {
-                    if let Some(t) = title.text {
-                        block = block.title(t);
+                self.border_style = options.style.apply_to_style(self.border_style);
+                self.border_type = options.r#type.unwrap_or(SerdeWrap(self.border_type)).0;
+
+                let mut block = if let Some(title) = options.title {
+                    self.border_title_style = title.style.apply_to_style(self.border_title_style);
+                    if let Some(text) = title.text {
+                        Block::new().title(text)
+                    } else {
+                        self.block.clone()
                     }
-                    block = block.title_style(title.style.apply_to_style(self.border_style));
-                }
+                } else {
+                    self.block.clone()
+                };
+
+                block = block.borders(Borders::ALL);
+                block = block.border_style(self.border_style);
+                block = block.border_type(self.border_type);
+                block = block.title_style(self.border_title_style);
+
                 self.block = block;
             },
             None => {},
