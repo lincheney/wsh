@@ -435,10 +435,10 @@ impl Tui {
 
         } else {
 
-            let allocate_more_space = (cursory + actual_height).saturating_sub(height);
+            let allocate_more_space = (cursory + actual_height) as isize - height as isize;
             if allocate_more_space > 0 {
                 // adjust cursory if new lines will be added below
-                let y = self.old_buffer.area.y.saturating_sub(allocate_more_space);
+                let y = self.old_buffer.area.y.saturating_sub(allocate_more_space as _);
                 self.old_buffer.area.y = y;
                 self.new_buffer.area.y = y;
                 self.old_buffer.reset();
@@ -458,8 +458,8 @@ impl Tui {
                     cursor::MoveToColumn(0),
                 )?;
 
-                let starty = self.old_buffer.area.y;
-                let updates = updates.into_iter().filter(|(_, y, _)| *y < starty + actual_height);
+                let limit = self.old_buffer.area.y + actual_height + (-allocate_more_space.min(0) as u16);
+                let updates = updates.into_iter().filter(|(_, y, _)| *y < limit);
                 self.terminal.backend_mut().draw(updates)?;
                 queue!(stdout, cursor::RestorePosition)?;
             }
