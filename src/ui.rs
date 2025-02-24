@@ -170,7 +170,6 @@ impl Ui {
             queue!(ui.stdout, MoveDown(ui.buffer.cursory as _))?;
         }
 
-        crossterm::terminal::enable_raw_mode()?;
         let events = ui.events.lock().await;
 
         if ui.dirty || ui.tui.dirty {
@@ -185,6 +184,7 @@ impl Ui {
         }
 
         execute!(ui.stdout, EndSynchronizedUpdate)?;
+        crossterm::terminal::enable_raw_mode()?;
         ui.cursory = (ui.prompt.height + ui.buffer.height) as u16;
         ui.cursor = events.get_cursor_position()?;
 
@@ -412,7 +412,7 @@ impl Ui {
         // the y will be wrong but at least the x will be right
         queue!(stdout, SavePosition)?;
         for _ in 0 .. height {
-            queue!(stdout, style::Print("\n"))?;
+            queue!(stdout, style::Print("\v"))?;
         }
         queue!(
             stdout,
