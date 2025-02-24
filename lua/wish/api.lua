@@ -1,3 +1,8 @@
+wish.async = {
+    spawn = wish.__async_spawn,
+    sleep = wish.__async_sleep,
+}
+
 setmetatable(wish, {
     __index = function(self, key)
         local fn = rawget(self, '__get_'..key)

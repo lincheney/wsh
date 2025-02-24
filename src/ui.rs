@@ -195,11 +195,15 @@ impl Ui {
         Ok(())
     }
 
-    pub fn call_lua_fn<T: IntoLuaMulti + mlua::MaybeSend + 'static>(&self, shell: Shell, callback: mlua::Function, arg: T) {
+    pub fn call_lua_fn<T: IntoLuaMulti + mlua::MaybeSend + 'static>(&self, shell: Shell, draw: bool, callback: mlua::Function, arg: T) {
         let mut ui = self.clone();
         async_std::task::spawn(async move {
             if let Err(err) = callback.call_async::<LuaValue>(arg).await {
                 ui.show_error_message(&shell, format!("ERROR: {}", err)).await;
+            } else if draw {
+                if let Err(err) = ui.draw(&shell).await {
+                    eprintln!("DEBUG(armada)\t{}\t= {:?}", stringify!(err), err);
+                }
             }
         });
     }
@@ -227,7 +231,7 @@ impl Ui {
 
             let callback = ui.keybinds.get(&(code, modifiers)).cloned();
             if let Some(callback) = callback {
-                self.call_lua_fn(shell.clone(), callback, ());
+                self.call_lua_fn(shell.clone(), true, callback, ());
                 return Ok(true)
             }
         }
@@ -344,17 +348,20 @@ impl Ui {
         }
     }
 
-    pub async fn set_lua_fn<F, A, R>(&self, name: &str, func: F) -> LuaResult<()>
+    pub async fn set_lua_fn<F, A, R>(&self, name: &str, shell: &Shell, func: F) -> LuaResult<()>
     where
-        F: Fn(&Self, &Lua, A) -> LuaResult<R> + mlua::MaybeSend + 'static,
+        F: Fn(&Self, &Shell, &Lua, A) -> Result<R> + mlua::MaybeSend + 'static,
         A: FromLuaMulti,
         R: IntoLuaMulti,
     {
 
         let weak = Arc::downgrade(&self.0);
         let ui = self.borrow().await;
+        let shell = Arc::downgrade(&shell.0);
         ui.lua_api.set(name, ui.lua.create_function(move |lua, value| {
-            func(&Ui::try_upgrade(&weak)?, lua, value)
+            let ui = Ui::try_upgrade(&weak)?;
+            func(&ui, &Shell(shell.upgrade().unwrap()), lua, value)
+                .map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))
         })?)
     }
 
@@ -416,6 +423,7 @@ impl Ui {
         crate::tui::init_lua(self, shell).await?;
         crate::history::init_lua(self, shell).await?;
         crate::events::init_lua(self, shell).await?;
+        crate::lua::init_lua(self, shell).await?;
 
         let lua = self.borrow().await.lua.clone();
         lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;

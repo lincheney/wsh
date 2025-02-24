@@ -29,7 +29,7 @@ macro_rules! event_types {
             pub fn [<trigger_ $name _callbacks>](&self, ui: &Ui, shell: &Shell, lua: &Lua, val: ($($arg),*)) {
                 let val = lua.to_value(&val).unwrap();
                 for cb in self.[<callbacks_ $name>].iter() {
-                    ui.call_lua_fn(shell.clone(), cb.clone(), val.clone());
+                    ui.call_lua_fn(shell.clone(), false, cb.clone(), val.clone());
                 }
             }
 
