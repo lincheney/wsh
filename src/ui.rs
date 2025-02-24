@@ -66,6 +66,7 @@ pub struct UiInner {
     dirty: bool,
     cursory: u16,
     pub keybinds: keybind::KeybindMapping,
+    pub event_callbacks: crate::events::EventCallbacks,
 
     pub buffer: crate::buffer::Buffer,
     pub prompt: crate::prompt::Prompt,
@@ -104,6 +105,7 @@ impl Ui {
             buffer: Default::default(),
             prompt: crate::prompt::Prompt::new(None),
             keybinds: Default::default(),
+            event_callbacks: Default::default(),
             stdout: std::io::stdout(),
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
             cursor,
@@ -193,21 +195,24 @@ impl Ui {
         Ok(())
     }
 
+    pub fn call_lua_fn<T: IntoLuaMulti + mlua::MaybeSend + 'static>(&self, callback: mlua::Function, arg: T) {
+        let mut ui = self.clone();
+        async_std::task::spawn(async move {
+            if let Err(err) = callback.call_async::<LuaValue>(arg).await {
+                let mut ui = ui.borrow_mut().await;
+                ui.tui.add_error_message(format!("ERROR: {}", err), None);
+            }
+        });
+    }
+
     pub async fn handle_event(&mut self, event: Event, shell: &Shell) -> Result<bool> {
         // eprintln!("DEBUG(grieve)\t{}\t= {:?}\r", stringify!(event), event);
 
         if let Event::Key(KeyEvent{code, modifiers, ..}) = event {
             let callback = self.borrow().await.keybinds.get(&(code, modifiers)).cloned();
             if let Some(callback) = callback {
-                let mut ui = self.clone();
-                let shell = shell.clone();
-
-                if let Err(err) = callback.call_async::<LuaValue>(()).await {
-                    let mut ui = ui.borrow_mut().await;
-                    ui.tui.add_error_message(format!("ERROR: {}", err), None);
-                }
-
-                if let Err(err) = ui.draw(&shell).await {
+                self.call_lua_fn(callback, ());
+                if let Err(err) = self.draw(&shell).await {
                     eprintln!("DEBUG(armada)\t{}\t= {:?}", stringify!(err), err);
                 }
 
@@ -398,6 +403,7 @@ impl Ui {
         completion::init_lua(self, shell).await?;
         crate::tui::init_lua(self, shell).await?;
         crate::history::init_lua(self, shell).await?;
+        crate::events::init_lua(self, shell).await?;
 
         let lua = self.borrow().await.lua.clone();
         lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;

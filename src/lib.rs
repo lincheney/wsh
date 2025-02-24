@@ -15,6 +15,7 @@ mod buffer;
 mod c_string_array;
 mod tui;
 mod event_stream;
+mod events;
 mod prompt;
 mod history;
 #[macro_use]
