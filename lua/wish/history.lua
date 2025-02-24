@@ -28,6 +28,7 @@ local function show_history(size)
         border = {
             fg = 'green',
             type = 'Rounded',
+            title = 'history',
         },
         height = 'max:'..(size + 2),
         text = text or '',
