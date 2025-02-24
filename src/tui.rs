@@ -216,7 +216,7 @@ impl Widget {
                 self.block = Block::new();
             },
             Some(options) => {
-                let mut block = std::mem::replace(&mut self.block, Block::new());
+                let mut block = Block::new();
                 block = block.borders(Borders::ALL);
                 block = block.border_style(options.style.apply_to_style(self.border_style));
                 if let Some(t) = options.r#type { block = block.border_type(t.0); }
