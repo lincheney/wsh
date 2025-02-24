@@ -3,4 +3,4 @@
 set -eu -o pipefail
 cd "$(dirname "$0")"
 cargo build --lib
-ZDOTDIR="$PWD/../zsh" zsh
+RUST_LOG=debug ZDOTDIR="$PWD/../zsh" zsh

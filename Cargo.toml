@@ -13,7 +13,9 @@ async-lock = "3.4.0"
 async-std = { version = "1.13.0", features = ["attributes"] }
 bstr = { version = "1.11.3", features = ["unicode"] }
 crossterm = { version = "0.28.1", features = ["event-stream"] }
+env_logger = "0.11.6"
 futures = "0.3.31"
+log = "0.4.26"
 mlua = { version = "0.10.3", features = ["luajit", "error-send", "macros", "vendored", "async", "send", "serialize"] }
 nix = { version = "0.29.0", features = ["fs", "process", "signal", "socket", "term", "uio"] }
 paste = "1.0.15"

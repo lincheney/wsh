@@ -25,6 +25,12 @@ mod utils;
 
 async fn main() -> Result<()> {
 
+    let log_file = Box::new(std::fs::File::create("/tmp/wish.log").expect("Can't create log file"));
+    env_logger::Builder::from_default_env()
+        .target(env_logger::Target::Pipe(log_file))
+        .format_source_path(true)
+        .init();
+
     // crossterm will default to opening fd 0
     // but zsh will mangle this halfway through
     // so trick crossterm into opening a separate fd to the tty
@@ -51,8 +57,8 @@ async fn main() -> Result<()> {
 
 unsafe extern "C" fn handlerfunc(_nam: *mut c_char, _argv: *mut *mut c_char, _options: zsh_sys::Options, _func: c_int) -> c_int {
     async_std::task::block_on(async {
-        if let Err(x) = main().await {
-            eprintln!("DEBUG(legman)\t{}\t= {:?}", stringify!(x), x);
+        if let Err(err) = main().await {
+            log::error!("{:?}", err);
         }
     });
     0

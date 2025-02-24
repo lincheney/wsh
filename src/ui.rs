@@ -112,7 +112,9 @@ impl Ui {
             size: crossterm::terminal::size()?,
         };
 
+        let start = std::time::Instant::now();
         shell.lock().await.readhistfile();
+        log::info!("loaded history in {:?}", start.elapsed());
         ui.reset(&mut *shell.lock().await);
 
         let ui = Self(Arc::new(RwLock::new(ui)));
@@ -202,7 +204,7 @@ impl Ui {
                 ui.show_error_message(&shell, format!("ERROR: {}", err)).await;
             } else if draw {
                 if let Err(err) = ui.draw(&shell).await {
-                    eprintln!("DEBUG(armada)\t{}\t= {:?}", stringify!(err), err);
+                    log::error!("{:?}", err);
                 }
             }
         });
@@ -215,12 +217,11 @@ impl Ui {
         }
 
         if let Err(err) = self.draw(&shell).await {
-            eprintln!("DEBUG(armada)\t{}\t= {:?}", stringify!(err), err);
+            log::error!("{:?}", err);
         }
     }
 
     pub async fn handle_event(&mut self, event: Event, shell: &Shell) -> Result<bool> {
-        // eprintln!("DEBUG(grieve)\t{}\t= {:?}\r", stringify!(event), event);
 
         if let Event::Key(key @ KeyEvent{code, modifiers, kind: event::KeyEventKind::Press, ..}) = event {
             let ui = self.borrow().await;
@@ -244,7 +245,6 @@ impl Ui {
                 kind: event::KeyEventKind::Press,
                 state: _,
             }) => {
-                // eprintln!("DEBUG(leaps) \t{}\t= {:?}", stringify!("kill"), "kill");
                 nix::sys::signal::kill(nix::unistd::Pid::from_raw(0), nix::sys::signal::Signal::SIGTERM)?;
                 for pid in self.borrow().await.threads.iter() {
                     nix::sys::signal::kill(*pid, nix::sys::signal::Signal::SIGINT)?;
@@ -429,7 +429,7 @@ impl Ui {
         let lua = self.borrow().await.lua.clone();
         lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;
         if let Err(err) = lua.load("require('wish')").exec() {
-            eprintln!("DEBUG(sliver)\t{}\t= {:?}", stringify!(err), err);
+            log::error!("{:?}", err);
         }
 
         Ok(())
@@ -504,7 +504,7 @@ impl UiInner {
 impl Drop for UiInner {
     fn drop(&mut self) {
         if let Err(err) = self.deactivate() {
-            eprintln!("ERROR: {}", err);
+            log::error!("{:?}", err);
         };
     }
 }
