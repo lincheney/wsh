@@ -1,8 +1,9 @@
 use anyhow::Result;
 use mlua::{prelude::*, Function};
-use serde::{Deserialize};
+use serde::{Deserialize, Serialize};
 use crate::ui::Ui;
 use crate::shell::Shell;
+use crossterm::event;
 
 macro_rules! event_types {
     ($( $name:ident($($arg:ty),*) ),*) => (
@@ -24,10 +25,16 @@ macro_rules! event_types {
 
         impl EventCallbacks {
         $(
-            pub fn [<trigger_ $name>](&self, ui: &Ui, shell: &Shell, val: ($($arg),*)) {
+            #[allow(unused_parens)]
+            pub fn [<trigger_ $name _callbacks>](&self, ui: &Ui, shell: &Shell, lua: &Lua, val: ($($arg),*)) {
+                let val = lua.to_value(&val).unwrap();
                 for cb in self.[<callbacks_ $name>].iter() {
-                    ui.call_lua_fn(shell.clone(), cb.clone(), val);
+                    ui.call_lua_fn(shell.clone(), cb.clone(), val.clone());
                 }
+            }
+
+            pub fn [<has_ $name _callbacks>](&self) -> bool {
+                !self.[<callbacks_ $name>].is_empty()
             }
         ),*
 
@@ -53,7 +60,27 @@ macro_rules! event_types {
     )
 }
 
-event_types!(key());
+
+#[derive(Debug, Serialize, Clone)]
+pub struct KeyEvent {
+    key: String,
+    control: bool,
+    shift: bool,
+    alt: bool,
+}
+
+impl From<event::KeyEvent> for KeyEvent {
+    fn from(ev: event::KeyEvent) -> Self {
+        Self{
+            key: ev.code.to_string(),
+            control: ev.modifiers.contains(event::KeyModifiers::CONTROL),
+            shift: ev.modifiers.contains(event::KeyModifiers::SHIFT),
+            alt: ev.modifiers.contains(event::KeyModifiers::ALT),
+        }
+    }
+}
+
+event_types!(key(KeyEvent));
 
 
 async fn add_event_callback(mut ui: Ui, _shell: Shell, lua: Lua, (typ, callback): (LuaValue, Function)) -> Result<()> {

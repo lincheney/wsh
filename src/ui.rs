@@ -218,10 +218,14 @@ impl Ui {
     pub async fn handle_event(&mut self, event: Event, shell: &Shell) -> Result<bool> {
         // eprintln!("DEBUG(grieve)\t{}\t= {:?}\r", stringify!(event), event);
 
-        self.borrow().await.event_callbacks.trigger_key(self, shell, ());
+        if let Event::Key(key @ KeyEvent{code, modifiers, kind: event::KeyEventKind::Press, ..}) = event {
+            let ui = self.borrow().await;
 
-        if let Event::Key(KeyEvent{code, modifiers, ..}) = event {
-            let callback = self.borrow().await.keybinds.get(&(code, modifiers)).cloned();
+            if ui.event_callbacks.has_key_callbacks() {
+                ui.event_callbacks.trigger_key_callbacks(self, shell, &ui.lua, key.into());
+            }
+
+            let callback = ui.keybinds.get(&(code, modifiers)).cloned();
             if let Some(callback) = callback {
                 self.call_lua_fn(shell.clone(), callback, ());
                 return Ok(true)

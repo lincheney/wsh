@@ -181,9 +181,6 @@ wish.set_keymap('<f12>', function()
     -- wish.redraw()
 end)
 
-wish.add_event_callback('key', function()
-    error("got a key")
-    -- local msg = wish.show_message{text="hello world " .. math.random()}
-    -- msg:set_text_weight('Bold');
-    -- wish.redraw()
+wish.add_event_callback('key', function(arg)
+    error("got a key " .. arg.key)
 end)
