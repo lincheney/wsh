@@ -307,14 +307,20 @@ impl Ui {
         self.draw(shell).await?;
 
         {
+            let clone = self.clone();
             let mut ui = self.borrow_mut().await;
             let ui = ui.deref_mut();
 
             {
                 // time to execute
-                let mut shell = shell.lock().await;
-                let (complete, _tokens) = shell.parse(ui.buffer.get_contents().as_ref());
+                let (complete, _tokens) = shell.lock().await.parse(ui.buffer.get_contents().as_ref());
                 if complete {
+
+                    if ui.event_callbacks.has_accept_line_callbacks() {
+                        ui.event_callbacks.trigger_accept_line_callbacks(&clone, shell, &ui.lua, ());
+                    }
+
+                    let mut shell = shell.lock().await;
                     shell.clear_completion_cache();
                     shell.push_history(ui.buffer.get_contents().as_ref());
 

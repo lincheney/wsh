@@ -98,6 +98,7 @@ impl From<event::KeyEvent> for KeyEvent {
 
 event_types!(
     key(KeyEvent),
+    accept_line(),
 );
 
 
