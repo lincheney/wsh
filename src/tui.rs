@@ -104,10 +104,18 @@ pub struct WidgetOptions {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
+pub struct BorderTitleOptions {
+    pub text: Option<String>,
+    #[serde(flatten)]
+    pub style: StyleOptions,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 pub struct BorderOptions {
     pub enabled: Option<bool>,
     pub r#type: Option<SerdeWrap<BorderType>>,
-    pub title: Option<String>,
+    pub title: Option<BorderTitleOptions>,
     #[serde(flatten)]
     pub style: StyleOptions,
 }
@@ -220,7 +228,12 @@ impl Widget {
                 block = block.borders(Borders::ALL);
                 block = block.border_style(options.style.apply_to_style(self.border_style));
                 if let Some(t) = options.r#type { block = block.border_type(t.0); }
-                if let Some(t) = options.title { block = block.title(t); }
+                if let Some(title) = options.title {
+                    if let Some(t) = title.text {
+                        block = block.title(t);
+                    }
+                    block = block.title_style(title.style.apply_to_style(self.border_style));
+                }
                 self.block = block;
             },
             None => {},
