@@ -50,7 +50,7 @@ wish.set_keymap('<c-w>', function()
         local buffer = wish.get_buffer()
         local start = buffer:sub(1, cursor):find('%S+%s*$')
         if start then
-            start = wish.str.to_byte_pos(start - 1)
+            start = wish.str.to_byte_pos(buffer, start - 1)
             wish.set_buffer(wish.str.set(buffer, nil, start, cursor))
             wish.set_cursor(start)
         end
