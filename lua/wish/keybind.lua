@@ -117,75 +117,9 @@ wish.set_keymap('<tab>', function()
 
 end)
 
-local function show_history(size)
-    local index, histnums, history = wish.get_history()
-
-    msg = msg and msg:exists() and msg or wish.show_message{
-        align = 'Left',
-        -- italic = true,
-        border = {
-            fg = 'green',
-            type = 'Rounded',
-        },
-    }
-    size = size or 10
-
-    local ix = 0
-    for i = 1, #histnums do
-        if histnums[i] == index then
-            ix = i
-            break
-        end
-    end
-
-    local start = math.max(1, ix - math.ceil(size / 2) + 1)
-    local text = {}
-    -- reverse
-    for i = math.min(#history, start + size), start, -1 do
-        table.insert(text, {text = history[i] .. '\n'})
-        if i == ix then
-            text[#text].bg = 'darkgrey'
-        end
-    end
-    if #text == 0 then
-        msg:remove()
-    else
-        msg:set_options{
-            height = 'max:'..(size + 2),
-            text = text,
-        }
-    end
-    wish.redraw()
-end
-
-wish.set_keymap('<up>', function()
-    local index = wish.get_history_index()
-    local newindex, value = wish.get_prev_history(index)
-    if index ~= newindex and newindex then
-        wish.goto_history(newindex)
-        show_history(5)
-        wish.redraw()
-    end
-end)
-
-wish.set_keymap('<down>', function()
-    local index = wish.get_history_index()
-    local newindex, value = wish.get_next_history(index)
-    if index ~= newindex then
-        wish.goto_history(newindex or index + 1)
-        show_history(5)
-        wish.redraw()
-    end
-end)
-
-wish.set_keymap('<c-r>', function()
-    if msg then
-        pcall(function() msg:remove() end)
-        wish.redraw()
-        msg = nil
-    end
-    show_history(3)
-end)
+wish.set_keymap('<up>', require('wish/history').history_up)
+wish.set_keymap('<down>', require('wish/history').history_down)
+wish.set_keymap('<c-r>', require('wish/history').history_search)
 
 wish.set_keymap('<f12>', function()
     error("ARGGHH")
