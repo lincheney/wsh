@@ -33,6 +33,7 @@ struct Widget{
     border_style: Style,
     block: Block<'static>,
     persist: bool,
+    visible: bool,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -91,6 +92,7 @@ pub enum TextParts {
 #[serde(default)]
 pub struct WidgetOptions {
     pub persist: Option<bool>,
+    pub visible: Option<bool>,
     pub text: Option<TextParts>,
     #[serde(flatten)]
     pub style: TextStyleOptions,
@@ -155,6 +157,10 @@ impl Widget {
     fn set_options(&mut self, options: WidgetOptions) {
         if let Some(persist) = options.persist {
             self.persist = persist;
+        }
+
+        if let Some(visible) = options.visible {
+            self.visible = visible;
         }
 
         if let Some(constraint) = options.height {
@@ -332,22 +338,24 @@ impl Tui {
         let mut frame = self.terminal.get_frame();
         std::mem::swap(frame.buffer_mut(), &mut self.new_buffer);
 
-        // assume each widget needs at least 1 line
-        let widgets = &self.widgets[..self.widgets.len().min(area.height as _)];
-
         let mut max_height = 0;
-        for w in widgets.iter() {
-            max_height += w.inner.line_count(width);
-            if max_height >= area.height as _ {
-                break
+        let mut last_widget = 0;
+        for (i, w) in self.widgets.iter().enumerate() {
+            if w.visible {
+                max_height += w.inner.line_count(width);
+                last_widget = i;
+                if max_height >= area.height as _ {
+                    break
+                }
             }
         }
+        let widgets = &self.widgets[..=last_widget];
         area.height = area.height.min(max_height as _);
 
-        let layout = Layout::vertical(widgets.iter().map(|w| w.constraint));
+        let layout = Layout::vertical(widgets.iter().filter(|w| w.visible).map(|w| w.constraint));
         let layouts = layout.split(area);
 
-        for (widget, layout) in widgets.iter().zip(layouts.iter()) {
+        for (widget, layout) in widgets.iter().filter(|w| w.visible).zip(layouts.iter()) {
             frame.render_widget(&widget.inner, *layout);
         }
         std::mem::swap(frame.buffer_mut(), &mut self.new_buffer);
