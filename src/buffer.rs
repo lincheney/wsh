@@ -204,15 +204,17 @@ impl Buffer {
         strip_colours(&mut text);
         self.y_offset = wrap(&text, width as _).len() - 1;
 
-        if suffix.is_empty() {
-            self.height = self.y_offset + 1;
+        let height = if suffix.is_empty() {
+            self.y_offset + 1
         } else {
             // pop the space from the end
             text.pop();
             text += &suffix;
             strip_colours(&mut text);
-            self.height = wrap(&text, width as _).len();
-        }
+            wrap(&text, width as _).len()
+        };
+
+        self.height = self.height.max(height);
         let changed = old != self.height;
 
         queue!(stdout, cursor::MoveToColumn(prompt_width as _))?;
@@ -229,8 +231,14 @@ impl Buffer {
             cursor::SavePosition,
             crossterm::style::Print(&suffix),
             Clear(ClearType::UntilNewLine),
-            cursor::RestorePosition,
         )?;
+        if self.height > height {
+            for _ in height .. self.height {
+                queue!(stdout, cursor::MoveDown(1), cursor::MoveToColumn(0), Clear(ClearType::UntilNewLine))?;
+            }
+        }
+        queue!(stdout, cursor::RestorePosition)?;
+
 
         self.dirty = false;
         Ok(changed)
