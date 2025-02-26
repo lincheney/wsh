@@ -5,7 +5,7 @@ use std::ops::DerefMut;
 use std::collections::HashSet;
 use std::default::Default;
 use mlua::{IntoLuaMulti, FromLuaMulti, Lua, Result as LuaResult, Value as LuaValue};
-use async_std::sync::RwLock;
+use tokio::sync::RwLock;
 use anyhow::Result;
 
 use crossterm::{
@@ -123,12 +123,12 @@ impl Ui {
         Ok(ui)
     }
 
-    pub fn borrow(&self) -> async_lock::futures::Read<UiInner> {
-        self.0.read()
+    pub async fn borrow(&self) -> tokio::sync::RwLockReadGuard<UiInner> {
+        self.0.read().await
     }
 
-    pub fn borrow_mut(&mut self) -> async_lock::futures::Write<UiInner> {
-        self.0.write()
+    pub async fn borrow_mut(&mut self) -> tokio::sync::RwLockWriteGuard<UiInner> {
+        self.0.write().await
     }
 
     pub async fn activate(&self) -> Result<()> {
@@ -199,7 +199,7 @@ impl Ui {
 
     pub fn call_lua_fn<T: IntoLuaMulti + mlua::MaybeSend + 'static>(&self, shell: Shell, draw: bool, callback: mlua::Function, arg: T) {
         let mut ui = self.clone();
-        async_std::task::spawn(async move {
+        tokio::task::spawn(async move {
             if let Err(err) = callback.call_async::<LuaValue>(arg).await {
                 log::error!("{}", err);
                 ui.show_error_message(&shell, format!("ERROR: {}", err)).await;

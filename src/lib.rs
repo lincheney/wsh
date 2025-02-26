@@ -56,7 +56,8 @@ async fn main() -> Result<()> {
 
 
 unsafe extern "C" fn handlerfunc(_nam: *mut c_char, _argv: *mut *mut c_char, _options: zsh_sys::Options, _func: c_int) -> c_int {
-    async_std::task::block_on(async {
+    let mut rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
         if let Err(err) = main().await {
             log::error!("{:?}", err);
         }

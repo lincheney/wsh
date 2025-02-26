@@ -1,5 +1,5 @@
 use std::sync::{Arc, Mutex};
-use async_std::sync::Mutex as AsyncMutex;
+use tokio::sync::Mutex as AsyncMutex;
 
 pub type ArcMutex<T> = Arc<Mutex<T>>;
 pub type AsyncArcMutex<T> = Arc<AsyncMutex<T>>;
@@ -12,7 +12,7 @@ macro_rules! ArcMutexNew {
 
 macro_rules! AsyncArcMutexNew {
     ($expr:expr) => (
-        ::std::sync::Arc::new(::async_std::sync::Mutex::new($expr))
+        ::std::sync::Arc::new(::tokio::sync::Mutex::new($expr))
     )
 }
 

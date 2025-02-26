@@ -5,7 +5,7 @@ use std::ptr::null_mut;
 use std::default::Default;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
-use async_std::sync::Mutex as AsyncMutex;
+use tokio::sync::Mutex as AsyncMutex;
 use bstr::{BStr, BString};
 use super::bindings;
 use crate::utils::*;

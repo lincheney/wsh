@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use futures::channel::mpsc;
 use futures::{select, SinkExt, StreamExt, FutureExt};
-use async_std::sync::{Mutex, MutexGuard, RwLock};
+use tokio::sync::{Mutex, MutexGuard, RwLock};
 
 struct Lock {
     inner: Mutex<UnlockedEvents>,
@@ -46,7 +46,7 @@ pub struct EventLocker {
 impl EventLocker {
     pub async fn lock(&mut self) -> MutexGuard<UnlockedEvents> {
         let _outer = self.lock.outer.read().await;
-        if let Some(lock) = self.lock.inner.try_lock() {
+        if let Ok(lock) = self.lock.inner.try_lock() {
             return lock;
         }
         self.sender.send(()).await.unwrap();

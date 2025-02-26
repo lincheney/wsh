@@ -50,20 +50,24 @@ async fn get_completions(ui: Ui, shell: Shell, _lua: Lua, val: Option<String>) -
     let shell_clone = shell.clone();
     let mut ui_clone = ui.clone();
     // run this in a thread
-    async_std::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let tid = nix::unistd::gettid();
         let shell = shell_clone.lock();
-        let shell = async_std::task::block_on(async {
-            ui_clone.borrow_mut().await.threads.insert(tid);
-            shell.await
+        let shell = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                ui_clone.borrow_mut().await.threads.insert(tid);
+                shell.await
+            })
         });
         producer.start(&shell);
         drop(shell);
-        async_std::task::block_on(async {
-            let mut ui = ui_clone.borrow_mut().await;
-            ui.threads.remove(&tid);
-            ui.activate()
-        })
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                let mut ui = ui_clone.borrow_mut().await;
+                ui.threads.remove(&tid);
+                ui.activate();
+            });
+        });
     });
 
     Ok(CompletionStream{inner: consumer})

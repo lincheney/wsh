@@ -10,7 +10,7 @@ fn async_spawn(ui: &Ui, shell: &Shell, _lua: &Lua, cb: Function) -> Result<()> {
 }
 
 async fn async_sleep(_ui: Ui, _shell: Shell, _lua: Lua, millis: u64) -> Result<()> {
-    async_std::task::sleep(std::time::Duration::from_millis(millis)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(millis)).await;
     Ok(())
 }
 

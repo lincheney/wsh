@@ -4,8 +4,7 @@ use std::ffi::{CString, CStr};
 use std::default::Default;
 use std::sync::Arc;
 use std::ptr::null_mut;
-use async_std::sync::Mutex;
-use async_lock::futures::Lock;
+use tokio::sync::{Mutex, MutexGuard};
 use bstr::{BStr, BString};
 
 use crate::zsh;
@@ -24,8 +23,8 @@ impl Shell {
         })))
     }
 
-    pub fn lock(&self) -> Lock<ShellInner> {
-        self.0.lock()
+    pub async fn lock(&self) -> MutexGuard<ShellInner> {
+        self.0.lock().await
     }
 }
 
