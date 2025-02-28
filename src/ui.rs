@@ -279,9 +279,10 @@ impl Ui {
             },
 
             Event::Paste(data) => {
-                // insert this into the buffer
-                self.borrow_mut().await.buffer.insert(data.as_bytes());
-                self.draw(shell).await?;
+                let ui = self.borrow().await;
+                if ui.event_callbacks.has_paste_callbacks() {
+                    ui.event_callbacks.trigger_paste_callbacks(self, shell, &ui.lua, ui.lua.create_string(data.as_bytes())?);
+                }
             },
 
             _ => {},

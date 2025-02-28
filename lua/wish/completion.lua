@@ -108,7 +108,7 @@ function M.complete()
         io.stdout:write('\x1b[A')
         io.stdout:flush()
 
-        wish.redraw{all=true}
+        wish.redraw{buffer=true, messages=true}
         wish.set_cursor(cursor)
         wish.redraw()
 

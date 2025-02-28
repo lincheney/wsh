@@ -98,3 +98,16 @@ end)
 wish.add_event_callback('key', function(arg)
     -- error("got a key " .. arg.key)
 end)
+
+wish.add_event_callback('paste', function(data)
+    -- insert this into the buffer
+    if #data > 0 then
+        local cursor = wish.get_cursor()
+        local buffer = wish.get_buffer()
+        local len = wish.str.len(data)
+        local buflen = wish.str.len(buffer)
+        wish.set_buffer((wish.str.get(buffer, 0, cursor) or '') .. data .. (wish.str.get(buffer, cursor, buflen) or ''))
+        wish.set_cursor(cursor + len)
+        wish.redraw()
+    end
+end)
