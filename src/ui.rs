@@ -13,7 +13,7 @@ use crossterm::{
     terminal::{Clear, ClearType, BeginSynchronizedUpdate, EndSynchronizedUpdate},
     cursor::{self, position},
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
-    style,
+    style::{self, ContentStyle, Attributes, Stylize},
     execute,
     queue,
 };
@@ -104,6 +104,13 @@ impl Ui {
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
             size: crossterm::terminal::size()?,
         };
+
+        ui.buffer.highlights.push(crate::buffer::Highlight{
+            start: 1,
+            end: 5,
+            style: ContentStyle::new().on_dark_yellow(),
+            attribute_mask: Attributes::default(),
+        });
 
         let start = std::time::Instant::now();
         shell.lock().await.readhistfile();
