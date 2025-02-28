@@ -77,5 +77,41 @@ impl Clone for cmatch {
     }
 }
 
+impl std::fmt::Debug for cmatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        use std::ffi::CStr;
+        use std::ptr::NonNull;
+
+        f.debug_struct("cmatch")
+            .field("str_", &NonNull::new(self.str_).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
+            .field("orig", &NonNull::new(self.orig).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
+            .field("ipre", &NonNull::new(self.ipre).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
+            .field("ripre", &NonNull::new(self.ripre).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
+            .field("isuf", &NonNull::new(self.isuf).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
+            .field("ppre", &NonNull::new(self.ppre).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
+            .field("psuf", &NonNull::new(self.psuf).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
+            .field("prpre", &NonNull::new(self.prpre).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
+            .field("pre", &NonNull::new(self.pre).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
+            .field("suf", &NonNull::new(self.suf).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
+            .field("disp", &NonNull::new(self.disp).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
+            .field("autoq", &NonNull::new(self.autoq).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
+            .field("rems", &NonNull::new(self.rems).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
+            .field("remf", &NonNull::new(self.remf).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
+            .field("brpl", &self.brpl)
+            .field("brsl", &self.brsl)
+
+            .field("flags", &self.flags)
+            .field("qipl", &self.qipl)
+            .field("qisl", &self.qisl)
+            .field("rnum", &self.rnum)
+            .field("gnum", &self.gnum)
+            .field("mode", &self.mode)
+            .field("modec", &self.modec)
+            .field("fmode", &self.fmode)
+            .field("fmodec", &self.fmodec)
+            .finish()
+    }
+}
+
 unsafe impl Send for cmatch {}
 unsafe impl Sync for cmatch {}

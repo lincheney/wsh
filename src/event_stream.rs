@@ -1,10 +1,10 @@
 use std::sync::Arc;
 use futures::channel::mpsc;
 use futures::{select, SinkExt, StreamExt, FutureExt};
-use tokio::sync::{Mutex, MutexGuard, RwLock};
+use tokio::sync::{Mutex, MutexGuard, OwnedMutexGuard, RwLock};
 
 struct Lock {
-    inner: Mutex<UnlockedEvents>,
+    inner: Arc<Mutex<UnlockedEvents>>,
     outer: RwLock<()>,
 }
 
@@ -53,6 +53,16 @@ impl EventLocker {
         self.lock.inner.lock().await
     }
 
+    pub async fn lock_owned(&mut self) -> OwnedMutexGuard<UnlockedEvents> {
+        let _outer = self.lock.outer.read().await;
+        let inner = self.lock.inner.clone();
+        if let Ok(lock) = inner.clone().try_lock_owned() {
+            return lock;
+        }
+        self.sender.send(()).await.unwrap();
+        inner.lock_owned().await
+    }
+
     pub async fn get_cursor_position(&mut self) -> Result<(u16, u16), std::io::Error> {
         self.lock().await.get_cursor_position()
     }
@@ -62,7 +72,7 @@ impl EventStream {
     pub fn new() -> (Self, EventLocker) {
         let (sender, receiver) = mpsc::unbounded::<()>();
         let lock = Arc::new(Lock{
-            inner: Mutex::new(UnlockedEvents()),
+            inner: Arc::new(Mutex::new(UnlockedEvents())),
             outer: RwLock::new(()),
         });
         let stream = Self{ lock: lock.clone(), receiver };

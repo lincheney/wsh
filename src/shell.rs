@@ -131,4 +131,28 @@ impl ShellInner {
         zsh::history::push_history(string)
     }
 
+    pub fn add_pid(&mut self, pid: i32) {
+        unsafe{
+            let aux = 1;
+            let bgtime = null_mut(); // this can be NULL if aux is 1
+            zsh_sys::addproc(pid, null_mut(), aux, bgtime, -1, -1);
+        }
+    }
+
+    pub fn find_pid(&mut self, pid: i32) -> Option<&zsh_sys::process> {
+        unsafe{
+            for i in 1..=zsh_sys::maxjob {
+                let mut proc = (*zsh_sys::jobtab.add(i as _)).auxprocs;
+                while let Some(p) = proc.as_ref() {
+                    if p.pid == pid {
+                        return Some(p);
+                    }
+                    proc = p.next;
+                }
+
+            }
+        }
+        None
+    }
+
 }

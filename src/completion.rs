@@ -65,7 +65,7 @@ async fn get_completions(ui: Ui, shell: Shell, _lua: Lua, val: Option<String>) -
             tokio::runtime::Handle::current().block_on(async {
                 let mut ui = ui_clone.borrow_mut().await;
                 ui.threads.remove(&tid);
-                ui.activate();
+                // ui.activate();
             });
         });
     });

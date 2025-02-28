@@ -60,7 +60,7 @@ pub struct UiInner {
 
     pub tui: crate::tui::Tui,
 
-    events: crate::event_stream::EventLocker,
+    pub events: crate::event_stream::EventLocker,
     is_running_process: bool,
     dirty: bool,
     y_offset: u16,
@@ -447,6 +447,10 @@ impl Ui {
         self.set_lua_async_fn("eval", shell, |_ui, shell, lua, (cmd, stderr): (mlua::String, bool)| async move {
             let data = shell.lock().await.eval((*cmd.as_bytes()).into(), stderr).unwrap();
             Ok(lua.create_string(data)?)
+        }).await?;
+
+        self.set_lua_async_fn("allocate_height", shell, |mut ui, _shell, _lua, height: u16| async move {
+            Ui::allocate_height(&mut ui.borrow_mut().await.stdout, height)
         }).await?;
 
         keybind::init_lua(self, shell).await?;

@@ -10,6 +10,7 @@ fn main() {
         // bindings for.
         .header("zsh.h")
         .blocklist_type(r"LinkList")
+        .no_debug("cmatch")
         // Tell cargo to invalidate the built crate whenever any of the
         // included header files changed.
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
