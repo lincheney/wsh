@@ -74,7 +74,6 @@ pub struct UiInner {
     pub threads: HashSet<nix::unistd::Pid>,
     stdout: std::io::Stdout,
     enhanced_keyboard: bool,
-    cursor: (u16, u16),
     size: (u16, u16),
 }
 
@@ -83,14 +82,12 @@ pub struct Ui(Arc<RwLock<UiInner>>);
 
 impl Ui {
 
-    pub async fn new(shell: &Shell, mut events: crate::event_stream::EventLocker) -> Result<Self> {
+    pub async fn new(shell: &Shell, events: crate::event_stream::EventLocker) -> Result<Self> {
         let lua = Lua::new();
         let lua_api = lua.create_table()?;
         lua.globals().set("wish", &lua_api)?;
         let lua_cache = lua.create_table()?;
         lua_api.set("__cache", &lua_cache)?;
-
-        let cursor = events.get_cursor_position().await?;
 
         let mut ui = UiInner{
             lua,
@@ -108,7 +105,6 @@ impl Ui {
             event_callbacks: Default::default(),
             stdout: std::io::stdout(),
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
-            cursor,
             size: crossterm::terminal::size()?,
         };
 
@@ -180,18 +176,13 @@ impl Ui {
             // move to last line of buffer
             let y_offset = (ui.buffer.height - ui.buffer.y_offset - 1) as u16;
             execute!(ui.stdout, MoveDown(y_offset))?;
-            // tui needs to know exactly where it is
-            // printing the prompt and buffer may have shifted cursor up
-            ui.cursor.1 = ui.cursor.1.min(ui.size.1 - (ui.prompt.height + ui.buffer.height - 1) as u16);
-            let cursory = ui.cursor.1 + ui.y_offset + y_offset;
-            ui.tui.draw(&mut ui.stdout, ui.size, cursory, ui.dirty)?;
+            ui.tui.draw(&mut ui.stdout, ui.size, ui.dirty)?;
             // then move back
             queue!(ui.stdout, MoveUp(y_offset))?;
         }
 
         execute!(ui.stdout, EndSynchronizedUpdate)?;
         crossterm::terminal::enable_raw_mode()?;
-        ui.cursor.1 = ui.cursor.1.min(ui.size.1 - (ui.prompt.height + ui.buffer.height - 1) as u16 - ui.tui.height);
 
         ui.dirty = false;
         Ok(())
@@ -299,10 +290,6 @@ impl Ui {
             _ => {},
         }
 
-        // if event == crossterm::event::Event::Key(crossterm::event::KeyCode::Char('c').into()) {
-            // println!("Cursor position: {:?}\r", crossterm::cursor::position());
-        // }
-
         Ok(true)
     }
 
@@ -340,10 +327,9 @@ impl Ui {
                     ui.is_running_process = false;
 
                     // move down one line if not at start of line
-                    ui.cursor = ui.events.lock().await.get_cursor_position()?;
-                    if ui.cursor.0 != 0 {
+                    let cursor = ui.events.lock().await.get_cursor_position()?;
+                    if cursor.0 != 0 {
                         ui.size = crossterm::terminal::size()?;
-                        ui.cursor.1 = (ui.cursor.1 + 1).min(ui.size.1 - 1);
                         queue!(ui.stdout, style::Print("\r\n"))?;
                     }
 
@@ -485,17 +471,11 @@ impl Ui {
     }
 
     pub fn allocate_height(stdout: &mut std::io::Stdout, height: u16) -> Result<()> {
-        // the y will be wrong but at least the x will be right
-        queue!(stdout, SavePosition)?;
         for _ in 0 .. height {
+            // vertical tab, this doesn't change x
             queue!(stdout, style::Print("\x0b"))?;
         }
-        queue!(
-            stdout,
-            RestorePosition,
-            MoveDown(height),
-            MoveUp(height),
-        )?;
+        queue!(stdout, MoveUp(height))?;
         Ok(())
     }
 

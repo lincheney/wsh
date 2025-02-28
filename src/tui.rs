@@ -407,7 +407,6 @@ impl Tui {
         &mut self,
         stdout: &mut std::io::Stdout,
         (width, height): (u16, u16),
-        mut cursory: u16,
         clear: bool,
     ) -> Result<()> {
 
@@ -444,42 +443,35 @@ impl Tui {
             queue!(stdout, Clear(ClearType::FromCursorDown))?;
 
         } else {
-            let allocate_more_space = (cursory + self.height) as isize - height as isize;
-            if allocate_more_space > 0 {
-                // adjust cursory if new lines will be added below
-                cursory = cursory.saturating_sub(allocate_more_space as _);
-                self.old_buffer.reset();
-                queue!(stdout, Clear(ClearType::FromCursorDown))?;
-            }
-
             let updates = self.old_buffer.diff(&self.new_buffer);
 
             if !updates.is_empty() {
-                if allocate_more_space > 0 {
-                    Ui::allocate_height(stdout, self.height)?;
-                }
+                Ui::allocate_height(stdout, self.height)?;
+
                 queue!(
                     stdout,
                     cursor::SavePosition,
                     cursor::MoveToNextLine(1),
                     cursor::MoveToColumn(0),
+                    // clear everything below
+                    cursor::MoveDown(self.height),
+                    Clear(ClearType::FromCursorDown),
                 )?;
-
-                let mut height = height;
-                if allocate_more_space < 0 {
-                    height += -allocate_more_space as u16;
+                if self.height > 1 {
+                    queue!(stdout, cursor::MoveUp(self.height - 1))?;
                 }
 
-                let lasty = updates.last().unwrap().1;
+                // the last line will have been cleared so always redraw it
+                {
+                    let old = &mut self.old_buffer.content;
+                    let len = old.len();
+                    for cell in old[len - width as usize ..].iter_mut() {
+                        cell.reset();
+                    }
+                }
+                let updates = self.old_buffer.diff(&self.new_buffer);
+
                 backend::draw(stdout, updates.into_iter())?;
-                if cursory + self.height < height {
-                    queue!(
-                        stdout,
-                        cursor::MoveDown(self.height - lasty),
-                        cursor::MoveToColumn(0),
-                        Clear(ClearType::FromCursorDown),
-                    )?;
-                }
                 queue!(stdout, cursor::RestorePosition)?;
             }
         }
