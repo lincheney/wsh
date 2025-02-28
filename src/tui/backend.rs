@@ -103,11 +103,11 @@ where
         if y != last_pos.y {
             queue!(writer, MoveDown(y - last_pos.y))?;
         }
-        if x != last_pos.x + 1 {
+        if x != last_pos.x {
             queue!(writer, MoveToColumn(x))?;
         }
 
-        last_pos = Position { x, y };
+        last_pos = Position { x: x+1, y };
         if cell.modifier != modifier {
             let diff = ModifierDiff {
                 from: modifier,

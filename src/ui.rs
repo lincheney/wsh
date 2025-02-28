@@ -166,7 +166,7 @@ impl Ui {
             queue!(ui.stdout, MoveDown(ui.buffer.y_offset as _))?;
         }
 
-        ui.y_offset = (ui.prompt.height + ui.buffer.y_offset) as u16;
+        ui.y_offset = (ui.prompt.height + ui.buffer.y_offset - 1) as u16;
 
         if ui.dirty || ui.tui.dirty {
             // move to last line of buffer

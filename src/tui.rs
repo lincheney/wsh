@@ -450,21 +450,19 @@ impl Tui {
                 queue!(
                     stdout,
                     cursor::SavePosition,
-                    cursor::MoveToNextLine(1),
                     cursor::MoveToColumn(0),
                     // clear everything below
                     cursor::MoveDown(self.height),
                     Clear(ClearType::FromCursorDown),
+                    cursor::MoveUp(self.height),
+                    cursor::MoveToNextLine(1),
                 )?;
-                if self.height > 1 {
-                    queue!(stdout, cursor::MoveUp(self.height - 1))?;
-                }
 
                 // the last line will have been cleared so always redraw it
                 {
                     let old = &mut self.old_buffer.content;
-                    let len = old.len();
-                    for cell in old[len - width as usize ..].iter_mut() {
+                    let start = ((self.height - 1) * width) as usize;
+                    for cell in old[start .. start + width as usize].iter_mut() {
                         cell.reset();
                     }
                 }
