@@ -18,8 +18,6 @@ use crossterm::{
     queue,
 };
 
-use crate::keybind;
-use crate::completion;
 use crate::shell::{Shell, ShellInner};
 
 fn lua_error<T>(msg: &str) -> Result<T, mlua::Error> {
@@ -65,8 +63,8 @@ pub struct UiInner {
     is_running_process: bool,
     dirty: bool,
     y_offset: u16,
-    pub keybinds: keybind::KeybindMapping,
-    pub event_callbacks: crate::events::EventCallbacks,
+    pub keybinds: crate::lua::KeybindMapping,
+    pub event_callbacks: crate::lua::EventCallbacks,
 
     pub buffer: crate::buffer::Buffer,
     pub prompt: crate::prompt::Prompt,
@@ -209,7 +207,7 @@ impl Ui {
     pub async fn show_error_message(&mut self, shell: &Shell, msg: String) {
         {
             let mut ui = self.borrow_mut().await;
-            ui.tui.add_error_message(msg, None);
+            ui.tui.add_error_message(msg);
         }
 
         if let Err(err) = self.draw(&shell).await {
@@ -479,13 +477,7 @@ impl Ui {
             Ui::allocate_height(&mut ui.borrow_mut().await.stdout, height)
         }).await?;
 
-        keybind::init_lua(self, shell).await?;
-        completion::init_lua(self, shell).await?;
-        crate::tui::init_lua(self, shell).await?;
-        crate::history::init_lua(self, shell).await?;
-        crate::events::init_lua(self, shell).await?;
         crate::lua::init_lua(self, shell).await?;
-        crate::string::init_lua(self, shell).await?;
 
         let lua = self.borrow().await.lua.clone();
         lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;

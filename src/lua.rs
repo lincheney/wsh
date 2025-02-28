@@ -10,6 +10,15 @@ use serde::{Deserialize};
 use crate::ui::Ui;
 use crate::shell::Shell;
 
+mod keybind;
+mod string;
+mod completion;
+mod history;
+mod events;
+mod tui;
+pub use keybind::KeybindMapping;
+pub use events::EventCallbacks;
+
 struct ReadableFile<T>(Option<BufReader<T>>);
 
 impl<T: AsyncRead + AsRawFd + std::marker::Unpin + mlua::MaybeSend + 'static> UserData for ReadableFile<T> {
@@ -250,28 +259,37 @@ pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
 
     }).await?;
 
-    let ui = ui.borrow().await;
+    {
+        let ui = ui.borrow().await;
 
-    let tbl = ui.lua.create_table()?;
-    ui.lua_api.set("async", &tbl)?;
+        let tbl = ui.lua.create_table()?;
+        ui.lua_api.set("async", &tbl)?;
 
-    tbl.set("sleep", ui.lua.create_async_function(|_, millis: u64| async move {
-        tokio::time::sleep(std::time::Duration::from_millis(millis)).await;
-        Ok(())
-    })?)?;
+        tbl.set("sleep", ui.lua.create_async_function(|_, millis: u64| async move {
+            tokio::time::sleep(std::time::Duration::from_millis(millis)).await;
+            Ok(())
+        })?)?;
 
-    tbl.set("schedule", schedule)?;
+        tbl.set("schedule", schedule)?;
 
-    tbl.set("__spawn", spawn)?;
+        tbl.set("__spawn", spawn)?;
 
 
-    let tbl = ui.lua.create_table()?;
-    ui.lua_api.set("log", &tbl)?;
+        let tbl = ui.lua.create_table()?;
+        ui.lua_api.set("log", &tbl)?;
 
-    tbl.set("debug", ui.lua.create_function(|_, val: LuaValue| { log::debug!("{:?}", val); Ok(()) })?)?;
-    tbl.set("info", ui.lua.create_function(|_, val: LuaValue| { log::info!("{:?}", val); Ok(()) })?)?;
-    tbl.set("warn", ui.lua.create_function(|_, val: LuaValue| { log::warn!("{:?}", val); Ok(()) })?)?;
-    tbl.set("error", ui.lua.create_function(|_, val: LuaValue| { log::error!("{:?}", val); Ok(()) })?)?;
+        tbl.set("debug", ui.lua.create_function(|_, val: LuaValue| { log::debug!("{:?}", val); Ok(()) })?)?;
+        tbl.set("info", ui.lua.create_function(|_, val: LuaValue| { log::info!("{:?}", val); Ok(()) })?)?;
+        tbl.set("warn", ui.lua.create_function(|_, val: LuaValue| { log::warn!("{:?}", val); Ok(()) })?)?;
+        tbl.set("error", ui.lua.create_function(|_, val: LuaValue| { log::error!("{:?}", val); Ok(()) })?)?;
+    }
+
+    keybind::init_lua(ui, shell).await?;
+    string::init_lua(ui, shell).await?;
+    completion::init_lua(ui, shell).await?;
+    history::init_lua(ui, shell).await?;
+    events::init_lua(ui, shell).await?;
+    tui::init_lua(ui, shell).await?;
 
     Ok(())
 }

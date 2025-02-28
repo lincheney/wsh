@@ -1,0 +1,306 @@
+use std::default::Default;
+use std::ops::DerefMut;
+use std::str::FromStr;
+use serde::{Deserialize, Deserializer, de};
+use anyhow::Result;
+use ratatui::{
+    text::*,
+    layout::*,
+    widgets::*,
+    style::*,
+};
+use mlua::{prelude::*, UserData, UserDataMethods};
+use crate::ui::Ui;
+use crate::shell::Shell;
+use crate::tui;
+
+pub struct WidgetId(Ui, usize);
+
+#[derive(Debug, Copy, Clone)]
+pub struct SerdeWrap<T>(T);
+impl<'de, T: FromStr> Deserialize<'de> for SerdeWrap<T>
+    where <T as FromStr>::Err: std::fmt::Display
+{
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let data = String::deserialize(deserializer)?;
+        Ok(Self(T::from_str(&data).map_err(de::Error::custom)?))
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct SerdeConstraint(Constraint);
+impl<'de> Deserialize<'de> for SerdeConstraint {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let data = String::deserialize(deserializer)?;
+        let constraint = if let Some(end) = data.strip_prefix("min:") {
+            Constraint::Min(end.parse::<u16>().map_err(de::Error::custom)?)
+        } else if let Some(end) = data.strip_prefix("max:") {
+            Constraint::Max(end.parse::<u16>().map_err(de::Error::custom)?)
+        } else if let Some(start) = data.strip_suffix("%") {
+            Constraint::Percentage(start.parse::<u16>().map_err(de::Error::custom)?)
+        } else {
+            Constraint::Length(data.parse::<u16>().map_err(de::Error::custom)?)
+        };
+        Ok(Self(constraint))
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct TextStyleOptions {
+    pub align: Option<SerdeWrap<Alignment>>,
+    #[serde(flatten)]
+    pub style: StyleOptions,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct TextOptions {
+    pub text: String,
+    #[serde(flatten)]
+    pub style: TextStyleOptions,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum TextParts {
+    Single(String),
+    Many(Vec<TextOptions>),
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct WidgetOptions {
+    pub persist: Option<bool>,
+    pub hidden: Option<bool>,
+    pub text: Option<TextParts>,
+    #[serde(flatten)]
+    pub style: TextStyleOptions,
+    pub border: Option<BorderOptions>,
+    pub height: Option<SerdeConstraint>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct BorderTitleOptions {
+    pub text: Option<String>,
+    #[serde(flatten)]
+    pub style: StyleOptions,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct BorderOptions {
+    pub enabled: Option<bool>,
+    pub r#type: Option<SerdeWrap<BorderType>>,
+    pub title: Option<BorderTitleOptions>,
+    #[serde(flatten)]
+    pub style: StyleOptions,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UnderlineStyleOptions {
+    color: SerdeWrap<Color>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum UnderlineOptions {
+    Bool(bool),
+    Options(UnderlineStyleOptions),
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct StyleOptions {
+    pub fg: Option<SerdeWrap<Color>>,
+    pub bg: Option<SerdeWrap<Color>>,
+    pub bold: Option<bool>,
+    pub dim: Option<bool>,
+    pub italic: Option<bool>,
+    pub underline: Option<UnderlineOptions>,
+    pub strikethrough: Option<bool>,
+    pub reversed: Option<bool>,
+    pub blink: Option<bool>,
+}
+
+impl StyleOptions {
+    fn apply_to_style(&self, mut style: Style) -> Style {
+        if let Some(fg) = self.fg { style = style.fg(fg.0); }
+        if let Some(bg) = self.bg { style = style.bg(bg.0); }
+
+        macro_rules! set_modifier {
+            ($field:ident, $enum:ident) => (
+                if let Some($field) = self.$field {
+                    let value = Modifier::$enum;
+                    style = if $field { style.add_modifier(value) } else { style.remove_modifier(value) };
+                }
+            )
+        }
+
+        set_modifier!(bold, BOLD);
+        set_modifier!(dim, DIM);
+        set_modifier!(italic, ITALIC);
+        set_modifier!(strikethrough, CROSSED_OUT);
+        set_modifier!(reversed, REVERSED);
+        set_modifier!(blink, SLOW_BLINK);
+
+        match self.underline.as_ref() {
+            Some(UnderlineOptions::Bool(val)) => if *val {
+                style = style.add_modifier(Modifier::UNDERLINED);
+            } else {
+                style = style.remove_modifier(Modifier::UNDERLINED);
+            },
+            Some(UnderlineOptions::Options(val)) => {
+                style = style.add_modifier(Modifier::UNDERLINED);
+                style = style.underline_color(val.color.0);
+            },
+            None => (),
+        }
+
+        style
+    }
+}
+
+fn set_widget_options(widget: &mut tui::Widget, options: WidgetOptions) {
+    if let Some(persist) = options.persist {
+        widget.persist = persist;
+    }
+
+    if let Some(hidden) = options.hidden {
+        widget.hidden = hidden;
+    }
+
+    if let Some(constraint) = options.height {
+        widget.constraint = constraint.0;
+    }
+
+    if let Some(text) = options.text {
+
+        // there's no way to set the text on an existing paragraph ...
+        let mut lines: Vec<_> = match text {
+            TextParts::Single(text) => {
+                let text = tui::Widget::replace_tabs(text);
+                text.split('\n').map(|l| l.to_owned()).map(Line::from).collect()
+            },
+            TextParts::Many(parts) => {
+                let mut lines = vec![Line::default()];
+                for part in parts.into_iter() {
+                    let style = part.style.style.apply_to_style(Style::default());
+                    let text = tui::Widget::replace_tabs(part.text);
+                    for (i, text) in text.split('\n').enumerate() {
+                        if i > 0 {
+                            lines.push(Line::default());
+                        }
+                        let line = lines.last_mut().unwrap();
+                        line.spans.push(Span::styled(text.to_owned(), style));
+                        line.alignment = part.style.align.map(|a| a.0);
+                    }
+                }
+                lines
+            },
+        };
+
+        lines.truncate(100);
+        widget.inner = Paragraph::new(lines);
+    }
+
+    if let Some(align) = options.style.align { widget.align = align.0; }
+    widget.style = options.style.style.apply_to_style(widget.style);
+
+    match options.border {
+        // explicitly disabled
+        Some(BorderOptions{enabled: Some(false), ..}) => {
+            widget.block = Block::new();
+        },
+        Some(options) => {
+            widget.border_style = options.style.apply_to_style(widget.border_style);
+            widget.border_type = options.r#type.unwrap_or(SerdeWrap(widget.border_type)).0;
+
+            let mut block = if let Some(title) = options.title {
+                widget.border_title_style = title.style.apply_to_style(widget.border_title_style);
+                if let Some(text) = title.text {
+                    Block::new().title(text)
+                } else {
+                    widget.block.clone()
+                }
+            } else {
+                widget.block.clone()
+            };
+
+            block = block.borders(Borders::ALL);
+            block = block.border_style(widget.border_style);
+            block = block.border_type(widget.border_type);
+            block = block.title_style(widget.border_title_style);
+
+            widget.block = block;
+        },
+        None => {},
+    }
+
+    let p = std::mem::replace(&mut widget.inner, Paragraph::new(""));
+    widget.inner = p
+        .alignment(widget.align)
+        .style(widget.style)
+        .block(widget.block.clone())
+        .wrap(Wrap{trim: false})
+    ;
+}
+
+impl UserData for WidgetId {
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+
+        methods.add_async_method("exists", |_lua, id, _val: ()| async move {
+            Ok(id.0.borrow().await.tui.get_index(id.1).is_some())
+        });
+
+        methods.add_async_method_mut("set_options", |lua, mut id, val: LuaValue| async move {
+            let id = id.deref_mut();
+            let tui = &mut id.0.borrow_mut().await.tui;
+            if let Some(mut widget) = tui.get_mut(id.1) {
+                set_widget_options(&mut widget, lua.from_value(val)?);
+                tui.dirty = true;
+                Ok(())
+            } else {
+                Err(LuaError::RuntimeError(format!("can't find widget with id {}", id.1)))
+            }
+        });
+
+        methods.add_async_method_mut("remove", |_lua, mut id, _val: LuaValue| async move {
+            let id = id.deref_mut();
+            let tui = &mut id.0.borrow_mut().await.tui;
+            if tui.remove(id.1).is_some() {
+                tui.dirty = true;
+                Ok(())
+            } else {
+                Err(LuaError::RuntimeError(format!("can't find widget with id {}", id.1)))
+            }
+        });
+    }
+}
+
+async fn show_message(mut ui: Ui, _shell: Shell, lua: Lua, val: LuaValue) -> Result<WidgetId> {
+    let mut widget = tui::Widget::default();
+    set_widget_options(&mut widget, lua.from_value(val)?);
+    let id = ui.borrow_mut().await.tui.add(widget);
+    Ok(WidgetId(ui, id))
+}
+
+async fn clear_messages(mut ui: Ui, _shell: Shell, _lua: Lua, all: bool) -> Result<()> {
+    let tui = &mut ui.borrow_mut().await.tui;
+    if all {
+        tui.clear_all();
+    } else {
+        tui.clear_non_persistent();
+    }
+    Ok(())
+}
+
+pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
+
+    ui.set_lua_async_fn("show_message", shell, show_message).await?;
+    ui.set_lua_async_fn("clear_messages", shell, clear_messages).await?;
+
+    Ok(())
+}
+

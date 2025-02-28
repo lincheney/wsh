@@ -37,7 +37,7 @@ fn set(lua: &Lua, (string, replace, start, end): (LuaString, Option<LuaString>, 
     }
 }
 
-fn len(_lua: &Lua, string: mlua::String) -> LuaResult<usize> {
+fn len(_lua: &Lua, string: LuaString) -> LuaResult<usize> {
     Ok(string.as_bytes().grapheme_indices().count())
 }
 

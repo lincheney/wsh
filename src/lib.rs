@@ -9,17 +9,12 @@ use std::ffi::CString;
 mod shell;
 mod zsh;
 mod ui;
-mod keybind;
-mod completion;
 mod buffer;
 mod c_string_array;
 mod tui;
 mod event_stream;
-mod events;
 mod prompt;
 mod lua;
-mod string;
-mod history;
 #[macro_use]
 mod utils;
 

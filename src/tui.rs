@@ -1,7 +1,4 @@
 use std::default::Default;
-use std::ops::DerefMut;
-use std::str::FromStr;
-use serde::{Deserialize, Deserializer, de};
 use anyhow::Result;
 use crossterm::{
     cursor,
@@ -10,278 +7,41 @@ use crossterm::{
 };
 use ratatui::{
     *,
-    text::*,
     layout::*,
     widgets::*,
     style::*,
     buffer::Buffer,
 };
-use mlua::{prelude::*, UserData, UserDataMethods};
 use crate::ui::Ui;
-use crate::shell::Shell;
 mod backend;
 
-pub struct WidgetId(Ui, usize);
-
 #[derive(Default)]
-struct Widget{
+pub struct Widget{
     id: usize,
-    constraint: Constraint,
-    inner: Paragraph<'static>,
-    align: Alignment,
-    style: Style,
-    border_style: Style,
-    border_title_style: Style,
-    border_type: BorderType,
-    block: Block<'static>,
-    persist: bool,
-    hidden: bool,
+    pub constraint: Constraint,
+    pub inner: Paragraph<'static>,
+    pub align: Alignment,
+    pub style: Style,
+    pub border_style: Style,
+    pub border_title_style: Style,
+    pub border_type: BorderType,
+    pub block: Block<'static>,
+    pub persist: bool,
+    pub hidden: bool,
 
     line_count: usize,
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct SerdeWrap<T>(T);
-impl<'de, T: FromStr> Deserialize<'de> for SerdeWrap<T>
-    where <T as FromStr>::Err: std::fmt::Display
-{
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let data = String::deserialize(deserializer)?;
-        Ok(Self(T::from_str(&data).map_err(de::Error::custom)?))
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-pub struct SerdeConstraint(Constraint);
-impl<'de> Deserialize<'de> for SerdeConstraint {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let data = String::deserialize(deserializer)?;
-        let constraint = if let Some(end) = data.strip_prefix("min:") {
-            Constraint::Min(end.parse::<u16>().map_err(de::Error::custom)?)
-        } else if let Some(end) = data.strip_prefix("max:") {
-            Constraint::Max(end.parse::<u16>().map_err(de::Error::custom)?)
-        } else if let Some(start) = data.strip_suffix("%") {
-            Constraint::Percentage(start.parse::<u16>().map_err(de::Error::custom)?)
-        } else {
-            Constraint::Length(data.parse::<u16>().map_err(de::Error::custom)?)
-        };
-        Ok(Self(constraint))
-    }
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-pub struct TextStyleOptions {
-    pub align: Option<SerdeWrap<Alignment>>,
-    #[serde(flatten)]
-    pub style: StyleOptions,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-pub struct TextOptions {
-    pub text: String,
-    #[serde(flatten)]
-    pub style: TextStyleOptions,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum TextParts {
-    Single(String),
-    Many(Vec<TextOptions>),
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-pub struct WidgetOptions {
-    pub persist: Option<bool>,
-    pub hidden: Option<bool>,
-    pub text: Option<TextParts>,
-    #[serde(flatten)]
-    pub style: TextStyleOptions,
-    pub border: Option<BorderOptions>,
-    pub height: Option<SerdeConstraint>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-pub struct BorderTitleOptions {
-    pub text: Option<String>,
-    #[serde(flatten)]
-    pub style: StyleOptions,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-pub struct BorderOptions {
-    pub enabled: Option<bool>,
-    pub r#type: Option<SerdeWrap<BorderType>>,
-    pub title: Option<BorderTitleOptions>,
-    #[serde(flatten)]
-    pub style: StyleOptions,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct UnderlineStyleOptions {
-    color: SerdeWrap<Color>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-pub enum UnderlineOptions {
-    Bool(bool),
-    Options(UnderlineStyleOptions),
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-pub struct StyleOptions {
-    pub fg: Option<SerdeWrap<Color>>,
-    pub bg: Option<SerdeWrap<Color>>,
-    pub bold: Option<bool>,
-    pub dim: Option<bool>,
-    pub italic: Option<bool>,
-    pub underline: Option<UnderlineOptions>,
-    pub strikethrough: Option<bool>,
-    pub reversed: Option<bool>,
-    pub blink: Option<bool>,
-}
-
-impl StyleOptions {
-    fn apply_to_style(&self, mut style: Style) -> Style {
-        if let Some(fg) = self.fg { style = style.fg(fg.0); }
-        if let Some(bg) = self.bg { style = style.bg(bg.0); }
-
-        macro_rules! set_modifier {
-            ($field:ident, $enum:ident) => (
-                if let Some($field) = self.$field {
-                    let value = Modifier::$enum;
-                    style = if $field { style.add_modifier(value) } else { style.remove_modifier(value) };
-                }
-            )
-        }
-
-        set_modifier!(bold, BOLD);
-        set_modifier!(dim, DIM);
-        set_modifier!(italic, ITALIC);
-        set_modifier!(strikethrough, CROSSED_OUT);
-        set_modifier!(reversed, REVERSED);
-        set_modifier!(blink, SLOW_BLINK);
-
-        match self.underline.as_ref() {
-            Some(UnderlineOptions::Bool(val)) => if *val {
-                style = style.add_modifier(Modifier::UNDERLINED);
-            } else {
-                style = style.remove_modifier(Modifier::UNDERLINED);
-            },
-            Some(UnderlineOptions::Options(val)) => {
-                style = style.add_modifier(Modifier::UNDERLINED);
-                style = style.underline_color(val.color.0);
-            },
-            None => (),
-        }
-
-        style
-    }
-}
-
 impl Widget {
-    fn take_inner(&mut self) -> Paragraph<'static> {
-        std::mem::replace(&mut self.inner, Paragraph::new(""))
+
+    pub fn replace_tabs(mut text: String) -> String {
+        let tab = "    ";
+        if text.contains('\t') {
+            text = text.replace('\t', tab)
+        }
+        text
     }
 
-    fn set_options(&mut self, options: WidgetOptions) {
-        if let Some(persist) = options.persist {
-            self.persist = persist;
-        }
-
-        if let Some(hidden) = options.hidden {
-            self.hidden = hidden;
-        }
-
-        if let Some(constraint) = options.height {
-            self.constraint = constraint.0;
-        }
-
-        if let Some(text) = options.text {
-
-            fn replace_tabs(mut text: String) -> String {
-                let tab = "    ";
-                if text.contains('\t') {
-                    text = text.replace('\t', tab)
-                }
-                text
-            }
-
-            // there's no way to set the text on an existing paragraph ...
-            let mut lines: Vec<_> = match text {
-                TextParts::Single(text) => {
-                    let text = replace_tabs(text);
-                    text.split('\n').map(|l| l.to_owned()).map(Line::from).collect()
-                },
-                TextParts::Many(parts) => {
-                    let mut lines = vec![Line::default()];
-                    for part in parts.into_iter() {
-                        let style = part.style.style.apply_to_style(Style::default());
-                        let text = replace_tabs(part.text);
-                        for (i, text) in text.split('\n').enumerate() {
-                            if i > 0 {
-                                lines.push(Line::default());
-                            }
-                            let line = lines.last_mut().unwrap();
-                            line.spans.push(Span::styled(text.to_owned(), style));
-                            line.alignment = part.style.align.map(|a| a.0);
-                        }
-                    }
-                    lines
-                },
-            };
-
-            lines.truncate(100);
-            self.inner = Paragraph::new(lines);
-        }
-
-        if let Some(align) = options.style.align { self.align = align.0; }
-        self.style = options.style.style.apply_to_style(self.style);
-
-        match options.border {
-            // explicitly disabled
-            Some(BorderOptions{enabled: Some(false), ..}) => {
-                self.block = Block::new();
-            },
-            Some(options) => {
-                self.border_style = options.style.apply_to_style(self.border_style);
-                self.border_type = options.r#type.unwrap_or(SerdeWrap(self.border_type)).0;
-
-                let mut block = if let Some(title) = options.title {
-                    self.border_title_style = title.style.apply_to_style(self.border_title_style);
-                    if let Some(text) = title.text {
-                        Block::new().title(text)
-                    } else {
-                        self.block.clone()
-                    }
-                } else {
-                    self.block.clone()
-                };
-
-                block = block.borders(Borders::ALL);
-                block = block.border_style(self.border_style);
-                block = block.border_type(self.border_type);
-                block = block.title_style(self.border_title_style);
-
-                self.block = block;
-            },
-            None => {},
-        }
-
-        self.inner = self.take_inner()
-            .alignment(self.align)
-            .style(self.style)
-            .block(self.block.clone())
-            .wrap(Wrap{trim: false})
-        ;
-    }
 }
 
 pub struct Tui {
@@ -317,29 +77,23 @@ impl std::default::Default for Tui {
 
 impl Tui {
 
-    pub fn add(&mut self, options: WidgetOptions) -> usize {
+    pub fn add(&mut self, mut widget: Widget) -> usize {
         let id = self.counter;
+        widget.id = id;
         self.counter += 1;
         self.dirty = true;
-
-        let mut widget = Widget{ id, ..Default::default() };
-        widget.set_options(options);
         self.widgets.push(widget);
         id
     }
 
-    pub fn add_error_message(&mut self, message: String, options: Option<WidgetOptions>) -> usize {
-        let mut options = options.unwrap_or_default();
-        options.text = Some(TextParts::Single(message));
-        // options.border.get_or_insert(Default::default());
-        // options.border.as_mut().unwrap().enabled = Some(true);
-        // options.border.as_mut().unwrap().style.fg = Some(SerdeWrap(Color::Red));
-        // options.style.bg.get_or_insert(SerdeWrap(Color::Rgb(0x30, 0x30, 0x30)));
-        options.style.style.fg.get_or_insert(SerdeWrap(Color::Red));
-        self.add(options)
+    pub fn add_error_message(&mut self, message: String) -> usize {
+        let mut widget = Widget::default();
+        widget.inner = Paragraph::new(message);
+        widget.inner = widget.inner.fg(Color::Red);
+        self.add(widget)
     }
 
-    fn get_index(&self, id: usize) -> Option<usize> {
+    pub fn get_index(&self, id: usize) -> Option<usize> {
         for (i, w) in self.widgets.iter().enumerate() {
             match w.id.cmp(&id) {
                 std::cmp::Ordering::Equal => return Some(i),
@@ -350,14 +104,14 @@ impl Tui {
         None
     }
 
-    fn get_mut(&mut self, id: usize) -> Option<&mut Widget> {
+    pub fn get_mut(&mut self, id: usize) -> Option<&mut Widget> {
         self.get_index(id).map(|i| {
             self.dirty = true;
             &mut self.widgets[i]
         })
     }
 
-    fn remove(&mut self, id: usize) -> Option<Widget> {
+    pub fn remove(&mut self, id: usize) -> Option<Widget> {
         self.get_index(id).map(|i| {
             self.dirty = true;
             self.widgets.remove(i)
@@ -502,61 +256,4 @@ impl Tui {
         Ok(())
     }
 
-}
-
-impl UserData for WidgetId {
-    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-
-        methods.add_async_method("exists", |_lua, id, _val: LuaValue| async move {
-            Ok(id.0.borrow().await.tui.get_index(id.1).is_some())
-        });
-
-        methods.add_async_method_mut("set_options", |lua, mut id, val: LuaValue| async move {
-            let id = id.deref_mut();
-            let tui = &mut id.0.borrow_mut().await.tui;
-            if let Some(widget) = tui.get_mut(id.1) {
-                let options: WidgetOptions = lua.from_value(val)?;
-                widget.set_options(options);
-                tui.dirty = true;
-                Ok(())
-            } else {
-                Err(LuaError::RuntimeError(format!("can't find widget with id {}", id.1)))
-            }
-        });
-
-        methods.add_async_method_mut("remove", |_lua, mut id, _val: LuaValue| async move {
-            let id = id.deref_mut();
-            let tui = &mut id.0.borrow_mut().await.tui;
-            if tui.remove(id.1).is_some() {
-                tui.dirty = true;
-                Ok(())
-            } else {
-                Err(LuaError::RuntimeError(format!("can't find widget with id {}", id.1)))
-            }
-        });
-    }
-}
-
-async fn show_message(mut ui: Ui, _shell: Shell, lua: Lua, val: LuaValue) -> Result<WidgetId> {
-    let options: WidgetOptions = lua.from_value(val)?;
-    let id = ui.borrow_mut().await.tui.add(options);
-    Ok(WidgetId(ui, id))
-}
-
-async fn clear_messages(mut ui: Ui, _shell: Shell, _lua: Lua, all: bool) -> Result<()> {
-    let tui = &mut ui.borrow_mut().await.tui;
-    if all {
-        tui.clear_all();
-    } else {
-        tui.clear_non_persistent();
-    }
-    Ok(())
-}
-
-pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
-
-    ui.set_lua_async_fn("show_message", shell, show_message).await?;
-    ui.set_lua_async_fn("clear_messages", shell, clear_messages).await?;
-
-    Ok(())
 }
