@@ -4,6 +4,7 @@ use std::sync::{Arc, Weak};
 use std::ops::DerefMut;
 use std::collections::HashSet;
 use std::default::Default;
+use serde::{Deserialize};
 use mlua::prelude::*;
 use tokio::sync::RwLock;
 use anyhow::Result;
@@ -440,7 +441,24 @@ impl Ui {
             ui.accept_line(&shell).await
         }).await?;
 
-        self.set_lua_async_fn("redraw", shell, |mut ui, shell, _lua, _val: ()| async move {
+        #[derive(Debug, Default, Deserialize)]
+        #[serde(default)]
+        struct RedrawOptions {
+            prompt: bool,
+            buffer: bool,
+            messages: bool,
+            all: bool,
+        }
+        self.set_lua_async_fn("redraw", shell, |mut ui, shell, lua, val: Option<LuaValue>| async move {
+            if let Some(val) = val {
+                let val: RedrawOptions = lua.from_value(val)?;
+                let mut ui = ui.borrow_mut().await;
+                if val.all { ui.dirty = true; }
+                if val.prompt { ui.prompt.dirty = true; }
+                if val.buffer { ui.buffer.dirty = true; }
+                if val.messages { ui.tui.dirty = true; }
+            }
+
             ui.draw(&shell).await
         }).await?;
 
