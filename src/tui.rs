@@ -14,7 +14,6 @@ use ratatui::{
     layout::*,
     widgets::*,
     style::*,
-    backend::Backend,
     buffer::Buffer,
 };
 use mlua::{prelude::*, UserData, UserDataMethods};

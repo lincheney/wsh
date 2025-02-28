@@ -10,7 +10,7 @@ use anyhow::Result;
 
 use crossterm::{
     terminal::{Clear, ClearType, BeginSynchronizedUpdate, EndSynchronizedUpdate},
-    cursor::{self, position, SavePosition, RestorePosition},
+    cursor::{self, position},
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     style,
     execute,
@@ -57,7 +57,6 @@ impl crossterm::Command for MoveDown {
 pub struct UiInner {
     pub lua: Lua,
     pub lua_api: mlua::Table,
-    lua_cache: mlua::Table,
 
     pub tui: crate::tui::Tui,
 
@@ -86,13 +85,10 @@ impl Ui {
         let lua = Lua::new();
         let lua_api = lua.create_table()?;
         lua.globals().set("wish", &lua_api)?;
-        let lua_cache = lua.create_table()?;
-        lua_api.set("__cache", &lua_cache)?;
 
         let mut ui = UiInner{
             lua,
             lua_api,
-            lua_cache,
             events,
             is_running_process: false,
             dirty: true,
