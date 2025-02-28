@@ -1,8 +1,3 @@
-wish.async = {
-    spawn = wish.__async_spawn,
-    sleep = wish.__async_sleep,
-}
-
 wish.repr = function(val)
     if type(val) == 'table' then
         local text = {}

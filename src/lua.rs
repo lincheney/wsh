@@ -93,7 +93,7 @@ impl From<Stdio> for std::process::Stdio {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-struct SpawnArgs {
+struct FullSpawnArgs {
     args: Vec<String>,
     env: Option<HashMap<String, String>>,
     clear_env: bool,
@@ -101,6 +101,13 @@ struct SpawnArgs {
     stdin: Stdio,
     stdout: Stdio,
     stderr: Stdio,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum SpawnArgs {
+    Simple(Vec<String>),
+    Full(FullSpawnArgs),
 }
 
 
@@ -122,8 +129,12 @@ pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
 
     tbl.set("schedule", schedule)?;
 
-    tbl.set("spawn", ui.lua.create_function(|lua, val: LuaValue| {
-        let args: SpawnArgs = lua.from_value(val)?;
+    tbl.set("__spawn", ui.lua.create_function(|lua, val: LuaValue| {
+        let args = match lua.from_value(val)? {
+            SpawnArgs::Full(args) => args,
+            SpawnArgs::Simple(args) => FullSpawnArgs{args, ..std::default::Default::default()},
+        };
+
         let arg0 = args.args.first().ok_or_else(|| LuaError::RuntimeError("no args given".to_owned()))?;
         let mut command = Command::new(arg0);
         if args.args.len() > 1 {
