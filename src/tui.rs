@@ -7,6 +7,7 @@ use crossterm::{
 };
 use ratatui::{
     *,
+    text::*,
     layout::*,
     widgets::*,
     style::*,
@@ -88,6 +89,8 @@ impl Tui {
 
     pub fn add_error_message(&mut self, message: String) -> usize {
         let mut widget = Widget::default();
+        let message = Widget::replace_tabs(message);
+        let message: Vec<_> = message.split('\n').map(|l| Line::from(l.to_owned())).collect();
         widget.inner = Paragraph::new(message);
         widget.inner = widget.inner.fg(Color::Red);
         self.add(widget)
