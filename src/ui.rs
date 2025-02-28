@@ -4,7 +4,7 @@ use std::sync::{Arc, Weak};
 use std::ops::DerefMut;
 use std::collections::HashSet;
 use std::default::Default;
-use mlua::{IntoLuaMulti, FromLuaMulti, Lua, Result as LuaResult, Value as LuaValue};
+use mlua::prelude::*;
 use tokio::sync::RwLock;
 use anyhow::Result;
 
@@ -378,14 +378,24 @@ impl Ui {
         R: IntoLuaMulti,
     {
 
+        let func = self.make_lua_fn(shell, func).await?;
+        self.borrow().await.lua_api.set(name, func)
+    }
+
+    pub async fn make_lua_fn<F, A, R>(&self, shell: &Shell, func: F) -> LuaResult<LuaFunction>
+    where
+        F: Fn(&Self, &Shell, &Lua, A) -> Result<R> + mlua::MaybeSend + 'static,
+        A: FromLuaMulti,
+        R: IntoLuaMulti,
+    {
         let weak = Arc::downgrade(&self.0);
         let ui = self.borrow().await;
         let shell = Arc::downgrade(&shell.0);
-        ui.lua_api.set(name, ui.lua.create_function(move |lua, value| {
+        ui.lua.create_function(move |lua, value| {
             let ui = Ui::try_upgrade(&weak)?;
             func(&ui, &Shell(shell.upgrade().unwrap()), lua, value)
                 .map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))
-        })?)
+        })
     }
 
     pub async fn set_lua_async_fn<F, A, R, T>(&self, name: &str, shell: &Shell, func: F) -> LuaResult<()>
@@ -395,10 +405,21 @@ impl Ui {
         R: IntoLuaMulti,
         T: Future<Output=Result<R>> + mlua::MaybeSend + 'static,
     {
+        let func = self.make_lua_async_fn(shell, func).await?;
+        self.borrow().await.lua_api.set(name, func)
+    }
+
+    pub async fn make_lua_async_fn<F, A, R, T>(&self, shell: &Shell, func: F) -> LuaResult<LuaFunction>
+    where
+        F: Fn(Self, Shell, Lua, A) -> T + mlua::MaybeSend + 'static + Clone,
+        A: FromLuaMulti + Send + 'static,
+        R: IntoLuaMulti,
+        T: Future<Output=Result<R>> + mlua::MaybeSend + 'static,
+    {
         let weak = Arc::downgrade(&self.0);
         let ui = self.borrow().await;
         let shell = Arc::downgrade(&shell.0);
-        ui.lua_api.set(name, ui.lua.create_async_function(move |lua, value| {
+        ui.lua.create_async_function(move |lua, value| {
             let weak = weak.clone();
             let func = func.clone();
             let shell = shell.clone();
@@ -407,7 +428,7 @@ impl Ui {
                 func(ui, Shell(shell.upgrade().unwrap()), lua, value).await
                     .map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))
             }
-        })?)
+        })
     }
 
     async fn init_lua(&mut self, shell: &Shell) -> Result<()> {
