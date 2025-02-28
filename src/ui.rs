@@ -84,7 +84,7 @@ pub struct Ui(Arc<RwLock<UiInner>>);
 impl Ui {
 
     pub async fn new(shell: &Shell, mut events: crate::event_stream::EventLocker) -> Result<Self> {
-        let lua = unsafe{ Lua::unsafe_new() };
+        let lua = Lua::new();
         let lua_api = lua.create_table()?;
         lua.globals().set("wish", &lua_api)?;
         let lua_cache = lua.create_table()?;
@@ -117,7 +117,7 @@ impl Ui {
         log::info!("loaded history in {:?}", start.elapsed());
         ui.reset(&mut *shell.lock().await);
 
-        let mut ui = Self(Arc::new(RwLock::new(ui)));
+        let ui = Self(Arc::new(RwLock::new(ui)));
         ui.init_lua(shell).await?;
 
         Ok(ui)
@@ -431,7 +431,7 @@ impl Ui {
         })
     }
 
-    async fn init_lua(&mut self, shell: &Shell) -> Result<()> {
+    async fn init_lua(&self, shell: &Shell) -> Result<()> {
         self.set_lua_async_fn("get_cursor", shell, |ui, _shell, _lua, _val: ()| async move {
             Ok(ui.borrow().await.buffer.get_cursor())
         } ).await?;
@@ -478,8 +478,7 @@ impl Ui {
         let lua = self.borrow().await.lua.clone();
         lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;
         if let Err(err) = lua.load("require('wish')").exec() {
-            self.show_error_message(&shell, format!("ERROR: {}", err)).await;
-            log::error!("{}", err);
+            log::error!("{:?}", err);
         }
 
         Ok(())
