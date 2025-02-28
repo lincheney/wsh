@@ -1,4 +1,4 @@
-wish.repr = function(val)
+function wish.repr(val)
     if type(val) == 'table' then
         local text = {}
         for k, v in ipairs(val) do
@@ -19,6 +19,18 @@ wish.repr = function(val)
     end
 end
 
-wish.pprint = function(val)
+function wish.pprint(val)
     wish.log.debug(wish.repr(val))
 end
+
+function wish.async.spawn(...)
+    local proc, stdin, stdout, stderr = wish.__spawn(...)
+    return {
+        stdin = stdin,
+        stdout = stdout,
+        stderr = stderr,
+        id = function(self) return proc:id() end,
+        wait = function(self) return proc:wait() end,
+    }
+end
+
