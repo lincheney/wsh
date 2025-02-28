@@ -1,5 +1,4 @@
 use std::default::Default;
-use std::ops::DerefMut;
 use std::str::FromStr;
 use serde::{Deserialize, Deserializer, de};
 use anyhow::Result;
@@ -9,12 +8,10 @@ use ratatui::{
     widgets::*,
     style::*,
 };
-use mlua::{prelude::*, UserData, UserDataMethods};
+use mlua::{prelude::*};
 use crate::ui::Ui;
 use crate::shell::Shell;
 use crate::tui;
-
-pub struct WidgetId(Ui, usize);
 
 #[derive(Debug, Copy, Clone)]
 pub struct SerdeWrap<T>(T);
@@ -71,6 +68,7 @@ pub enum TextParts {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct WidgetOptions {
+    id: Option<usize>,
     pub persist: Option<bool>,
     pub hidden: Option<bool>,
     pub text: Option<TextParts>,
@@ -247,43 +245,23 @@ fn set_widget_options(widget: &mut tui::Widget, options: WidgetOptions) {
     ;
 }
 
-impl UserData for WidgetId {
-    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+async fn show_message(mut ui: Ui, _shell: Shell, lua: Lua, val: LuaValue) -> Result<usize> {
+    let options: WidgetOptions = lua.from_value(val)?;
 
-        methods.add_async_method("exists", |_lua, id, _val: ()| async move {
-            Ok(id.0.borrow().await.tui.get_index(id.1).is_some())
-        });
-
-        methods.add_async_method_mut("set_options", |lua, mut id, val: LuaValue| async move {
-            let id = id.deref_mut();
-            let tui = &mut id.0.borrow_mut().await.tui;
-            if let Some(mut widget) = tui.get_mut(id.1) {
-                set_widget_options(&mut widget, lua.from_value(val)?);
-                tui.dirty = true;
-                Ok(())
-            } else {
-                Err(LuaError::RuntimeError(format!("can't find widget with id {}", id.1)))
-            }
-        });
-
-        methods.add_async_method_mut("remove", |_lua, mut id, _val: LuaValue| async move {
-            let id = id.deref_mut();
-            let tui = &mut id.0.borrow_mut().await.tui;
-            if tui.remove(id.1).is_some() {
-                tui.dirty = true;
-                Ok(())
-            } else {
-                Err(LuaError::RuntimeError(format!("can't find widget with id {}", id.1)))
-            }
-        });
+    let tui = &mut ui.borrow_mut().await.tui;
+    if let Some(id) = options.id {
+        if let Some(mut widget) = tui.get_mut(id) {
+            set_widget_options(&mut widget, options);
+            tui.dirty = true;
+            Ok(id)
+        } else {
+            Err(anyhow::anyhow!("can't find widget with id {}", id))
+        }
+    } else {
+        let mut widget = tui::Widget::default();
+        set_widget_options(&mut widget, options);
+        Ok(tui.add(widget))
     }
-}
-
-async fn show_message(mut ui: Ui, _shell: Shell, lua: Lua, val: LuaValue) -> Result<WidgetId> {
-    let mut widget = tui::Widget::default();
-    set_widget_options(&mut widget, lua.from_value(val)?);
-    let id = ui.borrow_mut().await.tui.add(widget);
-    Ok(WidgetId(ui, id))
 }
 
 async fn clear_messages(mut ui: Ui, _shell: Shell, _lua: Lua, all: bool) -> Result<()> {
@@ -296,9 +274,26 @@ async fn clear_messages(mut ui: Ui, _shell: Shell, _lua: Lua, all: bool) -> Resu
     Ok(())
 }
 
+async fn check_message(ui: Ui, _shell: Shell, _lua: Lua, id: usize) -> Result<bool> {
+    Ok(ui.borrow().await.tui.get_index(id).is_some())
+}
+
+async fn remove_message(mut ui: Ui, _shell: Shell, _lua: Lua, id: usize) -> Result<()> {
+    let tui = &mut ui.borrow_mut().await.tui;
+    if tui.remove(id).is_some() {
+        tui.dirty = true;
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("can't find widget with id {}", id))
+    }
+}
+
+
 pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
 
     ui.set_lua_async_fn("show_message", shell, show_message).await?;
+    ui.set_lua_async_fn("check_message", shell, check_message).await?;
+    ui.set_lua_async_fn("remove_message", shell, remove_message).await?;
     ui.set_lua_async_fn("clear_messages", shell, clear_messages).await?;
 
     Ok(())

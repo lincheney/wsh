@@ -139,11 +139,11 @@ function M.show(opts)
 
     opts.height = 'max:'..(SIZE + 2)
     opts.hidden = false
-    if selection_widget and selection_widget:exists() then
-        selection_widget:set_options(opts)
-    else
-        selection_widget = wish.show_message(opts)
+    if selection_widget and not wish.check_message(selection_widget) then
+        selection_widget = nil
     end
+    opts.id = selection_widget
+    selection_widget = wish.show_message(opts)
 
     recalc_filter()
     return selection_widget
