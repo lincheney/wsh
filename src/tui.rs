@@ -20,6 +20,7 @@ use ratatui::{
 use mlua::{prelude::*, UserData, UserDataMethods};
 use crate::ui::Ui;
 use crate::shell::Shell;
+mod backend;
 
 pub struct WidgetId(Ui, usize);
 
@@ -406,7 +407,7 @@ impl Tui {
         &mut self,
         stdout: &mut std::io::Stdout,
         (width, height): (u16, u16),
-        cursory: u16,
+        mut cursory: u16,
         clear: bool,
     ) -> Result<()> {
 
@@ -443,15 +444,10 @@ impl Tui {
             queue!(stdout, Clear(ClearType::FromCursorDown))?;
 
         } else {
-            self.old_buffer.area.y = cursory;
-            self.new_buffer.area.y = cursory;
-
             let allocate_more_space = (cursory + self.height) as isize - height as isize;
             if allocate_more_space > 0 {
                 // adjust cursory if new lines will be added below
-                let y = self.old_buffer.area.y.saturating_sub(allocate_more_space as _);
-                self.old_buffer.area.y = y;
-                self.new_buffer.area.y = y;
+                cursory = cursory.saturating_sub(allocate_more_space as _);
                 self.old_buffer.reset();
                 queue!(stdout, Clear(ClearType::FromCursorDown))?;
             }
@@ -474,11 +470,12 @@ impl Tui {
                     height += -allocate_more_space as u16;
                 }
 
-                self.terminal.backend_mut().draw(updates.into_iter())?;
-                if self.old_buffer.area.y + self.height < height {
+                let lasty = updates.last().unwrap().1;
+                backend::draw(stdout, updates.into_iter())?;
+                if cursory + self.height < height {
                     queue!(
                         stdout,
-                        cursor::MoveToRow(self.old_buffer.area.y + self.height),
+                        cursor::MoveDown(self.height - lasty),
                         cursor::MoveToColumn(0),
                         Clear(ClearType::FromCursorDown),
                     )?;
