@@ -478,7 +478,7 @@ impl Ui {
         let lua = self.borrow().await.lua.clone();
         lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;
         if let Err(err) = lua.load("require('wish')").exec() {
-            log::error!("{:?}", err);
+            log::error!("{}", err);
         }
 
         Ok(())
