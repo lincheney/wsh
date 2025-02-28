@@ -122,6 +122,18 @@ pub struct BorderOptions {
     pub style: StyleOptions,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct UnderlineStyleOptions {
+    color: SerdeWrap<Color>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum UnderlineOptions {
+    Bool(bool),
+    Options(UnderlineStyleOptions),
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct StyleOptions {
@@ -130,7 +142,7 @@ pub struct StyleOptions {
     pub bold: Option<bool>,
     pub dim: Option<bool>,
     pub italic: Option<bool>,
-    pub underline: Option<bool>,
+    pub underline: Option<UnderlineOptions>,
     pub strikethrough: Option<bool>,
     pub reversed: Option<bool>,
     pub blink: Option<bool>,
@@ -153,10 +165,23 @@ impl StyleOptions {
         set_modifier!(bold, BOLD);
         set_modifier!(dim, DIM);
         set_modifier!(italic, ITALIC);
-        set_modifier!(underline, UNDERLINED);
         set_modifier!(strikethrough, CROSSED_OUT);
         set_modifier!(reversed, REVERSED);
         set_modifier!(blink, SLOW_BLINK);
+
+        match self.underline.as_ref() {
+            Some(UnderlineOptions::Bool(val)) => if *val {
+                style = style.add_modifier(Modifier::UNDERLINED);
+            } else {
+                style = style.remove_modifier(Modifier::UNDERLINED);
+            },
+            Some(UnderlineOptions::Options(val)) => {
+                style = style.add_modifier(Modifier::UNDERLINED);
+                style = style.underline_color(val.color.0);
+            },
+            None => (),
+        }
+
         style
     }
 }
