@@ -123,7 +123,7 @@ function M.complete()
         if not ok then
             error(err)
         end
-        wish.show_message{text='No completion matches', fg='lightred'}
+        wish.set_message{text='No completion matches', fg='lightred'}
         wish.redraw()
 
     end

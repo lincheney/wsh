@@ -105,7 +105,7 @@ local function recalc_filter()
     end
 
     if selection_widget and wish.check_message(selection_widget) then
-        wish.show_message{id = selection_widget, text = #text > 0 and text or ''}
+        wish.set_message{id = selection_widget, text = #text > 0 and text or ''}
         wish.redraw()
     end
 end
@@ -143,7 +143,7 @@ function M.show(opts)
         selection_widget = nil
     end
     opts.id = selection_widget
-    selection_widget = wish.show_message(opts)
+    selection_widget = wish.set_message(opts)
 
     recalc_filter()
     return selection_widget
@@ -151,7 +151,7 @@ end
 
 function M.hide()
     if selection_widget and wish.check_message(selection_widget) then
-        wish.show_message{id = selection_widget, hidden = true}
+        wish.set_message{id = selection_widget, hidden = true}
         wish.redraw()
     end
 end

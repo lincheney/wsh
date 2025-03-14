@@ -59,7 +59,7 @@ end)
 
 -- there ought to be a better way of doing this
 wish.set_keymap('<c-d>', function()
-    wish.show_message{text='hello '..wish.get_buffer()}
+    wish.set_message{text='hello '..wish.get_buffer()}
     wish.redraw()
     if not wish.get_buffer():find('%S') then
         wish.set_buffer('exit')

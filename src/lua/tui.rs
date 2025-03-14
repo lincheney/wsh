@@ -245,7 +245,7 @@ fn set_widget_options(widget: &mut tui::Widget, options: WidgetOptions) {
     ;
 }
 
-async fn show_message(mut ui: Ui, _shell: Shell, lua: Lua, val: LuaValue) -> Result<usize> {
+async fn set_message(mut ui: Ui, _shell: Shell, lua: Lua, val: LuaValue) -> Result<usize> {
     let options: WidgetOptions = lua.from_value(val)?;
 
     let tui = &mut ui.borrow_mut().await.tui;
@@ -291,7 +291,7 @@ async fn remove_message(mut ui: Ui, _shell: Shell, _lua: Lua, id: usize) -> Resu
 
 pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
 
-    ui.set_lua_async_fn("show_message", shell, show_message).await?;
+    ui.set_lua_async_fn("set_message", shell, set_message).await?;
     ui.set_lua_async_fn("check_message", shell, check_message).await?;
     ui.set_lua_async_fn("remove_message", shell, remove_message).await?;
     ui.set_lua_async_fn("clear_messages", shell, clear_messages).await?;
