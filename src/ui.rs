@@ -11,7 +11,7 @@ use anyhow::Result;
 
 use crossterm::{
     terminal::{Clear, ClearType, BeginSynchronizedUpdate, EndSynchronizedUpdate},
-    cursor::{self, position},
+    cursor::{self, position, MoveToColumn},
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     style,
     execute,
@@ -137,19 +137,19 @@ impl Ui {
         let mut ui = self.borrow_mut().await;
         let ui = ui.deref_mut();
 
+        // do NOT render ui elements if there is a foreground process
+        if !(ui.dirty || ui.buffer.dirty || ui.prompt.dirty || ui.tui.dirty) || ui.is_running_process {
+            return Ok(())
+        }
+
         // if ui.dirty it means redraw everything from scratch
-        if ui.dirty || ui.is_running_process {
+        if ui.dirty {
             queue!(
                 ui.stdout,
                 MoveUp(ui.y_offset),
                 Clear(ClearType::FromCursorDown),
                 MoveDown(ui.y_offset),
             )?;
-        }
-
-        // do NOT render ui elements if there is a foreground process
-        if !(ui.dirty || ui.buffer.dirty || ui.prompt.dirty || ui.tui.dirty) || ui.is_running_process {
-            return Ok(())
         }
 
         crossterm::terminal::disable_raw_mode()?;
@@ -302,8 +302,8 @@ impl Ui {
     }
 
     async fn accept_line(&mut self, shell: &Shell) -> Result<bool> {
-        self.borrow_mut().await.is_running_process = true;
         self.draw(shell).await?;
+        self.borrow_mut().await.is_running_process = true;
 
         {
             let clone = self.clone();
@@ -325,8 +325,16 @@ impl Ui {
 
                     ui.tui.clear_non_persistent();
                     ui.deactivate()?;
-                    // new line
-                    execute!(ui.stdout, style::Print("\r\n"))?;
+
+                    // move to last line of buffer
+                    let y_offset = (ui.buffer.height - ui.buffer.y_offset - 1) as u16;
+                    execute!(
+                        ui.stdout,
+                        MoveDown(y_offset),
+                        style::Print('\n'),
+                        MoveToColumn(0),
+                        Clear(ClearType::FromCursorDown),
+                    )?;
 
                     if let Err(code) = shell.exec(ui.buffer.get_contents().as_ref()) {
                         eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
