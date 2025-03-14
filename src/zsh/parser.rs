@@ -1,5 +1,4 @@
 use std::ops::Range;
-use std::os::raw::*;
 use std::ffi::CStr;
 use std::ptr::null_mut;
 use bstr::{BStr, ByteSlice};
@@ -13,13 +12,19 @@ pub enum TokenKind {
 
 #[derive(Debug)]
 pub struct Token {
-    range: Range<usize>,
+    pub range: Range<usize>,
     kind: Option<TokenKind>,
 }
 
 impl Token {
-    fn as_str<'a>(&self, cmd: &'a BStr) -> &'a BStr {
+    pub fn as_str<'a>(&self, cmd: &'a BStr) -> &'a BStr {
         &cmd[self.range.clone()]
+    }
+    pub fn kind_as_str(&self) -> Option<String> {
+        Some(match self.kind? {
+            TokenKind::Lextok(k) => format!("{:?}", k),
+            TokenKind::Token(k) => format!("{:?}", k),
+        })
     }
 }
 
