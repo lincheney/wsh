@@ -112,7 +112,7 @@ enum SpawnArgs {
     Full(FullSpawnArgs),
 }
 
-async fn spawn(ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
+async fn spawn(mut ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let args = match lua.from_value(val)? {
         SpawnArgs::Full(args) => args,
         SpawnArgs::Simple(args) => FullSpawnArgs{args, ..std::default::Default::default()},
@@ -140,10 +140,9 @@ async fn spawn(ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<LuaMulti
 
     let lock = if args.foreground {
         // this essentially locks ui
-        let mut ui = ui.clone();
         let lock = ui.borrow_mut().await.events.lock_owned().await;
         ui.deactivate().await?;
-        Some((ui, lock))
+        Some(lock)
     } else {
         None
     };
@@ -176,7 +175,7 @@ async fn spawn(ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<LuaMulti
             },
         };
 
-        if let Some((ui, lock)) = lock {
+        if let Some(lock) = lock {
             ui.activate().await;
             drop(lock);
         }
@@ -208,7 +207,7 @@ fn restore_fd<A: AsRawFd>(old: RawFd, new: A) -> Result<()> {
     Ok(())
 }
 
-async fn shell_run(ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
+async fn shell_run(mut ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let args = match lua.from_value(val)? {
         CommandSpawnArgs::Full(args) => args,
         CommandSpawnArgs::Simple(args) => FullCommandSpawnArgs{args, ..Default::default()},
@@ -218,10 +217,9 @@ async fn shell_run(ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<LuaM
 
     let lock = if args.foreground {
         // this essentially locks ui
-        let mut ui = ui.clone();
         let lock = ui.borrow_mut().await.events.lock_owned().await;
         ui.deactivate().await?;
-        Some((ui, lock))
+        Some(lock)
     } else {
         None
     };
@@ -275,7 +273,7 @@ async fn shell_run(ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<LuaM
                 restore_fd(stderr, std::io::stderr()).unwrap();
             }
 
-            if let Some((ui, lock)) = lock {
+            if let Some(lock) = lock {
                 tokio::runtime::Handle::current().block_on(async {
                     ui.activate().await;
                 });
