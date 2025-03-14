@@ -1,4 +1,3 @@
-use std::os::fd::{RawFd};
 use std::os::raw::{c_long};
 use std::ffi::{CString, CStr};
 use std::default::Default;

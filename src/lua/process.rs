@@ -1,5 +1,4 @@
 use std::os::unix::process::ExitStatusExt;
-use std::os::raw::c_int;
 use std::collections::HashMap;
 use std::default::Default;
 use std::os::fd::{RawFd, AsRawFd, IntoRawFd};
@@ -176,10 +175,11 @@ async fn spawn(mut ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<LuaM
         };
 
         if let Some(lock) = lock {
-            ui.activate().await;
+            ui.report_error(&shell, true, ui.activate().await).await;
             drop(lock);
         }
-        sender.send(result.map(|r| r.into_raw()));
+        // ignore error
+        let _ = sender.send(result.map(|r| r.into_raw()));
     });
 
     Ok(lua.pack_multi((
@@ -215,7 +215,7 @@ async fn shell_run(mut ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<
 
     let (sender, receiver) = oneshot::channel();
 
-    let lock = if args.foreground {
+    let mut lock = if args.foreground {
         // this essentially locks ui
         let lock = ui.borrow_mut().await.events.lock_owned().await;
         ui.deactivate().await?;
@@ -255,31 +255,34 @@ async fn shell_run(mut ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<
     // run this in a thread
     tokio::task::spawn_blocking(move || {
         tokio::task::block_in_place(|| {
-            let mut shell = tokio::runtime::Handle::current().block_on(shell.lock());
 
-            let code = match shell.exec(bstr::BStr::new(&args.args)) {
-                Ok(()) => 0,
-                Err(code) => code,
+            let code =  {
+                let mut shell = tokio::runtime::Handle::current().block_on(shell.lock());
+                match shell.exec(bstr::BStr::new(&args.args)) {
+                    Ok(()) => 0,
+                    Err(code) => code,
+                }
             };
 
-            // restore stdio
-            if let Some(stdin) = stdin.1 {
-                restore_fd(stdin, std::io::stdin()).unwrap();
-            }
-            if let Some(stdout) = stdout.1 {
-                restore_fd(stdout, std::io::stdout()).unwrap();
-            }
-            if let Some(stderr) = stderr.1 {
-                restore_fd(stderr, std::io::stderr()).unwrap();
-            }
+            tokio::runtime::Handle::current().block_on(async {
+                // restore stdio
+                if let Some(stdin) = stdin.1 {
+                    ui.report_error(&shell, true, restore_fd(stdin, std::io::stdin())).await;
+                }
+                if let Some(stdout) = stdout.1 {
+                    ui.report_error(&shell, true, restore_fd(stdout, std::io::stdout())).await;
+                }
+                if let Some(stderr) = stderr.1 {
+                    ui.report_error(&shell, true, restore_fd(stderr, std::io::stderr())).await;
+                }
 
-            if let Some(lock) = lock {
-                tokio::runtime::Handle::current().block_on(async {
-                    ui.activate().await;
-                });
-                drop(lock);
-            }
-            sender.send(Ok(code as _));
+                if lock.take().is_some() {
+                    ui.report_error(&shell, true, ui.activate().await).await;
+                }
+                // ignore error
+                let _ = sender.send(Ok(code as _));
+            });
+
         })
     });
 

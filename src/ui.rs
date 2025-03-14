@@ -193,15 +193,19 @@ impl Ui {
     pub fn call_lua_fn<T: IntoLuaMulti + mlua::MaybeSend + 'static>(&self, shell: Shell, draw: bool, callback: mlua::Function, arg: T) {
         let mut ui = self.clone();
         tokio::task::spawn(async move {
-            if let Err(err) = callback.call_async::<LuaValue>(arg).await {
-                log::error!("{}", err);
-                ui.show_error_message(&shell, format!("ERROR: {}", err)).await;
-            } else if draw {
-                if let Err(err) = ui.draw(&shell).await {
-                    log::error!("{:?}", err);
-                }
-            }
+            ui.report_error(&shell, draw, callback.call_async::<LuaValue>(arg).await).await;
         });
+    }
+
+    pub async fn report_error<T, E: std::fmt::Display>(&mut self, shell: &Shell, draw: bool, result: std::result::Result<T, E>) {
+        if let Err(err) = result {
+            log::error!("{}", err);
+            self.show_error_message(shell, format!("ERROR: {}", err)).await;
+        } else if draw {
+            if let Err(err) = self.draw(shell).await {
+                log::error!("{:?}", err);
+            }
+        }
     }
 
     pub async fn show_error_message(&mut self, shell: &Shell, msg: String) {
