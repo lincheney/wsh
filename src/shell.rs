@@ -155,11 +155,29 @@ impl ShellInner {
     }
 
     pub fn get_var(&mut self, name: &BStr) -> anyhow::Result<Option<zsh::Value>> {
-        zsh::get_var(name)
+        if let Some(mut v) = zsh::Variable::get(name) {
+            Ok(Some(v.as_value()?))
+        } else {
+            Ok(None)
+        }
     }
 
     pub fn set_var(&mut self, name: &BStr, value: zsh::Value) -> anyhow::Result<()> {
-        zsh::set_var(name, value)
+        zsh::Variable::set(name, value)
     }
+
+    pub fn unset_var(&mut self, name: &BStr) -> () {
+        zsh::Variable::unset(name)
+    }
+
+    pub fn export_var(&mut self, name: &BStr) -> bool {
+        if let Some(var) = zsh::Variable::get(name) {
+            var.export();
+            true
+        } else {
+            false
+        }
+    }
+
 
 }

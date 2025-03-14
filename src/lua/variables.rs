@@ -39,10 +39,22 @@ async fn set_var(_ui: Ui, shell: Shell, lua: Lua, (name, val): (BString, LuaValu
     Ok(())
 }
 
+async fn unset_var(_ui: Ui, shell: Shell, _lua: Lua, name: BString) -> Result<()> {
+    shell.lock().await.unset_var(name.as_ref());
+    Ok(())
+}
+
+async fn export_var(_ui: Ui, shell: Shell, _lua: Lua, name: BString) -> Result<()> {
+    shell.lock().await.export_var(name.as_ref());
+    Ok(())
+}
+
 pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
 
     ui.set_lua_async_fn("get_var", shell, get_var).await?;
     ui.set_lua_async_fn("set_var", shell, set_var).await?;
+    ui.set_lua_async_fn("unset_var", shell, unset_var).await?;
+    ui.set_lua_async_fn("export_var", shell, export_var).await?;
 
     Ok(())
 }

@@ -128,9 +128,13 @@ impl Variable {
 
     }
 
-    pub fn unset(name: &str) {
+    pub fn unset(name: &[u8]) {
         let c_name = CString::new(name).unwrap();
         unsafe{ zsh_sys::unsetparam(c_name.as_ptr() as *mut _); }
+    }
+
+    pub fn export(&self) {
+        unsafe{ zsh_sys::export_param(self.value.pm) }
     }
 
     fn param(&mut self) -> &mut zsh_sys::param {
