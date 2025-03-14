@@ -63,7 +63,8 @@ pub struct UiInner {
     is_running_process: bool,
     dirty: bool,
     y_offset: u16,
-    pub keybinds: crate::lua::KeybindMapping,
+    pub keybinds: Vec<crate::lua::KeybindMapping>,
+    pub keybind_layer_id: usize,
     pub event_callbacks: crate::lua::EventCallbacks,
 
     pub buffer: crate::buffer::Buffer,
@@ -97,11 +98,13 @@ impl Ui {
             buffer: Default::default(),
             prompt: crate::prompt::Prompt::new(None),
             keybinds: Default::default(),
+            keybind_layer_id: Default::default(),
             event_callbacks: Default::default(),
             stdout: std::io::stdout(),
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
             size: crossterm::terminal::size()?,
         };
+        ui.keybinds.push(Default::default());
 
         let start = std::time::Instant::now();
         shell.lock().await.readhistfile();
@@ -226,9 +229,9 @@ impl Ui {
                 ui.event_callbacks.trigger_key_callbacks(self, shell, &ui.lua, key.into());
             }
 
-            let callback = ui.keybinds.get(&(code, modifiers)).cloned();
+            let callback = ui.keybinds.iter().rev().find_map(|k| k.inner.get(&(code, modifiers)));
             if let Some(callback) = callback {
-                self.call_lua_fn(shell.clone(), true, callback, ());
+                self.call_lua_fn(shell.clone(), true, callback.clone(), ());
                 return Ok(true)
             }
         }

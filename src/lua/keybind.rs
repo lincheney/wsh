@@ -1,14 +1,19 @@
 use std::collections::HashMap;
+use std::default::Default;
 use anyhow::Result;
 use mlua::{prelude::*, Function};
 use crossterm::event::{KeyCode, KeyModifiers};
 use crate::ui::Ui;
 use crate::shell::Shell;
 
-pub type KeybindMapping = HashMap<(KeyCode, KeyModifiers), Function>;
+#[derive(Default)]
+pub struct KeybindMapping {
+    id: usize,
+    pub inner: HashMap<(KeyCode, KeyModifiers), Function>,
+}
 
 
-async fn set_keymap(mut ui: Ui, _shell: Shell, _lua: Lua, (key, callback): (String, Function)) -> Result<()> {
+async fn set_keymap(mut ui: Ui, _shell: Shell, _lua: Lua, (key, callback, layer): (String, Function, Option<usize>)) -> Result<()> {
     let mut modifiers = KeyModifiers::empty();
 
     let original = &key;
@@ -67,14 +72,40 @@ async fn set_keymap(mut ui: Ui, _shell: Shell, _lua: Lua, (key, callback): (Stri
         },
     };
 
-    ui.borrow_mut().await.keybinds.insert((key, modifiers), callback);
+    let mut ui = ui.borrow_mut().await;
+    let layer = if let Some(layer) = layer {
+        if let Some(layer) = ui.keybinds.iter_mut().find(|k| k.id == layer) {
+            layer
+        } else {
+            return Err(anyhow::anyhow!("invalid layer: {:?}", layer))
+        }
+    } else {
+        ui.keybinds.last_mut().unwrap()
+    };
+    layer.inner.insert((key, modifiers), callback);
 
+    Ok(())
+}
+
+async fn add_keymap_layer(mut ui: Ui, _shell: Shell, _lua: Lua, _val: ()) -> Result<usize> {
+    let mut ui = ui.borrow_mut().await;
+    ui.keybind_layer_id += 1;
+    let id = ui.keybind_layer_id;
+    ui.keybinds.push(KeybindMapping{id, inner: Default::default()});
+    Ok(id)
+}
+
+async fn del_keymap_layer(mut ui: Ui, _shell: Shell, _lua: Lua, layer: usize) -> Result<()> {
+    let mut ui = ui.borrow_mut().await;
+    ui.keybinds.retain(|k| k.id != layer);
     Ok(())
 }
 
 pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
 
     ui.set_lua_async_fn("set_keymap", shell, set_keymap).await?;
+    ui.set_lua_async_fn("add_keymap_layer", shell, add_keymap_layer).await?;
+    ui.set_lua_async_fn("del_keymap_layer", shell, del_keymap_layer).await?;
 
     Ok(())
 }
