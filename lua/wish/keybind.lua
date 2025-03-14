@@ -45,17 +45,32 @@ wish.set_keymap('<c-left>', function()
         wish.set_cursor(wish.str.from_byte_pos(buffer, (cursor or 1) - 1))
     end
 end)
+
 wish.set_keymap('<c-right>', function()
     local buffer = wish.get_buffer()
     local cursor = wish.str.to_byte_pos(buffer, wish.get_cursor())
     cursor = buffer:find('%f[%s]', cursor + 2)
     wish.set_cursor(wish.str.from_byte_pos(buffer, (cursor or #buffer + 1) - 1))
 end)
+
 wish.set_keymap('<c-w>', function()
     local cursor = wish.get_cursor()
     if cursor > 0 then
         local buffer = wish.get_buffer()
         local start = buffer:sub(1, cursor):find('%S+%s*$')
+        if start then
+            start = wish.str.to_byte_pos(buffer, start - 1)
+            wish.set_buffer(wish.str.set(buffer, nil, start, cursor))
+            wish.set_cursor(start)
+        end
+    end
+end)
+
+wish.set_keymap('<a-bs>', function()
+    local cursor = wish.get_cursor()
+    if cursor > 0 then
+        local buffer = wish.get_buffer()
+        local start = buffer:sub(1, cursor):find('[^/%s]+[/%s]*$')
         if start then
             start = wish.str.to_byte_pos(buffer, start - 1)
             wish.set_buffer(wish.str.set(buffer, nil, start, cursor))
