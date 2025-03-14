@@ -67,6 +67,18 @@ pub(crate) fn iter_linked_list(list: zsh_sys::LinkList) -> impl Iterator<Item=*m
     }
 }
 
+pub fn get_var(name: &BStr) -> anyhow::Result<Option<variables::Value>> {
+    if let Some(mut v) = variables::Variable::get(name) {
+        Ok(Some(v.as_value()?))
+    } else {
+        Ok(None)
+    }
+}
+
+pub fn set_var(name: &BStr, value: Value) -> anyhow::Result<()> {
+    variables::Variable::set(name, value)
+}
+
 pub fn get_prompt(prompt: Option<&BStr>, escaped: bool) -> Option<CString> {
     let prompt = if let Some(prompt) = prompt {
         CString::new(prompt.to_vec()).unwrap()

@@ -26,4 +26,3 @@ pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
 
     Ok(())
 }
-

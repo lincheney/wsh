@@ -12,6 +12,7 @@ mod log;
 mod process;
 mod asyncio;
 mod parser;
+mod variables;
 pub use keybind::KeybindMapping;
 pub use events::EventCallbacks;
 
@@ -27,6 +28,7 @@ pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
     asyncio::init_lua(ui, shell).await?;
     process::init_lua(ui, shell).await?;
     parser::init_lua(ui, shell).await?;
+    variables::init_lua(ui, shell).await?;
 
     Ok(())
 }

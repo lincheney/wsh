@@ -32,6 +32,9 @@ impl CStringArray {
         self.iter().map(|s| s.to_bytes().to_owned()).map(BString::new).collect()
     }
 
+    pub fn into_ptr(self) -> *mut *mut c_char {
+        self.ptr
+    }
 }
 
 impl Drop for CStringArray {
@@ -52,5 +55,18 @@ impl Drop for CStringArray {
 impl From<*mut *mut c_char> for CStringArray {
     fn from(ptr: *mut *mut c_char) -> Self {
         Self{ ptr }
+    }
+}
+
+impl From<Vec<BString>> for CStringArray {
+    fn from(vec: Vec<BString>) -> Self {
+        unsafe {
+            let ptr: *mut *mut c_char = zsh_sys::zalloc(std::mem::size_of::<*mut c_char>() * (vec.len() + 1)) as _;
+            for (i, string) in vec.iter().enumerate() {
+                *ptr.add(i) = zsh_sys::ztrduppfx(string.as_ptr() as _, string.len() as _);
+            }
+            *ptr.add(vec.len()) = std::ptr::null_mut();
+            Self{ ptr }
+        }
     }
 }

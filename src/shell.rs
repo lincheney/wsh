@@ -154,4 +154,12 @@ impl ShellInner {
         None
     }
 
+    pub fn get_var(&mut self, name: &BStr) -> anyhow::Result<Option<zsh::Value>> {
+        zsh::get_var(name)
+    }
+
+    pub fn set_var(&mut self, name: &BStr, value: zsh::Value) -> anyhow::Result<()> {
+        zsh::set_var(name, value)
+    }
+
 }

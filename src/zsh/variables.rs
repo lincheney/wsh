@@ -24,6 +24,48 @@ pub enum Value {
     HashMap(HashMap<BString, BString>),
 }
 
+impl From<i64> for Value {
+    fn from(val: i64) -> Self {
+        Value::Integer(val)
+    }
+}
+
+impl From<f64> for Value {
+    fn from(val: f64) -> Self {
+        Value::Float(val)
+    }
+}
+
+impl From<Vec<BString>> for Value {
+    fn from(val: Vec<BString>) -> Self {
+        Value::Array(val)
+    }
+}
+
+impl From<BString> for Value {
+    fn from(val: BString) -> Self {
+        Value::String(val)
+    }
+}
+
+impl From<&BStr> for Value {
+    fn from(val: &BStr) -> Self {
+        Value::String(val.to_owned())
+    }
+}
+
+impl From<String> for Value {
+    fn from(val: String) -> Self {
+        Value::String(val.into())
+    }
+}
+
+impl From<HashMap<BString, BString>> for Value {
+    fn from(val: HashMap<BString, BString>) -> Self {
+        Value::HashMap(val)
+    }
+}
+
 impl Variable {
     pub fn get<S: AsRef<BStr>>(name: S) -> Option<Self> {
         let bracks = 1;
@@ -49,15 +91,41 @@ impl Variable {
         }
     }
 
-    pub fn set<S: AsRef<[u8]>>(name: &str, value: S) -> Result<()> {
+    pub fn set(name: &[u8], value: Value) -> Result<()> {
         let c_name = CString::new(name).unwrap();
-        // setsparam will free the value for us
-        let c_value: ZString = value.as_ref().into();
-        if unsafe{ zsh_sys::setsparam(c_name.as_ptr() as *mut _, c_value.into_raw()) }.is_null() {
+        let name = c_name.as_ptr() as *mut _;
+        let result = match value {
+            Value::HashMap(value) => {
+                let value: Vec<BString> = value.into_iter().flat_map(|(k, v)| [k, v]).collect();
+                let value: CStringArray = value.into();
+                unsafe{ zsh_sys::setaparam(name, value.into_ptr()) }
+            },
+            Value::Array(value) => {
+                let value: CStringArray = value.into();
+                unsafe{ zsh_sys::setaparam(name, value.into_ptr()) }
+            },
+            Value::Float(value) => {
+                let value = zsh_sys::mnumber{
+                    type_: zsh_sys::MN_FLOAT as _,
+                    u: zsh_sys::mnumber__bindgen_ty_1{ d: value },
+                };
+                unsafe{ zsh_sys::setnparam(name, value) }
+            },
+            Value::Integer(value) => {
+                unsafe{ zsh_sys::setiparam(name, value) }
+            },
+            Value::String(value) => {
+                // setsparam will free the value for us
+                let c_value: ZString = (&value[..]).into();
+                unsafe{ zsh_sys::setsparam(name, c_value.into_raw()) }
+            },
+        };
+        if result.is_null() {
             Err(anyhow::anyhow!("failed to set var {name:?}"))
         } else {
             Ok(())
         }
+
     }
 
     pub fn unset(name: &str) {
@@ -141,15 +209,15 @@ impl Variable {
     pub fn as_value(&mut self) -> Result<Value> {
         Ok(
             if let Some(x) = self.try_as_hashmap()? {
-                Value::HashMap(x)
+                x.into()
             } else if let Some(x) = self.try_as_array() {
-                Value::Array(x)
+                x.into()
             } else if let Some(x) = self.try_as_float()? {
-                Value::Float(x)
+                x.into()
             } else if let Some(x) = self.try_as_int()? {
-                Value::Integer(x)
+                x.into()
             } else {
-                Value::String(self.as_bytes())
+                self.as_bytes().into()
             }
         )
     }
