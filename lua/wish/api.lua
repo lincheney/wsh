@@ -11,9 +11,10 @@ function wish.repr(val)
                 table.insert(text, '['..wish.repr(k)..'] = ' .. wish.repr(v))
             end
         end
-        return '{' .. table.concat(text, ',') .. '}'
+        return '{' .. table.concat(text, ', ') .. '}'
     elseif type(val) == 'string' then
-        return string.format('%q', val)
+        local val = string.format('%q', val):gsub('\\\n', '\\n')
+        return val
     else
         return tostring(val)
     end
