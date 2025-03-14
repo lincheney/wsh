@@ -1,5 +1,9 @@
 use std::os::unix::process::ExitStatusExt;
+use std::os::raw::c_int;
 use std::collections::HashMap;
+use std::default::Default;
+use std::os::fd::{RawFd, AsRawFd, IntoRawFd};
+use std::fs::File;
 use anyhow::Result;
 use mlua::{prelude::*, UserData, UserDataMethods};
 use tokio::io::{BufReader, BufWriter};
@@ -10,9 +14,32 @@ use crate::ui::Ui;
 use crate::shell::Shell;
 use super::asyncio::{ReadableFile, WriteableFile};
 
+struct CommandResult {
+    inner: Option<oneshot::Receiver<std::io::Result<i32>>>,
+}
+
+impl CommandResult {
+    async fn wait(&mut self) -> LuaResult<Option<i32>> {
+        if let Some(waiter) = self.inner.take() {
+            let result = waiter.await.map_err(|e| LuaError::RuntimeError(format!("{}", e)))??;
+            Ok(Some(result))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl UserData for CommandResult {
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_async_method_mut("wait", |_lua, mut proc, ()| async move {
+            proc.wait().await
+        });
+    }
+}
+
 struct Process {
     pid: u32,
-    result: Option<oneshot::Receiver<std::io::Result<std::process::ExitStatus>>>,
+    result: CommandResult,
 }
 
 impl UserData for Process {
@@ -23,12 +50,7 @@ impl UserData for Process {
         });
 
         methods.add_async_method_mut("wait", |_lua, mut proc, ()| async move {
-            if let Some(waiter) = proc.result.take() {
-                let result = waiter.await.map_err(|e| LuaError::RuntimeError(format!("{}", e)))??;
-                Ok(Some(result.into_raw()))
-            } else {
-                Ok(None)
-            }
+            proc.result.wait().await
         });
 
     }
@@ -55,15 +77,32 @@ impl From<Stdio> for std::process::Stdio {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-struct FullSpawnArgs {
-    args: Vec<String>,
-    env: Option<HashMap<String, String>>,
-    clear_env: bool,
-    cwd: Option<String>,
+struct FullCommandSpawnArgs {
+    args: String,
     stdin: Stdio,
     stdout: Stdio,
     stderr: Stdio,
     foreground: bool,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct FullSpawnArgs {
+    args: Vec<String>,
+    stdin: Stdio,
+    stdout: Stdio,
+    stderr: Stdio,
+    env: Option<HashMap<String, String>>,
+    clear_env: bool,
+    cwd: Option<String>,
+    foreground: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum CommandSpawnArgs {
+    Simple(String),
+    Full(FullCommandSpawnArgs),
 }
 
 #[derive(Debug, Deserialize)]
@@ -141,11 +180,11 @@ async fn spawn(ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<LuaMulti
             ui.activate().await;
             drop(lock);
         }
-        sender.send(result);
+        sender.send(result.map(|r| r.into_raw()));
     });
 
     Ok(lua.pack_multi((
-        Process{pid, result: Some(receiver)},
+        Process{pid, result: CommandResult{ inner: Some(receiver) }},
         stdin,
         stdout,
         stderr,
@@ -153,10 +192,111 @@ async fn spawn(ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<LuaMulti
 
 }
 
+fn override_fd<A: AsRawFd, B: IntoRawFd>(old: A, new: B) -> Result<RawFd> {
+    let old = old.as_raw_fd();
+    let new = new.into_raw_fd();
+    let backup = nix::unistd::dup(old)?;
+    nix::unistd::dup2(new, old)?;
+    nix::unistd::close(new)?;
+    Ok(backup)
+}
+
+fn restore_fd<A: AsRawFd>(old: RawFd, new: A) -> Result<()> {
+    let new = new.as_raw_fd();
+    nix::unistd::dup2(old, new)?;
+    nix::unistd::close(old)?;
+    Ok(())
+}
+
+async fn shell_run(ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
+    let args = match lua.from_value(val)? {
+        CommandSpawnArgs::Full(args) => args,
+        CommandSpawnArgs::Simple(args) => FullCommandSpawnArgs{args, ..Default::default()},
+    };
+
+    let (sender, receiver) = oneshot::channel();
+
+    let lock = if args.foreground {
+        // this essentially locks ui
+        let mut ui = ui.clone();
+        let lock = ui.borrow_mut().await.events.lock_owned().await;
+        ui.deactivate().await?;
+        Some((ui, lock))
+    } else {
+        None
+    };
+
+    macro_rules! stdio_pipe {
+        ($name:ident, true) => (
+            stdio_pipe!($name, File::create("/dev/null"), {
+                let (send, recv) = tokio::net::unix::pipe::pipe()?;
+                let send = WriteableFile(Some(BufWriter::new(send)));
+                (Some(send), Some(override_fd(std::io::$name(), recv.into_nonblocking_fd()?)?))
+            })
+        );
+        ($name:ident, false) => (
+            stdio_pipe!($name, File::open("/dev/null"), {
+                let (send, recv) = tokio::net::unix::pipe::pipe()?;
+                let recv = ReadableFile(Some(BufReader::new(recv)));
+                (Some(recv), Some(override_fd(std::io::$name(), send.into_nonblocking_fd()?)?))
+            })
+        );
+        ($name:ident, $null:expr, $piped:expr) => (
+            match args.$name {
+                Stdio::inherit => (None, None),
+                Stdio::null => (None, Some(override_fd(std::io::$name(), $null?)?)),
+                Stdio::piped => $piped,
+            }
+        );
+    }
+
+    let stdin = stdio_pipe!(stdin, true);
+    let stdout = stdio_pipe!(stdout, false);
+    let stderr = stdio_pipe!(stderr, false);
+
+    // run this in a thread
+    tokio::task::spawn_blocking(move || {
+        tokio::task::block_in_place(|| {
+            let mut shell = tokio::runtime::Handle::current().block_on(shell.lock());
+
+            let code = match shell.exec(bstr::BStr::new(&args.args)) {
+                Ok(()) => 0,
+                Err(code) => code,
+            };
+
+            // restore stdio
+            if let Some(stdin) = stdin.1 {
+                restore_fd(stdin, std::io::stdin()).unwrap();
+            }
+            if let Some(stdout) = stdout.1 {
+                restore_fd(stdout, std::io::stdout()).unwrap();
+            }
+            if let Some(stderr) = stderr.1 {
+                restore_fd(stderr, std::io::stderr()).unwrap();
+            }
+
+            if let Some((ui, lock)) = lock {
+                tokio::runtime::Handle::current().block_on(async {
+                    ui.activate().await;
+                });
+                drop(lock);
+            }
+            sender.send(Ok(code as _));
+        })
+    });
+
+    Ok(lua.pack_multi((
+        CommandResult{ inner: Some(receiver) },
+        stdin.0,
+        stdout.0,
+        stderr.0,
+    ))?)
+}
 
 pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
 
     ui.set_lua_async_fn("__spawn", shell, spawn).await?;
+    ui.set_lua_async_fn("__shell_run", shell, shell_run).await?;
 
     Ok(())
 }

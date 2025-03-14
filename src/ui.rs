@@ -323,7 +323,7 @@ impl Ui {
                     // new line
                     execute!(ui.stdout, style::Print("\r\n"))?;
 
-                    if let Err(code) = shell.exec(ui.buffer.get_contents().as_ref(), None) {
+                    if let Err(code) = shell.exec(ui.buffer.get_contents().as_ref()) {
                         eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
                     }
                     ui.reset(&mut shell);

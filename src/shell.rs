@@ -38,7 +38,7 @@ impl CompletionStarter {
 
 impl ShellInner {
 
-    pub fn exec(&mut self, string: &BStr, _fds: Option<&[RawFd; 3]>) -> Result<(), c_long> {
+    pub fn exec(&mut self, string: &BStr) -> Result<(), c_long> {
         zsh::execstring(string, Default::default());
         let code = zsh::get_return_code();
         if code > 0 { Err(code) } else { Ok(()) }

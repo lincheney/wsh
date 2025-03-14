@@ -89,7 +89,9 @@ end)
 wish.set_keymap('<c-r>', require('wish/history').history_search)
 
 wish.set_keymap('<f12>', function()
-    error("ARGGHH")
+    local code, stdout = wish.eval[[echo 123]]
+    wish.pprint({code, stdout})
+    -- error("ARGGHH")
     -- local msg = wish.show_message{text="hello world " .. math.random()}
     -- msg:set_text_weight('Bold');
     -- wish.redraw()

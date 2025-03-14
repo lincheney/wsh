@@ -30,8 +30,25 @@ function wish.async.spawn(...)
         stdin = stdin,
         stdout = stdout,
         stderr = stderr,
-        id = function(self) return proc:id() end,
+        pid = function(self) return proc:pid() end,
         wait = function(self) return proc:wait() end,
     }
 end
 
+function wish.cmd(...)
+    local proc, stdin, stdout, stderr = wish.__shell_run(...)
+    return {
+        stdin = stdin,
+        stdout = stdout,
+        stderr = stderr,
+        wait = function(self) return proc:wait() end,
+    }
+end
+
+function wish.eval(args)
+    local proc, stdin, stdout, stderr = wish.__shell_run{args = args, stdout = 'piped'}
+    local stdout = stdout:read_all()
+    local code = proc:wait()
+    wish.pprint({stdout=stdout})
+    return code, stdout
+end
