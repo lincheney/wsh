@@ -6,6 +6,13 @@ wish.set_keymap('<bs>', function()
     end
 end)
 
+wish.set_keymap('<delete>', function()
+    local cursor = wish.get_cursor()
+    local buffer = wish.get_buffer()
+    buffer = wish.str.set(buffer, nil, cursor, cursor+1)
+    wish.set_buffer(buffer)
+end)
+
 wish.set_keymap('<c-u>', function()
     local cursor = wish.get_cursor()
     if cursor > 0 then
