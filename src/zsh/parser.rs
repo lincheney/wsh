@@ -155,6 +155,9 @@ pub fn parse(cmd: &BStr) -> (bool, Vec<Token>) {
         } else {
             // otherwise it must be joined onto an incomplete token
             last.range.end -= dummy.len();
+            if last.range.is_empty() {
+                tokens.pop();
+            }
             complete = false;
         }
     } else {
