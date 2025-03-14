@@ -213,4 +213,10 @@ pub enum token {
     Comma      = 0x9a,
     Dash       = 0x9b, /* Only in patterns */
     Bang       = 0x9c, /* Only in patterns */
+
+    Snull      = 0x9d,
+    Dnull      = 0x9e,
+    Bnull      = 0x9f,
+
+    Bnullkeep  = 0xa0
 }

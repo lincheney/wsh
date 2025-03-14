@@ -39,6 +39,11 @@ fn find_str(needle: &BStr, haystack: &BStr, start: usize) -> Option<Range<usize>
 }
 
 pub fn parse(cmd: &BStr) -> (bool, Vec<Token>) {
+    // we add some at the end to detect if the command line is actually complete
+    let dummy = b" x";
+    let mut cmd = cmd.to_owned();
+    cmd.extend(dummy);
+
     let ptr = super::metafy(&cmd);
     let mut complete = true;
     let mut tokens = vec![];
@@ -49,9 +54,9 @@ pub fn parse(cmd: &BStr) -> (bool, Vec<Token>) {
             let range = if $has_meta {
                 let mut tokstr = $tokstr.to_owned();
                 super::unmetafy_owned(&mut tokstr);
-                find_str(BStr::new(tokstr.as_slice()), cmd, start).unwrap()
+                find_str(BStr::new(tokstr.as_slice()), cmd.as_ref(), start).unwrap()
             } else {
-                find_str(BStr::new($tokstr), cmd, start).unwrap()
+                find_str(BStr::new($tokstr), cmd.as_ref(), start).unwrap()
             };
             start = range.end;
             tokens.push(Token{range, kind: $kind});
@@ -139,6 +144,22 @@ pub fn parse(cmd: &BStr) -> (bool, Vec<Token>) {
         zsh_sys::strinend();
         zsh_sys::inpop();
         zsh_sys::errflag &= !zsh_sys::errflag_bits_ERRFLAG_ERROR as i32;
+    }
+
+    if let Some(last) = tokens.last_mut() {
+        debug_assert!(last.range.end == cmd.len());
+
+        // if the last token is just the dummy, pop it
+        if last.range.start == cmd.len() - 1 {
+            tokens.pop();
+        } else {
+            // otherwise it must be joined onto an incomplete token
+            last.range.end -= dummy.len();
+            complete = false;
+        }
+    } else {
+        // no tokens???
+        complete = false;
     }
 
     (complete, tokens)

@@ -1,6 +1,6 @@
 module_path+=( "$ZDOTDIR" )
 >&2 printf "DEBUG(puff)  \t%s\n" "$(declare -p module_path)"
-HISTFILE=~/.zsh_history
+# HISTFILE=/tmp/zsh.history
 
 zmodload zsh/complete
 # zmodload zsh/zle
@@ -18,10 +18,15 @@ zstyle ':completion:*' format 'Completing %d'
 bindkey '^I' menu-complete
 # compdef ls _dsv
 
-_main_complete() {
-    sleep 5
-    compadd x
-}
+PROMPT=$'%K{10}%F{0}hello 林\n>>>%k%f '
+PROMPT=$'%F{10}>>> %f'
+
+# _main_complete() {
+    # sleep 5
+    # compadd x
+# }
+eval "_aws(){ $(cat /home/qianli/setup/vendor/aws-cli-completion.git/zsh/_aws); }; compdef _aws aws"
+# eval "_aws(){ compadd x; }; compdef _aws aws"
 
 wash
 
