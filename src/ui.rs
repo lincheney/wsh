@@ -135,8 +135,13 @@ impl Ui {
         let ui = ui.deref_mut();
 
         // if ui.dirty it means redraw everything from scratch
-        if ui.dirty || ui.is_running_process {
-            queue!(ui.stdout, Clear(ClearType::FromCursorDown))?;
+        if ui.dirty {
+            queue!(
+                ui.stdout,
+                MoveUp(ui.y_offset),
+                Clear(ClearType::FromCursorDown),
+                MoveDown(ui.y_offset),
+            )?;
         }
 
         // do NOT render ui elements if there is a foreground process
