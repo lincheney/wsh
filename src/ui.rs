@@ -138,7 +138,7 @@ impl Ui {
         let ui = ui.deref_mut();
 
         // if ui.dirty it means redraw everything from scratch
-        if ui.dirty {
+        if ui.dirty || ui.is_running_process {
             queue!(
                 ui.stdout,
                 MoveUp(ui.y_offset),
