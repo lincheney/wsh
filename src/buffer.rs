@@ -146,7 +146,7 @@ fn strip_colours(string: &mut String) {
                 in_esc = true;
             }
 
-            in_esc
+            !in_esc
         });
     }
 }
@@ -240,6 +240,7 @@ impl Buffer {
         self.saved_contents.clear();
         self.saved_cursor = 0;
         self.dirty = true;
+        self.height = 0;
     }
 
     pub fn cursor_byte_pos(&mut self) -> usize {
@@ -310,7 +311,12 @@ impl Buffer {
         )?;
         if self.height > height {
             for _ in height .. self.height {
-                queue!(stdout, cursor::MoveDown(1), cursor::MoveToColumn(0), Clear(ClearType::UntilNewLine))?;
+                queue!(
+                    stdout,
+                    cursor::MoveDown(1),
+                    cursor::MoveToColumn(0),
+                    Clear(ClearType::UntilNewLine),
+                )?;
             }
         }
         queue!(stdout, cursor::RestorePosition)?;
