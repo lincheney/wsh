@@ -13,7 +13,7 @@ use crossterm::{
     terminal::{Clear, ClearType, BeginSynchronizedUpdate, EndSynchronizedUpdate},
     cursor::{self, position},
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
-    style::{self, ContentStyle, Attributes, Stylize},
+    style,
     execute,
     queue,
 };
