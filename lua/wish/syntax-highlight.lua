@@ -2,7 +2,7 @@ local prev_buffer = nil
 
 local PUNCTUATION = {fg = 'grey', bold = true}
 local NEW_COMMAND = {fg = 'yellow'}
-local STRING = nil
+local STRING = {}
 local KEYWORD = {fg = 'green', bold = true}
 
 local highlights = {
@@ -14,6 +14,7 @@ local highlights = {
     STRING = STRING,
     ENVSTRING = STRING,
     ENVARRAY = STRING,
+    LEXERR = STRING,
 
     CASE = KEYWORD,
     COPROC = KEYWORD,
@@ -52,7 +53,7 @@ wish.add_event_callback('buffer_change', function()
                 hl = PUNCTUATION
             end
 
-            if hl then
+            if next(hl) then
                 local arg = {}
                 for k, v in pairs(hl) do
                     arg[k] = v
