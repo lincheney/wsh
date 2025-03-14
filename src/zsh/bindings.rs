@@ -115,3 +115,102 @@ impl std::fmt::Debug for cmatch {
 
 unsafe impl Send for cmatch {}
 unsafe impl Sync for cmatch {}
+
+#[derive(num_derive::FromPrimitive, Debug, Copy, Clone)]
+pub enum lextok {
+    NULLTOK,		/* 0  */
+    SEPER,
+    NEWLIN,
+    SEMI,
+    DSEMI,
+    AMPER,		/* 5  */
+    INPAR,
+    OUTPAR,
+    DBAR,
+    DAMPER,
+    OUTANG,		/* 10 */
+    OUTANGBANG,
+    DOUTANG,
+    DOUTANGBANG,
+    INANG,
+    INOUTANG,		/* 15 */
+    DINANG,
+    DINANGDASH,
+    INANGAMP,
+    OUTANGAMP,
+    AMPOUTANG,		/* 20 */
+    OUTANGAMPBANG,
+    DOUTANGAMP,
+    DOUTANGAMPBANG,
+    TRINANG,
+    BAR,		/* 25 */
+    BARAMP,
+    INOUTPAR,
+    DINPAR,
+    DOUTPAR,
+    AMPERBANG,		/* 30 */
+    SEMIAMP,
+    SEMIBAR,
+    DOUTBRACK,
+    STRING,
+    ENVSTRING,		/* 35 */
+    ENVARRAY,
+    ENDINPUT,
+    LEXERR,
+
+    /* Tokens for reserved words */
+    BANG,	/* !         */
+    DINBRACK,	/* [[        */	/* 40 */
+    INBRACE,    /* {         */
+    OUTBRACE,   /* }         */
+    CASE,	/* case      */
+    COPROC,	/* coproc    */
+    DOLOOP,	/* do        */ /* 45 */
+    DONE,	/* done      */
+    ELIF,	/* elif      */
+    ELSE,	/* else      */
+    ZEND,	/* end       */
+    ESAC,	/* esac      */ /* 50 */
+    FI,		/* fi        */
+    FOR,	/* for       */
+    FOREACH,	/* foreach   */
+    FUNC,	/* function  */
+    IF,		/* if        */ /* 55 */
+    NOCORRECT,	/* nocorrect */
+    REPEAT,	/* repeat    */
+    SELECT,	/* select    */
+    THEN,	/* then      */
+    TIME,	/* time      */ /* 60 */
+    UNTIL,	/* until     */
+    WHILE,	/* while     */
+    TYPESET     /* typeset or similar */
+}
+
+#[derive(num_derive::FromPrimitive, Debug, Copy, Clone)]
+pub enum token {
+    Pound      = 0x84,
+    String     = 0x85,
+    Hat        = 0x86,
+    Star       = 0x87,
+    Inpar      = 0x88,
+    Inparmath  = 0x89,
+    Outpar     = 0x8a,
+    Outparmath = 0x8b,
+    Qstring    = 0x8c,
+    Equals     = 0x8d,
+    Bar        = 0x8e,
+    Inbrace    = 0x8f,
+    Outbrace   = 0x90,
+    Inbrack    = 0x91,
+    Outbrack   = 0x92,
+    Tick       = 0x93,
+    Inang      = 0x94,
+    Outang     = 0x95,
+    OutangProc = 0x96,
+    Quest      = 0x97,
+    Tilde      = 0x98,
+    Qtick      = 0x99,
+    Comma      = 0x9a,
+    Dash       = 0x9b, /* Only in patterns */
+    Bang       = 0x9c, /* Only in patterns */
+}
