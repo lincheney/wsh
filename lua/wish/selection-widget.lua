@@ -104,8 +104,8 @@ local function recalc_filter()
         end
     end
 
-    if selection_widget:exists() then
-        selection_widget:set_options{text = #text > 0 and text or ''}
+    if selection_widget and wish.check_message(selection_widget) then
+        wish.show_message{id = selection_widget, text = #text > 0 and text or ''}
         wish.redraw()
     end
 end
@@ -150,8 +150,8 @@ function M.show(opts)
 end
 
 function M.hide()
-    if selection_widget and selection_widget:exists() then
-        selection_widget:set_options{hidden = true}
+    if selection_widget and wish.check_message(selection_widget) then
+        wish.show_message{id = selection_widget, hidden = true}
         wish.redraw()
     end
 end
