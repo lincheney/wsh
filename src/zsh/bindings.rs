@@ -116,7 +116,7 @@ impl std::fmt::Debug for cmatch {
 unsafe impl Send for cmatch {}
 unsafe impl Sync for cmatch {}
 
-#[derive(num_derive::FromPrimitive, Debug, Copy, Clone)]
+#[derive(num_derive::FromPrimitive, Debug, Copy, Clone, PartialEq)]
 pub enum lextok {
     NULLTOK,		/* 0  */
     SEPER,
@@ -186,7 +186,7 @@ pub enum lextok {
     TYPESET     /* typeset or similar */
 }
 
-#[derive(num_derive::FromPrimitive, Debug, Copy, Clone)]
+#[derive(num_derive::FromPrimitive, Debug, Copy, Clone, PartialEq)]
 pub enum token {
     Pound      = 0x84,
     String     = 0x85,

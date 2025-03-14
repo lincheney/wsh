@@ -3,9 +3,9 @@ use crate::shell::Shell;
 use anyhow::Result;
 use mlua::prelude::*;
 
-async fn parse(_ui: Ui, shell: Shell, lua: Lua, val: bstr::BString) -> Result<(bool, LuaTable, LuaTable, LuaTable)> {
+async fn parse(_ui: Ui, shell: Shell, lua: Lua, (val, recursive): (bstr::BString, Option<bool>)) -> Result<(bool, LuaTable, LuaTable, LuaTable)> {
     let val = val.as_ref();
-    let (complete, tokens) = shell.lock().await.parse(val);
+    let (complete, tokens) = shell.lock().await.parse(val, recursive.unwrap_or(false));
 
     let starts = lua.create_table()?;
     let ends = lua.create_table()?;

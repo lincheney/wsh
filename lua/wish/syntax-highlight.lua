@@ -44,7 +44,7 @@ wish.add_event_callback('buffer_change', function()
     if buffer ~= prev_buffer then
         -- rehighlight
         -- is this going to be slow? do we need a debounce or something?
-        local complete, starts, ends, kinds = wish.parse(buffer)
+        local complete, starts, ends, kinds = wish.parse(buffer, true)
 
         wish.clear_buf_highlights()
         for i = 1, #kinds do

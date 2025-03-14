@@ -62,8 +62,8 @@ impl ShellInner {
         zsh::completion::insert_completion(string, m)
     }
 
-    pub fn parse(&mut self, string: &BStr) -> (bool, Vec<zsh::parser::Token>) {
-        zsh::parser::parse(string)
+    pub fn parse(&mut self, string: &BStr, recursive: bool) -> (bool, Vec<zsh::parser::Token>) {
+        zsh::parser::parse(string, recursive)
     }
 
     pub fn get_prompt(&mut self, prompt: Option<&str>, escaped: bool) -> Option<CString> {

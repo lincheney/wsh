@@ -1,13 +1,19 @@
 use std::ops::Range;
 use std::ffi::CStr;
 use std::ptr::null_mut;
-use bstr::{BStr, ByteSlice};
+use bstr::{BString, BStr, ByteSlice};
 use super::bindings;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Kind {
+    Subshell,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TokenKind {
     Lextok(bindings::lextok),
     Token(bindings::token),
+    Custom(Kind),
 }
 
 #[derive(Debug)]
@@ -20,10 +26,12 @@ impl Token {
     pub fn as_str<'a>(&self, cmd: &'a BStr) -> &'a BStr {
         &cmd[self.range.clone()]
     }
+
     pub fn kind_as_str(&self) -> Option<String> {
         Some(match self.kind? {
             TokenKind::Lextok(k) => format!("{:?}", k),
             TokenKind::Token(k) => format!("{:?}", k),
+            TokenKind::Custom(k) => format!("{:?}", k),
         })
     }
 }
@@ -38,13 +46,38 @@ fn find_str(needle: &BStr, haystack: &BStr, start: usize) -> Option<Range<usize>
     Some(start .. start + needle.len())
 }
 
-pub fn parse(cmd: &BStr) -> (bool, Vec<Token>) {
+pub fn parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
     // we add some at the end to detect if the command line is actually complete
     let dummy = b" x";
     let mut cmd = cmd.to_owned();
     cmd.extend(dummy);
 
-    let ptr = super::metafy(&cmd);
+    let (mut complete, mut tokens) = _parse(cmd.as_ref(), recursive);
+
+    if let Some(last) = tokens.last_mut() {
+        debug_assert!(last.range.end == cmd.len());
+
+        // if the last token is just the dummy, pop it
+        if last.range.start == cmd.len() - 1 {
+            tokens.pop();
+        } else {
+            // otherwise it must be joined onto an incomplete token
+            last.range.end -= dummy.len();
+            if last.range.is_empty() {
+                tokens.pop();
+            }
+            complete = false;
+        }
+    } else {
+        // no tokens???
+        complete = false;
+    }
+
+    (complete, tokens)
+}
+
+fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
+    let ptr = super::metafy(cmd);
     let mut complete = true;
     let mut tokens = vec![];
     let mut start = 0;
@@ -146,23 +179,32 @@ pub fn parse(cmd: &BStr) -> (bool, Vec<Token>) {
         zsh_sys::errflag &= !zsh_sys::errflag_bits_ERRFLAG_ERROR as i32;
     }
 
-    if let Some(last) = tokens.last_mut() {
-        debug_assert!(last.range.end == cmd.len());
+    // this is inefficient but whatever
+    let mut i = 0;
+    while i < tokens.len() {
+        if i+1 < tokens.len()
+            && tokens[i].kind == Some(TokenKind::Token(bindings::token::String))
+            && tokens[i+1].kind == Some(TokenKind::Token(bindings::token::Inpar))
+        {
+            // combine $ (
+            let next = tokens.remove(i+1);
+            tokens[i].kind = Some(TokenKind::Custom(Kind::Subshell));
+            tokens[i].range.end = next.range.end;
 
-        // if the last token is just the dummy, pop it
-        if last.range.start == cmd.len() - 1 {
-            tokens.pop();
-        } else {
-            // otherwise it must be joined onto an incomplete token
-            last.range.end -= dummy.len();
-            if last.range.is_empty() {
-                tokens.pop();
+            // parse subshells
+            if recursive && i+1 < tokens.len() && matches!(tokens[i+1].kind, Some(TokenKind::Lextok(bindings::lextok::STRING | bindings::lextok::LEXERR))) {
+                let range = &tokens[i+1].range;
+                let (_, mut subshell) = _parse(&cmd[range.clone()], true);
+                for t in subshell.iter_mut() {
+                    t.range.start += range.start;
+                    t.range.end += range.start;
+                }
+                tokens.splice(i+1 ..= i+1, subshell);
             }
-            complete = false;
+
         }
-    } else {
-        // no tokens???
-        complete = false;
+
+        i += 1;
     }
 
     (complete, tokens)

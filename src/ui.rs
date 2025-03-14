@@ -312,7 +312,7 @@ impl Ui {
 
             {
                 // time to execute
-                let (complete, _tokens) = shell.lock().await.parse(ui.buffer.get_contents().as_ref());
+                let (complete, _tokens) = shell.lock().await.parse(ui.buffer.get_contents().as_ref(), false);
                 if complete {
 
                     if ui.event_callbacks.has_accept_line_callbacks() {
