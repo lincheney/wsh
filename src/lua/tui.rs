@@ -251,7 +251,7 @@ async fn set_message(mut ui: Ui, _shell: Shell, lua: Lua, val: LuaValue) -> Resu
     let tui = &mut ui.borrow_mut().await.tui;
     if let Some(id) = options.id {
         if let Some(mut widget) = tui.get_mut(id) {
-            set_widget_options(&mut widget, options);
+            set_widget_options(widget, options);
             tui.dirty = true;
             Ok(id)
         } else {

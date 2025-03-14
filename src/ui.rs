@@ -215,7 +215,7 @@ impl Ui {
             ui.tui.add_error_message(msg);
         }
 
-        if let Err(err) = self.draw(&shell).await {
+        if let Err(err) = self.draw(shell).await {
             log::error!("{:?}", err);
         }
     }

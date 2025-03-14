@@ -134,11 +134,11 @@ where
         queue!(writer, Print(cell.symbol()))?;
     }
 
-    return queue!(
+    queue!(
         writer,
         SetForegroundColor(CColor::Reset),
         SetBackgroundColor(CColor::Reset),
         SetUnderlineColor(CColor::Reset),
         SetAttribute(CAttribute::Reset),
-    );
+    )
 }

@@ -88,7 +88,7 @@ impl<T: AsyncWrite + AsRawFd + std::marker::Unpin + mlua::MaybeSend + 'static> U
 
         methods.add_async_method_mut("write", |_lua, mut file, val: LuaString| async move {
             if let Some(file) = file.0.as_mut() {
-                file.write_all(&*val.as_bytes()).await?;
+                file.write_all(&val.as_bytes()).await?;
                 file.flush().await?;
             }
             Ok(())

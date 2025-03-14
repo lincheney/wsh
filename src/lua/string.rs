@@ -12,7 +12,7 @@ fn slice(string: &LuaString, start: usize, end: Option<usize>) -> Option<std::op
     match (slice.next(), slice.last()) {
         (Some((s, _, _)), Some((_, e, _))) => Some(s..e),
         (Some((s, e, _)), None) => Some(s..e),
-        (None, _) => return None,
+        (None, _) => None,
     }
 }
 

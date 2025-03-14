@@ -56,7 +56,7 @@ macro_rules! event_types {
             fn add_event_callback(&mut self, typ: EventType, cb: Function) -> usize {
                 let counter = self.counter;
                 self.get_callbacks_mut(typ).push((counter, cb));
-                self.counter = self.counter + 1;
+                self.counter += 1;
                 counter
             }
 

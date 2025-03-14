@@ -1,13 +1,8 @@
 use std::ops::Range;
 use std::ffi::CStr;
 use std::ptr::null_mut;
-use bstr::{BString, BStr, ByteSlice};
+use bstr::{BStr, ByteSlice};
 use super::bindings;
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Kind {
-    Subshell,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum TokenKind {
