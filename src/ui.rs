@@ -103,13 +103,6 @@ impl Ui {
             size: crossterm::terminal::size()?,
         };
 
-        ui.buffer.highlights.push(crate::buffer::Highlight{
-            start: 1,
-            end: 5,
-            style: ContentStyle::new().on_dark_yellow(),
-            attribute_mask: Attributes::default(),
-        });
-
         let start = std::time::Instant::now();
         shell.lock().await.readhistfile();
         log::info!("loaded history in {:?}", start.elapsed());

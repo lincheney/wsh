@@ -288,6 +288,70 @@ async fn remove_message(mut ui: Ui, _shell: Shell, _lua: Lua, id: usize) -> Resu
     }
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct Highlight {
+    start: usize,
+    end: usize,
+    #[serde(flatten)]
+    style: StyleOptions,
+}
+
+async fn add_buf_highlight(mut ui: Ui, _shell: Shell, lua: Lua, val: LuaValue) -> Result<()> {
+    let hl: Highlight = lua.from_value(val)?;
+    let mut mask = crossterm::style::Attributes::default();
+    let mut style = crossterm::style::ContentStyle::new();
+    style.foreground_color = hl.style.fg.map(|x| x.0.into());
+    style.background_color = hl.style.bg.map(|x| x.0.into());
+
+    macro_rules! set_modifier {
+        ($field:ident, $enum:ident) => (
+            if let Some($field) = hl.style.$field {
+                let val = crossterm::style::Attribute::$enum;
+                if $field {
+                    style.attributes.set(val);
+                } else {
+                    style.attributes.unset(val);
+                }
+                mask.set(val);
+            }
+        )
+    }
+
+    set_modifier!(bold, Bold);
+    set_modifier!(dim, Dim);
+    set_modifier!(italic, Italic);
+    set_modifier!(strikethrough, CrossedOut);
+    set_modifier!(reversed, Reverse);
+    set_modifier!(blink, SlowBlink);
+
+    match hl.style.underline.as_ref() {
+        Some(UnderlineOptions::Bool(val)) => if *val {
+            style.attributes.set(crossterm::style::Attribute::Underlined);
+        } else {
+            style.attributes.unset(crossterm::style::Attribute::Underlined);
+        },
+        Some(UnderlineOptions::Options(val)) => {
+            style.attributes.set(crossterm::style::Attribute::Underlined);
+            style.underline_color = Some(val.color.0.into());
+        },
+        None => (),
+    }
+
+    ui.borrow_mut().await.buffer.highlights.push(crate::buffer::Highlight{
+        start: hl.start,
+        end: hl.end,
+        style,
+        attribute_mask: mask,
+    });
+
+    Ok(())
+}
+
+async fn clear_buf_highlights(mut ui: Ui, _shell: Shell, _lua: Lua, _val: ()) -> Result<()> {
+    ui.borrow_mut().await.buffer.highlights.clear();
+    Ok(())
+}
 
 pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
 
@@ -295,6 +359,8 @@ pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
     ui.set_lua_async_fn("check_message", shell, check_message).await?;
     ui.set_lua_async_fn("remove_message", shell, remove_message).await?;
     ui.set_lua_async_fn("clear_messages", shell, clear_messages).await?;
+    ui.set_lua_async_fn("add_buf_highlight", shell, add_buf_highlight).await?;
+    ui.set_lua_async_fn("clear_buf_highlights", shell, clear_buf_highlights).await?;
 
     Ok(())
 }
