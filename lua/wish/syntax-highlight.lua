@@ -49,7 +49,7 @@ wish.add_event_callback('buffer_change', function()
         wish.clear_buf_highlights()
         for i = 1, #kinds do
             local hl = highlights[kinds[i]]
-            if not hl and kinds[i] ~= 'STRING' then
+            if not hl and kinds[i] ~= 'STRING' and not buffer:sub(starts[i]+1, ends[i]):find('%w') then
                 hl = PUNCTUATION
             end
 

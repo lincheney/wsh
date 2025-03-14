@@ -13,7 +13,6 @@ pub enum Kind {
 pub enum TokenKind {
     Lextok(bindings::lextok),
     Token(bindings::token),
-    Custom(Kind),
 }
 
 #[derive(Debug)]
@@ -31,7 +30,6 @@ impl Token {
         Some(match self.kind? {
             TokenKind::Lextok(k) => format!("{:?}", k),
             TokenKind::Token(k) => format!("{:?}", k),
-            TokenKind::Custom(k) => format!("{:?}", k),
         })
     }
 }
@@ -179,32 +177,37 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
         zsh_sys::errflag &= !zsh_sys::errflag_bits_ERRFLAG_ERROR as i32;
     }
 
+    // detect subshells
     // this is inefficient but whatever
-    let mut i = 0;
-    while i < tokens.len() {
-        if i+1 < tokens.len()
-            && tokens[i].kind == Some(TokenKind::Token(bindings::token::String))
-            && tokens[i+1].kind == Some(TokenKind::Token(bindings::token::Inpar))
-        {
-            // combine $ (
-            let next = tokens.remove(i+1);
-            tokens[i].kind = Some(TokenKind::Custom(Kind::Subshell));
-            tokens[i].range.end = next.range.end;
+    if recursive {
+        let mut i = 2;
+        while i < tokens.len() {
+            let kinds = tokens[i-2].kind.zip(tokens[i-1].kind).zip(tokens[i].kind);
+            if matches!(kinds, Some(((
+                TokenKind::Token(
+                    bindings::token::String // $(
+                    | bindings::token::OutangProc // >(
+                    | bindings::token::Inang // <(
+                    | bindings::token::Equals // =(
+                ),
+                TokenKind::Token(bindings::token::Inpar),
+            ),
+                TokenKind::Lextok(bindings::lextok::STRING | bindings::lextok::LEXERR),
+            ))) {
 
-            // parse subshells
-            if recursive && i+1 < tokens.len() && matches!(tokens[i+1].kind, Some(TokenKind::Lextok(bindings::lextok::STRING | bindings::lextok::LEXERR))) {
-                let range = &tokens[i+1].range;
+                let range = &tokens[i].range;
                 let (_, mut subshell) = _parse(&cmd[range.clone()], true);
                 for t in subshell.iter_mut() {
                     t.range.start += range.start;
                     t.range.end += range.start;
                 }
-                tokens.splice(i+1 ..= i+1, subshell);
+                let replace = i ..= i;
+                i += subshell.len() - 1;
+                tokens.splice(replace, subshell);
             }
 
+            i += 1;
         }
-
-        i += 1;
     }
 
     (complete, tokens)
