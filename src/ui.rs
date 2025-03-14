@@ -64,7 +64,7 @@ pub struct UiInner {
     dirty: bool,
     y_offset: u16,
     pub keybinds: Vec<crate::lua::KeybindMapping>,
-    pub keybind_layer_id: usize,
+    pub keybind_layer_counter: usize,
     pub event_callbacks: crate::lua::EventCallbacks,
 
     pub buffer: crate::buffer::Buffer,
@@ -98,7 +98,7 @@ impl Ui {
             buffer: Default::default(),
             prompt: crate::prompt::Prompt::new(None),
             keybinds: Default::default(),
-            keybind_layer_id: Default::default(),
+            keybind_layer_counter: Default::default(),
             event_callbacks: Default::default(),
             stdout: std::io::stdout(),
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),

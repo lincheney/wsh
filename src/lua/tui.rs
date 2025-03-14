@@ -295,6 +295,7 @@ struct Highlight {
     end: usize,
     #[serde(flatten)]
     style: StyleOptions,
+    namespace: Option<usize>,
 }
 
 async fn add_buf_highlight(mut ui: Ui, _shell: Shell, lua: Lua, val: LuaValue) -> Result<()> {
@@ -343,14 +344,26 @@ async fn add_buf_highlight(mut ui: Ui, _shell: Shell, lua: Lua, val: LuaValue) -
         end: hl.end,
         style,
         attribute_mask: mask,
+        namespace: hl.namespace.unwrap_or(0),
     });
 
     Ok(())
 }
 
-async fn clear_buf_highlights(mut ui: Ui, _shell: Shell, _lua: Lua, _val: ()) -> Result<()> {
-    ui.borrow_mut().await.buffer.highlights.clear();
+async fn clear_buf_highlights(mut ui: Ui, _shell: Shell, _lua: Lua, namespace: Option<usize>) -> Result<()> {
+    let mut ui = ui.borrow_mut().await;
+    if let Some(namespace) = namespace {
+        ui.buffer.highlights.retain(|h| h.namespace != namespace);
+    } else {
+        ui.buffer.highlights.clear();
+    }
     Ok(())
+}
+
+async fn add_buf_highlight_namespace(mut ui: Ui, _shell: Shell, _lua: Lua, _val: ()) -> Result<usize> {
+    let mut ui = ui.borrow_mut().await;
+    ui.buffer.highlight_counter += 1;
+    Ok(ui.buffer.highlight_counter)
 }
 
 pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
@@ -359,6 +372,7 @@ pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
     ui.set_lua_async_fn("check_message", shell, check_message).await?;
     ui.set_lua_async_fn("remove_message", shell, remove_message).await?;
     ui.set_lua_async_fn("clear_messages", shell, clear_messages).await?;
+    ui.set_lua_async_fn("add_buf_highlight_namespace", shell, add_buf_highlight_namespace).await?;
     ui.set_lua_async_fn("add_buf_highlight", shell, add_buf_highlight).await?;
     ui.set_lua_async_fn("clear_buf_highlights", shell, clear_buf_highlights).await?;
 

@@ -89,8 +89,8 @@ async fn set_keymap(mut ui: Ui, _shell: Shell, _lua: Lua, (key, callback, layer)
 
 async fn add_keymap_layer(mut ui: Ui, _shell: Shell, _lua: Lua, _val: ()) -> Result<usize> {
     let mut ui = ui.borrow_mut().await;
-    ui.keybind_layer_id += 1;
-    let id = ui.keybind_layer_id;
+    ui.keybind_layer_counter += 1;
+    let id = ui.keybind_layer_counter;
     ui.keybinds.push(KeybindMapping{id, inner: Default::default()});
     Ok(id)
 }

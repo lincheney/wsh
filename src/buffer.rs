@@ -14,6 +14,7 @@ pub struct Highlight {
     pub end: usize,
     pub style: ContentStyle,
     pub attribute_mask: Attributes,
+    pub namespace: usize,
 }
 
 struct HighlightStack<'a>(Vec<&'a Highlight>);
@@ -53,6 +54,7 @@ pub struct Buffer {
     pub y_offset: usize,
 
     pub highlights: Vec<Highlight>,
+    pub highlight_counter: usize,
 }
 
 struct BufferContents<'a> {
