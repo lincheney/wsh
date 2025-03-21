@@ -84,13 +84,7 @@ end)
 
 local msg = nil
 
-wish.set_keymap('<tab>', function()
-    if require('wish/selection-widget').is_active() then
-        require('wish/selection-widget').trigger()
-    else
-        require('wish/completion').complete()
-    end
-end)
+wish.set_keymap('<tab>', require('wish/completion').complete)
 wish.set_keymap('<up>', require('wish/history').history_up)
 wish.set_keymap('<down>', require('wish/history').history_down)
 wish.set_keymap('<c-p>', require('wish/history').history_up)
