@@ -48,9 +48,9 @@ end)
 
 wish.set_keymap('<c-right>', function()
     local buffer = wish.get_buffer()
-    local cursor = wish.str.to_byte_pos(buffer, wish.get_cursor())
+    local cursor = wish.str.to_byte_pos(buffer, wish.get_cursor()) or #buffer
     cursor = buffer:find('%f[%s]', cursor + 2)
-    wish.set_cursor(wish.str.from_byte_pos(buffer, (cursor or #buffer + 1) - 1))
+    wish.set_cursor(wish.str.from_byte_pos(buffer, (cursor or #buffer + 1) - 1) or #buffer)
 end)
 
 wish.set_keymap('<c-w>', function()
