@@ -4,8 +4,7 @@ local state = nil
 
 function M.stop()
     if state then
-        -- TODO kill
-        -- state.proc.
+        state.proc.term()
         state.proc.wait()
         state = nil
     end

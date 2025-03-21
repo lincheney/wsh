@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::os::unix::process::ExitStatusExt;
 use std::collections::HashMap;
 use std::default::Default;
@@ -8,10 +9,28 @@ use mlua::{prelude::*, UserData, UserDataMethods};
 use tokio::io::{BufReader, BufWriter};
 use tokio::process::Command;
 use tokio::sync::oneshot;
-use serde::{Deserialize};
+use serde::{Deserialize, Deserializer, de};
 use crate::ui::Ui;
 use crate::shell::Shell;
 use super::asyncio::{ReadableFile, WriteableFile};
+
+#[derive(Debug, Copy, Clone)]
+struct Signal(nix::sys::signal::Signal);
+#[derive(Debug, Deserialize, Clone)]
+enum RawSignal {
+    Number(i32),
+    String(String),
+}
+
+impl<'de> Deserialize<'de> for Signal {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let signal = match RawSignal::deserialize(deserializer)? {
+            RawSignal::Number(x) => nix::sys::signal::Signal::try_from(x).map_err(de::Error::custom)?,
+            RawSignal::String(x) => nix::sys::signal::Signal::from_str(x.as_ref()).map_err(de::Error::custom)?,
+        };
+        Ok(Signal(signal))
+    }
+}
 
 struct CommandResult {
     inner: Option<oneshot::Receiver<std::io::Result<i32>>>,
@@ -50,6 +69,12 @@ impl UserData for Process {
 
         methods.add_async_method_mut("wait", |_lua, mut proc, ()| async move {
             proc.result.wait().await
+        });
+
+        methods.add_method("kill", |lua, proc, signal: LuaValue| {
+            let signal: Signal = lua.from_value(signal)?;
+            let pid = nix::unistd::Pid::from_raw(proc.pid as _);
+            nix::sys::signal::kill(pid, signal.0).map_err(|e| LuaError::RuntimeError(format!("{}", e)))
         });
 
     }

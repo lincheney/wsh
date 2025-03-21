@@ -32,6 +32,8 @@ function wish.async.spawn(...)
         stderr = stderr,
         pid = function(self) return proc:pid() end,
         wait = function(self) return proc:wait() end,
+        kill = function(self) return self:kill() end,
+        term = function(self) return self:kill('SIGTERM') end,
     }
 end
 
