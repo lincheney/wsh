@@ -74,8 +74,26 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Compl
 
 async fn insert_completion(mut ui: Ui, _lua: Lua, val: CompletionMatch) -> Result<()> {
     let buffer = ui.inner.borrow().await.buffer.get_contents().clone();
-    let (buffer, pos) = ui.shell.lock().await.insert_completion(buffer.as_ref(), &val.inner);
-    ui.inner.borrow_mut().await.buffer.set(Some(&buffer), Some(pos));
+    let (new_buffer, new_pos) = ui.shell.lock().await.insert_completion(buffer.as_ref(), &val.inner);
+
+    // see if this can be done as an insert
+    {
+        let buffer = &mut ui.inner.borrow_mut().await.buffer;
+        let cursor = buffer.cursor_byte_pos();
+        let contents = buffer.get_contents();
+        let (prefix, suffix) = &contents.split_at_checked(cursor).unwrap_or((contents, b""));
+
+        if new_buffer.starts_with(prefix) && new_buffer.ends_with(suffix) {
+            let new_buffer = &new_buffer[prefix.len() .. new_buffer.len() - suffix.len()];
+            buffer.insert_at_cursor(new_buffer);
+            if buffer.get_cursor() != new_pos {
+                buffer.set_cursor(new_pos);
+            }
+        } else {
+            buffer.set(Some(&new_buffer), Some(new_pos));
+        }
+    }
+
     ui.draw().await?;
     Ok(())
 }
