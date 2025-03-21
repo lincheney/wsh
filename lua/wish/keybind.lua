@@ -99,22 +99,23 @@ wish.set_keymap('<tab>', function()
     end
 end)
 wish.set_keymap('<up>', function()
-    if not require('wish/history').history_up() then
-        require('wish/selection-widget').up()
-    end
+    require('wish/history').history_up()
 end)
 wish.set_keymap('<down>', function()
-    if not require('wish/history').history_down() then
-        require('wish/selection-widget').down()
-    end
+    require('wish/history').history_down()
 end)
 wish.set_keymap('<c-r>', require('wish/history').history_search)
 
 wish.set_keymap('<f12>', function()
-    local code, stdout = wish.eval[[echo 123]]
-    wish.pprint({code, stdout})
+    wish.set_var("path[${#path[@]}+1]", "hello")
+    wish.pprint(wish.get_var("path"))
+    -- local complete, starts, ends, kinds = wish.parse(wish.get_buffer())
+    -- wish.pprint(complete)
+    -- wish.pprint(strings)
+    -- wish.pprint(kinds)
+    -- wish.cmd[[x=3]]:wait()
     -- error("ARGGHH")
-    -- local msg = wish.show_message{text="hello world " .. math.random()}
+    -- local msg = wish.set_message{text="hello world " .. math.random()}
     -- msg:set_text_weight('Bold');
     -- wish.redraw()
 end)
