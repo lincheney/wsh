@@ -54,8 +54,6 @@ impl crossterm::Command for MoveDown {
 }
 
 pub struct UiInner {
-    pub lua: Lua,
-    pub lua_api: mlua::Table,
 
     pub tui: crate::tui::Tui,
 
@@ -77,18 +75,33 @@ pub struct UiInner {
 }
 
 #[derive(Clone)]
-pub struct Ui(Arc<RwLock<UiInner>>);
+pub struct ThreadsafeUiInner(Arc<RwLock<UiInner>>);
+
+#[derive(Clone)]
+pub struct Ui {
+    pub inner: ThreadsafeUiInner,
+    pub lua: Lua,
+    pub shell: Shell,
+}
+
+impl ThreadsafeUiInner {
+    pub async fn borrow(&self) -> tokio::sync::RwLockReadGuard<UiInner> {
+        self.0.read().await
+    }
+
+    pub async fn borrow_mut(&mut self) -> tokio::sync::RwLockWriteGuard<UiInner> {
+        self.0.write().await
+    }
+}
 
 impl Ui {
 
-    pub async fn new(shell: &Shell, events: crate::event_stream::EventLocker) -> Result<Self> {
+    pub async fn new(events: crate::event_stream::EventLocker) -> Result<Self> {
         let lua = Lua::new();
         let lua_api = lua.create_table()?;
         lua.globals().set("wish", &lua_api)?;
 
         let mut ui = UiInner{
-            lua,
-            lua_api,
             events,
             is_running_process: false,
             dirty: true,
@@ -107,34 +120,36 @@ impl Ui {
         ui.keybinds.push(Default::default());
 
         let start = std::time::Instant::now();
+        let shell = Shell::new();
         shell.lock().await.readhistfile();
         log::info!("loaded history in {:?}", start.elapsed());
         ui.reset(&mut *shell.lock().await);
 
-        let ui = Self(Arc::new(RwLock::new(ui)));
-        ui.init_lua(shell).await?;
+        let ui = Self{
+            inner: ThreadsafeUiInner(Arc::new(RwLock::new(ui))),
+            lua,
+            shell: shell,
+        };
+        ui.init_lua().await?;
 
         Ok(ui)
     }
 
-    pub async fn borrow(&self) -> tokio::sync::RwLockReadGuard<UiInner> {
-        self.0.read().await
-    }
-
-    pub async fn borrow_mut(&mut self) -> tokio::sync::RwLockWriteGuard<UiInner> {
-        self.0.write().await
-    }
-
     pub async fn activate(&self) -> Result<()> {
-        self.borrow().await.activate()
+        self.inner.borrow().await.activate()
     }
 
     pub async fn deactivate(&mut self) -> Result<()> {
-        self.borrow_mut().await.deactivate()
+        self.inner.borrow_mut().await.deactivate()
     }
 
-    pub async fn draw(&mut self, shell: &Shell) -> Result<()> {
-        let mut ui = self.borrow_mut().await;
+    pub fn get_lua_api(&self) -> LuaResult<LuaTable> {
+        self.lua.globals().get("wish")
+    }
+
+    pub async fn draw(&mut self) -> Result<()> {
+        let shell = self.shell.clone();
+        let mut ui = self.inner.borrow_mut().await;
         let ui = ui.deref_mut();
 
         // do NOT render ui elements if there is a foreground process
@@ -191,47 +206,47 @@ impl Ui {
         Ok(())
     }
 
-    pub fn call_lua_fn<T: IntoLuaMulti + mlua::MaybeSend + 'static>(&self, shell: Shell, draw: bool, callback: mlua::Function, arg: T) {
+    pub fn call_lua_fn<T: IntoLuaMulti + mlua::MaybeSend + 'static>(&self, draw: bool, callback: mlua::Function, arg: T) {
         let mut ui = self.clone();
         tokio::task::spawn(async move {
-            ui.report_error(&shell, draw, callback.call_async::<LuaValue>(arg).await).await;
+            ui.report_error(draw, callback.call_async::<LuaValue>(arg).await).await;
         });
     }
 
-    pub async fn report_error<T, E: std::fmt::Display>(&mut self, shell: &Shell, draw: bool, result: std::result::Result<T, E>) {
+    pub async fn report_error<T, E: std::fmt::Display>(&mut self, draw: bool, result: std::result::Result<T, E>) {
         if let Err(err) = result {
             log::error!("{}", err);
-            self.show_error_message(shell, format!("ERROR: {}", err)).await;
+            self.show_error_message(format!("ERROR: {}", err)).await;
         } else if draw {
-            if let Err(err) = self.draw(shell).await {
+            if let Err(err) = self.draw().await {
                 log::error!("{:?}", err);
             }
         }
     }
 
-    pub async fn show_error_message(&mut self, shell: &Shell, msg: String) {
+    pub async fn show_error_message(&mut self, msg: String) {
         {
-            let mut ui = self.borrow_mut().await;
+            let mut ui = self.inner.borrow_mut().await;
             ui.tui.add_error_message(msg);
         }
 
-        if let Err(err) = self.draw(shell).await {
+        if let Err(err) = self.draw().await {
             log::error!("{:?}", err);
         }
     }
 
-    pub async fn handle_event(&mut self, event: Event, shell: &Shell) -> Result<bool> {
+    pub async fn handle_event(&mut self, event: Event) -> Result<bool> {
 
         if let Event::Key(key @ KeyEvent{code, modifiers, kind: event::KeyEventKind::Press, ..}) = event {
-            let ui = self.borrow().await;
+            let ui = self.inner.borrow().await;
 
             if ui.event_callbacks.has_key_callbacks() {
-                ui.event_callbacks.trigger_key_callbacks(self, shell, &ui.lua, key.into());
+                ui.event_callbacks.trigger_key_callbacks(self, &self.lua, key.into());
             }
 
             let callback = ui.keybinds.iter().rev().find_map(|k| k.inner.get(&(code, modifiers)));
             if let Some(callback) = callback {
-                self.call_lua_fn(shell.clone(), true, callback.clone(), ());
+                self.call_lua_fn(true, callback.clone(), ());
                 return Ok(true)
             }
         }
@@ -245,7 +260,7 @@ impl Ui {
                 state: _,
             }) => {
                 nix::sys::signal::kill(nix::unistd::Pid::from_raw(0), nix::sys::signal::Signal::SIGTERM)?;
-                for pid in self.borrow().await.threads.iter() {
+                for pid in self.inner.borrow().await.threads.iter() {
                     nix::sys::signal::kill(*pid, nix::sys::signal::Signal::SIGINT)?;
                 }
             },
@@ -258,15 +273,15 @@ impl Ui {
             }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
                 {
                     let clone = self.clone();
-                    let mut ui = self.borrow_mut().await;
+                    let mut ui = self.inner.borrow_mut().await;
                     let mut buf = [0; 4];
                     ui.buffer.insert(c.encode_utf8(&mut buf).as_bytes());
                     if ui.event_callbacks.has_buffer_change_callbacks() {
-                        ui.event_callbacks.trigger_buffer_change_callbacks(&clone, shell, &ui.lua, ());
+                        ui.event_callbacks.trigger_buffer_change_callbacks(&clone, &clone.lua, ());
                     }
                 }
 
-                self.draw(shell).await?;
+                self.draw().await?;
             },
 
             Event::Key(KeyEvent{
@@ -275,7 +290,7 @@ impl Ui {
                 kind: event::KeyEventKind::Press,
                 state: _,
             }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
-                return self.accept_line(shell).await;
+                return self.accept_line().await;
             },
 
             Event::Key(KeyEvent{
@@ -289,9 +304,9 @@ impl Ui {
             },
 
             Event::Paste(data) => {
-                let ui = self.borrow().await;
+                let ui = self.inner.borrow().await;
                 if ui.event_callbacks.has_paste_callbacks() {
-                    ui.event_callbacks.trigger_paste_callbacks(self, shell, &ui.lua, ui.lua.create_string(data.as_bytes())?);
+                    ui.event_callbacks.trigger_paste_callbacks(self, &self.lua, self.lua.create_string(data.as_bytes())?);
                 }
             },
 
@@ -301,25 +316,25 @@ impl Ui {
         Ok(true)
     }
 
-    async fn accept_line(&mut self, shell: &Shell) -> Result<bool> {
-        self.draw(shell).await?;
-        self.borrow_mut().await.is_running_process = true;
+    async fn accept_line(&mut self) -> Result<bool> {
+        self.draw().await?;
+        self.inner.borrow_mut().await.is_running_process = true;
 
         {
             let clone = self.clone();
-            let mut ui = self.borrow_mut().await;
+            let mut ui = self.inner.borrow_mut().await;
             let ui = ui.deref_mut();
 
             {
                 // time to execute
-                let (complete, _tokens) = shell.lock().await.parse(ui.buffer.get_contents().as_ref(), false);
+                let (complete, _tokens) = self.shell.lock().await.parse(ui.buffer.get_contents().as_ref(), false);
                 if complete {
 
                     if ui.event_callbacks.has_accept_line_callbacks() {
-                        ui.event_callbacks.trigger_accept_line_callbacks(&clone, shell, &ui.lua, ());
+                        ui.event_callbacks.trigger_accept_line_callbacks(&clone, &self.lua, ());
                     }
 
-                    let mut shell = shell.lock().await;
+                    let mut shell = self.shell.lock().await;
                     shell.clear_completion_cache();
                     shell.push_history(ui.buffer.get_contents().as_ref());
 
@@ -352,7 +367,7 @@ impl Ui {
                 } else {
                     ui.buffer.insert(b"\n");
                     if ui.event_callbacks.has_buffer_change_callbacks() {
-                        ui.event_callbacks.trigger_buffer_change_callbacks(&clone, shell, &ui.lua, ());
+                        ui.event_callbacks.trigger_buffer_change_callbacks(&clone, &clone.lua, ());
                     }
                 }
                 ui.is_running_process = false;
@@ -361,104 +376,102 @@ impl Ui {
             ui.activate()?;
         }
 
-        self.draw(shell).await?;
+        self.draw().await?;
         Ok(true)
     }
 
-    fn try_upgrade(ui: &Weak<RwLock<UiInner>>) -> LuaResult<Self> {
+    fn try_upgrade(ui: &Weak<RwLock<UiInner>>, shell: Shell, lua: Lua) -> LuaResult<Self> {
         if let Some(ui) = ui.upgrade() {
-            Ok(Ui(ui))
+            Ok(Ui{ inner: ThreadsafeUiInner(ui), shell, lua })
         } else {
             lua_error("ui not running")
         }
     }
 
-    pub async fn set_lua_fn<F, A, R>(&self, name: &str, shell: &Shell, func: F) -> LuaResult<()>
+    pub fn set_lua_fn<F, A, R>(&self, name: &str, func: F) -> LuaResult<()>
     where
-        F: Fn(&Self, &Shell, &Lua, A) -> Result<R> + mlua::MaybeSend + 'static,
+        F: Fn(&Self, &Lua, A) -> Result<R> + mlua::MaybeSend + 'static,
         A: FromLuaMulti,
         R: IntoLuaMulti,
     {
 
-        let func = self.make_lua_fn(shell, func).await?;
-        self.borrow().await.lua_api.set(name, func)
+        let func = self.make_lua_fn(func)?;
+        self.get_lua_api()?.set(name, func)
     }
 
-    pub async fn make_lua_fn<F, A, R>(&self, shell: &Shell, func: F) -> LuaResult<LuaFunction>
+    pub fn make_lua_fn<F, A, R>(&self, func: F) -> LuaResult<LuaFunction>
     where
-        F: Fn(&Self, &Shell, &Lua, A) -> Result<R> + mlua::MaybeSend + 'static,
+        F: Fn(&Self, &Lua, A) -> Result<R> + mlua::MaybeSend + 'static,
         A: FromLuaMulti,
         R: IntoLuaMulti,
     {
-        let weak = Arc::downgrade(&self.0);
-        let ui = self.borrow().await;
-        let shell = Arc::downgrade(&shell.0);
-        ui.lua.create_function(move |lua, value| {
-            let ui = Ui::try_upgrade(&weak)?;
-            func(&ui, &Shell(shell.upgrade().unwrap()), lua, value)
+        let weak = Arc::downgrade(&self.inner.0);
+        let shell = Arc::downgrade(&self.shell.0);
+        self.lua.create_function(move |lua, value| {
+            let ui = Ui::try_upgrade(&weak, Shell(shell.upgrade().unwrap()), lua.clone())?;
+            func(&ui, lua, value)
                 .map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))
         })
     }
 
-    pub async fn set_lua_async_fn<F, A, R, T>(&self, name: &str, shell: &Shell, func: F) -> LuaResult<()>
+    pub fn set_lua_async_fn<F, A, R, T>(&self, name: &str, func: F) -> LuaResult<()>
     where
-        F: Fn(Self, Shell, Lua, A) -> T + mlua::MaybeSend + 'static + Clone,
+        F: Fn(Self, Lua, A) -> T + mlua::MaybeSend + 'static + Clone,
         A: FromLuaMulti + Send + 'static,
         R: IntoLuaMulti,
         T: Future<Output=Result<R>> + mlua::MaybeSend + 'static,
     {
-        let func = self.make_lua_async_fn(shell, func).await?;
-        self.borrow().await.lua_api.set(name, func)
+        let func = self.make_lua_async_fn(func)?;
+        self.get_lua_api()?.set(name, func)
     }
 
-    pub async fn make_lua_async_fn<F, A, R, T>(&self, shell: &Shell, func: F) -> LuaResult<LuaFunction>
+    pub fn make_lua_async_fn<F, A, R, T>(&self, func: F) -> LuaResult<LuaFunction>
     where
-        F: Fn(Self, Shell, Lua, A) -> T + mlua::MaybeSend + 'static + Clone,
+        F: Fn(Self, Lua, A) -> T + mlua::MaybeSend + 'static + Clone,
         A: FromLuaMulti + Send + 'static,
         R: IntoLuaMulti,
         T: Future<Output=Result<R>> + mlua::MaybeSend + 'static,
     {
-        let weak = Arc::downgrade(&self.0);
-        let ui = self.borrow().await;
-        let shell = Arc::downgrade(&shell.0);
-        ui.lua.create_async_function(move |lua, value| {
+        let weak = Arc::downgrade(&self.inner.0);
+        let shell = Arc::downgrade(&self.shell.0);
+        self.lua.create_async_function(move |lua, value| {
             let weak = weak.clone();
             let func = func.clone();
             let shell = shell.clone();
             async move {
-                let ui = Ui::try_upgrade(&weak)?;
-                func(ui, Shell(shell.upgrade().unwrap()), lua, value).await
+                let ui = Ui::try_upgrade(&weak, Shell(shell.upgrade().unwrap()), lua.clone())?;
+                func(ui, lua, value).await
                     .map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))
             }
         })
     }
 
-    async fn init_lua(&self, shell: &Shell) -> Result<()> {
-        self.set_lua_async_fn("get_cursor", shell, |ui, _shell, _lua, _val: ()| async move {
-            Ok(ui.borrow().await.buffer.get_cursor())
-        } ).await?;
-        self.set_lua_async_fn("get_buffer", shell, |ui, _shell, lua, _val: ()| async move {
-            Ok(lua.create_string(ui.borrow().await.buffer.get_contents())?)
-        }).await?;
+    async fn init_lua(&self) -> Result<()> {
+        self.set_lua_async_fn("get_cursor", |ui, _lua, ()| async move {
+            Ok(ui.inner.borrow().await.buffer.get_cursor())
+        })?;
+        self.set_lua_async_fn("get_buffer", |ui, lua, ()| async move {
+            Ok(lua.create_string(ui.inner.borrow().await.buffer.get_contents())?)
+        })?;
 
-        self.set_lua_async_fn("set_cursor", shell, |mut ui, _shell, _lua, val: usize| async move {
-            ui.borrow_mut().await.buffer.set_cursor(val);
+        self.set_lua_async_fn("set_cursor", |mut ui, _lua, val: usize| async move {
+            ui.inner.borrow_mut().await.buffer.set_cursor(val);
             Ok(())
-        }).await?;
+        })?;
 
-        self.set_lua_async_fn("set_buffer", shell, |mut ui, shell, _lua, val: mlua::String| async move {
+        self.set_lua_async_fn("set_buffer", |mut ui, lua, val: mlua::String| async move {
             let clone = ui.clone();
-            let mut ui = ui.borrow_mut().await;
+            let mut ui = ui.inner.borrow_mut().await;
             ui.buffer.set_contents(&val.as_bytes());
             if ui.event_callbacks.has_buffer_change_callbacks() {
-                ui.event_callbacks.trigger_buffer_change_callbacks(&clone, &shell, &ui.lua, ());
+                ui.event_callbacks.trigger_buffer_change_callbacks(&clone, &lua, ());
             }
             Ok(())
-        }).await?;
+        })?;
 
-        self.set_lua_async_fn("accept_line", shell, |mut ui, shell, _lua, _val: ()| async move {
-            ui.accept_line(&shell).await
-        }).await?;
+        self.set_lua_async_fn("accept_line", |mut ui, _lua, _val: ()| async move {
+            ui.accept_line().await
+        })?;
 
         #[derive(Debug, Default, Deserialize)]
         #[serde(default)]
@@ -468,31 +481,31 @@ impl Ui {
             messages: bool,
             all: bool,
         }
-        self.set_lua_async_fn("redraw", shell, |mut ui, shell, lua, val: Option<LuaValue>| async move {
+        self.set_lua_async_fn("redraw", |mut ui, lua, val: Option<LuaValue>| async move {
             if let Some(val) = val {
                 let val: RedrawOptions = lua.from_value(val)?;
-                let mut ui = ui.borrow_mut().await;
+                let mut ui = ui.inner.borrow_mut().await;
                 if val.all { ui.dirty = true; }
                 if val.prompt { ui.prompt.dirty = true; }
                 if val.buffer { ui.buffer.dirty = true; }
                 if val.messages { ui.tui.dirty = true; }
             }
 
-            ui.draw(&shell).await
-        }).await?;
+            ui.draw().await
+        })?;
 
-        self.set_lua_async_fn("eval", shell, |_ui, shell, lua, (cmd, stderr): (mlua::String, bool)| async move {
-            let data = shell.lock().await.eval((*cmd.as_bytes()).into(), stderr).unwrap();
+        self.set_lua_async_fn("eval", |ui, lua, (cmd, stderr): (mlua::String, bool)| async move {
+            let data = ui.shell.lock().await.eval((*cmd.as_bytes()).into(), stderr).unwrap();
             Ok(lua.create_string(data)?)
-        }).await?;
+        })?;
 
-        self.set_lua_async_fn("allocate_height", shell, |mut ui, _shell, _lua, height: u16| async move {
-            Ui::allocate_height(&mut ui.borrow_mut().await.stdout, height)
-        }).await?;
+        self.set_lua_async_fn("allocate_height", |mut ui, _lua, height: u16| async move {
+            Ui::allocate_height(&mut ui.inner.borrow_mut().await.stdout, height)
+        })?;
 
-        crate::lua::init_lua(self, shell).await?;
+        crate::lua::init_lua(self).await?;
 
-        let lua = self.borrow().await.lua.clone();
+        let lua = self.lua.clone();
         lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;
         if let Err(err) = lua.load("require('wish')").exec() {
             log::error!("{}", err);

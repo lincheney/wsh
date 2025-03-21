@@ -1,11 +1,10 @@
 use crate::ui::Ui;
-use crate::shell::Shell;
 use anyhow::Result;
 use mlua::prelude::*;
 
-async fn parse(_ui: Ui, shell: Shell, lua: Lua, (val, recursive): (bstr::BString, Option<bool>)) -> Result<(bool, LuaTable, LuaTable, LuaTable)> {
+async fn parse(ui: Ui, lua: Lua, (val, recursive): (bstr::BString, Option<bool>)) -> Result<(bool, LuaTable, LuaTable, LuaTable)> {
     let val = val.as_ref();
-    let (complete, tokens) = shell.lock().await.parse(val, recursive.unwrap_or(false));
+    let (complete, tokens) = ui.shell.lock().await.parse(val, recursive.unwrap_or(false));
 
     let starts = lua.create_table()?;
     let ends = lua.create_table()?;
@@ -20,9 +19,9 @@ async fn parse(_ui: Ui, shell: Shell, lua: Lua, (val, recursive): (bstr::BString
     Ok((complete, starts, ends, kinds))
 }
 
-pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
+pub fn init_lua(ui: &Ui) -> Result<()> {
 
-    ui.set_lua_async_fn("parse", shell, parse).await?;
+    ui.set_lua_async_fn("parse", parse)?;
 
     Ok(())
 }

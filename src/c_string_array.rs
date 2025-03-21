@@ -2,11 +2,15 @@ use std::ffi::{CStr};
 use std::os::raw::{c_char};
 use bstr::BString;
 
-pub struct CStringArray {
+pub struct CStrArray {
     pub ptr: *mut *mut c_char,
 }
 
-impl CStringArray {
+pub struct CStringArray {
+    inner: CStrArray,
+}
+
+impl CStrArray {
     pub fn iter_ptr(&self) -> impl Iterator<Item=*mut c_char> {
         let mut ptr = self.ptr;
         std::iter::from_fn(move || {
@@ -31,9 +35,18 @@ impl CStringArray {
     pub fn to_vec(&self) -> Vec<BString> {
         self.iter().map(|s| s.to_bytes().to_owned()).map(BString::new).collect()
     }
+}
 
+impl CStringArray {
     pub fn into_ptr(self) -> *mut *mut c_char {
         self.ptr
+    }
+}
+
+impl std::ops::Deref for CStringArray {
+    type Target = CStrArray;
+    fn deref(&self) -> &Self::Target {
+        &self.inner
     }
 }
 
@@ -52,13 +65,13 @@ impl Drop for CStringArray {
     }
 }
 
-impl From<*mut *mut c_char> for CStringArray {
+impl From<*mut *mut c_char> for CStrArray {
     fn from(ptr: *mut *mut c_char) -> Self {
         Self{ ptr }
     }
 }
 
-impl From<Vec<BString>> for CStringArray {
+impl From<Vec<BString>> for CStrArray {
     fn from(vec: Vec<BString>) -> Self {
         unsafe {
             let ptr: *mut *mut c_char = zsh_sys::zalloc(std::mem::size_of::<*mut c_char>() * (vec.len() + 1)) as _;
@@ -68,5 +81,23 @@ impl From<Vec<BString>> for CStringArray {
             *ptr.add(vec.len()) = std::ptr::null_mut();
             Self{ ptr }
         }
+    }
+}
+
+impl From<CStrArray> for CStringArray {
+    fn from(inner: CStrArray) -> Self {
+        Self{ inner }
+    }
+}
+
+impl From<*mut *mut c_char> for CStringArray {
+    fn from(ptr: *mut *mut c_char) -> Self {
+        Self{ inner: ptr.into() }
+    }
+}
+
+impl From<Vec<BString>> for CStringArray {
+    fn from(vec: Vec<BString>) -> Self {
+        Self{ inner: vec.into() }
     }
 }

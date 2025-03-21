@@ -1,7 +1,6 @@
 use anyhow::Result;
 use mlua::{prelude::*};
 use crate::ui::Ui;
-use crate::shell::Shell;
 use bstr::{ByteSlice};
 
 fn slice(string: &LuaString, start: usize, end: Option<usize>) -> Option<std::ops::Range<usize>> {
@@ -58,17 +57,17 @@ fn from_byte_pos(_lua: &Lua, (string, index): (mlua::String, usize)) -> LuaResul
     Ok(None)
 }
 
-pub async fn init_lua(ui: &Ui, _shell: &Shell) -> Result<()> {
+pub async fn init_lua(ui: &Ui) -> Result<()> {
 
-    let ui = ui.borrow().await;
-    let string = ui.lua.create_table()?;
-    ui.lua_api.set("str", &string)?;
+    let lua_api = ui.get_lua_api()?;
+    let tbl = ui.lua.create_table()?;
+    lua_api.set("str", &tbl)?;
 
-    string.set("get", ui.lua.create_function(get)?)?;
-    string.set("set", ui.lua.create_function(set)?)?;
-    string.set("len", ui.lua.create_function(len)?)?;
-    string.set("to_byte_pos", ui.lua.create_function(to_byte_pos)?)?;
-    string.set("from_byte_pos", ui.lua.create_function(from_byte_pos)?)?;
+    tbl.set("get", ui.lua.create_function(get)?)?;
+    tbl.set("set", ui.lua.create_function(set)?)?;
+    tbl.set("len", ui.lua.create_function(len)?)?;
+    tbl.set("to_byte_pos", ui.lua.create_function(to_byte_pos)?)?;
+    tbl.set("from_byte_pos", ui.lua.create_function(from_byte_pos)?)?;
 
     Ok(())
 }

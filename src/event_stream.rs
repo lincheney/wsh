@@ -80,7 +80,7 @@ impl EventStream {
         (stream, locker)
     }
 
-    pub async fn run(&mut self, ui: &mut crate::ui::Ui, shell: &crate::shell::Shell) -> anyhow::Result<()> {
+    pub async fn run(&mut self, ui: &mut crate::ui::Ui) -> anyhow::Result<()> {
         loop {
             let mut lock = None;
             let mut waker = self.receiver.next().fuse();
@@ -104,7 +104,7 @@ impl EventStream {
 
                         match e {
                             Some(Ok(event)) => {
-                                if !ui.handle_event(event, shell).await? {
+                                if !ui.handle_event(event).await? {
                                     return Ok(())
                                 }
                             }

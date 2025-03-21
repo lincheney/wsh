@@ -10,7 +10,6 @@ use ratatui::{
 };
 use mlua::{prelude::*};
 use crate::ui::Ui;
-use crate::shell::Shell;
 use crate::tui;
 
 #[derive(Debug, Copy, Clone)]
@@ -245,10 +244,10 @@ fn set_widget_options(widget: &mut tui::Widget, options: WidgetOptions) {
     ;
 }
 
-async fn set_message(mut ui: Ui, _shell: Shell, lua: Lua, val: LuaValue) -> Result<usize> {
+async fn set_message(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
     let options: WidgetOptions = lua.from_value(val)?;
 
-    let tui = &mut ui.borrow_mut().await.tui;
+    let tui = &mut ui.inner.borrow_mut().await.tui;
     if let Some(id) = options.id {
         if let Some(widget) = tui.get_mut(id) {
             set_widget_options(widget, options);
@@ -264,8 +263,8 @@ async fn set_message(mut ui: Ui, _shell: Shell, lua: Lua, val: LuaValue) -> Resu
     }
 }
 
-async fn clear_messages(mut ui: Ui, _shell: Shell, _lua: Lua, all: bool) -> Result<()> {
-    let tui = &mut ui.borrow_mut().await.tui;
+async fn clear_messages(mut ui: Ui, _lua: Lua, all: bool) -> Result<()> {
+    let tui = &mut ui.inner.borrow_mut().await.tui;
     if all {
         tui.clear_all();
     } else {
@@ -274,12 +273,12 @@ async fn clear_messages(mut ui: Ui, _shell: Shell, _lua: Lua, all: bool) -> Resu
     Ok(())
 }
 
-async fn check_message(ui: Ui, _shell: Shell, _lua: Lua, id: usize) -> Result<bool> {
-    Ok(ui.borrow().await.tui.get_index(id).is_some())
+async fn check_message(ui: Ui, _lua: Lua, id: usize) -> Result<bool> {
+    Ok(ui.inner.borrow().await.tui.get_index(id).is_some())
 }
 
-async fn remove_message(mut ui: Ui, _shell: Shell, _lua: Lua, id: usize) -> Result<()> {
-    let tui = &mut ui.borrow_mut().await.tui;
+async fn remove_message(mut ui: Ui, _lua: Lua, id: usize) -> Result<()> {
+    let tui = &mut ui.inner.borrow_mut().await.tui;
     if tui.remove(id).is_some() {
         tui.dirty = true;
         Ok(())
@@ -298,7 +297,7 @@ struct Highlight {
     namespace: Option<usize>,
 }
 
-async fn add_buf_highlight(mut ui: Ui, _shell: Shell, lua: Lua, val: LuaValue) -> Result<()> {
+async fn add_buf_highlight(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
     let hl: Highlight = lua.from_value(val)?;
     let mut mask = crossterm::style::Attributes::default();
     let mut style = crossterm::style::ContentStyle::new();
@@ -339,7 +338,7 @@ async fn add_buf_highlight(mut ui: Ui, _shell: Shell, lua: Lua, val: LuaValue) -
         None => (),
     }
 
-    ui.borrow_mut().await.buffer.highlights.push(crate::buffer::Highlight{
+    ui.inner.borrow_mut().await.buffer.highlights.push(crate::buffer::Highlight{
         start: hl.start,
         end: hl.end,
         style,
@@ -350,8 +349,8 @@ async fn add_buf_highlight(mut ui: Ui, _shell: Shell, lua: Lua, val: LuaValue) -
     Ok(())
 }
 
-async fn clear_buf_highlights(mut ui: Ui, _shell: Shell, _lua: Lua, namespace: Option<usize>) -> Result<()> {
-    let mut ui = ui.borrow_mut().await;
+async fn clear_buf_highlights(mut ui: Ui, _lua: Lua, namespace: Option<usize>) -> Result<()> {
+    let mut ui = ui.inner.borrow_mut().await;
     if let Some(namespace) = namespace {
         ui.buffer.highlights.retain(|h| h.namespace != namespace);
     } else {
@@ -360,21 +359,21 @@ async fn clear_buf_highlights(mut ui: Ui, _shell: Shell, _lua: Lua, namespace: O
     Ok(())
 }
 
-async fn add_buf_highlight_namespace(mut ui: Ui, _shell: Shell, _lua: Lua, _val: ()) -> Result<usize> {
-    let mut ui = ui.borrow_mut().await;
+async fn add_buf_highlight_namespace(mut ui: Ui, _lua: Lua, _val: ()) -> Result<usize> {
+    let mut ui = ui.inner.borrow_mut().await;
     ui.buffer.highlight_counter += 1;
     Ok(ui.buffer.highlight_counter)
 }
 
-pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
+pub fn init_lua(ui: &Ui) -> Result<()> {
 
-    ui.set_lua_async_fn("set_message", shell, set_message).await?;
-    ui.set_lua_async_fn("check_message", shell, check_message).await?;
-    ui.set_lua_async_fn("remove_message", shell, remove_message).await?;
-    ui.set_lua_async_fn("clear_messages", shell, clear_messages).await?;
-    ui.set_lua_async_fn("add_buf_highlight_namespace", shell, add_buf_highlight_namespace).await?;
-    ui.set_lua_async_fn("add_buf_highlight", shell, add_buf_highlight).await?;
-    ui.set_lua_async_fn("clear_buf_highlights", shell, clear_buf_highlights).await?;
+    ui.set_lua_async_fn("set_message", set_message)?;
+    ui.set_lua_async_fn("check_message", check_message)?;
+    ui.set_lua_async_fn("remove_message", remove_message)?;
+    ui.set_lua_async_fn("clear_messages", clear_messages)?;
+    ui.set_lua_async_fn("add_buf_highlight_namespace", add_buf_highlight_namespace)?;
+    ui.set_lua_async_fn("add_buf_highlight", add_buf_highlight)?;
+    ui.set_lua_async_fn("clear_buf_highlights", clear_buf_highlights)?;
 
     Ok(())
 }

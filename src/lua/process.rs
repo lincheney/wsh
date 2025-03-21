@@ -11,7 +11,6 @@ use tokio::process::Command;
 use tokio::sync::oneshot;
 use serde::{Deserialize, Deserializer, de};
 use crate::ui::Ui;
-use crate::shell::Shell;
 use super::asyncio::{ReadableFile, WriteableFile};
 
 #[derive(Debug, Copy, Clone)]
@@ -136,7 +135,7 @@ enum SpawnArgs {
     Full(FullSpawnArgs),
 }
 
-async fn spawn(mut ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
+async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let args = match lua.from_value(val)? {
         SpawnArgs::Full(args) => args,
         SpawnArgs::Simple(args) => FullSpawnArgs{args, ..std::default::Default::default()},
@@ -164,7 +163,7 @@ async fn spawn(mut ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<LuaM
 
     let lock = if args.foreground {
         // this essentially locks ui
-        let lock = ui.borrow_mut().await.events.lock_owned().await;
+        let lock = ui.inner.borrow_mut().await.events.lock_owned().await;
         ui.deactivate().await?;
         Some(lock)
     } else {
@@ -173,7 +172,7 @@ async fn spawn(mut ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<LuaM
 
     let mut proc = command.spawn()?;
     let pid = proc.id().unwrap();
-    shell.lock().await.add_pid(pid as _);
+    ui.shell.lock().await.add_pid(pid as _);
 
     let stdin  = proc.stdin.take().map(|s| WriteableFile(Some(BufWriter::new(s))));
     let stdout = proc.stdout.take().map(|s| ReadableFile(Some(BufReader::new(s))));
@@ -188,7 +187,7 @@ async fn spawn(mut ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<LuaM
             Ok(e) => Ok(e),
             Err(e) => {
                 if e.raw_os_error().is_some_and(|e| e == nix::errno::Errno::ECHILD as _) {
-                    if let Some(proc) = shell.lock().await.find_pid(pid as _) {
+                    if let Some(proc) = ui.shell.lock().await.find_pid(pid as _) {
                         Ok(std::process::ExitStatus::from_raw(proc.status))
                     } else {
                         Err(e)
@@ -200,7 +199,7 @@ async fn spawn(mut ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<LuaM
         };
 
         if let Some(lock) = lock {
-            ui.report_error(&shell, true, ui.activate().await).await;
+            ui.report_error(true, ui.activate().await).await;
             drop(lock);
         }
         // ignore error
@@ -232,7 +231,7 @@ fn restore_fd<A: AsRawFd>(old: RawFd, new: A) -> Result<()> {
     Ok(())
 }
 
-async fn shell_run(mut ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
+async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let args = match lua.from_value(val)? {
         CommandSpawnArgs::Full(args) => args,
         CommandSpawnArgs::Simple(args) => FullCommandSpawnArgs{args, ..Default::default()},
@@ -242,7 +241,7 @@ async fn shell_run(mut ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<
 
     let mut lock = if args.foreground {
         // this essentially locks ui
-        let lock = ui.borrow_mut().await.events.lock_owned().await;
+        let lock = ui.inner.borrow_mut().await.events.lock_owned().await;
         ui.deactivate().await?;
         Some(lock)
     } else {
@@ -282,7 +281,7 @@ async fn shell_run(mut ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<
         tokio::task::block_in_place(|| {
 
             let code =  {
-                let mut shell = tokio::runtime::Handle::current().block_on(shell.lock());
+                let mut shell = tokio::runtime::Handle::current().block_on(ui.shell.lock());
                 match shell.exec(bstr::BStr::new(&args.args)) {
                     Ok(()) => 0,
                     Err(code) => code,
@@ -292,17 +291,17 @@ async fn shell_run(mut ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<
             tokio::runtime::Handle::current().block_on(async {
                 // restore stdio
                 if let Some(stdin) = stdin.1 {
-                    ui.report_error(&shell, true, restore_fd(stdin, std::io::stdin())).await;
+                    ui.report_error(true, restore_fd(stdin, std::io::stdin())).await;
                 }
                 if let Some(stdout) = stdout.1 {
-                    ui.report_error(&shell, true, restore_fd(stdout, std::io::stdout())).await;
+                    ui.report_error(true, restore_fd(stdout, std::io::stdout())).await;
                 }
                 if let Some(stderr) = stderr.1 {
-                    ui.report_error(&shell, true, restore_fd(stderr, std::io::stderr())).await;
+                    ui.report_error(true, restore_fd(stderr, std::io::stderr())).await;
                 }
 
                 if lock.take().is_some() {
-                    ui.report_error(&shell, true, ui.activate().await).await;
+                    ui.report_error(true, ui.activate().await).await;
                 }
                 // ignore error
                 let _ = sender.send(Ok(code as _));
@@ -319,10 +318,10 @@ async fn shell_run(mut ui: Ui, shell: Shell, lua: Lua, val: LuaValue) -> Result<
     ))?)
 }
 
-pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
+pub fn init_lua(ui: &Ui) -> Result<()> {
 
-    ui.set_lua_async_fn("__spawn", shell, spawn).await?;
-    ui.set_lua_async_fn("__shell_run", shell, shell_run).await?;
+    ui.set_lua_async_fn("__spawn", spawn)?;
+    ui.set_lua_async_fn("__shell_run", shell_run)?;
 
     Ok(())
 }

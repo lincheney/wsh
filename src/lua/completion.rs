@@ -2,7 +2,6 @@ use anyhow::Result;
 use mlua::{prelude::*, UserData, UserDataMethods, MetaMethod};
 use std::sync::Arc;
 use crate::ui::Ui;
-use crate::shell::Shell;
 use crate::utils::*;
 
 struct CompletionStream {
@@ -36,18 +35,18 @@ impl UserData for CompletionMatch {
     }
 }
 
-async fn get_completions(ui: Ui, shell: Shell, _lua: Lua, val: Option<String>) -> Result<CompletionStream> {
+async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<CompletionStream> {
 
     let val = if let Some(val) = val {
         val.into()
     } else {
-        ui.borrow().await.buffer.get_contents().clone()
+        ui.inner.borrow().await.buffer.get_contents().clone()
     };
 
-    let result = shell.lock().await.get_completions(val.as_ref());
+    let result = ui.shell.lock().await.get_completions(val.as_ref());
     let (consumer, producer) = result.map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))?;
 
-    let shell_clone = shell.clone();
+    let shell_clone = ui.shell.clone();
     let mut ui_clone = ui.clone();
     // run this in a thread
     tokio::task::spawn_blocking(move || {
@@ -55,7 +54,7 @@ async fn get_completions(ui: Ui, shell: Shell, _lua: Lua, val: Option<String>) -
         let shell = shell_clone.lock();
         let shell = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
-                ui_clone.borrow_mut().await.threads.insert(tid);
+                ui_clone.inner.borrow_mut().await.threads.insert(tid);
                 shell.await
             })
         });
@@ -63,7 +62,7 @@ async fn get_completions(ui: Ui, shell: Shell, _lua: Lua, val: Option<String>) -
         drop(shell);
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
-                let mut ui = ui_clone.borrow_mut().await;
+                let mut ui = ui_clone.inner.borrow_mut().await;
                 ui.threads.remove(&tid);
                 // ui.activate();
             });
@@ -73,18 +72,18 @@ async fn get_completions(ui: Ui, shell: Shell, _lua: Lua, val: Option<String>) -
     Ok(CompletionStream{inner: consumer})
 }
 
-async fn insert_completion(mut ui: Ui, shell: Shell, _lua: Lua, val: CompletionMatch) -> Result<()> {
-    let buffer = ui.borrow().await.buffer.get_contents().clone();
-    let (buffer, pos) = shell.lock().await.insert_completion(buffer.as_ref(), &val.inner);
-    ui.borrow_mut().await.buffer.set(Some(&buffer), Some(pos));
-    ui.draw(&shell).await?;
+async fn insert_completion(mut ui: Ui, _lua: Lua, val: CompletionMatch) -> Result<()> {
+    let buffer = ui.inner.borrow().await.buffer.get_contents().clone();
+    let (buffer, pos) = ui.shell.lock().await.insert_completion(buffer.as_ref(), &val.inner);
+    ui.inner.borrow_mut().await.buffer.set(Some(&buffer), Some(pos));
+    ui.draw().await?;
     Ok(())
 }
 
-pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
+pub fn init_lua(ui: &Ui) -> Result<()> {
 
-    ui.set_lua_async_fn("get_completions", shell, get_completions).await?;
-    ui.set_lua_async_fn("insert_completion", shell, insert_completion).await?;
+    ui.set_lua_async_fn("get_completions", get_completions)?;
+    ui.set_lua_async_fn("insert_completion", insert_completion)?;
 
     Ok(())
 }

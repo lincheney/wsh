@@ -1,6 +1,5 @@
 use anyhow::Result;
 use crate::ui::Ui;
-use crate::shell::Shell;
 use mlua::prelude::*;
 
 struct LogValue(LuaValue);
@@ -15,10 +14,10 @@ impl std::fmt::Display for LogValue {
     }
 }
 
-pub async fn init_lua(ui: &Ui, _shell: &Shell) -> Result<()> {
-    let ui = ui.borrow().await;
+pub async fn init_lua(ui: &Ui) -> Result<()> {
+    let lua_api = ui.get_lua_api()?;
     let tbl = ui.lua.create_table()?;
-    ui.lua_api.set("log", &tbl)?;
+    lua_api.set("log", &tbl)?;
 
     tbl.set("debug", ui.lua.create_function(|_, val: LuaValue| { log::debug!("{}", LogValue(val)); Ok(()) })?)?;
     tbl.set("info",  ui.lua.create_function(|_, val: LuaValue| {  log::info!("{}", LogValue(val)); Ok(()) })?)?;

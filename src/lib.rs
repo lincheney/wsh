@@ -3,7 +3,7 @@ use std::ops::Deref;
 use std::os::fd::AsRawFd;
 use std::os::raw::{c_char, c_int};
 use std::ptr::null_mut;
-use std::sync::{LazyLock};
+use std::sync::{LazyLock, OnceLock};
 use std::ffi::CString;
 
 mod shell;
@@ -17,6 +17,8 @@ mod prompt;
 mod lua;
 #[macro_use]
 mod utils;
+
+static STATE: OnceLock<ui::Ui> = OnceLock::new();
 
 async fn main() -> Result<()> {
 
@@ -35,28 +37,54 @@ async fn main() -> Result<()> {
 
     let (mut events, event_locker) = event_stream::EventStream::new();
 
-    let shell = shell::Shell::new();
-    let mut ui = ui::Ui::new(&shell, event_locker).await?;
+    let mut ui = ui::Ui::new(event_locker).await?;
     ui.activate().await?;
-    ui.draw(&shell).await?;
+    ui.draw().await?;
+    let _ = STATE.set(ui.clone());
 
     drop(devnull);
     nix::unistd::dup2(old_stdin, 0)?;
     nix::unistd::close(old_stdin)?;
 
-    let result = events.run(&mut ui, &shell).await;
+    let result = events.run(&mut ui).await;
     let _ = ui.deactivate().await;
     result
 }
 
 
-unsafe extern "C" fn handlerfunc(_nam: *mut c_char, _argv: *mut *mut c_char, _options: zsh_sys::Options, _func: c_int) -> c_int {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        if let Err(err) = main().await {
-            log::error!("{:?}", err);
-        }
-    });
+unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _options: zsh_sys::Options, _func: c_int) -> c_int {
+    let argv = c_string_array::CStrArray::from(argv).to_vec();
+    match argv.first().map(|s| s.as_slice()) {
+        Some(b"lua") => {
+            if let Some(ui) = STATE.get() {
+                let result = tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async {
+                        ui.lua.load(argv.get(1).map(|s| s.as_slice()).unwrap_or(b"")).exec_async().await
+                    })
+                });
+                if let Err(err) = result {
+                    eprintln!("{:?}", err);
+                }
+            }
+        },
+        Some(_) => {
+            eprintln!("unknown arguments: {:?}", argv);
+        },
+        None => {
+            // no args
+            if STATE.get().is_some() {
+                eprintln!("wsh is already running");
+            } else {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(async {
+                    if let Err(err) = main().await {
+                        log::error!("{:?}", err);
+                    }
+                });
+            }
+        },
+    }
+
     0
 }
 
@@ -69,7 +97,7 @@ const DEFAULT_BUILTIN: zsh_sys::builtin = zsh_sys::builtin{
     node: zsh_sys::hashnode{ next: null_mut(), nam: null_mut(), flags: 0 },
     handlerfunc: None,
     minargs: 0,
-    maxargs: 0,
+    maxargs: -1,
     funcid: 0,
     optstr: null_mut(),
     defopts: null_mut(),
@@ -80,7 +108,7 @@ static MODULE_FEATURES: LazyLock<Features> = LazyLock::new(|| {
         zsh_sys::builtin{
             node: zsh_sys::hashnode{
                 next: null_mut(),
-                nam: CString::new("wash").unwrap().into_raw(),
+                nam: CString::new("wsh").unwrap().into_raw(),
                 flags: 0,
             },
             handlerfunc: Some(handlerfunc),

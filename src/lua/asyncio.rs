@@ -3,7 +3,6 @@ use anyhow::Result;
 use mlua::{prelude::*, UserData, UserDataMethods};
 use tokio::io::{BufReader, BufWriter, AsyncRead, AsyncWrite, AsyncReadExt, AsyncWriteExt, AsyncBufReadExt};
 use crate::ui::Ui;
-use crate::shell::Shell;
 
 pub struct ReadableFile<T>(pub Option<BufReader<T>>);
 
@@ -97,18 +96,17 @@ impl<T: AsyncWrite + AsRawFd + std::marker::Unpin + mlua::MaybeSend + 'static> U
     }
 }
 
-fn schedule(ui: &Ui, shell: &Shell, _lua: &Lua, cb: LuaFunction) -> Result<()> {
-    ui.call_lua_fn(shell.clone(), false, cb, ());
+fn schedule(ui: &Ui, _lua: &Lua, cb: LuaFunction) -> Result<()> {
+    ui.call_lua_fn(false, cb, ());
     Ok(())
 }
 
-pub async fn init_lua(ui: &Ui, shell: &Shell) -> Result<()> {
+pub async fn init_lua(ui: &Ui) -> Result<()> {
 
-    ui.set_lua_fn("schedule", shell, schedule).await?;
+    ui.set_lua_fn("schedule", schedule)?;
 
-    let ui = ui.borrow().await;
     let tbl = ui.lua.create_table()?;
-    ui.lua_api.set("async", &tbl)?;
+    ui.get_lua_api()?.set("async", &tbl)?;
 
     tbl.set("sleep", ui.lua.create_async_function(|_, millis: u64| async move {
         tokio::time::sleep(std::time::Duration::from_millis(millis)).await;
