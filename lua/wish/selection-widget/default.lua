@@ -48,7 +48,7 @@ local function recalc_filter()
     local filter = buffer:sub(#state.buffer + 1)
 
     if state.filter and (buffer:sub(1, #state.buffer) ~= state.buffer or filter:find('%s$')) then
-        M.stop()
+        state.resume()
         return
     end
 
@@ -123,17 +123,10 @@ local function recalc_filter()
     end
 end
 
-function trigger_change_callback()
-    if state.change_callback and state.real_selected then
-        state.change_callback(state.real_selected, state.lines[state.real_selected])
-    end
-end
-
 -- opts:
 --      filter: bool: whether to do text filtering
 --      reverse: bool: show in reverse
---      accept_callback: function: function to call when selection made
---      change_callback: function: function to call when selection changed
+--      reload_callback: function: function to call on reload
 --      selected: int: selected index
 --      lines: string[]: lines fot text to select
 --      keymaps: bool: set keymaps
@@ -145,13 +138,13 @@ function M.start(opts)
             data = opts.data,
             buffer = wish.get_buffer(),
             filter = true,
+            lines = {},
             event_id = wish.add_event_callback('buffer_change', function()
                 if state.filter then
                     recalc_filter()
                 end
             end),
             keymap_layer = wish.add_keymap_layer(),
-            lines = opts.lines or {},
             selected = 1,
             real_selected = nil,
         }
@@ -164,12 +157,6 @@ function M.start(opts)
         end
     end
 
-    local old_selected = state.selected
-
-    state.accept_callback = opts.accept_callback or state.accept_callback
-    opts.accept_callback = nil
-    state.change_callback = opts.change_callback or state.change_callback
-    opts.change_callback = nil
     state.reload_callback = opts.reload_callback or state.reload_callback
     opts.reload_callback = nil
 
@@ -190,10 +177,24 @@ function M.start(opts)
     opts.id = selection_widget
     selection_widget = wish.set_message(opts)
 
-    recalc_filter()
-    if old_select ~= state.selected then
-        trigger_change_callback()
+    if type(opts.source) == 'function' then
+        wish.schedule(function()
+            for lines in opts.source() do
+                M.add_lines(lines)
+            end
+        end)
+    elseif type(opts.source) == 'table' then
+        M.add_lines(opts.source)
     end
+
+    recalc_filter()
+
+    local resume, yield = wish.async.promise()
+    state.resume = resume
+    local result = yield()
+    wish.pprint(result)
+    M.stop()
+    return result
 end
 
 function M.add_lines(lines)
@@ -201,7 +202,6 @@ function M.add_lines(lines)
         for i = 1, #lines do
             table.insert(state.lines, lines[i])
         end
-        -- state.filter_text = nil
         recalc_filter()
     end
 end
@@ -214,22 +214,25 @@ function M.clear()
 end
 
 function M.accept()
-    if state.accept_callback then
-        state.accept_callback(state.real_selected)
-    end
+    state.resume(state.real_selected)
+end
+
+function M.reload()
+    local callback = state.reload_callback
     M.stop()
+    if callback then
+        callback()
+    end
 end
 
 function M.up()
     state.selected = state.selected - 1
     recalc_filter()
-    trigger_change_callback()
 end
 
 function M.down()
     state.selected = state.selected + 1
     recalc_filter()
-    trigger_change_callback()
 end
 
 function M.is_active()

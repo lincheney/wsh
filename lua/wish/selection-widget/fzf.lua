@@ -3,7 +3,7 @@ local M = {}
 local state = nil
 
 function M.stop()
-    if state then
+    if state and state.proc then
         state.proc.term()
         state.proc.wait()
         state = nil
@@ -52,13 +52,16 @@ function M.start(opts)
     local resume, yield = wish.async.promise()
     state.resume = resume
 
-    if opts.source_func then
+    if type(opts.source) == 'function' then
         wish.schedule(function()
-            for lines in opts.source_func() do
+            for lines in opts.source() do
                 M.add_lines(lines)
             end
             M.add_lines(nil)
         end)
+    elseif type(opts.source) == 'table' then
+        M.add_lines(opts.source)
+        M.add_lines(nil)
     end
 
     yield()

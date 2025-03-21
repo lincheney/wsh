@@ -18,21 +18,16 @@ function show_history(widget, filter, data)
         end
     end
 
-    widget.start{
+    local result = widget.start{
         data = data,
         selected = ix,
-        lines = lines,
+        source = lines,
         reverse = reverse,
         filter = filter,
         no_keymaps = not filter,
-        accept_callback = filter and function(i)
-            wish.goto_history(histnums[i])
-            wish.redraw()
+        reload_callback = filter and function()
+            show_history(widget, filter, data)
         end,
-        -- change_callback = not filter and function(i)
-            -- wish.goto_history(histnums[#history + 1 - i])
-            -- wish.redraw()
-        -- end,
 
         align = 'Left',
         border = {
@@ -43,8 +38,11 @@ function show_history(widget, filter, data)
             },
         },
     }
-    widget.add_lines()
 
+    if filter and result then
+        wish.goto_history(histnums[result])
+        wish.redraw()
+    end
 end
 
 function M.history_up()
