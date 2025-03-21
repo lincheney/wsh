@@ -20,7 +20,7 @@ function show_history(widget, filter, data)
 
     local result = widget.start{
         data = data,
-        selected = ix,
+        selected = filter and math.max(1, ix) or ix,
         source = lines,
         reverse = reverse,
         filter = filter,

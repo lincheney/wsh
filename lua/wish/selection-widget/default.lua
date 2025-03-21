@@ -140,7 +140,7 @@ function M.start(opts)
             filter = true,
             lines = {},
             event_id = wish.add_event_callback('buffer_change', function()
-                if state.filter then
+                if state and state.filter then
                     recalc_filter()
                 end
             end),
@@ -226,7 +226,7 @@ function M.reload()
 end
 
 function M.up()
-    state.selected = state.selected - 1
+    state.selected = math.max(1, state.selected - 1)
     recalc_filter()
 end
 
