@@ -17,24 +17,21 @@ local function show_history(widget, filter, data)
         end
     end
 
-    if reverse then
-        ix = #history + 1 - ix
-    end
-
     widget.start{
         data = data,
         selected = ix,
         lines = lines,
         reverse = reverse,
         filter = filter,
+        keymaps = filter,
         accept_callback = filter and function(i)
             wish.goto_history(histnums[i])
             wish.redraw()
         end,
-        change_callback = not filter and function(i)
-            wish.goto_history(histnums[#history + 1 - i])
-            wish.redraw()
-        end,
+        -- change_callback = not filter and function(i)
+            -- wish.goto_history(histnums[#history + 1 - i])
+            -- wish.redraw()
+        -- end,
 
         align = 'Left',
         border = {
@@ -49,16 +46,24 @@ local function show_history(widget, filter, data)
 
 end
 
-
 function M.history_up()
+    local index = wish.get_history_index()
+    local newindex, value = wish.get_prev_history(index)
+    if index ~= newindex and newindex then
+        wish.goto_history(newindex)
+    end
     show_history(SELECTION.default, false, HISTORY_MENU)
-    SELECTION.default.up()
 end
 
 function M.history_down()
+    local index = wish.get_history_index()
+    local newindex, value = wish.get_next_history(index)
+    if index ~= newindex then
+        wish.goto_history(newindex or index + 1)
+    end
     show_history(SELECTION.default, false, HISTORY_MENU)
-    SELECTION.default.down()
 end
+
 
 function M.history_search()
     show_history(SELECTION.fzf, true, HISTORY_SEARCH)

@@ -23,22 +23,22 @@ local function score(haystack, needle)
     local last = 1
     local start = 0
     local text = {}
-    for i = 1, wish.str.len(y) do
-        local ix = string.find(x, wish.str.get(y, i-1), last, true)
+    for i = 1, wish.str.len(needle) do
+        local ix = string.find(haystack, wish.str.get(needle, i-1), last, true)
         if not ix then
             return
         elseif ix > last then
             if last > 1 then
-                table.insert(text, {text = x:sub(start, last-1), fg = match_fg})
+                table.insert(text, {text = haystack:sub(start, last-1), fg = match_fg})
             end
-            table.insert(text, {text = x:sub(last, ix-1)})
+            table.insert(text, {text = haystack:sub(last, ix-1)})
             start = ix
         end
         last = ix + 1
     end
-    table.insert(text, {text = x:sub(start, last-1), fg = match_fg})
-    if last <= #x then
-        table.insert(text, {text = x:sub(last)})
+    table.insert(text, {text = haystack:sub(start, last-1), fg = match_fg})
+    if last <= #haystack then
+        table.insert(text, {text = haystack:sub(last)})
     end
     return text
 end
@@ -55,14 +55,7 @@ local function recalc_filter()
     if #filter == 0 or not state.filter then
         -- no filtering
         state.filter_text = nil
-        if state.reverse then
-            state.filtered = {}
-            for i = #state.lines, 1, -1 do
-                table.insert(state.filtered, state.lines[i])
-            end
-        else
-            state.filtered = state.lines
-        end
+        state.filtered = state.lines
 
     elseif filter ~= state.filter_text then
         -- text filtering
@@ -91,9 +84,15 @@ local function recalc_filter()
     local bottom = math.min(#state.filtered, state.selected + math.ceil(SIZE / 2) - 1)
     local top = math.max(1, bottom - SIZE + 1)
     bottom = math.min(#state.filtered, top + SIZE - 1)
+    local step = 1
+
+    if state.reverse then
+        top, bottom = bottom, top
+        step = -1
+    end
 
     local text = {}
-    for i = top, bottom do
+    for i = top, bottom, step do
         local bg = i == state.selected and 'darkgrey' or nil
 
         if state.filtered[i].text then
@@ -137,10 +136,11 @@ end
 --      change_callback: function: function to call when selection changed
 --      selected: int: selected index
 --      lines: string[]: lines fot text to select
+--      keymaps: bool: set keymaps
 --      data: any
 function M.start(opts)
 
-    if state and opts.data ~= state.data then
+    if not state or opts.data ~= state.data then
         state = {
             data = opts.data,
             buffer = wish.get_buffer(),
@@ -156,19 +156,29 @@ function M.start(opts)
             real_selected = nil,
         }
 
-        wish.set_keymap('<up>', M.up, state.keymap_layer)
-        wish.set_keymap('<down>', M.down, state.keymap_layer)
-        wish.set_keymap('<tab>', M.accept, state.keymap_layer)
+        if opts.keymaps then
+            wish.set_keymap('<up>', M.up, state.keymap_layer)
+            wish.set_keymap('<down>', M.down, state.keymap_layer)
+            wish.set_keymap('<tab>', M.accept, state.keymap_layer)
+        end
     end
 
     local old_selected = state.selected
 
     state.accept_callback = opts.accept_callback or state.accept_callback
     state.change_callback = opts.change_callback or state.change_callback
+    if opts.filter ~= nil then
+        state.filter = opts.filter
+    end
+    if opts.reverse ~= nil then
+        state.reverse = opts.reverse
+    end
     state.selected = opts.selected or state.selected
 
     opts.height = 'max:'..(SIZE + 2)
     opts.hidden = false
+    opts.accept_callback = nil
+    opts.change_callback = nil
 
     if selection_widget and not wish.check_message(selection_widget) then
         selection_widget = nil
