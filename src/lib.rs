@@ -64,16 +64,19 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
                 });
                 if let Err(err) = result {
                     eprintln!("{:?}", err);
+                    return 1;
                 }
             }
         },
         Some(_) => {
             eprintln!("unknown arguments: {:?}", argv);
+            return 1;
         },
         None => {
             // no args
             if STATE.get().is_some() {
                 eprintln!("wsh is already running");
+                return 1;
             } else {
                 let rt = tokio::runtime::Runtime::new().unwrap();
                 rt.block_on(async {
