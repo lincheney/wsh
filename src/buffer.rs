@@ -1,3 +1,4 @@
+use std::ops::Range;
 use bstr::{BString, ByteSlice, BStr};
 use anyhow::Result;
 use unicode_width::UnicodeWidthStr;
@@ -15,6 +16,28 @@ pub struct Highlight {
     pub style: ContentStyle,
     pub attribute_mask: Attributes,
     pub namespace: usize,
+}
+
+impl Highlight {
+    fn shift(&mut self, range: Range<usize>, new_end: usize) {
+        if range.end <= self.start {
+            self.start = self.start + new_end - range.end;
+        } else if range.start <= self.start {
+            self.start = new_end;
+        }
+
+        if range.end <= self.end {
+            self.end = self.end + new_end - range.end;
+        } else if range.start <= self.end {
+            self.end = new_end;
+        }
+
+        self.start = self.start.min(self.end);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.start == self.end
+    }
 }
 
 struct HighlightStack<'a>(Vec<&'a Highlight>);
@@ -175,13 +198,6 @@ impl Buffer {
         self.dirty = true;
     }
 
-    pub fn mutate<F: FnOnce(&mut BString, &mut usize)->R, R>(&mut self, func: F) -> R {
-        let value = func(&mut self.contents, &mut self.cursor);
-        self.len = None;
-        self.fix_cursor();
-        value
-    }
-
     pub fn get_contents(&self) -> &BString {
         &self.contents
     }
@@ -194,6 +210,8 @@ impl Buffer {
         if let Some(contents) = contents {
             self.contents.resize(contents.len(), 0);
             self.contents.copy_from_slice(contents);
+            // all highlights are now invalid!
+            self.highlights.clear();
             self.len = None;
         }
         if let Some(cursor) = cursor {
@@ -212,13 +230,18 @@ impl Buffer {
 
     pub fn splice_at_cursor(&mut self, data: &[u8], replace_len: Option<usize>) {
         let start = self.cursor_byte_pos();
-        if let Some(replace_len) = replace_len {
-            let end = self.contents.grapheme_indices().take_while(|(s, _, _)| *s < start  + replace_len).count();
-            self.contents.splice(start .. end, data.iter().copied());
+        let end = if let Some(replace_len) = replace_len {
+            self.byte_pos(self.cursor + replace_len)
         } else {
-            self.contents.splice(start .. , data.iter().copied());
-        }
+            self.contents.len()
+        };
+        self.contents.splice(start .. end, data.iter().copied());
         self.len = None;
+
+        self.highlights.retain_mut(|hl| {
+            hl.shift(start .. end, start + data.len());
+            !hl.is_empty()
+        });
 
         // calculate the new cursor
         let end = start + data.len();
@@ -254,12 +277,16 @@ impl Buffer {
         self.height = 0;
     }
 
-    pub fn cursor_byte_pos(&mut self) -> usize {
+    fn byte_pos(&self, pos: usize) -> usize {
         self.contents
             .grapheme_indices()
-            .nth(self.cursor)
+            .nth(pos)
             .map(|(s, _, _)| s)
             .unwrap_or_else(|| self.contents.len())
+    }
+
+    pub fn cursor_byte_pos(&self) -> usize {
+        self.byte_pos(self.cursor)
     }
 
     pub fn draw(
