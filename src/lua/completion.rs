@@ -78,19 +78,24 @@ async fn insert_completion(mut ui: Ui, _lua: Lua, val: CompletionMatch) -> Resul
 
     // see if this can be done as an insert
     {
-        let buffer = &mut ui.inner.borrow_mut().await.buffer;
-        let cursor = buffer.cursor_byte_pos();
-        let contents = buffer.get_contents();
+        let clone = ui.clone();
+
+        let mut ui = ui.inner.borrow_mut().await;
+        let cursor = ui.buffer.cursor_byte_pos();
+        let contents = ui.buffer.get_contents();
         let (prefix, suffix) = &contents.split_at_checked(cursor).unwrap_or((contents, b""));
 
         if new_buffer.starts_with(prefix) && new_buffer.ends_with(suffix) {
             let new_buffer = &new_buffer[prefix.len() .. new_buffer.len() - suffix.len()];
-            buffer.insert_at_cursor(new_buffer);
-            if buffer.get_cursor() != new_pos {
-                buffer.set_cursor(new_pos);
+            ui.buffer.insert_at_cursor(new_buffer);
+            if ui.buffer.get_cursor() != new_pos {
+                ui.buffer.set_cursor(new_pos);
             }
         } else {
-            buffer.set(Some(&new_buffer), Some(new_pos));
+            ui.buffer.set(Some(&new_buffer), Some(new_pos));
+        }
+        if ui.event_callbacks.has_buffer_change_callbacks() {
+            ui.event_callbacks.trigger_buffer_change_callbacks(&clone, &clone.lua, ());
         }
     }
 
