@@ -1,40 +1,46 @@
 local M = {}
 local SELECTION = require('wish/selection-widget')
 
-function M.complete()
+local matches = nil
+
+local function iter_completions()
+    matches = {}
+
     local comp = wish.get_completions()
-    local matches = {}
+    return function()
+        while true do
+            local chunk = comp()
+            if not chunk then
+                return
+            end
 
-    for chunk in comp do
+            local filtered_chunk = {}
+            for i = 1, #chunk do
+                local text = tostring(chunk[i])
+                if text then
+                    table.insert(matches, chunk[i])
+                    table.insert(filtered_chunk, {text = text})
+                end
+            end
 
-        local filtered_chunk = {}
-        for i = 1, #chunk do
-            local text = tostring(chunk[i])
-            if text then
-                table.insert(matches, chunk[i])
-                table.insert(filtered_chunk, {text = text})
+            if #filtered_chunk > 0 then
+                return filtered_chunk
             end
         end
-
-        if #filtered_chunk > 0 then
-            if not SELECTION.is_active() then
-                SELECTION.start{
-                    accept_callback = function(i)
-                        wish.insert_completion(matches[i])
-                        wish.redraw()
-                    end,
-                }
-            end
-            SELECTION.add_lines(filtered_chunk)
-        end
-
     end
+end
 
-    if #matches == 0 then
+function M.complete()
+    local result = SELECTION.start{
+        source_func = iter_completions,
+    }
+
+    if result then
+        wish.insert_completion(matches[result])
+        wish.redraw()
+    elseif #matches == 0 then
         wish.set_message{text='No completion matches', fg='lightred'}
         wish.redraw()
-    else
-        SELECTION.add_lines(nil)
     end
 
 end

@@ -10,13 +10,7 @@ function M.stop()
     end
 end
 
-function M.start(opts)
-    if state and opts.data == state.data then
-        state.accept_callback = opts.accept_callback or state.accept_callback
-        return
-    end
-    M.stop()
-
+local function start_proc()
     -- go to last line
     wish.set_cursor(wish.str.len(wish.get_buffer()))
     wish.redraw()
@@ -24,50 +18,71 @@ function M.start(opts)
     io.stdout:write('\r\n')
     io.stdout:flush()
 
+    state.proc = wish.async.spawn{
+        args = {
+            'fzf',
+            '--read0',
+            '--exit-0',
+            '--height=40%',
+            '--reverse',
+            '--with-nth=2..',
+        },
+        foreground = true,
+        stdin = 'piped',
+        stdout = 'piped',
+    }
+    state.cursor = wish.get_cursor()
+    state.resume()
+end
+
+function M.start(opts)
+    if state and opts.data == state.data then
+        state.accept_callback = opts.accept_callback or state.accept_callback
+        return
+    end
+    M.stop()
+
     state = {
         data = opts.data,
         count = 0,
-        proc = wish.async.spawn{
-            args = {
-                'fzf',
-                '--read0',
-                '--exit-0',
-                '--height=40%',
-                '--reverse',
-                '--with-nth=2..',
-            },
-            foreground = true,
-            stdin = 'piped',
-            stdout = 'piped',
-        },
-        accept_callback = opts.accept_callback,
-        cursor = wish.get_cursor(),
+        proc = nil,
+        no_more_input = false,
     }
 
-    if opts.lines then
-        M.add_lines(opts.lines)
+    local resume, yield = wish.async.promise()
+    state.resume = resume
+
+    if opts.source_func then
+        wish.schedule(function()
+            for lines in opts.source_func() do
+                M.add_lines(lines)
+            end
+            M.add_lines(nil)
+        end)
     end
 
-    -- and wait for the proc to finish
-    wish.schedule(function()
-        if state then
-            local code = state.proc:wait()
-            local num = tonumber(state.proc.stdout:read_all():match('^(%d+)\t'))
-            -- go back up
-            io.stdout:write('\x1b[A')
-            io.stdout:flush()
+    yield()
 
-            wish.redraw{buffer=true, messages=true}
-            wish.set_cursor(state.cursor)
-            wish.redraw()
-
-            if state.accept_callback and code == 0 and num then
-                state.accept_callback(num)
-            end
-            state = nil
+    local result = nil
+    if state.proc then
+        -- and wait for the proc to finish
+        local code = state.proc:wait()
+        if code == 0 then
+            result = tonumber(state.proc.stdout:read_all():match('^(%d+)\t'))
         end
-    end)
 
+        -- go back up
+        io.stdout:write('\x1b[A')
+        io.stdout:flush()
+
+        wish.redraw{buffer=true, messages=true}
+        wish.set_cursor(state.cursor)
+        wish.redraw()
+    end
+
+    state = nil
+
+    return result
 end
 
 function M.add_lines(lines)
@@ -77,10 +92,20 @@ function M.add_lines(lines)
             table.insert(str, string.format('%i\t%s\0', state.count + i, lines[i].text))
         end
         state.count = state.count + #lines
+
+        if not state.proc then
+            start_proc()
+        end
         state.proc.stdin:write(table.concat(str, ''))
+
     else
-        -- close stdin
-        state.proc.stdin:close()
+        state.no_more_input = true
+        if state.proc then
+            -- close stdin
+            state.proc.stdin:close()
+        else
+            state.resume()
+        end
     end
 end
 

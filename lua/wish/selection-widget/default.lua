@@ -156,17 +156,23 @@ function M.start(opts)
             real_selected = nil,
         }
 
-        if opts.keymaps then
+        if not opts.no_keymaps then
             wish.set_keymap('<up>', M.up, state.keymap_layer)
             wish.set_keymap('<down>', M.down, state.keymap_layer)
             wish.set_keymap('<tab>', M.accept, state.keymap_layer)
+            wish.set_keymap('<c-r>', M.reload, state.keymap_layer)
         end
     end
 
     local old_selected = state.selected
 
     state.accept_callback = opts.accept_callback or state.accept_callback
+    opts.accept_callback = nil
     state.change_callback = opts.change_callback or state.change_callback
+    opts.change_callback = nil
+    state.reload_callback = opts.reload_callback or state.reload_callback
+    opts.reload_callback = nil
+
     if opts.filter ~= nil then
         state.filter = opts.filter
     end
@@ -177,8 +183,6 @@ function M.start(opts)
 
     opts.height = 'max:'..(SIZE + 2)
     opts.hidden = false
-    opts.accept_callback = nil
-    opts.change_callback = nil
 
     if selection_widget and not wish.check_message(selection_widget) then
         selection_widget = nil

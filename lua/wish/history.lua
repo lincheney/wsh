@@ -4,7 +4,8 @@ local SELECTION = require('wish/selection-widget')
 local HISTORY_MENU = {}
 local HISTORY_SEARCH = {}
 
-local function show_history(widget, filter, data)
+local show_history
+function show_history(widget, filter, data)
     local index, histnums, history = wish.get_history()
     local reverse = not filter
 
@@ -23,7 +24,7 @@ local function show_history(widget, filter, data)
         lines = lines,
         reverse = reverse,
         filter = filter,
-        keymaps = filter,
+        no_keymaps = not filter,
         accept_callback = filter and function(i)
             wish.goto_history(histnums[i])
             wish.redraw()
@@ -66,7 +67,7 @@ end
 
 
 function M.history_search()
-    show_history(SELECTION.fzf, true, HISTORY_SEARCH)
+    show_history(SELECTION, true, HISTORY_SEARCH)
 end
 
 return M

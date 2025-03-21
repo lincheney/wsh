@@ -101,6 +101,30 @@ fn schedule(ui: &Ui, _lua: &Lua, cb: LuaFunction) -> Result<()> {
     Ok(())
 }
 
+struct Sender(Option<tokio::sync::oneshot::Sender<LuaValue>>);
+struct Receiver(Option<tokio::sync::oneshot::Receiver<LuaValue>>);
+
+impl UserData for Sender {
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_meta_method_mut(mlua::MetaMethod::Call, |_lua, sender, val| {
+            if let Some(sender) = sender.0.take() {
+                let _ = sender.send(val);
+            }
+            Ok(())
+        });
+    }
+}
+impl UserData for Receiver {
+    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_async_meta_method_mut(mlua::MetaMethod::Call, |_lua, mut receiver, ()| async move {
+            if let Some(receiver) = receiver.0.take() {
+                receiver.await.map_err(|e| LuaError::RuntimeError(format!("{}", e)))?;
+            }
+            Ok(())
+        });
+    }
+}
+
 pub async fn init_lua(ui: &Ui) -> Result<()> {
 
     ui.set_lua_fn("schedule", schedule)?;
@@ -111,6 +135,15 @@ pub async fn init_lua(ui: &Ui) -> Result<()> {
     tbl.set("sleep", ui.lua.create_async_function(|_, millis: u64| async move {
         tokio::time::sleep(std::time::Duration::from_millis(millis)).await;
         Ok(())
+    })?)?;
+
+    // this exists bc mlua calls coroutine.resume all the time so we can't use it
+    tbl.set("promise", ui.lua.create_function(|lua, ()| {
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        Ok(lua.pack_multi((
+            Sender(Some(sender)),
+            Receiver(Some(receiver)),
+        ))?)
     })?)?;
 
     Ok(())
