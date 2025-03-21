@@ -166,7 +166,7 @@ impl ShellInner {
         zsh::Variable::set(name, value)
     }
 
-    pub fn unset_var(&mut self, name: &BStr) -> () {
+    pub fn unset_var(&mut self, name: &BStr) {
         zsh::Variable::unset(name)
     }
 

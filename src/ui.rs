@@ -128,7 +128,7 @@ impl Ui {
         let ui = Self{
             inner: ThreadsafeUiInner(Arc::new(RwLock::new(ui))),
             lua,
-            shell: shell,
+            shell,
         };
         ui.init_lua().await?;
 
