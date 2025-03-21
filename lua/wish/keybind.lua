@@ -1,32 +1,25 @@
 wish.set_keymap('<bs>', function()
     local cursor = wish.get_cursor()
     if cursor > 0 then
-        wish.set_buffer(wish.str.set(wish.get_buffer(), nil, cursor-1, cursor))
         wish.set_cursor(cursor-1)
+        wish.set_buffer('', 1)
     end
 end)
 
 wish.set_keymap('<delete>', function()
-    local cursor = wish.get_cursor()
-    local buffer = wish.get_buffer()
-    buffer = wish.str.set(buffer, nil, cursor, cursor+1)
-    wish.set_buffer(buffer)
+    wish.set_buffer('', 1)
 end)
 
 wish.set_keymap('<c-u>', function()
     local cursor = wish.get_cursor()
     if cursor > 0 then
-        wish.set_buffer(wish.str.set(wish.get_buffer(), nil, 0, cursor))
         wish.set_cursor(0)
+        wish.set_buffer('', cursor)
     end
 end)
 
 wish.set_keymap('<c-k>', function()
-    local cursor = wish.get_cursor()
-    local buffer = wish.get_buffer()
-    buffer = wish.str.set(buffer, nil, cursor, #buffer)
-    wish.set_buffer(buffer)
-    wish.set_cursor(wish.str.len(buffer))
+    wish.set_buffer('')
 end)
 
 wish.set_keymap('<c-a>',   function() wish.set_cursor(0) end)
@@ -59,9 +52,9 @@ wish.set_keymap('<c-w>', function()
         local buffer = wish.get_buffer()
         local start = buffer:sub(1, cursor):find('%S+%s*$')
         if start then
-            start = wish.str.to_byte_pos(buffer, start - 1)
-            wish.set_buffer(wish.str.set(buffer, nil, start, cursor))
+            start = wish.str.from_byte_pos(buffer, start - 1)
             wish.set_cursor(start)
+            wish.set_buffer('', cursor - start)
         end
     end
 end)
@@ -72,9 +65,9 @@ wish.set_keymap('<a-bs>', function()
         local buffer = wish.get_buffer()
         local start = buffer:sub(1, cursor):find('[^/%s]+[/%s]*$')
         if start then
-            start = wish.str.to_byte_pos(buffer, start - 1)
-            wish.set_buffer(wish.str.set(buffer, nil, start, cursor))
+            start = wish.str.from_byte_pos(buffer, start - 1)
             wish.set_cursor(start)
+            wish.set_buffer('', cursor - start)
         end
     end
 end)
@@ -133,9 +126,7 @@ wish.add_event_callback('paste', function(data)
 
         local prefix = wish.str.get(buffer, 0, cursor) or ''
         local suffix = wish.str.get(buffer, cursor, buflen) or ''
-
-        wish.set_buffer(prefix .. data .. suffix)
-        wish.set_cursor(cursor + len)
+        wish.set_buffer(data, 0)
 
         -- flash blue for a bit
         wish.add_buf_highlight{namespace = PASTE_NS, fg = 'blue', start = #prefix, finish = #prefix + len}

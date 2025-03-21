@@ -210,15 +210,24 @@ impl Buffer {
         self.set(None, Some(cursor));
     }
 
-    pub fn insert(&mut self, data: &[u8]) {
-        let byte_pos = self.cursor_byte_pos();
-        self.contents.splice(byte_pos .. byte_pos, data.iter().copied());
+    pub fn splice_at_cursor(&mut self, data: &[u8], replace_len: Option<usize>) {
+        let start = self.cursor_byte_pos();
+        if let Some(replace_len) = replace_len {
+            let end = self.contents.grapheme_indices().take_while(|(s, _, _)| *s < start  + replace_len).count();
+            self.contents.splice(start .. end, data.iter().copied());
+        } else {
+            self.contents.splice(start .. , data.iter().copied());
+        }
         self.len = None;
 
         // calculate the new cursor
-        let byte_pos = byte_pos + data.len();
-        self.cursor = self.contents.grapheme_indices().take_while(|(s, _, _)| *s < byte_pos).count();
+        let end = start + data.len();
+        self.cursor = self.contents.grapheme_indices().take_while(|(s, _, _)| *s < end).count();
         self.fix_cursor();
+    }
+
+    pub fn insert_at_cursor(&mut self, data: &[u8]) {
+        self.splice_at_cursor(data, Some(0));
     }
 
     pub fn save(&mut self) {
