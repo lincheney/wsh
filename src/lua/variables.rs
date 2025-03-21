@@ -22,11 +22,14 @@ async fn set_var(ui: Ui, lua: Lua, (name, val): (BString, LuaValue)) -> Result<(
         LuaValue::Number(val) => val.into(),
         LuaValue::String(val) => BString::new(val.as_bytes().to_owned()).into(),
         LuaValue::Table(val) => {
-            if val.raw_len() == val.sequence_values::<LuaValue>().count() {
-                let val = Vec::<BString>::from_lua(LuaValue::Table(val), &lua)?;
+            let mut size = 0;
+            val.for_each(|_: LuaValue, _: LuaValue| { size += 1; Ok(()) })?;
+
+            if val.raw_len() != size {
+                let val = HashMap::<BString, BString>::from_lua(LuaValue::Table(val), &lua)?;
                 val.into()
             } else {
-                let val = HashMap::<BString, BString>::from_lua(LuaValue::Table(val), &lua)?;
+                let val = Vec::<BString>::from_lua(LuaValue::Table(val), &lua)?;
                 val.into()
             }
         },

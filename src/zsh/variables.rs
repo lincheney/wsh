@@ -98,7 +98,7 @@ impl Variable {
             Value::HashMap(value) => {
                 let value: Vec<BString> = value.into_iter().flat_map(|(k, v)| [k, v]).collect();
                 let value: CStringArray = value.into();
-                unsafe{ zsh_sys::setaparam(name, value.into_ptr()) }
+                unsafe{ zsh_sys::sethparam(name, value.into_ptr()) }
             },
             Value::Array(value) => {
                 let value: CStringArray = value.into();

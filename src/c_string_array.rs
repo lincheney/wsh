@@ -39,7 +39,10 @@ impl CStrArray {
 
 impl CStringArray {
     pub fn into_ptr(self) -> *mut *mut c_char {
-        self.ptr
+        let ptr = self.ptr;
+        // leak it
+        std::mem::forget(self);
+        ptr
     }
 }
 
@@ -71,19 +74,6 @@ impl From<*mut *mut c_char> for CStrArray {
     }
 }
 
-impl From<Vec<BString>> for CStrArray {
-    fn from(vec: Vec<BString>) -> Self {
-        unsafe {
-            let ptr: *mut *mut c_char = zsh_sys::zalloc(std::mem::size_of::<*mut c_char>() * (vec.len() + 1)) as _;
-            for (i, string) in vec.iter().enumerate() {
-                *ptr.add(i) = zsh_sys::ztrduppfx(string.as_ptr() as _, string.len() as _);
-            }
-            *ptr.add(vec.len()) = std::ptr::null_mut();
-            Self{ ptr }
-        }
-    }
-}
-
 impl From<CStrArray> for CStringArray {
     fn from(inner: CStrArray) -> Self {
         Self{ inner }
@@ -98,6 +88,14 @@ impl From<*mut *mut c_char> for CStringArray {
 
 impl From<Vec<BString>> for CStringArray {
     fn from(vec: Vec<BString>) -> Self {
-        Self{ inner: vec.into() }
+        unsafe {
+            let ptr: *mut *mut c_char = zsh_sys::zalloc(std::mem::size_of::<*mut c_char>() * (vec.len() + 1)) as _;
+            for (i, string) in vec.iter().enumerate() {
+                *ptr.add(i) = zsh_sys::ztrduppfx(string.as_ptr() as _, string.len() as _);
+            }
+            *ptr.add(vec.len()) = std::ptr::null_mut();
+            Self{ inner: ptr.into() }
+        }
     }
 }
+
