@@ -140,7 +140,7 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
                     } else if *c == bindings::Meta {
                         meta = true;
                         has_meta = true;
-                    } else if *c >= bindings::token::Pound as _ { // token
+                    } else if *c >= bindings::token::Pound as _ && *c < bindings::token::Nularg as _ { // token
 
                         if i > slice_start {
                             push_token!(&tokstr[slice_start..i], kind, has_meta);

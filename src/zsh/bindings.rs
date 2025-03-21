@@ -219,5 +219,7 @@ pub enum token {
     Dnull      = 0x9e,
     Bnull      = 0x9f,
 
-    Bnullkeep  = 0xa0
+    Bnullkeep  = 0xa0,
+
+    Nularg     = 0xa1,
 }
