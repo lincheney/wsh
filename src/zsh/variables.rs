@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::ffi::{CString, CStr};
 use std::os::raw::{c_int, c_char};
 use anyhow::Result;
-use crate::c_string_array::CStringArray;
+use crate::c_string_array::{CStringArray, CStrArray};
 use super::ZString;
 use bstr::{BStr, BString};
 
@@ -166,7 +166,7 @@ impl Variable {
 
     pub fn try_as_array(&mut self) -> Option<Vec<BString>> {
         if self.value.isarr != 0 {
-            let array: CStringArray = unsafe{ zsh_sys::getarrvalue(&mut self.value as *mut _) }.into();
+            let array: CStrArray = unsafe{ zsh_sys::getarrvalue(&mut self.value as *mut _) }.into();
             Some(array.to_vec())
         } else {
             None
@@ -179,8 +179,8 @@ impl Variable {
             let mut hashmap = HashMap::new();
             unsafe {
                 let param = (*self.param().gsu.h).getfn.ok_or(anyhow::anyhow!("gsu.h.getfn is missing"))?(self.param());
-                let keys: CStringArray = zsh_sys::paramvalarr(param, zsh_sys::SCANPM_WANTKEYS as c_int).into();
-                let values: CStringArray = zsh_sys::paramvalarr(param, zsh_sys::SCANPM_WANTVALS as c_int).into();
+                let keys: CStrArray = zsh_sys::paramvalarr(param, zsh_sys::SCANPM_WANTKEYS as c_int).into();
+                let values: CStrArray = zsh_sys::paramvalarr(param, zsh_sys::SCANPM_WANTVALS as c_int).into();
 
                 let keys = keys.iter().map(Some).chain(std::iter::repeat(None));
                 let values = values.iter().map(Some).chain(std::iter::repeat(None));
