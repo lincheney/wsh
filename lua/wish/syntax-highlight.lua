@@ -4,6 +4,7 @@ local PUNCTUATION = {fg = 'grey', bold = true}
 local NEW_COMMAND = {fg = 'yellow'}
 local STRING = {}
 local KEYWORD = {fg = 'green', bold = true}
+local NAMESPACE = wish.add_buf_highlight_namespace()
 
 local highlights = {
     SEPER = NEW_COMMAND,
@@ -46,7 +47,7 @@ wish.add_event_callback('buffer_change', function()
         -- is this going to be slow? do we need a debounce or something?
         local complete, starts, ends, kinds = wish.parse(buffer, true)
 
-        wish.clear_buf_highlights()
+        wish.clear_buf_highlights(NAMESPACE)
         for i = 1, #kinds do
             local hl = highlights[kinds[i]]
             if not hl and kinds[i] ~= 'STRING' and not buffer:sub(starts[i]+1, ends[i]):find('%w') then
@@ -59,7 +60,8 @@ wish.add_event_callback('buffer_change', function()
                     arg[k] = v
                 end
                 arg.start = starts[i]
-                arg['end'] = ends[i]
+                arg.finish = ends[i]
+                arg.namespace = NAMESPACE
                 wish.add_buf_highlight(arg)
             end
         end

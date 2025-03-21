@@ -122,6 +122,7 @@ wish.add_event_callback('key', function(arg)
     -- error("got a key " .. arg.key)
 end)
 
+local PASTE_NS = wish.add_buf_highlight_namespace()
 wish.add_event_callback('paste', function(data)
     -- insert this into the buffer
     if #data > 0 then
@@ -129,8 +130,18 @@ wish.add_event_callback('paste', function(data)
         local buffer = wish.get_buffer()
         local len = wish.str.len(data)
         local buflen = wish.str.len(buffer)
-        wish.set_buffer((wish.str.get(buffer, 0, cursor) or '') .. data .. (wish.str.get(buffer, cursor, buflen) or ''))
+
+        local prefix = wish.str.get(buffer, 0, cursor) or ''
+        local suffix = wish.str.get(buffer, cursor, buflen) or ''
+
+        wish.set_buffer(prefix .. data .. suffix)
         wish.set_cursor(cursor + len)
+
+        -- flash blue for a bit
+        wish.add_buf_highlight{namespace = PASTE_NS, fg = 'blue', start = #prefix, finish = #prefix + len}
         wish.redraw()
+        wish.async.sleep(500)
+        wish.clear_buf_highlights(PASTE_NS)
+        wish.redraw{buffer = true}
     end
 end)

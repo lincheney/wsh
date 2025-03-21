@@ -1,6 +1,5 @@
 local M = {}
 local SELECTION = require('wish/selection-widget')
-local COMPLETION = {}
 
 function M.complete()
     local comp = wish.get_completions()

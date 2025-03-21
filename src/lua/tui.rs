@@ -291,7 +291,7 @@ async fn remove_message(mut ui: Ui, _lua: Lua, id: usize) -> Result<()> {
 #[serde(default)]
 struct Highlight {
     start: usize,
-    end: usize,
+    finish: usize,
     #[serde(flatten)]
     style: StyleOptions,
     namespace: Option<usize>,
@@ -340,7 +340,7 @@ async fn add_buf_highlight(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
 
     ui.inner.borrow_mut().await.buffer.highlights.push(crate::buffer::Highlight{
         start: hl.start,
-        end: hl.end,
+        end: hl.finish,
         style,
         attribute_mask: mask,
         namespace: hl.namespace.unwrap_or(0),
