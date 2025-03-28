@@ -187,6 +187,12 @@ function M.start(opts)
         wish.schedule(function()
             for lines in source() do
                 M.add_lines(lines)
+                if not M.is_active() then
+                    break
+                end
+            end
+            if M.is_active() and #state.lines == 0 then
+                state.resume()
             end
         end)
     elseif type(source) == 'table' then
