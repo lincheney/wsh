@@ -27,11 +27,16 @@ impl Shell {
     }
 }
 
+#[derive(Clone)]
 pub struct CompletionStarter(Arc<std::sync::Mutex<zsh::completion::Streamer>>);
 
 impl CompletionStarter {
     pub fn start(&self, _shell: &ShellInner) {
         zsh::completion::_get_completions(&self.0);
+    }
+
+    pub fn cancel(&self) -> anyhow::Result<()> {
+        self.0.lock().unwrap().cancel()
     }
 }
 

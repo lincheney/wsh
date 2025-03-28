@@ -6,13 +6,15 @@ local state = nil
 local match_fg = 'yellow'
 
 function M.stop()
-    wish.remove_event_callback(state.event_id)
-    wish.del_keymap_layer(state.keymap_layer)
-    state = nil
+    if M.is_active() then
+        wish.remove_event_callback(state.event_id)
+        wish.del_keymap_layer(state.keymap_layer)
+        state = nil
 
-    if selection_widget and wish.check_message(selection_widget) then
-        wish.set_message{id = selection_widget, hidden = true}
-        wish.redraw()
+        if selection_widget and wish.check_message(selection_widget) then
+            wish.set_message{id = selection_widget, hidden = true}
+            wish.redraw()
+        end
     end
 end
 
@@ -133,7 +135,7 @@ end
 --      data: any
 function M.start(opts)
 
-    if not state or opts.data ~= state.data then
+    if not M.is_active() or opts.data ~= state.data then
         state = {
             data = opts.data,
             buffer = wish.get_buffer(),
@@ -153,6 +155,7 @@ function M.start(opts)
             wish.set_keymap('<up>', M.up, state.keymap_layer)
             wish.set_keymap('<down>', M.down, state.keymap_layer)
             wish.set_keymap('<tab>', M.accept, state.keymap_layer)
+            wish.set_keymap('<esc>', M.cancel, state.keymap_layer)
             wish.set_keymap('<c-r>', M.reload, state.keymap_layer)
         end
     end
@@ -175,16 +178,19 @@ function M.start(opts)
         selection_widget = nil
     end
     opts.id = selection_widget
+
+    local source = opts.source
+    opts.source = nil
     selection_widget = wish.set_message(opts)
 
-    if type(opts.source) == 'function' then
+    if type(source) == 'function' then
         wish.schedule(function()
-            for lines in opts.source() do
+            for lines in source() do
                 M.add_lines(lines)
             end
         end)
-    elseif type(opts.source) == 'table' then
-        M.add_lines(opts.source)
+    elseif type(source) == 'table' then
+        M.add_lines(source)
     end
 
     recalc_filter()
@@ -198,7 +204,7 @@ function M.start(opts)
 end
 
 function M.add_lines(lines)
-    if lines then
+    if M.is_active() and lines then
         for i = 1, #lines do
             table.insert(state.lines, lines[i])
         end
@@ -207,32 +213,48 @@ function M.add_lines(lines)
 end
 
 function M.clear()
-    for i = #state.lines, 1, -1 do
-        state.lines[i] = nil
+    if M.is_active() then
+        for i = #state.lines, 1, -1 do
+            state.lines[i] = nil
+        end
+        recalc_filter()
     end
-    recalc_filter()
 end
 
 function M.accept()
-    state.resume(state.real_selected)
+    if M.is_active() then
+        state.resume(state.real_selected)
+    end
+end
+
+function M.cancel()
+    if M.is_active() then
+        state.resume()
+    end
 end
 
 function M.reload()
-    local callback = state.reload_callback
-    M.stop()
-    if callback then
-        callback()
+    if M.is_active() then
+        local callback = state.reload_callback
+        M.stop()
+        if callback then
+            callback()
+        end
     end
 end
 
 function M.up()
-    state.selected = math.max(1, state.selected - 1)
-    recalc_filter()
+    if M.is_active() then
+        state.selected = math.max(1, state.selected - 1)
+        recalc_filter()
+    end
 end
 
 function M.down()
-    state.selected = state.selected + 1
-    recalc_filter()
+    if M.is_active() then
+        state.selected = state.selected + 1
+        recalc_filter()
+    end
 end
 
 function M.is_active()

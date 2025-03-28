@@ -34,16 +34,6 @@ impl StreamConsumer {
             None
         }
     }
-
-    pub fn cancel(&self) -> anyhow::Result<()> {
-        let parent = self.parent.lock().unwrap();
-        if !parent.finished {
-            if let Some(pid) = parent.thread {
-                nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGINT)?;
-            }
-        }
-        Ok(())
-    }
 }
 
 impl std::future::Future for WaitForChunk<'_> {
@@ -69,7 +59,7 @@ pub struct Streamer {
     finished: bool,
     matches: Vec<Arc<bindings::cmatch>>,
     wakers: Vec<Waker>,
-    thread: Option<nix::unistd::Pid>,
+    thread: Option<nix::sys::pthread::Pthread>,
 }
 unsafe impl Send for Streamer {}
 
@@ -85,6 +75,17 @@ impl Streamer {
         for waker in self.wakers.drain(..) {
             waker.wake()
         }
+    }
+
+    pub fn cancel(&self) -> anyhow::Result<()> {
+        if !self.finished {
+            nix::sys::signal::kill(nix::unistd::Pid::from_raw(0), nix::sys::signal::Signal::SIGINT)?;
+
+            // if let Some(pid) = self.thread {
+                // nix::sys::pthread::pthread_kill(pid, nix::sys::signal::Signal::SIGTERM)?;
+            // }
+        }
+        Ok(())
     }
 }
 
@@ -206,7 +207,7 @@ pub fn get_completions(line: &BStr) -> anyhow::Result<(AsyncArcMutex<StreamConsu
 }
 
 pub fn _get_completions(streamer: &Mutex<Streamer>) {
-    streamer.lock().unwrap().thread = Some(nix::unistd::gettid());
+    streamer.lock().unwrap().thread = Some(nix::sys::pthread::pthread_self());
 
     unsafe {
         // set the zle buffer

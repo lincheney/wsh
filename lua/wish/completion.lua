@@ -3,10 +3,10 @@ local SELECTION = require('wish/selection-widget')
 
 function M.complete()
     local matches = nil
+    local comp = wish.get_completions()
 
     local result = SELECTION.start{
         source = function()
-            local comp = wish.get_completions()
             matches = {}
             return function()
                 while true do
@@ -31,7 +31,7 @@ function M.complete()
             end
         end
     }
-
+    comp:cancel()
 
     if result then
         wish.insert_completion(matches[result])

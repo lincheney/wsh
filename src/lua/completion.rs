@@ -6,6 +6,7 @@ use crate::utils::*;
 
 struct CompletionStream {
     inner: AsyncArcMutex<crate::zsh::completion::StreamConsumer>,
+    parent: crate::shell::CompletionStarter,
 }
 
 #[derive(FromLua, Clone)]
@@ -22,7 +23,7 @@ impl UserData for CompletionStream {
         });
 
         methods.add_async_method("cancel", |_lua, stream, ()| async move {
-            stream.inner.lock().await.cancel().map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))
+            stream.parent.cancel().map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))
         });
     }
 }
@@ -45,6 +46,7 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Compl
 
     let result = ui.shell.lock().await.get_completions(val.as_ref());
     let (consumer, producer) = result.map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))?;
+    let parent = producer.clone();
 
     let shell_clone = ui.shell.clone();
     let mut ui_clone = ui.clone();
@@ -69,7 +71,7 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Compl
         });
     });
 
-    Ok(CompletionStream{inner: consumer})
+    Ok(CompletionStream{inner: consumer, parent})
 }
 
 async fn insert_completion(mut ui: Ui, _lua: Lua, val: CompletionMatch) -> Result<()> {
