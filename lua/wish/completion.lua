@@ -10,8 +10,9 @@ function M.complete()
     -- loading spinner thing
     wish.schedule(function()
         local dots = 1
+        wish.async.sleep(50)
         while not loaded do
-            wish.set_message{id = msg, hidden = false, text = 'Loading matches ' .. string.rep('.', dots)}
+            wish.set_message{id = msg, hidden = false, text = 'Loading matches ' .. string.rep('.', dots), fg = 'grey'}
             wish.redraw()
             dots = (dots + 1) % 4
             wish.async.sleep(200)
