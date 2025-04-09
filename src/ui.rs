@@ -80,7 +80,7 @@ pub struct ThreadsafeUiInner(Arc<RwLock<UiInner>>);
 #[derive(Clone)]
 pub struct Ui {
     pub inner: ThreadsafeUiInner,
-    pub lua: Lua,
+    pub lua: Arc<Lua>,
     pub shell: Shell,
 }
 
@@ -127,7 +127,7 @@ impl Ui {
 
         let ui = Self{
             inner: ThreadsafeUiInner(Arc::new(RwLock::new(ui))),
-            lua,
+            lua: Arc::new(lua),
             shell,
         };
         ui.init_lua().await?;
@@ -380,7 +380,7 @@ impl Ui {
         Ok(true)
     }
 
-    fn try_upgrade(ui: &Weak<RwLock<UiInner>>, shell: Shell, lua: Lua) -> LuaResult<Self> {
+    fn try_upgrade(ui: &Weak<RwLock<UiInner>>, shell: Shell, lua: Arc<Lua>) -> LuaResult<Self> {
         if let Some(ui) = ui.upgrade() {
             Ok(Ui{ inner: ThreadsafeUiInner(ui), shell, lua })
         } else {
@@ -407,8 +407,9 @@ impl Ui {
     {
         let weak = Arc::downgrade(&self.inner.0);
         let shell = Arc::downgrade(&self.shell.0);
+        let ui_lua = Arc::downgrade(&self.lua);
         self.lua.create_function(move |lua, value| {
-            let ui = Ui::try_upgrade(&weak, Shell(shell.upgrade().unwrap()), lua.clone())?;
+            let ui = Ui::try_upgrade(&weak, Shell(shell.upgrade().unwrap()), ui_lua.upgrade().unwrap())?;
             func(&ui, lua, value)
                 .map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))
         })
@@ -434,12 +435,14 @@ impl Ui {
     {
         let weak = Arc::downgrade(&self.inner.0);
         let shell = Arc::downgrade(&self.shell.0);
+        let ui_lua = Arc::downgrade(&self.lua);
         self.lua.create_async_function(move |lua, value| {
             let weak = weak.clone();
             let func = func.clone();
             let shell = shell.clone();
+            let ui_lua = ui_lua.clone();
             async move {
-                let ui = Ui::try_upgrade(&weak, Shell(shell.upgrade().unwrap()), lua.clone())?;
+                let ui = Ui::try_upgrade(&weak, Shell(shell.upgrade().unwrap()), ui_lua.upgrade().unwrap())?;
                 func(ui, lua, value).await
                     .map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))
             }
