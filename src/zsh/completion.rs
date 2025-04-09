@@ -216,7 +216,7 @@ pub fn _get_completions(streamer: &Mutex<Streamer>) {
         {
             let line = &streamer.lock().unwrap().buffer;
             super::Variable::set(b"BUFFER", line.to_owned().into()).unwrap();
-            super::Variable::set(b"CURSOR", format!("{}", line.len() + 1).into()).unwrap();
+            super::Variable::set(b"CURSOR", (line.len() as i64 + 1).into()).unwrap();
         }
         zsh_sys::endparamscope();
 
@@ -247,7 +247,7 @@ pub fn insert_completion(line: &BStr, m: &bindings::cmatch) -> (BString, usize) 
         zsh_sys::startparamscope();
         bindings::makezleparams(0);
         super::Variable::set(b"BUFFER", line.into()).unwrap();
-        super::Variable::set(b"CURSOR", format!("{}", line.len() + 1).into()).unwrap();
+        super::Variable::set(b"CURSOR", (line.len() as i64 + 1).into()).unwrap();
         zsh_sys::endparamscope();
 
         bindings::metafy_line();
