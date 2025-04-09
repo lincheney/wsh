@@ -9,7 +9,7 @@ function M.complete()
 
     -- loading spinner thing
     wish.schedule(function()
-        local dots = 1
+        local dots = 0
         wish.async.sleep(50)
         while not loaded do
             wish.set_message{id = msg, hidden = false, text = 'Loading matches ' .. string.rep('.', dots), fg = 'grey'}
