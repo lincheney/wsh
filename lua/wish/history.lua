@@ -18,31 +18,33 @@ function show_history(widget, filter, data)
         end
     end
 
-    local result = widget.start{
-        data = data,
-        selected = filter and math.max(1, ix) or ix,
-        source = lines,
-        reverse = reverse,
-        filter = filter,
-        no_keymaps = not filter,
-        reload_callback = filter and function()
-            show_history(widget, filter, data)
-        end,
+    wish.schedule(function()
+        local result = widget.start{
+            data = data,
+            selected = filter and math.max(1, ix) or ix,
+            source = lines,
+            reverse = reverse,
+            filter = filter,
+            no_keymaps = not filter,
+            reload_callback = filter and function()
+                show_history(widget, filter, data)
+            end,
 
-        align = 'Left',
-        border = {
-            fg = 'green',
-            type = 'Rounded',
-            title = {
-                text = 'history',
+            align = 'Left',
+            border = {
+                fg = 'green',
+                type = 'Rounded',
+                title = {
+                    text = 'history',
+                },
             },
-        },
-    }
+        }
 
-    if filter and result then
-        wish.goto_history(histnums[result])
-        wish.redraw()
-    end
+        if filter and result then
+            wish.goto_history(histnums[result])
+            wish.redraw()
+        end
+    end)
 end
 
 function M.history_up()

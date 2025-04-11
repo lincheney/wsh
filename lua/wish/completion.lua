@@ -19,45 +19,48 @@ function M.complete()
         end
     end)
 
-    local result = SELECTION.start{
-        source = function()
-            matches = {}
-            return function()
-                while true do
-                    local chunk = comp()
-                    loaded = true
-                    if not chunk then
-                        return
-                    end
-                    wish.set_message{id = msg, hidden = true}
+    wish.schedule(function()
 
-                    local filtered_chunk = {}
-                    for i = 1, #chunk do
-                        local text = tostring(chunk[i])
-                        if text then
-                            table.insert(matches, chunk[i])
-                            table.insert(filtered_chunk, {text = text})
+        local result = SELECTION.start{
+            source = function()
+                matches = {}
+                return function()
+                    while true do
+                        local chunk = comp()
+                        loaded = true
+                        if not chunk then
+                            return
                         end
-                    end
+                        wish.set_message{id = msg, hidden = true}
 
-                    if #filtered_chunk > 0 then
-                        return filtered_chunk
+                        local filtered_chunk = {}
+                        for i = 1, #chunk do
+                            local text = tostring(chunk[i])
+                            if text then
+                                table.insert(matches, chunk[i])
+                                table.insert(filtered_chunk, {text = text})
+                            end
+                        end
+
+                        if #filtered_chunk > 0 then
+                            return filtered_chunk
+                        end
                     end
                 end
             end
-        end
-    }
-    comp:cancel()
-    loaded = true
+        }
+        comp:cancel()
+        loaded = true
 
-    if result then
-        wish.set_message{id = msg, hidden = true}
-        wish.insert_completion(comp, matches[result])
-        wish.redraw()
-    elseif not matches or #matches == 0 then
-        wish.set_message{id = msg, hidden = false, text='No completion matches', fg='lightred'}
-        wish.redraw()
-    end
+        if result then
+            wish.set_message{id = msg, hidden = true}
+            wish.insert_completion(comp, matches[result])
+            wish.redraw()
+        elseif not matches or #matches == 0 then
+            wish.set_message{id = msg, hidden = false, text='No completion matches', fg='lightred'}
+            wish.redraw()
+        end
+    end)
 
 end
 
