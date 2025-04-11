@@ -110,9 +110,12 @@ wish.add_event_callback('key', function(arg)
 end)
 
 local PASTE_NS = wish.add_buf_highlight_namespace()
+local clear_paste = nil
 wish.add_event_callback('paste', function(data)
     -- insert this into the buffer
     if #data > 0 then
+        local id = math.random()
+        clear_paste = id
         local cursor = wish.get_cursor()
         local buffer = wish.get_buffer()
         local len = wish.str.len(data)
@@ -124,9 +127,18 @@ wish.add_event_callback('paste', function(data)
 
         -- flash blue for a bit
         wish.add_buf_highlight{namespace = PASTE_NS, fg = 'blue', start = #prefix, finish = #prefix + len}
-        wish.redraw()
-        wish.async.sleep(500)
-        wish.clear_buf_highlights(PASTE_NS)
         wish.redraw{buffer = true}
+
+        wish.schedule(function()
+            wish.async.sleep(500)
+            if clear_paste == id then
+                wish.clear_buf_highlights(PASTE_NS)
+                wish.redraw{buffer = true}
+            end
+        end)
     end
+end)
+wish.add_event_callback('accept_line', function()
+    wish.clear_buf_highlights(PASTE_NS)
+    wish.redraw{buffer = true}
 end)
