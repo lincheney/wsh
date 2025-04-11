@@ -1,11 +1,11 @@
 local M = {}
 local SELECTION = require('wish/selection-widget')
+local msg = wish.set_message{hidden = true}
 
 function M.complete()
     local matches = nil
     local comp = wish.get_completions()
     local loaded = false
-    local msg = wish.set_message{hidden = true}
 
     -- loading spinner thing
     wish.schedule(function()
@@ -48,11 +48,13 @@ function M.complete()
         end
     }
     comp:cancel()
+    loaded = true
 
     if result then
+        wish.set_message{id = msg, hidden = true}
         wish.insert_completion(comp, matches[result])
         wish.redraw()
-    elseif #matches == 0 then
+    elseif not matches or #matches == 0 then
         wish.set_message{id = msg, hidden = false, text='No completion matches', fg='lightred'}
         wish.redraw()
     end
