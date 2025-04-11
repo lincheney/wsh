@@ -97,7 +97,10 @@ impl<T: AsyncWrite + AsRawFd + std::marker::Unpin + mlua::MaybeSend + 'static> U
 }
 
 fn schedule(ui: &Ui, _lua: &Lua, cb: LuaFunction) -> Result<()> {
-    ui.call_lua_fn(false, cb, ());
+    let ui = ui.clone();
+    tokio::task::spawn(async move {
+        ui.call_lua_fn(false, cb, ()).await;
+    });
     Ok(())
 }
 

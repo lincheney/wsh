@@ -19,6 +19,8 @@ use crossterm::{
 };
 
 use crate::shell::{Shell, ShellInner};
+use crate::utils::*;
+use crate::lua::EventCallbacks;
 
 fn lua_error<T>(msg: &str) -> Result<T, mlua::Error> {
     Err(mlua::Error::RuntimeError(msg.to_string()))
@@ -63,7 +65,6 @@ pub struct UiInner {
     y_offset: u16,
     pub keybinds: Vec<crate::lua::KeybindMapping>,
     pub keybind_layer_counter: usize,
-    pub event_callbacks: crate::lua::EventCallbacks,
 
     pub buffer: crate::buffer::Buffer,
     pub prompt: crate::prompt::Prompt,
@@ -82,6 +83,15 @@ pub struct Ui {
     pub inner: ThreadsafeUiInner,
     pub lua: Arc<Lua>,
     pub shell: Shell,
+    pub event_callbacks: ArcMutex<EventCallbacks>,
+}
+
+#[derive(Clone)]
+struct WeakUi {
+    pub inner: std::sync::Weak<RwLock<UiInner>>,
+    pub lua: std::sync::Weak<Lua>,
+    pub shell: std::sync::Weak<tokio::sync::Mutex<ShellInner>>,
+    pub event_callbacks: std::sync::Weak<std::sync::Mutex<EventCallbacks>>,
 }
 
 impl ThreadsafeUiInner {
@@ -112,7 +122,6 @@ impl Ui {
             prompt: crate::prompt::Prompt::new(None),
             keybinds: Default::default(),
             keybind_layer_counter: Default::default(),
-            event_callbacks: Default::default(),
             stdout: std::io::stdout(),
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
             size: crossterm::terminal::size()?,
@@ -129,6 +138,7 @@ impl Ui {
             inner: ThreadsafeUiInner(Arc::new(RwLock::new(ui))),
             lua: Arc::new(lua),
             shell,
+            event_callbacks: Default::default(),
         };
         ui.init_lua().await?;
 
@@ -206,10 +216,11 @@ impl Ui {
         Ok(())
     }
 
-    pub fn call_lua_fn<T: IntoLuaMulti + mlua::MaybeSend + 'static>(&self, draw: bool, callback: mlua::Function, arg: T) {
+    pub async fn call_lua_fn<T: IntoLuaMulti + mlua::MaybeSend + 'static>(&self, draw: bool, callback: mlua::Function, arg: T) {
+        let result = callback.call_async::<LuaValue>(arg).await;
         let mut ui = self.clone();
         tokio::task::spawn(async move {
-            ui.report_error(draw, callback.call_async::<LuaValue>(arg).await).await;
+            ui.report_error(draw, result).await;
         });
     }
 
@@ -238,15 +249,15 @@ impl Ui {
     pub async fn handle_event(&mut self, event: Event) -> Result<bool> {
 
         if let Event::Key(key @ KeyEvent{code, modifiers, kind: event::KeyEventKind::Press, ..}) = event {
-            let ui = self.inner.borrow().await;
+            EventCallbacks::trigger_key_callbacks(self, key.into()).await;
 
-            if ui.event_callbacks.has_key_callbacks() {
-                ui.event_callbacks.trigger_key_callbacks(self, &self.lua, key.into());
-            }
-
-            let callback = ui.keybinds.iter().rev().find_map(|k| k.inner.get(&(code, modifiers)));
+            let callback = self.inner.borrow().await.keybinds
+                .iter()
+                .rev()
+                .find_map(|k| k.inner.get(&(code, modifiers)))
+                .cloned();
             if let Some(callback) = callback {
-                self.call_lua_fn(true, callback.clone(), ());
+                self.call_lua_fn(true, callback, ()).await;
                 return Ok(true)
             }
         }
@@ -272,13 +283,13 @@ impl Ui {
                 state: _,
             }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
                 {
-                    let clone = self.clone();
-                    let mut ui = self.inner.borrow_mut().await;
-                    let mut buf = [0; 4];
-                    ui.buffer.insert_at_cursor(c.encode_utf8(&mut buf).as_bytes());
-                    if ui.event_callbacks.has_buffer_change_callbacks() {
-                        ui.event_callbacks.trigger_buffer_change_callbacks(&clone, &clone.lua, ());
+                    {
+                        let mut ui = self.inner.borrow_mut().await;
+                        let mut buf = [0; 4];
+                        ui.buffer.insert_at_cursor(c.encode_utf8(&mut buf).as_bytes());
                     }
+
+                    EventCallbacks::trigger_buffer_change_callbacks(self, ()).await;
                 }
 
                 self.draw().await?;
@@ -304,10 +315,8 @@ impl Ui {
             },
 
             Event::Paste(data) => {
-                let ui = self.inner.borrow().await;
-                if ui.event_callbacks.has_paste_callbacks() {
-                    ui.event_callbacks.trigger_paste_callbacks(self, &self.lua, self.lua.create_string(data.as_bytes())?);
-                }
+                let data = self.lua.create_string(data.as_bytes())?;
+                EventCallbacks::trigger_paste_callbacks(self, data).await;
             },
 
             _ => {},
@@ -321,57 +330,53 @@ impl Ui {
         self.inner.borrow_mut().await.is_running_process = true;
 
         {
-            let clone = self.clone();
-            let mut ui = self.inner.borrow_mut().await;
-            let ui = ui.deref_mut();
+            let (complete, _tokens) = {
+                let ui = self.inner.borrow().await;
+                let buffer = ui.buffer.get_contents().as_ref();
+                self.shell.lock().await.parse(buffer, false)
+            };
 
-            {
-                // time to execute
-                let (complete, _tokens) = self.shell.lock().await.parse(ui.buffer.get_contents().as_ref(), false);
-                if complete {
+            // time to execute
+            if complete {
+                EventCallbacks::trigger_accept_line_callbacks(self, ()).await;
 
-                    if ui.event_callbacks.has_accept_line_callbacks() {
-                        ui.event_callbacks.trigger_accept_line_callbacks(&clone, &self.lua, ());
-                    }
+                let mut ui = self.inner.borrow_mut().await;
+                let mut shell = self.shell.lock().await;
+                shell.clear_completion_cache();
+                shell.push_history(ui.buffer.get_contents().as_ref());
 
-                    let mut shell = self.shell.lock().await;
-                    shell.clear_completion_cache();
-                    shell.push_history(ui.buffer.get_contents().as_ref());
+                ui.tui.clear_non_persistent();
+                ui.deactivate()?;
 
-                    ui.tui.clear_non_persistent();
-                    ui.deactivate()?;
+                // move to last line of buffer
+                let y_offset = (ui.buffer.height - ui.buffer.y_offset - 1) as u16;
+                execute!(
+                    ui.stdout,
+                    MoveDown(y_offset),
+                    style::Print('\n'),
+                    MoveToColumn(0),
+                    Clear(ClearType::FromCursorDown),
+                )?;
 
-                    // move to last line of buffer
-                    let y_offset = (ui.buffer.height - ui.buffer.y_offset - 1) as u16;
-                    execute!(
-                        ui.stdout,
-                        MoveDown(y_offset),
-                        style::Print('\n'),
-                        MoveToColumn(0),
-                        Clear(ClearType::FromCursorDown),
-                    )?;
-
-                    if let Err(code) = shell.exec(ui.buffer.get_contents().as_ref()) {
-                        eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
-                    }
-                    ui.reset(&mut shell);
-                    ui.is_running_process = false;
-
-                    // move down one line if not at start of line
-                    let cursor = ui.events.lock().await.get_cursor_position()?;
-                    if cursor.0 != 0 {
-                        ui.size = crossterm::terminal::size()?;
-                        queue!(ui.stdout, style::Print("\r\n"))?;
-                    }
-
-                } else {
-                    ui.buffer.insert_at_cursor(b"\n");
-                    if ui.event_callbacks.has_buffer_change_callbacks() {
-                        ui.event_callbacks.trigger_buffer_change_callbacks(&clone, &clone.lua, ());
-                    }
+                if let Err(code) = shell.exec(ui.buffer.get_contents().as_ref()) {
+                    eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
                 }
+                ui.reset(&mut shell);
                 ui.is_running_process = false;
+
+                // move down one line if not at start of line
+                let cursor = ui.events.lock().await.get_cursor_position()?;
+                if cursor.0 != 0 {
+                    ui.size = crossterm::terminal::size()?;
+                    queue!(ui.stdout, style::Print("\r\n"))?;
+                }
+
+            } else {
+                self.inner.borrow_mut().await.buffer.insert_at_cursor(b"\n");
+                EventCallbacks::trigger_buffer_change_callbacks(self, ()).await;
             }
+            let mut ui = self.inner.borrow_mut().await;
+            ui.is_running_process = false;
 
             ui.activate()?;
         }
@@ -380,11 +385,12 @@ impl Ui {
         Ok(true)
     }
 
-    fn try_upgrade(ui: &Weak<RwLock<UiInner>>, shell: Shell, lua: Arc<Lua>) -> LuaResult<Self> {
-        if let Some(ui) = ui.upgrade() {
-            Ok(Ui{ inner: ThreadsafeUiInner(ui), shell, lua })
-        } else {
-            lua_error("ui not running")
+    fn downgrade(&self) -> WeakUi {
+        WeakUi{
+            inner: Arc::downgrade(&self.inner.0),
+            lua: Arc::downgrade(&self.lua),
+            shell: Arc::downgrade(&self.shell.0),
+            event_callbacks: Arc::downgrade(&self.event_callbacks),
         }
     }
 
@@ -405,11 +411,9 @@ impl Ui {
         A: FromLuaMulti,
         R: IntoLuaMulti,
     {
-        let weak = Arc::downgrade(&self.inner.0);
-        let shell = Arc::downgrade(&self.shell.0);
-        let ui_lua = Arc::downgrade(&self.lua);
+        let weak = self.downgrade();
         self.lua.create_function(move |lua, value| {
-            let ui = Ui::try_upgrade(&weak, Shell(shell.upgrade().unwrap()), ui_lua.upgrade().unwrap())?;
+            let ui = weak.try_upgrade()?;
             func(&ui, lua, value)
                 .map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))
         })
@@ -433,16 +437,12 @@ impl Ui {
         R: IntoLuaMulti,
         T: Future<Output=Result<R>> + mlua::MaybeSend + 'static,
     {
-        let weak = Arc::downgrade(&self.inner.0);
-        let shell = Arc::downgrade(&self.shell.0);
-        let ui_lua = Arc::downgrade(&self.lua);
+        let weak = self.downgrade();
         self.lua.create_async_function(move |lua, value| {
             let weak = weak.clone();
             let func = func.clone();
-            let shell = shell.clone();
-            let ui_lua = ui_lua.clone();
             async move {
-                let ui = Ui::try_upgrade(&weak, Shell(shell.upgrade().unwrap()), ui_lua.upgrade().unwrap())?;
+                let ui = weak.try_upgrade()?;
                 func(ui, lua, value).await
                     .map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))
             }
@@ -462,13 +462,12 @@ impl Ui {
             Ok(())
         })?;
 
-        self.set_lua_async_fn("set_buffer", |mut ui, lua, (val, replace_len): (mlua::String, Option<usize>)| async move {
-            let clone = ui.clone();
-            let mut ui = ui.inner.borrow_mut().await;
-            ui.buffer.splice_at_cursor(&val.as_bytes(), replace_len);
-            if ui.event_callbacks.has_buffer_change_callbacks() {
-                ui.event_callbacks.trigger_buffer_change_callbacks(&clone, &lua, ());
+        self.set_lua_async_fn("set_buffer", |mut ui, _lua, (val, replace_len): (mlua::String, Option<usize>)| async move {
+            {
+                let mut ui = ui.inner.borrow_mut().await;
+                ui.buffer.splice_at_cursor(&val.as_bytes(), replace_len);
             }
+            EventCallbacks::trigger_buffer_change_callbacks(&mut ui, ()).await;
             Ok(())
         })?;
 
@@ -608,6 +607,25 @@ fn print_events() -> Result<()> {
     }
 
     Ok(())
+}
+
+impl WeakUi {
+    fn upgrade(&self) -> Option<Ui> {
+        Some(Ui{
+            inner: ThreadsafeUiInner(self.inner.upgrade()?),
+            shell: Shell(self.shell.upgrade()?),
+            lua: self.lua.upgrade()?,
+            event_callbacks: self.event_callbacks.upgrade()?,
+        })
+    }
+
+    fn try_upgrade(&self) -> LuaResult<Ui> {
+        if let Some(ui) = self.upgrade() {
+            Ok(ui)
+        } else {
+            lua_error("ui not running")
+        }
+    }
 }
 
 // Resize events can occur in batches.

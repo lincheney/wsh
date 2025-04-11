@@ -82,8 +82,6 @@ async fn insert_completion(mut ui: Ui, _lua: Lua, (stream, val): (CompletionStre
 
     // see if this can be done as an insert
     {
-        let clone = ui.clone();
-
         let mut ui = ui.inner.borrow_mut().await;
         let cursor = ui.buffer.cursor_byte_pos();
         let contents = ui.buffer.get_contents();
@@ -98,10 +96,8 @@ async fn insert_completion(mut ui: Ui, _lua: Lua, (stream, val): (CompletionStre
         } else {
             ui.buffer.set(Some(&new_buffer), Some(new_pos));
         }
-        if ui.event_callbacks.has_buffer_change_callbacks() {
-            ui.event_callbacks.trigger_buffer_change_callbacks(&clone, &clone.lua, ());
-        }
     }
+    super::events::EventCallbacks::trigger_buffer_change_callbacks(&mut ui, ()).await;
 
     ui.draw().await?;
     Ok(())

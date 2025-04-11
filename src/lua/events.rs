@@ -2,6 +2,7 @@ use anyhow::Result;
 use mlua::{prelude::*, Function};
 use serde::{Deserialize, Serialize};
 use crate::ui::Ui;
+use crate::utils::*;
 use crossterm::event;
 
 macro_rules! event_types {
@@ -21,17 +22,24 @@ macro_rules! event_types {
         pub struct EventCallbacks {
             counter: usize,
         $(
-            [<callbacks_ $name>]: Vec<(usize, Function)>,
+            pub [<callbacks_ $name>]: Vec<(usize, Function)>,
         )*
         }
 
         impl EventCallbacks {
         $(
             #[allow(unused_parens)]
-            pub fn [<trigger_ $name _callbacks>](&self, ui: &Ui, lua: &Lua, val: ($($arg),*)) {
-                let val = lua.to_value(&val).unwrap();
-                for (_, cb) in self.[<callbacks_ $name>].iter() {
-                    ui.call_lua_fn(false, cb.clone(), val.clone());
+            pub async fn [<trigger_ $name _callbacks>](ui: &mut Ui, val: ($($arg),*)) {
+                let callbacks = {
+                    let callbacks = &ui.event_callbacks.lock().unwrap().[<callbacks_ $name>];
+                    if callbacks.is_empty() {
+                        return;
+                    }
+                    callbacks.clone()
+                };
+                let val = ui.lua.to_value(&val).unwrap();
+                for (_, cb) in callbacks.iter() {
+                    ui.call_lua_fn(false, cb.clone(), val.clone()).await;
                 }
             }
 
@@ -103,20 +111,20 @@ event_types!(
 );
 
 
-async fn add_event_callback(mut ui: Ui, lua: Lua, (typ, callback): (LuaValue, Function)) -> Result<usize> {
+fn add_event_callback(ui: &Ui, lua: &Lua, (typ, callback): (LuaValue, Function)) -> Result<usize> {
     let typ: EventType = lua.from_value(typ)?;
-    Ok(ui.inner.borrow_mut().await.event_callbacks.add_event_callback(typ, callback))
+    Ok(ui.event_callbacks.lock().unwrap().add_event_callback(typ, callback))
 }
 
-async fn remove_event_callback(mut ui: Ui, _lua: Lua, id: usize) -> Result<()> {
-    ui.inner.borrow_mut().await.event_callbacks.remove_event_callback(id);
+fn remove_event_callback(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
+    ui.event_callbacks.lock().unwrap().remove_event_callback(id);
     Ok(())
 }
 
 pub fn init_lua(ui: &Ui) -> Result<()> {
 
-    ui.set_lua_async_fn("add_event_callback", add_event_callback)?;
-    ui.set_lua_async_fn("remove_event_callback", remove_event_callback)?;
+    ui.set_lua_fn("add_event_callback", add_event_callback)?;
+    ui.set_lua_fn("remove_event_callback", remove_event_callback)?;
 
     Ok(())
 }
