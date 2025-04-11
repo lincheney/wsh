@@ -10,6 +10,13 @@ use crossterm::{
 };
 
 #[derive(Debug)]
+pub struct Edit {
+    before: BString,
+    after: BString,
+    position: usize,
+}
+
+#[derive(Debug)]
 pub struct Highlight {
     pub start: usize,
     pub end: usize,
@@ -67,6 +74,9 @@ pub struct Buffer {
     // display: String,
     len: Option<usize>,
     cursor: usize,
+
+    history: Vec<Edit>,
+    history_index: usize,
 
     saved_contents: BString,
     saved_cursor: usize,
@@ -208,11 +218,11 @@ impl Buffer {
 
     pub fn set(&mut self, contents: Option<&[u8]>, cursor: Option<usize>) {
         if let Some(contents) = contents {
-            self.contents.resize(contents.len(), 0);
-            self.contents.copy_from_slice(contents);
             // all highlights are now invalid!
             self.highlights.clear();
-            self.len = None;
+            self.contents.resize(contents.len(), 0);
+            self.cursor = 0;
+            self.splice_at_cursor(contents, None);
         }
         if let Some(cursor) = cursor {
             self.cursor = cursor;
@@ -229,24 +239,62 @@ impl Buffer {
     }
 
     pub fn splice_at_cursor(&mut self, data: &[u8], replace_len: Option<usize>) {
+        // turn it into an edit
         let start = self.cursor_byte_pos();
         let end = if let Some(replace_len) = replace_len {
             self.byte_pos(self.cursor + replace_len)
         } else {
             self.contents.len()
         };
-        self.contents.splice(start .. end, data.iter().copied());
+        let edit = Edit{
+            before: self.contents[start .. end].into(),
+            after: data.into(),
+            position: start,
+        };
+        if self.history_index < self.history.len() {
+            drop(self.history.drain(self.history_index .. ));
+        }
+        self.history.push(edit);
+        self.apply_edit(self.history_index, false);
+        self.history_index += 1;
+    }
+
+    fn apply_edit(&mut self, index: usize, reverse: bool) {
+        let edit = &self.history[index];
+        let (old, new) = if reverse {
+            (&edit.after, &edit.before)
+        } else {
+            (&edit.before, &edit.after)
+        };
+
+        let start = edit.position;
+        let end = start + old.len();
+        self.contents.splice(start .. end, new.iter().copied());
         self.len = None;
 
         self.highlights.retain_mut(|hl| {
-            hl.shift(start .. end, start + data.len());
+            hl.shift(start .. end, start + new.len());
             !hl.is_empty()
         });
 
         // calculate the new cursor
-        let end = start + data.len();
+        let end = start + new.len();
         self.cursor = self.contents.grapheme_indices().take_while(|(s, _, _)| *s < end).count();
         self.fix_cursor();
+    }
+
+    pub fn move_in_history(&mut self, forward: bool) -> bool {
+        if forward && self.history_index < self.history.len() {
+            self.apply_edit(self.history_index, false);
+            self.history_index += 1;
+            true
+        } else if !forward && self.history_index > 0 {
+            self.history_index -= 1;
+            self.apply_edit(self.history_index, true);
+            true
+        } else {
+            false
+        }
     }
 
     pub fn insert_at_cursor(&mut self, data: &[u8]) {
@@ -269,6 +317,8 @@ impl Buffer {
     pub fn reset(&mut self) {
         self.contents.clear();
         self.len = None;
+        self.history.clear();
+        self.history_index = 0;
         self.cursor = 0;
         self.y_offset = 0;
         self.saved_contents.clear();

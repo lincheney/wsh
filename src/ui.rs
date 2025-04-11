@@ -1,6 +1,6 @@
 use std::time::Duration;
 use std::future::Future;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 use std::ops::DerefMut;
 use std::collections::HashSet;
 use std::default::Default;
@@ -468,6 +468,19 @@ impl Ui {
                 ui.buffer.splice_at_cursor(&val.as_bytes(), replace_len);
             }
             EventCallbacks::trigger_buffer_change_callbacks(&mut ui, ()).await;
+            Ok(())
+        })?;
+
+        self.set_lua_async_fn("undo_buffer", |mut ui, _lua, ()| async move {
+            if ui.inner.borrow_mut().await.buffer.move_in_history(false) {
+                EventCallbacks::trigger_buffer_change_callbacks(&mut ui, ()).await;
+            }
+            Ok(())
+        })?;
+        self.set_lua_async_fn("redo_buffer", |mut ui, _lua, ()| async move {
+            if ui.inner.borrow_mut().await.buffer.move_in_history(true) {
+                EventCallbacks::trigger_buffer_change_callbacks(&mut ui, ()).await;
+            }
             Ok(())
         })?;
 

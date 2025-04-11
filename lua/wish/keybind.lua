@@ -72,6 +72,13 @@ wish.set_keymap('<a-bs>', function()
     end
 end)
 
+wish.set_keymap('<c-7>', function() -- same as <c-s-_>
+    wish.undo_buffer()
+end)
+wish.set_keymap('<a-_>', function()
+    wish.redo_buffer()
+end)
+
 -- there ought to be a better way of doing this
 wish.set_keymap('<c-d>', function()
     wish.set_message{text='hello '..wish.get_buffer()}
@@ -121,12 +128,12 @@ wish.add_event_callback('paste', function(data)
         local len = wish.str.len(data)
         local buflen = wish.str.len(buffer)
 
-        local prefix = wish.str.get(buffer, 0, cursor) or ''
-        local suffix = wish.str.get(buffer, cursor, buflen) or ''
+        local _, prefix = wish.str.to_byte_pos(buffer, cursor)
+        prefix = prefix or 0
         wish.set_buffer(data, 0)
 
         -- flash blue for a bit
-        wish.add_buf_highlight{namespace = PASTE_NS, fg = 'blue', start = #prefix, finish = #prefix + len}
+        wish.add_buf_highlight{namespace = PASTE_NS, fg = 'blue', start = prefix, finish = prefix + len}
         wish.redraw{buffer = true}
 
         wish.schedule(function()
