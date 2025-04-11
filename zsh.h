@@ -138,3 +138,17 @@ mod_export void
 metafy_line(void);
 mod_export void
 unmetafy_line(void);
+
+struct menuinfo {
+    Cmgroup group;		/* position in the group list */
+    Cmatch *cur;		/* match currently inserted */
+    int pos;			/* begin on line */
+    int len;			/* length of inserted string */
+    int end;			/* end on the line */
+    int we;			/* non-zero if the cursor was at the end */
+    int insc;			/* length of suffix inserted */
+    int asked;			/* we asked if the list should be shown */
+    char *prebr;		/* prefix before a brace, if any */
+    char *postbr;		/* suffix after a brace */
+};
+mod_export struct menuinfo minfo;

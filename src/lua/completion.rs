@@ -4,6 +4,7 @@ use std::sync::Arc;
 use crate::ui::Ui;
 use crate::utils::*;
 
+#[derive(FromLua, Clone)]
 struct CompletionStream {
     inner: AsyncArcMutex<crate::zsh::completion::StreamConsumer>,
     parent: crate::shell::CompletionStarter,
@@ -74,9 +75,10 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Compl
     Ok(CompletionStream{inner: consumer, parent})
 }
 
-async fn insert_completion(mut ui: Ui, _lua: Lua, val: CompletionMatch) -> Result<()> {
+async fn insert_completion(mut ui: Ui, _lua: Lua, (stream, val): (CompletionStream, CompletionMatch)) -> Result<()> {
     let buffer = ui.inner.borrow().await.buffer.get_contents().clone();
-    let (new_buffer, new_pos) = ui.shell.lock().await.insert_completion(buffer.as_ref(), &val.inner);
+    let completion_word_len = stream.parent.get_completion_word_len();
+    let (new_buffer, new_pos) = ui.shell.lock().await.insert_completion(buffer.as_ref(), completion_word_len, &val.inner);
 
     // see if this can be done as an insert
     {

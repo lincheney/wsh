@@ -38,6 +38,10 @@ impl CompletionStarter {
     pub fn cancel(&self) -> anyhow::Result<()> {
         self.0.lock().unwrap().cancel()
     }
+
+    pub fn get_completion_word_len(&self) -> usize {
+        self.0.lock().unwrap().completion_word_len
+    }
 }
 
 impl ShellInner {
@@ -63,8 +67,8 @@ impl ShellInner {
         zsh::completion::clear_cache()
     }
 
-    pub fn insert_completion(&self, string: &BStr, m: &zsh::cmatch) -> (BString, usize) {
-        zsh::completion::insert_completion(string, m)
+    pub fn insert_completion(&self, string: &BStr, completion_word_len: usize, m: &zsh::cmatch) -> (BString, usize) {
+        zsh::completion::insert_completion(string, completion_word_len, m)
     }
 
     pub fn parse(&mut self, string: &BStr, recursive: bool) -> (bool, Vec<zsh::parser::Token>) {

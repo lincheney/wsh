@@ -56,6 +56,7 @@ impl std::future::Future for WaitForChunk<'_> {
 #[derive(Debug)]
 pub struct Streamer {
     buffer: BString,
+    pub(crate) completion_word_len: usize,
     finished: bool,
     matches: Vec<Arc<bindings::cmatch>>,
     wakers: Vec<Waker>,
@@ -138,6 +139,7 @@ unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_cha
                 }
             }).skip(len);
         streamer.matches.extend(iter);
+        streamer.completion_word_len = (zsh_sys::we - zsh_sys::wb).max(0) as usize;
         streamer.wake();
             // eprintln!("DEBUG(pucks) \t{}\t= {:?}\r", stringify!(node), (std::ffi::CStr::from_ptr((*dat).str_), (*dat).gnum));
         // }
@@ -189,6 +191,7 @@ pub fn get_completions(line: &BStr) -> anyhow::Result<(AsyncArcMutex<StreamConsu
             // }
             let producer = ArcMutexNew!(Streamer {
                 buffer: line.to_owned(),
+                completion_word_len: 0,
                 finished: false,
                 matches: vec![],
                 wakers: vec![],
@@ -227,6 +230,8 @@ pub fn _get_completions(streamer: &Mutex<Streamer>) {
         // zsh will switch up the pgid if monitor and interactive are set
         super::execstring("set +o monitor", Default::default());
         bindings::menucomplete(null_mut());
+        // soft exit menu completion
+        bindings::minfo.cur = null_mut();
         super::execstring("set -o monitor", Default::default());
     }
 
@@ -241,7 +246,7 @@ pub fn clear_cache() {
     }
 }
 
-pub fn insert_completion(line: &BStr, m: &bindings::cmatch) -> (BString, usize) {
+pub fn insert_completion(line: &BStr, completion_word_len: usize, m: &bindings::cmatch) -> (BString, usize) {
     unsafe {
         // set the zle buffer
         zsh_sys::startparamscope();
@@ -249,6 +254,10 @@ pub fn insert_completion(line: &BStr, m: &bindings::cmatch) -> (BString, usize) 
         super::Variable::set(b"BUFFER", line.into()).unwrap();
         super::Variable::set(b"CURSOR", (line.len() as i64 + 1).into()).unwrap();
         zsh_sys::endparamscope();
+
+        // set start and end of word being completed
+        zsh_sys::we = line.len() as i32;
+        zsh_sys::wb = zsh_sys::we - completion_word_len as i32;
 
         bindings::metafy_line();
         bindings::do_single(m as *const _ as *mut _);

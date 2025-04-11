@@ -50,7 +50,7 @@ function M.complete()
     comp:cancel()
 
     if result then
-        wish.insert_completion(matches[result])
+        wish.insert_completion(comp, matches[result])
         wish.redraw()
     elseif #matches == 0 then
         wish.set_message{id = msg, hidden = false, text='No completion matches', fg='lightred'}
