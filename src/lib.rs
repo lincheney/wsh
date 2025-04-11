@@ -136,13 +136,13 @@ static MODULE_FEATURES: LazyLock<Features> = LazyLock::new(|| {
 
 
 #[no_mangle]
-pub extern fn setup_() -> c_int {
+pub extern "C" fn setup_() -> c_int {
     0
 }
 
 #[no_mangle]
 #[allow(clippy::missing_safety_doc)]
-pub unsafe extern fn features_(module: zsh_sys::Module, features: *mut *mut *mut c_char) -> c_int {
+pub unsafe extern "C" fn features_(module: zsh_sys::Module, features: *mut *mut *mut c_char) -> c_int {
     let module_features: &zsh_sys::features = &MODULE_FEATURES.deref().0;
     unsafe{ *features = zsh_sys::featuresarray(module, module_features as *const _ as *mut _); }
     0
@@ -150,26 +150,26 @@ pub unsafe extern fn features_(module: zsh_sys::Module, features: *mut *mut *mut
 
 #[no_mangle]
 #[allow(clippy::missing_safety_doc)]
-pub unsafe extern fn enables_(module: zsh_sys::Module, enables: *mut *mut c_int) -> c_int {
+pub unsafe extern "C" fn enables_(module: zsh_sys::Module, enables: *mut *mut c_int) -> c_int {
     let module_features: &zsh_sys::features = &MODULE_FEATURES.deref().0;
     unsafe{ zsh_sys::handlefeatures(module, module_features as *const _ as *mut _, enables) }
 }
 
 #[no_mangle]
-pub extern fn boot_() -> c_int {
+pub extern "C" fn boot_() -> c_int {
     zsh::completion::override_compadd();
     0
 }
 
 #[no_mangle]
 #[allow(clippy::missing_safety_doc)]
-pub unsafe extern fn cleanup_(module: zsh_sys::Module) -> c_int {
+pub unsafe extern "C" fn cleanup_(module: zsh_sys::Module) -> c_int {
     zsh::completion::restore_compadd();
     let module_features: &zsh_sys::features = &MODULE_FEATURES.deref().0;
     unsafe{ zsh_sys::setfeatureenables(module, module_features as *const _ as *mut _, null_mut()) }
 }
 
 #[no_mangle]
-pub extern fn finish_() -> c_int {
+pub extern "C" fn finish_() -> c_int {
     0
 }
