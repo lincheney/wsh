@@ -26,7 +26,7 @@ i wish i could have
 # TODO
 
 * [x] buffer edit history, undo, redo
-* [ ] cut and paste
+* [x] cut and paste
 * [ ] up/down work in multiline editing?
 * [ ] <alt-.>, insert-last-word
 * [ ] edit-command-line, i.e. in vim

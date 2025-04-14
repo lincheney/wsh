@@ -1,3 +1,11 @@
+local cut_contents = nil
+local function cut_buffer(len)
+    local buffer = wish.get_buffer()
+    local cursor = wish.str.to_byte_pos(buffer, wish.get_cursor()) or #buffer
+    cut_contents = buffer:sub(cursor + 1, len and cursor + len)
+    wish.set_buffer('', len)
+end
+
 wish.set_keymap('<bs>', function()
     local cursor = wish.get_cursor()
     if cursor > 0 then
@@ -14,12 +22,18 @@ wish.set_keymap('<c-u>', function()
     local cursor = wish.get_cursor()
     if cursor > 0 then
         wish.set_cursor(0)
-        wish.set_buffer('', cursor)
+        cut_buffer(cursor)
     end
 end)
 
 wish.set_keymap('<c-k>', function()
-    wish.set_buffer('')
+    cut_buffer(nil)
+end)
+
+wish.set_keymap('<c-y>', function()
+    if cut_contents then
+        wish.set_buffer(cut_contents, 0)
+    end
 end)
 
 wish.set_keymap('<c-a>',   function() wish.set_cursor(0) end)
@@ -50,11 +64,12 @@ wish.set_keymap('<c-w>', function()
     local cursor = wish.get_cursor()
     if cursor > 0 then
         local buffer = wish.get_buffer()
+        cursor = wish.str.to_byte_pos(buffer, cursor) or #buffer
         local start = buffer:sub(1, cursor):find('%S+%s*$')
         if start then
             start = wish.str.from_byte_pos(buffer, start - 1)
             wish.set_cursor(start)
-            wish.set_buffer('', cursor - start)
+            cut_buffer(cursor - start)
         end
     end
 end)
@@ -63,11 +78,12 @@ wish.set_keymap('<a-bs>', function()
     local cursor = wish.get_cursor()
     if cursor > 0 then
         local buffer = wish.get_buffer()
+        cursor = wish.str.to_byte_pos(buffer, cursor) or #buffer
         local start = buffer:sub(1, cursor):find('[^/%s]+[/%s]*$')
         if start then
             start = wish.str.from_byte_pos(buffer, start - 1)
             wish.set_cursor(start)
-            wish.set_buffer('', cursor - start)
+            cut_buffer(cursor - start)
         end
     end
 end)
