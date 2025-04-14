@@ -2,7 +2,7 @@ use std::ffi::{CString, CStr};
 use std::os::raw::*;
 use std::default::Default;
 use std::ptr::null_mut;
-use bstr::BStr;
+use bstr::{BStr, BString};
 
 mod string;
 mod bindings;
@@ -12,7 +12,7 @@ pub mod completion;
 pub mod parser;
 pub use variables::*;
 pub use string::ZString;
-pub use bindings::{cmatch, Inpar, Outpar, Meta};
+pub use bindings::{cmatch, Inpar, Outpar, Meta, expandhistory};
 
 // pub type HandlerFunc = unsafe extern "C" fn(name: *mut c_char, argv: *mut *mut c_char, options: *mut zsh_sys::options, func: c_int) -> c_int;
 
@@ -130,4 +130,28 @@ pub fn unmetafy_owned(value: &mut Vec<u8>) {
         zsh_sys::unmetafy(value.as_mut_ptr() as _, &mut len as _);
     }
     value.truncate(len as _);
+}
+
+pub fn set_zle_buffer(buffer: BString, cursor: i64) {
+    unsafe {
+        zsh_sys::startparamscope();
+        crate::zsh::bindings::makezleparams(0);
+        Variable::set(b"BUFFER", buffer.into()).unwrap();
+        Variable::set(b"CURSOR", cursor.into()).unwrap();
+        zsh_sys::endparamscope();
+    }
+}
+
+pub fn get_zle_buffer() -> (BString, Option<i64>) {
+    unsafe {
+        zsh_sys::startparamscope();
+        bindings::makezleparams(0);
+        let buffer = Variable::get("BUFFER").unwrap().as_bytes();
+        let cursor = Variable::get("CURSOR").unwrap().try_as_int();
+        zsh_sys::endparamscope();
+        match cursor {
+            Ok(Some(cursor)) => (buffer, Some(cursor)),
+            _ => (buffer, None),
+        }
+    }
 }

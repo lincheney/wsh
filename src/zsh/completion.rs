@@ -249,11 +249,7 @@ pub fn clear_cache() {
 pub fn insert_completion(line: &BStr, completion_word_len: usize, m: &bindings::cmatch) -> (BString, usize) {
     unsafe {
         // set the zle buffer
-        zsh_sys::startparamscope();
-        bindings::makezleparams(0);
-        super::Variable::set(b"BUFFER", line.into()).unwrap();
-        super::Variable::set(b"CURSOR", (line.len() as i64 + 1).into()).unwrap();
-        zsh_sys::endparamscope();
+        super::set_zle_buffer(line.into(), line.len() as i64 + 1);
 
         // set start and end of word being completed
         zsh_sys::we = line.len() as i32;

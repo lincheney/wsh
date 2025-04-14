@@ -43,4 +43,6 @@ i wish i could have
 * [ ] fork and run zsh
 * [ ] var for last term cursor position
 * [ ] options system
+* [x] alias, history expansion
+* [ ] heredocs
 * [ ] 

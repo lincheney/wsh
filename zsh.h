@@ -152,3 +152,5 @@ struct menuinfo {
     char *postbr;		/* suffix after a brace */
 };
 mod_export struct menuinfo minfo;
+
+int expandhistory();

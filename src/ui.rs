@@ -130,7 +130,11 @@ impl Ui {
 
         let start = std::time::Instant::now();
         let shell = Shell::new();
-        shell.lock().await.readhistfile();
+        {
+            let mut shell = shell.lock().await;
+            shell.readhistfile();
+            shell.init_interactive();
+        }
         log::info!("loaded history in {:?}", start.elapsed());
         ui.reset(&mut *shell.lock().await);
 
@@ -342,8 +346,6 @@ impl Ui {
 
                 let mut ui = self.inner.borrow_mut().await;
                 let mut shell = self.shell.lock().await;
-                shell.clear_completion_cache();
-                shell.push_history(ui.buffer.get_contents().as_ref());
 
                 ui.tui.clear_non_persistent();
                 ui.deactivate()?;
@@ -358,7 +360,14 @@ impl Ui {
                     Clear(ClearType::FromCursorDown),
                 )?;
 
-                if let Err(code) = shell.exec(ui.buffer.get_contents().as_ref()) {
+                // expand history e.g. !!
+                let buffer = ui.buffer.get_contents();
+                let expanded_buffer = shell.expandhistory(buffer.clone());
+                let buffer = expanded_buffer.as_ref().unwrap_or(buffer).as_ref();
+                shell.clear_completion_cache();
+                shell.push_history(buffer);
+
+                if let Err(code) = shell.exec(buffer) {
                     eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
                 }
                 ui.reset(&mut shell);

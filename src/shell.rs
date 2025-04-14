@@ -46,6 +46,13 @@ impl CompletionStarter {
 
 impl ShellInner {
 
+    pub fn init_interactive(&mut self) {
+        unsafe {
+            zsh_sys::opts[zsh_sys::INTERACTIVE as usize] = 1;
+            zsh_sys::opts[zsh_sys::SHINSTDIN as usize] = 1;
+        }
+    }
+
     pub fn exec(&mut self, string: &BStr) -> Result<(), c_long> {
         zsh::execstring(string, Default::default());
         let code = zsh::get_return_code();
@@ -188,5 +195,14 @@ impl ShellInner {
         }
     }
 
+    pub fn expandhistory(&mut self, buffer: BString) -> Option<BString> {
+        let cursor = buffer.len() as i64 + 1;
+        zsh::set_zle_buffer(buffer, cursor);
+        if unsafe{ zsh::expandhistory() } == 0 {
+            Some(zsh::get_zle_buffer().0)
+        } else {
+            None
+        }
+    }
 
 }
