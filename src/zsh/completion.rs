@@ -212,17 +212,12 @@ pub fn get_completions(line: &BStr) -> anyhow::Result<(AsyncArcMutex<StreamConsu
 pub fn _get_completions(streamer: &Mutex<Streamer>) {
     streamer.lock().unwrap().thread = Some(nix::sys::pthread::pthread_self());
 
-    unsafe {
-        // set the zle buffer
-        zsh_sys::startparamscope();
-        bindings::makezleparams(0);
-        {
-            let line = &streamer.lock().unwrap().buffer;
-            super::Variable::set(b"BUFFER", line.to_owned().into(), true).unwrap();
-            super::Variable::set(b"CURSOR", (line.len() as i64 + 1).into(), true).unwrap();
-        }
-        zsh_sys::endparamscope();
+    {
+        let line = &streamer.lock().unwrap().buffer;
+        super::set_zle_buffer(line.clone(), line.len() as i64 + 1);
+    }
 
+    unsafe {
         // this is kinda what completecall() does
         let cfargs: [*mut c_char; 1] = [null_mut()];
         bindings::cfargs = cfargs.as_ptr() as _;
