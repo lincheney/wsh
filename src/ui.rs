@@ -345,40 +345,51 @@ impl Ui {
 
             ui.is_running_process = true;
             ui.tui.clear_non_persistent();
-            ui.deactivate()?;
 
-            // move to last line of buffer
-            let y_offset = (ui.buffer.height - ui.buffer.y_offset - 1) as u16;
-            execute!(
-                ui.stdout,
-                MoveDown(y_offset),
-                style::Print('\n'),
-                MoveToColumn(0),
-                Clear(ClearType::FromCursorDown),
-            )?;
+            let mut result: Result<()> = (|| {
+                ui.deactivate()?;
 
-            // expand history e.g. !!
-            let buffer = ui.buffer.get_contents();
-            let expanded_buffer = shell.expandhistory(buffer.clone());
-            let buffer = expanded_buffer.as_ref().unwrap_or(buffer).as_ref();
-            shell.clear_completion_cache();
-            shell.push_history(buffer);
+                // move to last line of buffer
+                let y_offset = (ui.buffer.height - ui.buffer.y_offset - 1) as u16;
+                execute!(
+                    ui.stdout,
+                    MoveDown(y_offset),
+                    style::Print('\n'),
+                    MoveToColumn(0),
+                    Clear(ClearType::FromCursorDown),
+                )?;
 
-            if let Err(code) = shell.exec(buffer) {
-                eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
+                // expand history e.g. !!
+                let buffer = ui.buffer.get_contents();
+                let expanded_buffer = shell.expandhistory(buffer.clone());
+                let buffer = expanded_buffer.as_ref().unwrap_or(buffer).as_ref();
+                shell.clear_completion_cache();
+                shell.push_history(buffer);
+
+                if let Err(code) = shell.exec(buffer) {
+                    eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
+                }
+                ui.reset(&mut shell);
+                ui.is_running_process = false;
+                Ok(())
+            })();
+
+            if result.is_ok() {
+                // separate this bc it has an await
+                let cursor = ui.events.lock().await.get_cursor_position();
+                result = (|| {
+                    // move down one line if not at start of line
+                    if cursor?.0 != 0 {
+                        ui.size = crossterm::terminal::size()?;
+                        queue!(ui.stdout, style::Print("\r\n"))?;
+                    }
+                    Ok(())
+                })();
             }
-            ui.reset(&mut shell);
-            ui.is_running_process = false;
-
-            // move down one line if not at start of line
-            let cursor = ui.events.lock().await.get_cursor_position()?;
-            if cursor.0 != 0 {
-                ui.size = crossterm::terminal::size()?;
-                queue!(ui.stdout, style::Print("\r\n"))?;
-            }
 
             ui.is_running_process = false;
-            ui.activate()?;
+            // prefer the result error over the activate error
+            result.and(ui.activate())?;
 
         } else {
             self.inner.borrow_mut().await.buffer.insert_at_cursor(b"\n");
