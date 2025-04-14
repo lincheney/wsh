@@ -120,10 +120,16 @@ wish.set_keymap('<a-v>', function()
     local old_buffer = wish.get_buffer()
     local old_cursor = wish.get_cursor()
     wish.in_param_scope(function()
-        wish.set_var('REGION_ACTIVE', 1)
-        wish.set_var('BUFFER', old_buffer)
-        wish.set_var('CURSOR', old_cursor)
-        wish.set_var('LBUFFER', old_buffer:sub(1, old_cursor))
+        for k, v in pairs{
+            REGION_ACTIVE = 1,
+            BUFFER = old_buffer,
+            CURSOR = old_cursor,
+            LBUFFER = old_buffer:sub(1, old_cursor),
+        } do
+            wish.unset_var(k)
+            wish.set_var(k, v)
+        end
+
         wish.cmd[[autoload -Uz edit-command-line; edit-command-line]].wait()
         buffer = wish.get_var('BUFFER') or old_buffer
         cursor = wish.get_var('CURSOR') or old_cursor

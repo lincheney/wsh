@@ -218,8 +218,8 @@ pub fn _get_completions(streamer: &Mutex<Streamer>) {
         bindings::makezleparams(0);
         {
             let line = &streamer.lock().unwrap().buffer;
-            super::Variable::set(b"BUFFER", line.to_owned().into()).unwrap();
-            super::Variable::set(b"CURSOR", (line.len() as i64 + 1).into()).unwrap();
+            super::Variable::set(b"BUFFER", line.to_owned().into(), true).unwrap();
+            super::Variable::set(b"CURSOR", (line.len() as i64 + 1).into(), true).unwrap();
         }
         zsh_sys::endparamscope();
 

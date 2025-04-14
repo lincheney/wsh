@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ptr::NonNull;
 use std::ffi::{CString, CStr};
 use std::os::raw::{c_int, c_char};
 use anyhow::Result;
@@ -91,10 +92,10 @@ impl Variable {
         }
     }
 
-    pub fn set(name: &[u8], value: Value) -> Result<()> {
+    pub fn set(name: &[u8], value: Value, local: bool) -> Result<()> {
         let c_name = CString::new(name).unwrap();
         let name = c_name.as_ptr() as *mut _;
-        let result = match value {
+        let param = match value {
             Value::HashMap(value) => {
                 let value: Vec<BString> = value.into_iter().flat_map(|(k, v)| [k, v]).collect();
                 let value: CStringArray = value.into();
@@ -120,10 +121,14 @@ impl Variable {
                 unsafe{ zsh_sys::setsparam(name, c_value.into_raw()) }
             },
         };
-        if result.is_null() {
-            Err(anyhow::anyhow!("failed to set var {name:?}"))
-        } else {
+
+        if let Some(mut param) = NonNull::new(param) {
+            unsafe {
+                param.as_mut().level = zsh_sys::locallevel;
+            }
             Ok(())
+        } else {
+            Err(anyhow::anyhow!("failed to set var {name:?}"))
         }
 
     }

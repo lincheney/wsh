@@ -16,7 +16,7 @@ async fn get_var(ui: Ui, lua: Lua, name: BString) -> Result<LuaValue> {
     Ok(val)
 }
 
-async fn set_var(ui: Ui, lua: Lua, (name, val): (BString, LuaValue)) -> Result<()> {
+async fn set_var(ui: Ui, lua: Lua, (name, val, global): (BString, LuaValue, Option<bool>)) -> Result<()> {
     let val: crate::zsh::Value = match val {
         LuaValue::Integer(val) => val.into(),
         LuaValue::Number(val) => val.into(),
@@ -37,7 +37,7 @@ async fn set_var(ui: Ui, lua: Lua, (name, val): (BString, LuaValue)) -> Result<(
             return Err(anyhow::anyhow!("invalid value: {:?}", val))
         },
     };
-    ui.shell.lock().await.set_var(name.as_ref(), val)?;
+    ui.shell.lock().await.set_var(name.as_ref(), val, !global.unwrap_or(false))?;
     Ok(())
 }
 

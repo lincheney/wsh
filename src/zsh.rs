@@ -136,8 +136,8 @@ pub fn set_zle_buffer(buffer: BString, cursor: i64) {
     unsafe {
         zsh_sys::startparamscope();
         crate::zsh::bindings::makezleparams(0);
-        Variable::set(b"BUFFER", buffer.into()).unwrap();
-        Variable::set(b"CURSOR", cursor.into()).unwrap();
+        Variable::set(b"BUFFER", buffer.into(), true).unwrap();
+        Variable::set(b"CURSOR", cursor.into(), true).unwrap();
         zsh_sys::endparamscope();
     }
 }
