@@ -76,7 +76,7 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
     let mut start = 0;
 
     macro_rules! push_token {
-        ($tokstr: expr, $kind:expr, $has_meta:expr) => (
+        ($tokstr:expr, $kind:expr, $has_meta:expr) => (
             let range = if $has_meta {
                 let mut tokstr = $tokstr.to_owned();
                 super::unmetafy_owned(&mut tokstr);
@@ -109,6 +109,11 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
             zsh_sys::ctxtlex();
 
             if zsh_sys::tok == zsh_sys::lextok_ENDINPUT {
+                break
+            }
+
+            if zsh_sys::tok == zsh_sys::lextok_LEXERR || (zsh_sys::errflag & zsh_sys::errflag_bits_ERRFLAG_INT as i32) > 0 {
+                complete = false;
                 break
             }
 
@@ -158,11 +163,6 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
                 if tokstr.len() > slice_start {
                     push_token!(&tokstr[slice_start..], kind, has_meta);
                 }
-            }
-
-            if zsh_sys::tok == zsh_sys::lextok_LEXERR || (zsh_sys::errflag & zsh_sys::errflag_bits_ERRFLAG_INT as i32) > 0 {
-                complete = false;
-                break
             }
         }
 
