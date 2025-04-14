@@ -29,7 +29,7 @@ i wish i could have
 * [x] cut and paste
 * [ ] up/down work in multiline editing?
 * [ ] <alt-.>, insert-last-word
-* [ ] edit-command-line, i.e. in vim
+* [x] edit-command-line, i.e. in vim
 * [ ] control over zerr, zwarning
 * [ ] silence zerr, zwarning during parsing
 * [ ] capture zerr, zwarning during completion

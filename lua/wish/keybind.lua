@@ -114,6 +114,27 @@ wish.set_keymap('<c-p>', require('wish/history').history_up)
 wish.set_keymap('<c-n>', require('wish/history').history_down)
 wish.set_keymap('<c-r>', require('wish/history').history_search)
 
+wish.set_keymap('<a-v>', function()
+    local buffer
+    local cursor
+    local old_buffer = wish.get_buffer()
+    local old_cursor = wish.get_cursor()
+    wish.in_param_scope(function()
+        wish.set_var('REGION_ACTIVE', 1)
+        wish.set_var('BUFFER', old_buffer)
+        wish.set_var('CURSOR', old_cursor)
+        wish.set_var('LBUFFER', old_buffer:sub(1, old_cursor))
+        wish.cmd[[autoload -Uz edit-command-line; edit-command-line]].wait()
+        buffer = wish.get_var('BUFFER') or old_buffer
+        cursor = wish.get_var('CURSOR') or old_cursor
+    end)
+    if buffer ~= old_buffer and cursor ~= old_cursor then
+        wish.set_cursor(0)
+        wish.set_buffer(buffer)
+        wish.set_cursor(cursor)
+    end
+end)
+
 wish.set_keymap('<f12>', function()
     wish.set_var("path[${#path[@]}+1]", "hello")
     wish.pprint(wish.get_var("path"))

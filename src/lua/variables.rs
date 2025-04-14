@@ -51,12 +51,20 @@ async fn export_var(ui: Ui, _lua: Lua, name: BString) -> Result<()> {
     Ok(())
 }
 
+async fn in_param_scope(ui: Ui, _lua: Lua, name: LuaFunction) -> Result<LuaValue> {
+    ui.shell.lock().await.startparamscope();
+    let result = name.call_async(()).await?;
+    ui.shell.lock().await.endparamscope();
+    Ok(result)
+}
+
 pub async fn init_lua(ui: &Ui) -> Result<()> {
 
     ui.set_lua_async_fn("get_var", get_var)?;
     ui.set_lua_async_fn("set_var", set_var)?;
     ui.set_lua_async_fn("unset_var", unset_var)?;
     ui.set_lua_async_fn("export_var", export_var)?;
+    ui.set_lua_async_fn("in_param_scope", in_param_scope)?;
 
     Ok(())
 }

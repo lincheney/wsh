@@ -178,6 +178,14 @@ impl ShellInner {
         }
     }
 
+    pub fn startparamscope(&mut self) {
+        unsafe{ zsh_sys::startparamscope() }
+    }
+
+    pub fn endparamscope(&mut self) {
+        unsafe{ zsh_sys::endparamscope() }
+    }
+
     pub fn set_var(&mut self, name: &BStr, value: zsh::Value) -> anyhow::Result<()> {
         zsh::Variable::set(name, value)
     }
