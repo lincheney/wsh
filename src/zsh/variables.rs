@@ -123,8 +123,10 @@ impl Variable {
         };
 
         if let Some(mut param) = NonNull::new(param) {
-            unsafe {
-                param.as_mut().level = zsh_sys::locallevel;
+            if local {
+                unsafe {
+                    param.as_mut().level = zsh_sys::locallevel;
+                }
             }
             Ok(())
         } else {
