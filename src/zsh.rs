@@ -12,7 +12,7 @@ pub mod completion;
 pub mod parser;
 pub use variables::*;
 pub use string::ZString;
-pub use bindings::{cmatch, Inpar, Outpar, Meta, expandhistory};
+pub use bindings::{cmatch, Inpar, Outpar, Meta, expandhistory, selectkeymap, initundo};
 
 // pub type HandlerFunc = unsafe extern "C" fn(name: *mut c_char, argv: *mut *mut c_char, options: *mut zsh_sys::options, func: c_int) -> c_int;
 
@@ -132,26 +132,33 @@ pub fn unmetafy_owned(value: &mut Vec<u8>) {
     value.truncate(len as _);
 }
 
-pub fn set_zle_buffer(buffer: BString, cursor: i64) {
+pub fn start_zle_scope(zleactive: bool) {
     unsafe {
         zsh_sys::startparamscope();
         crate::zsh::bindings::makezleparams(0);
-        Variable::set(b"BUFFER", buffer.into(), true).unwrap();
-        Variable::set(b"CURSOR", cursor.into(), true).unwrap();
+    }
+}
+
+pub fn end_zle_scope(zleactive: bool) {
+    unsafe {
         zsh_sys::endparamscope();
     }
 }
 
+pub fn set_zle_buffer(buffer: BString, cursor: i64) {
+    start_zle_scope(false);
+    Variable::set(b"BUFFER", buffer.into(), true).unwrap();
+    Variable::set(b"CURSOR", cursor.into(), true).unwrap();
+    end_zle_scope(false);
+}
+
 pub fn get_zle_buffer() -> (BString, Option<i64>) {
-    unsafe {
-        zsh_sys::startparamscope();
-        bindings::makezleparams(0);
-        let buffer = Variable::get("BUFFER").unwrap().as_bytes();
-        let cursor = Variable::get("CURSOR").unwrap().try_as_int();
-        zsh_sys::endparamscope();
-        match cursor {
-            Ok(Some(cursor)) => (buffer, Some(cursor)),
-            _ => (buffer, None),
-        }
+    start_zle_scope(false);
+    let buffer = Variable::get("BUFFER").unwrap().as_bytes();
+    let cursor = Variable::get("CURSOR").unwrap().try_as_int();
+    end_zle_scope(false);
+    match cursor {
+        Ok(Some(cursor)) => (buffer, Some(cursor)),
+        _ => (buffer, None),
     }
 }

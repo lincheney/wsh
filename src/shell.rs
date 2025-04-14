@@ -50,6 +50,11 @@ impl ShellInner {
         unsafe {
             zsh_sys::opts[zsh_sys::INTERACTIVE as usize] = 1;
             zsh_sys::opts[zsh_sys::SHINSTDIN as usize] = 1;
+
+            // zle_main runs these
+            let keymap = CString::new("main").unwrap();
+            zsh::selectkeymap(keymap.as_ptr()as *mut _, 1);
+            zsh::initundo();
         }
     }
 
@@ -211,6 +216,14 @@ impl ShellInner {
         } else {
             None
         }
+    }
+
+    pub fn start_zle_scope(&mut self, zleactive: bool) {
+        zsh::start_zle_scope(zleactive);
+    }
+
+    pub fn end_zle_scope(&mut self, zleactive: bool) {
+        zsh::end_zle_scope(zleactive);
     }
 
 }

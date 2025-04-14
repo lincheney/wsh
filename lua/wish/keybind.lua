@@ -141,6 +141,14 @@ wish.set_keymap('<a-v>', function()
     end
 end)
 
+wish.set_keymap('<a-.>', function()
+    require('wish.insert-last-word').handler(true)
+end)
+
+wish.set_keymap('<a-,>', function()
+    require('wish.insert-last-word').handler(false)
+end)
+
 wish.set_keymap('<f12>', function()
     wish.set_var("path[${#path[@]}+1]", "hello")
     wish.pprint(wish.get_var("path"))

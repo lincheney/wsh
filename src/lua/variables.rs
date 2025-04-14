@@ -53,9 +53,9 @@ async fn export_var(ui: Ui, _lua: Lua, name: BString) -> Result<()> {
 
 async fn in_param_scope(ui: Ui, _lua: Lua, name: LuaFunction) -> Result<LuaValue> {
     ui.shell.lock().await.startparamscope();
-    let result = name.call_async(()).await?;
+    let result = name.call_async(()).await;
     ui.shell.lock().await.endparamscope();
-    Ok(result)
+    Ok(result?)
 }
 
 pub async fn init_lua(ui: &Ui) -> Result<()> {

@@ -28,7 +28,7 @@ i wish i could have
 * [x] buffer edit history, undo, redo
 * [x] cut and paste
 * [ ] up/down work in multiline editing?
-* [ ] <alt-.>, insert-last-word
+* [x] <alt-.>, insert-last-word
 * [x] edit-command-line, i.e. in vim
 * [ ] control over zerr, zwarning
 * [ ] silence zerr, zwarning during parsing
@@ -45,4 +45,5 @@ i wish i could have
 * [ ] options system
 * [x] alias, history expansion
 * [ ] heredocs
+* [ ] selecting `print -s echo` in history is weird
 * [ ] 

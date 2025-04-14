@@ -54,3 +54,11 @@ function wish.eval(args)
     wish.pprint({stdout=stdout})
     return code, stdout
 end
+
+function wish.shell_split(str)
+    return wish.in_param_scope(function()
+        wish.set_var('str', str)
+        wish.cmd[[ () { emulate -LR zsh; str=( ${(z)str} ); } ]].wait()
+        return wish.get_var('str')
+    end)
+end
