@@ -8,6 +8,7 @@ use super::bindings;
 pub enum TokenKind {
     Lextok(bindings::lextok),
     Token(bindings::token),
+    Comment,
 }
 
 #[derive(Debug)]
@@ -25,6 +26,7 @@ impl Token {
         Some(match self.kind? {
             TokenKind::Lextok(k) => format!("{:?}", k),
             TokenKind::Token(k) => format!("{:?}", k),
+            TokenKind::Comment => "comment".into(),
         })
     }
 }
@@ -55,11 +57,13 @@ pub fn parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
             tokens.pop();
         } else {
             // otherwise it must be joined onto an incomplete token
+            if last.kind != Some(TokenKind::Comment) {
+                complete = false;
+            }
             last.range.end -= dummy.len();
             if last.range.is_empty() {
                 tokens.pop();
             }
-            complete = false;
         }
     } else {
         // no tokens???
@@ -112,18 +116,13 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
                 break
             }
 
-            if zsh_sys::tok == zsh_sys::lextok_LEXERR || (zsh_sys::errflag & zsh_sys::errflag_bits_ERRFLAG_INT as i32) > 0 {
-                complete = false;
-                break
-            }
-
-            let kind: Option<TokenKind> = num::FromPrimitive::from_u32(zsh_sys::tok).map(TokenKind::Lextok);
+            let mut kind: Option<TokenKind> = num::FromPrimitive::from_u32(zsh_sys::tok).map(TokenKind::Lextok);
 
             if zsh_sys::tokstr.is_null() {
                 // no tokstr, so get string from tokstring table
 
                 #[allow(static_mut_refs)]
-                if let Some(tokstr) = zsh_sys::tokstrings.get(zsh_sys::tok as usize) {
+                if let Some(tokstr) = zsh_sys::tokstrings.get(zsh_sys::tok as usize).filter(|t| !t.is_null()) {
                     let tokstr = CStr::from_ptr(*tokstr).to_bytes();
                     push_token!(tokstr, kind, false);
 
@@ -136,6 +135,11 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
                 // let's go through the tokens
 
                 let tokstr = CStr::from_ptr(zsh_sys::tokstr).to_bytes();
+
+                if kind == Some(TokenKind::Lextok(bindings::lextok::STRING)) && tokstr.starts_with(b"#") {
+                    kind = Some(TokenKind::Comment);
+                }
+
                 let mut slice_start = 0;
                 let mut meta = false;
                 let mut has_meta = false;
@@ -164,6 +168,12 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
                     push_token!(&tokstr[slice_start..], kind, has_meta);
                 }
             }
+
+            if zsh_sys::tok == zsh_sys::lextok_LEXERR || (zsh_sys::errflag & zsh_sys::errflag_bits_ERRFLAG_INT as i32) > 0 {
+                complete = false;
+                break
+            }
+
         }
 
         // restore

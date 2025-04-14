@@ -4,6 +4,7 @@ local PUNCTUATION = {fg = 'grey', bold = true}
 local NEW_COMMAND = {fg = 'yellow'}
 local STRING = {}
 local KEYWORD = {fg = 'green', bold = true}
+local COMMENT = {fg = 'grey'}
 local NAMESPACE = wish.add_buf_highlight_namespace()
 
 local highlights = {
@@ -37,7 +38,9 @@ local highlights = {
     TIME = KEYWORD,
     UNTIL = KEYWORD,
     WHILE = KEYWORD,
-    TYPESET = KEYWORD
+    TYPESET = KEYWORD,
+
+    comment = COMMENT,
 }
 
 wish.add_event_callback('buffer_change', function()
@@ -54,7 +57,7 @@ wish.add_event_callback('buffer_change', function()
                 hl = PUNCTUATION
             end
 
-            if next(hl) then
+            if hl and next(hl) then
                 local arg = {}
                 for k, v in pairs(hl) do
                     arg[k] = v

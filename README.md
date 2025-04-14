@@ -30,9 +30,9 @@ i wish i could have
 * [ ] up/down work in multiline editing?
 * [x] <alt-.>, insert-last-word
 * [x] edit-command-line, i.e. in vim
-* [ ] control over zerr, zwarning
-* [ ] silence zerr, zwarning during parsing
-* [ ] capture zerr, zwarning during completion
+* [ ] ~~control over zerr, zwarning~~
+* [ ] ~~silence zerr, zwarning during parsing~~
+* [ ] ~~capture zerr, zwarning during completion~~
 * [ ] drop history entries which are space etc
 * [x] general selection widget interface
 * [ ] embed process output in a tui message
@@ -46,4 +46,6 @@ i wish i could have
 * [x] alias, history expansion
 * [ ] heredocs
 * [ ] selecting `print -s echo` in history is weird
+* [ ] silence parse warnings
+* [ ] custom buffer rendering, ghost text etc
 * [ ] 
