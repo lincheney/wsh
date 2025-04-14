@@ -330,64 +330,59 @@ impl Ui {
     }
 
     async fn accept_line(&mut self) -> Result<bool> {
-        self.draw().await?;
-        self.inner.borrow_mut().await.is_running_process = true;
+        let (complete, _tokens) = {
+            let ui = self.inner.borrow().await;
+            let buffer = ui.buffer.get_contents().as_ref();
+            self.shell.lock().await.parse(buffer, false)
+        };
 
-        {
-            let (complete, _tokens) = {
-                let ui = self.inner.borrow().await;
-                let buffer = ui.buffer.get_contents().as_ref();
-                self.shell.lock().await.parse(buffer, false)
-            };
+        // time to execute
+        if complete {
+            EventCallbacks::trigger_accept_line_callbacks(self, ()).await;
 
-            // time to execute
-            if complete {
-                EventCallbacks::trigger_accept_line_callbacks(self, ()).await;
-
-                let mut ui = self.inner.borrow_mut().await;
-                let mut shell = self.shell.lock().await;
-
-                ui.tui.clear_non_persistent();
-                ui.deactivate()?;
-
-                // move to last line of buffer
-                let y_offset = (ui.buffer.height - ui.buffer.y_offset - 1) as u16;
-                execute!(
-                    ui.stdout,
-                    MoveDown(y_offset),
-                    style::Print('\n'),
-                    MoveToColumn(0),
-                    Clear(ClearType::FromCursorDown),
-                )?;
-
-                // expand history e.g. !!
-                let buffer = ui.buffer.get_contents();
-                let expanded_buffer = shell.expandhistory(buffer.clone());
-                let buffer = expanded_buffer.as_ref().unwrap_or(buffer).as_ref();
-                shell.clear_completion_cache();
-                shell.push_history(buffer);
-
-                if let Err(code) = shell.exec(buffer) {
-                    eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
-                }
-                ui.reset(&mut shell);
-                ui.is_running_process = false;
-
-                // move down one line if not at start of line
-                let cursor = ui.events.lock().await.get_cursor_position()?;
-                if cursor.0 != 0 {
-                    ui.size = crossterm::terminal::size()?;
-                    queue!(ui.stdout, style::Print("\r\n"))?;
-                }
-
-            } else {
-                self.inner.borrow_mut().await.buffer.insert_at_cursor(b"\n");
-                EventCallbacks::trigger_buffer_change_callbacks(self, ()).await;
-            }
             let mut ui = self.inner.borrow_mut().await;
+            let mut shell = self.shell.lock().await;
+
+            ui.is_running_process = true;
+            ui.tui.clear_non_persistent();
+            ui.deactivate()?;
+
+            // move to last line of buffer
+            let y_offset = (ui.buffer.height - ui.buffer.y_offset - 1) as u16;
+            execute!(
+                ui.stdout,
+                MoveDown(y_offset),
+                style::Print('\n'),
+                MoveToColumn(0),
+                Clear(ClearType::FromCursorDown),
+            )?;
+
+            // expand history e.g. !!
+            let buffer = ui.buffer.get_contents();
+            let expanded_buffer = shell.expandhistory(buffer.clone());
+            let buffer = expanded_buffer.as_ref().unwrap_or(buffer).as_ref();
+            shell.clear_completion_cache();
+            shell.push_history(buffer);
+
+            if let Err(code) = shell.exec(buffer) {
+                eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
+            }
+            ui.reset(&mut shell);
             ui.is_running_process = false;
 
+            // move down one line if not at start of line
+            let cursor = ui.events.lock().await.get_cursor_position()?;
+            if cursor.0 != 0 {
+                ui.size = crossterm::terminal::size()?;
+                queue!(ui.stdout, style::Print("\r\n"))?;
+            }
+
+            ui.is_running_process = false;
             ui.activate()?;
+
+        } else {
+            self.inner.borrow_mut().await.buffer.insert_at_cursor(b"\n");
+            EventCallbacks::trigger_buffer_change_callbacks(self, ()).await;
         }
 
         self.draw().await?;
