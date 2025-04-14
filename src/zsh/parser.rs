@@ -95,6 +95,7 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
         zsh_sys::zlemetall = cmd.len() as _;
         zsh_sys::zlemetacs = zsh_sys::zlemetall;
         zsh_sys::strinbeg(0);
+        let old_noaliases = zsh_sys::noaliases;
         zsh_sys::noaliases = 1;
 
         let lexflags = zsh_sys::lexflags;
@@ -170,6 +171,7 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
         zsh_sys::strinend();
         zsh_sys::inpop();
         zsh_sys::errflag &= !zsh_sys::errflag_bits_ERRFLAG_ERROR as i32;
+        zsh_sys::noaliases = old_noaliases;
     }
 
     // detect subshells
