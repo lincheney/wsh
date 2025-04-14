@@ -132,31 +132,31 @@ pub fn unmetafy_owned(value: &mut Vec<u8>) {
     value.truncate(len as _);
 }
 
-pub fn start_zle_scope(zleactive: bool) {
+pub fn start_zle_scope() {
     unsafe {
         zsh_sys::startparamscope();
         crate::zsh::bindings::makezleparams(0);
     }
 }
 
-pub fn end_zle_scope(zleactive: bool) {
+pub fn end_zle_scope() {
     unsafe {
         zsh_sys::endparamscope();
     }
 }
 
 pub fn set_zle_buffer(buffer: BString, cursor: i64) {
-    start_zle_scope(false);
+    start_zle_scope();
     Variable::set(b"BUFFER", buffer.into(), true).unwrap();
     Variable::set(b"CURSOR", cursor.into(), true).unwrap();
-    end_zle_scope(false);
+    end_zle_scope();
 }
 
 pub fn get_zle_buffer() -> (BString, Option<i64>) {
-    start_zle_scope(false);
+    start_zle_scope();
     let buffer = Variable::get("BUFFER").unwrap().as_bytes();
     let cursor = Variable::get("CURSOR").unwrap().try_as_int();
-    end_zle_scope(false);
+    end_zle_scope();
     match cursor {
         Ok(Some(cursor)) => (buffer, Some(cursor)),
         _ => (buffer, None),
