@@ -236,14 +236,7 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
         None => {},
     }
 
-    let p = widget.inner.take().unwrap_or_else(|| Paragraph::default());
-    let p = p
-        .alignment(widget.align)
-        .style(widget.style.as_style())
-        .block(widget.block.clone())
-        .wrap(Wrap{trim: false})
-    ;
-    widget.inner = Some(p);
+    widget.make_paragraph();
 }
 
 async fn set_message(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {

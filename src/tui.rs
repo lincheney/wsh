@@ -103,6 +103,17 @@ impl Widget {
         text
     }
 
+    pub fn make_paragraph(&mut self) {
+        let p = self.inner.take().unwrap_or_else(|| Paragraph::default());
+        let p = p
+            .alignment(self.align)
+            .style(self.style.as_style())
+            .block(self.block.clone())
+            .wrap(Wrap{trim: false})
+        ;
+        self.inner = Some(p);
+    }
+
 }
 
 #[derive(Debug)]

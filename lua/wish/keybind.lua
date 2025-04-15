@@ -150,7 +150,17 @@ wish.set_keymap('<a-,>', function()
 end)
 
 wish.set_keymap('<f12>', function()
-    local id = wish.set_ansi_message{dim = true}
+    local id = wish.set_ansi_message{
+        dim = true,
+        border = {
+            fg = 'blue',
+            dim = false,
+            type = 'Rounded',
+            title = {
+                text = ' running ... ',
+            },
+        },
+    }
     wish.schedule(function()
         local proc = wish.async.spawn{
             args = {'bash', '-c', 'for i in {1..10}; do printf "\\rhello world %i" $i; sleep 1; done'},

@@ -130,7 +130,10 @@ impl Parser {
             }
         }
 
-        self.widget.inner.get_or_insert_with(|| Paragraph::new(text));
+        if self.widget.inner.is_none() {
+            self.widget.inner = Some(Paragraph::new(text));
+            self.widget.make_paragraph();
+        }
         &mut self.widget
     }
 
