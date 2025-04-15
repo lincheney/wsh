@@ -1,6 +1,6 @@
 local M = {}
 local SELECTION = require('wish/selection-widget')
-local msg = wish.set_message{hidden = true}
+local msg = wish.set_message{hidden = true, persistent = true}
 
 function M.complete()
     local matches = nil
