@@ -150,9 +150,24 @@ wish.set_keymap('<a-,>', function()
 end)
 
 wish.set_keymap('<f12>', function()
-    local code, stdout = wish.eval[[ls -l --color=always /tmp/]]
     local id = wish.set_ansi_message{dim = true}
-    wish.feed_ansi_message(id, stdout)
+    wish.schedule(function()
+        local proc = wish.async.spawn{
+            args = {'bash', '-c', 'for i in {1..10}; do printf "\\rhello world %i" $i; sleep 1; done'},
+            stdout = 'piped',
+        }
+        while true do
+            local stdout = proc.stdout:read()
+            wish.pprint("DEBUG(pile)      ".."stdout"..(" = %q\n"):format(stdout))
+            if not stdout then
+                break
+            end
+            wish.feed_ansi_message(id, stdout)
+            wish.redraw()
+        end
+        proc:wait()
+    end)
+    -- local code, stdout = wish.eval[[ls -l --color=always /tmp/]]
 
     -- wish.set_var("path[${#path[@]}+1]", "hello")
     -- wish.pprint(wish.get_var("path"))

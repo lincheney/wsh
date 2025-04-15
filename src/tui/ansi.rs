@@ -11,6 +11,7 @@ pub struct Parser {
     buffer: BString,
     style: Style,
     pub(super) widget: super::Widget,
+    cursor_x: usize,
 }
 
 fn parse_ansi_col(mut style: Style, string: &BStr) -> Style {
@@ -133,6 +134,7 @@ impl Parser {
 
     fn add_line(&mut self) {
         self.text.lines.push(Line::default());
+        self.cursor_x = 0;
     }
 
     fn add_str(&mut self, string: String) {
@@ -144,7 +146,61 @@ impl Parser {
             self.add_line();
         }
         let line = self.text.lines.last_mut().unwrap();
-        line.spans.push(Span::styled(string, self.style));
+        let span = Span::styled(string, self.style);
+        let width = span.width();
+        if self.cursor_x >= line.width() {
+            line.spans.push(span);
+        } else {
+            // need to overwrite things ....
+            let mut start = 0;
+            line.spans.retain_mut(|sp| {
+                let w = sp.width();
+                let start_overlap = (self.cursor_x + width).saturating_sub(start);
+                let end_overlap = (start + w).saturating_sub(self.cursor_x);
+                start += w;
+
+                if start_overlap > 0 && end_overlap > 0 {
+                    // span is fully within the overwrite range
+                    false
+                } else if start_overlap > 0 {
+                    // range overlaps start of this span
+                    let content = sp.styled_graphemes(Style::default())
+                        .skip(start_overlap)
+                        .map(|s| s.symbol)
+                        .collect::<Vec<_>>()
+                        .join("");
+                    *sp = std::mem::replace(sp, Span::default()).content(content);
+                    true
+                } else if end_overlap > 0 {
+                    // range overlaps end of this span
+                    let content = sp.styled_graphemes(Style::default())
+                        .take(w - end_overlap)
+                        .map(|s| s.symbol)
+                        .collect::<Vec<_>>()
+                        .join("");
+                    *sp = std::mem::replace(sp, Span::default()).content(content);
+                    true
+                } else {
+                    // no overlap
+                    true
+                }
+            });
+
+            if line.spans.is_empty() {
+                line.spans.push(span);
+            } else {
+                let mut start = 0;
+                for (i, sp) in line.spans.iter().enumerate() {
+                    start += sp.width();
+                    if start >= self.cursor_x {
+                        line.spans.insert(i, span);
+                        break
+                    }
+                }
+            }
+
+        }
+        self.cursor_x += width;
         self.flush();
     }
 
@@ -153,7 +209,7 @@ impl Parser {
     }
 
     pub fn feed(&mut self, mut string: &BStr) {
-        while let Some(chunk) = string.split_inclusive(|c| matches!(c, b'\n' | b'\x1b')).next() {
+        while let Some(chunk) = string.split_inclusive(|c| matches!(c, b'\n' | b'\r' | b'\x1b')).next() {
 
             let (last, chunk) = chunk.split_last().unwrap();
             match last {
@@ -162,6 +218,13 @@ impl Parser {
                         self.add_str(format!("{}", chunk.as_bstr()));
                     }
                     self.add_line();
+                    string = &string[chunk.len() + 1 .. ];
+                },
+                b'\r' => {
+                    if !chunk.is_empty() {
+                        self.add_str(format!("{}", chunk.as_bstr()));
+                    }
+                    self.cursor_x = 0;
                     string = &string[chunk.len() + 1 .. ];
                 },
                 b'\x1b' => {
