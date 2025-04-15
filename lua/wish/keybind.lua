@@ -163,7 +163,7 @@ wish.set_keymap('<f12>', function()
     }
     wish.schedule(function()
         local proc = wish.async.spawn{
-            args = {'bash', '-c', 'for i in {1..10}; do printf "\\rhello world %i" $i; sleep 1; done'},
+            args = {'bash', '-c', 'for i in {1..10}; do printf "\\rhello world %i\x1b[3%im" $i $i; sleep 0.3; done; echo; echo done'},
             stdout = 'piped',
         }
         while true do

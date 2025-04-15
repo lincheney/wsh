@@ -14,6 +14,7 @@ pub struct Parser {
     style: Style,
     pub(super) widget: super::Widget,
     cursor_x: usize,
+    need_newline: bool,
 }
 
 fn parse_ansi_col(mut style: Style, string: &BStr) -> Style {
@@ -140,6 +141,7 @@ impl Parser {
     fn add_line(&mut self) {
         self.text.lines.push(Line::default());
         self.cursor_x = 0;
+        self.need_newline = false;
     }
 
     fn add_str(&mut self, string: String) {
@@ -147,7 +149,7 @@ impl Parser {
             return
         }
 
-        if self.text.lines.is_empty() {
+        if self.need_newline || self.text.lines.is_empty() {
             self.add_line();
         }
         let line = self.text.lines.last_mut().unwrap();
@@ -230,7 +232,7 @@ impl Parser {
             match last {
                 b'\n' => {
                     handler();
-                    self.add_line();
+                    self.need_newline = true;
                 },
                 b'\r' => {
                     handler();
