@@ -5,6 +5,8 @@ use ratatui::{
     style::*,
 };
 
+const TAB_SIZE: usize = 8;
+
 #[derive(Debug, Default)]
 pub struct Parser {
     text: Text<'static>,
@@ -209,29 +211,35 @@ impl Parser {
     }
 
     pub fn feed(&mut self, mut string: &BStr) {
-        while let Some(chunk) = string.split_inclusive(|c| matches!(c, b'\n' | b'\r' | b'\x1b')).next() {
+        while let Some(chunk) = string.split_inclusive(|c| matches!(c,
+            b'\n' | b'\r' | b'\t' | b'\x1b',
+        )).next() {
 
             let (last, chunk) = chunk.split_last().unwrap();
+
+            let mut handler = || {
+                if !chunk.is_empty() {
+                    self.add_str(format!("{}", chunk.as_bstr()));
+                }
+                string = &string[chunk.len() + 1 .. ];
+            };
+
             match last {
                 b'\n' => {
-                    if !chunk.is_empty() {
-                        self.add_str(format!("{}", chunk.as_bstr()));
-                    }
+                    handler();
                     self.add_line();
-                    string = &string[chunk.len() + 1 .. ];
                 },
                 b'\r' => {
-                    if !chunk.is_empty() {
-                        self.add_str(format!("{}", chunk.as_bstr()));
-                    }
+                    handler();
                     self.cursor_x = 0;
-                    string = &string[chunk.len() + 1 .. ];
+                },
+                b'\t' => {
+                    handler();
+                    let len = TAB_SIZE - self.cursor_x % TAB_SIZE;
+                    self.add_str(" ".repeat(len));
                 },
                 b'\x1b' => {
-                    if !chunk.is_empty() {
-                        self.add_str(format!("{}", chunk.as_bstr()));
-                    }
-                    string = &string[chunk.len() + 1 .. ];
+                    handler();
 
                     if string.starts_with(b"[") {
                         // csi
