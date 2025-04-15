@@ -1,4 +1,4 @@
-use bstr::{BStr, BString, ByteSlice};
+use bstr::{BStr, BString};
 use ratatui::{
     text::*,
     widgets::*,
@@ -7,11 +7,23 @@ use ratatui::{
 
 const TAB_SIZE: usize = 8;
 
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+enum State {
+    #[default]
+    None,
+    Esc,
+    Csi,
+    CsiParams,
+    CsiOther,
+    CsiOtherParams,
+}
+
 #[derive(Debug, Default)]
 pub struct Parser {
     text: Text<'static>,
     buffer: BString,
     style: Style,
+    state: State,
     pub(super) widget: super::Widget,
     cursor_x: usize,
     need_newline: bool,
@@ -36,7 +48,7 @@ fn parse_ansi_col(mut style: Style, string: &BStr) -> Style {
 
     while let Some((part, colon)) = parts.next() {
         style = match part {
-            0 =>  Style::default(),
+            0 => Style::default(),
             1 => style.add_modifier(Modifier::BOLD),
             2 => style.add_modifier(Modifier::DIM),
             3 => style.add_modifier(Modifier::ITALIC),
@@ -144,6 +156,13 @@ impl Parser {
         self.need_newline = false;
     }
 
+    fn add_buffer(&mut self) {
+        if !self.buffer.is_empty() {
+            self.add_str(format!("{}", self.buffer));
+            self.buffer.clear();
+        }
+    }
+
     fn add_str(&mut self, string: String) {
         if string.is_empty() {
             return
@@ -215,66 +234,64 @@ impl Parser {
         self.widget.inner = None;
     }
 
-    pub fn feed(&mut self, mut string: &BStr) {
-        while let Some(chunk) = string.split_inclusive(|c| matches!(c,
-            b'\n' | b'\r' | b'\t' | b'\x1b',
-        )).next() {
+    pub fn feed(&mut self, string: &BStr) {
+        for c in string.iter() {
+            let old_state = self.state;
+            self.state = match (old_state, c) {
+                (State::None, b'\x1b') => State::Esc,
+                (State::Esc, b'[') => State::Csi,
+                (State::Esc, _) => State::None,
 
-            let (last, chunk) = chunk.split_last().unwrap();
+                (State::Csi | State::CsiParams, b'0'..=b'9' | b';' | b':') => {
+                    self.buffer.push(*c);
+                    State::CsiParams
+                },
+                (State::CsiParams, b'm') => {
+                    self.style = parse_ansi_col(self.style, self.buffer.as_ref());
+                    self.buffer.clear();
+                    State::None
+                },
+                (State::CsiParams, _) => {
+                    self.buffer.clear();
+                    State::None
+                },
 
-            let mut handler = || {
-                if !chunk.is_empty() {
-                    self.add_str(format!("{}", chunk.as_bstr()));
-                }
-                string = &string[chunk.len() + 1 .. ];
-            };
+                (State::Csi, b' ' | b'#' | b'%' | b'(' | b')' | b'*' | b'+') => State::CsiOther,
+                (State::CsiOther, _) => State::None,
 
-            match last {
-                b'\n' => {
-                    handler();
+                (State::Csi, b'?' | b'>' | b'=' | b'!') => State::CsiOtherParams,
+                (State::CsiOtherParams, b'0'..=b'9' | b';' | b':') => State::CsiOtherParams,
+                (State::CsiOtherParams, _) => State::None,
+                (State::Csi, _) => State::None,
+
+                (State::None, b'\n') => {
+                    self.add_buffer();
                     self.need_newline = true;
+                    State::None
                 },
-                b'\r' => {
-                    handler();
+                (State::None, b'\r') => {
+                    self.add_buffer();
                     self.cursor_x = 0;
+                    State::None
                 },
-                b'\t' => {
-                    handler();
+                (State::None, b'\t') => {
+                    self.add_buffer();
                     let len = TAB_SIZE - self.cursor_x % TAB_SIZE;
                     self.add_str(" ".repeat(len));
+                    State::None
                 },
-                b'\x1b' => {
-                    handler();
-
-                    if string.starts_with(b"[") {
-                        // csi
-                        string = &string[1..];
-
-                        let col = match string.iter().position(|c| !matches!(c, b'0'..=b'9' | b':' | b';')) {
-                            Some(col) => col,
-                            None => {
-                                // csi sequence not finished
-                                self.buffer.extend_from_slice(string);
-                                return
-                            },
-                        };
-
-                        self.buffer.extend_from_slice(&string[..col]);
-                        string = &string[col .. ];
-                        if string.starts_with(b"m") {
-                            self.style = parse_ansi_col(self.style, self.buffer.as_ref());
-                            self.buffer.clear();
-                        }
-                        string = &string[1..];
-                    }
+                (State::None, _) => {
+                    self.buffer.push(*c);
+                    State::None
                 },
-                _ => {
-                    self.add_str(format!("{}", string));
-                    return
-                },
+            };
+
+            if old_state == State::None && self.state != State::None {
+                self.add_buffer();
             }
         }
 
+        self.add_buffer();
     }
 
 }

@@ -35,7 +35,7 @@ i wish i could have
 * [ ] ~~capture zerr, zwarning during completion~~
 * [ ] drop history entries which are space etc
 * [x] general selection widget interface
-* [ ] embed process output in a tui message
+* [x] embed process output in a tui message
 * [ ] draw prompt and buffer using ratatui
 * [ ] status bar
 * [ ] poc async prompt
