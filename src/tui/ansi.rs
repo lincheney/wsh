@@ -1,4 +1,4 @@
-use bstr::{BStr, BString};
+use bstr::{BStr, BString, ByteSlice};
 use ratatui::{
     text::*,
     widgets::*,
@@ -14,8 +14,8 @@ enum State {
     Esc,
     Csi,
     CsiParams,
+    EscOther,
     CsiOther,
-    CsiOtherParams,
 }
 
 #[derive(Debug, Default)]
@@ -30,6 +30,12 @@ pub struct Parser {
 }
 
 fn parse_ansi_col(mut style: Style, string: &BStr) -> Style {
+    let string = if string.is_empty() {
+        b";".as_bstr()
+    } else {
+        string
+    };
+
     let mut parts = string.split_inclusive(|c| matches!(c, b';' | b':'))
         .map(|part| {
             if part.is_empty() {
@@ -42,7 +48,11 @@ fn parse_ansi_col(mut style: Style, string: &BStr) -> Style {
                 } else {
                     (part, false)
                 };
-                (std::str::from_utf8(part).unwrap().parse::<usize>().unwrap(), colon)
+                if part.is_empty() {
+                    (0, false)
+                } else {
+                    (std::str::from_utf8(part).unwrap().parse::<usize>().unwrap(), colon)
+                }
             }
         });
 
@@ -235,18 +245,19 @@ impl Parser {
     }
 
     pub fn feed(&mut self, string: &BStr) {
+        // we support some csi styling, newlines, tabs and normal text and that's about it
+
         for c in string.iter() {
             let old_state = self.state;
             self.state = match (old_state, c) {
                 (State::None, b'\x1b') => State::Esc,
                 (State::Esc, b'[') => State::Csi,
-                (State::Esc, _) => State::None,
 
                 (State::Csi | State::CsiParams, b'0'..=b'9' | b';' | b':') => {
                     self.buffer.push(*c);
                     State::CsiParams
                 },
-                (State::CsiParams, b'm') => {
+                (State::Csi | State::CsiParams, b'm') => {
                     self.style = parse_ansi_col(self.style, self.buffer.as_ref());
                     self.buffer.clear();
                     State::None
@@ -256,13 +267,14 @@ impl Parser {
                     State::None
                 },
 
-                (State::Csi, b' ' | b'#' | b'%' | b'(' | b')' | b'*' | b'+') => State::CsiOther,
-                (State::CsiOther, _) => State::None,
+                (State::Esc, b' ' | b'#' | b'%' | b'(' | b')' | b'*' | b'+') => State::EscOther,
+                (State::EscOther, _) => State::None,
 
-                (State::Csi, b'?' | b'>' | b'=' | b'!') => State::CsiOtherParams,
-                (State::CsiOtherParams, b'0'..=b'9' | b';' | b':') => State::CsiOtherParams,
-                (State::CsiOtherParams, _) => State::None,
+                (State::Csi, b'?' | b'>' | b'=' | b'!') => State::CsiOther,
+                (State::CsiOther, b'0'..=b'9' | b';' | b':') => State::CsiOther,
+                (State::CsiOther, _) => State::None,
                 (State::Csi, _) => State::None,
+                (State::Esc, _) => State::None,
 
                 (State::None, b'\n') => {
                     self.add_buffer();
@@ -291,7 +303,9 @@ impl Parser {
             }
         }
 
-        self.add_buffer();
+        if self.state == State::None {
+            self.add_buffer();
+        }
     }
 
 }
