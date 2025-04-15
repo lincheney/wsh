@@ -80,7 +80,7 @@ function M.start(opts)
 
         wish.redraw{buffer=true, messages=true}
         wish.set_cursor(state.cursor)
-        wish.redraw()
+        wish.redraw{all = true}
     end
 
     state = nil
