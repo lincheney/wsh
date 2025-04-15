@@ -150,8 +150,12 @@ wish.set_keymap('<a-,>', function()
 end)
 
 wish.set_keymap('<f12>', function()
-    wish.set_var("path[${#path[@]}+1]", "hello")
-    wish.pprint(wish.get_var("path"))
+    local code, stdout = wish.eval[[ls -l --color=always /tmp/]]
+    local id = wish.set_ansi_message()
+    wish.feed_ansi_message(id, stdout)
+
+    -- wish.set_var("path[${#path[@]}+1]", "hello")
+    -- wish.pprint(wish.get_var("path"))
     -- local complete, starts, ends, kinds = wish.parse(wish.get_buffer())
     -- wish.pprint(complete)
     -- wish.pprint(strings)

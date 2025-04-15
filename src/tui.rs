@@ -15,12 +15,13 @@ use ratatui::{
 };
 use crate::ui::Ui;
 mod backend;
+pub mod ansi;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Widget{
     id: usize,
     pub constraint: Constraint,
-    pub inner: Paragraph<'static>,
+    pub inner: Option<Paragraph<'static>>,
     pub align: Alignment,
     pub style: Style,
     pub border_style: Style,
@@ -45,10 +46,44 @@ impl Widget {
 
 }
 
+#[derive(Debug)]
+pub enum WidgetWrapper {
+    Widget(Widget),
+    Ansi(ansi::Parser),
+}
+
+impl WidgetWrapper {
+    pub fn as_ref(&self) -> &Widget {
+        match self {
+            Self::Widget(ref w) => w,
+            Self::Ansi(p) => &p.widget,
+        }
+    }
+
+    pub fn as_mut(&mut self) -> &mut Widget {
+        match self {
+            Self::Widget(ref mut w) => w,
+            Self::Ansi(p) => p.as_widget(),
+        }
+    }
+}
+
+impl Into<WidgetWrapper> for Widget {
+    fn into(self) -> WidgetWrapper {
+        WidgetWrapper::Widget(self)
+    }
+}
+
+impl Into<WidgetWrapper> for ansi::Parser {
+    fn into(self) -> WidgetWrapper {
+        WidgetWrapper::Ansi(self)
+    }
+}
+
 pub struct Tui {
     terminal: ratatui::DefaultTerminal,
     counter: usize,
-    widgets: Vec<Widget>,
+    widgets: Vec<WidgetWrapper>,
 
     pub dirty: bool,
     width: u16,
@@ -78,27 +113,26 @@ impl std::default::Default for Tui {
 
 impl Tui {
 
-    pub fn add(&mut self, mut widget: Widget) -> usize {
+    pub fn add(&mut self, mut widget: WidgetWrapper) -> (usize, &mut WidgetWrapper) {
         let id = self.counter;
-        widget.id = id;
+        widget.as_mut().id = id;
         self.counter += 1;
         self.dirty = true;
         self.widgets.push(widget);
-        id
+        (id, self.widgets.last_mut().unwrap())
     }
 
-    pub fn add_error_message(&mut self, message: String) -> usize {
+    pub fn add_error_message(&mut self, message: String) -> (usize, &mut WidgetWrapper) {
         let mut widget = Widget::default();
         let message = Widget::replace_tabs(message);
         let message: Vec<_> = message.split('\n').map(|l| Line::from(l.to_owned())).collect();
-        widget.inner = Paragraph::new(message);
-        widget.inner = widget.inner.fg(Color::Red);
-        self.add(widget)
+        widget.inner = Some(Paragraph::new(message).fg(Color::Red));
+        self.add(widget.into())
     }
 
     pub fn get_index(&self, id: usize) -> Option<usize> {
         for (i, w) in self.widgets.iter().enumerate() {
-            match w.id.cmp(&id) {
+            match w.as_ref().id.cmp(&id) {
                 std::cmp::Ordering::Equal => return Some(i),
                 std::cmp::Ordering::Greater => break,
                 std::cmp::Ordering::Less => (),
@@ -107,14 +141,14 @@ impl Tui {
         None
     }
 
-    pub fn get_mut(&mut self, id: usize) -> Option<&mut Widget> {
+    pub fn get_mut(&mut self, id: usize) -> Option<&mut WidgetWrapper> {
         self.get_index(id).map(|i| {
             self.dirty = true;
             &mut self.widgets[i]
         })
     }
 
-    pub fn remove(&mut self, id: usize) -> Option<Widget> {
+    pub fn remove(&mut self, id: usize) -> Option<WidgetWrapper> {
         self.get_index(id).map(|i| {
             self.dirty = true;
             self.widgets.remove(i)
@@ -127,7 +161,7 @@ impl Tui {
     }
 
     pub fn clear_non_persistent(&mut self) {
-        self.widgets.retain(|w| w.persist);
+        self.widgets.retain(|w| w.as_ref().persist);
         self.dirty = true;
     }
 
@@ -155,13 +189,17 @@ impl Tui {
         let mut max_height = 0;
         let mut last_widget = 0;
         for (i, w) in self.widgets.iter_mut().enumerate() {
-            if !w.hidden {
-                w.line_count = w.inner.line_count(width);
-                max_height += w.line_count;
-                last_widget = i;
-                if max_height >= area.height as _ {
-                    break
-                }
+            let w = w.as_mut();
+            match &w.inner {
+                Some(inner) if !w.hidden => {
+                    w.line_count = inner.line_count(width);
+                    max_height += w.line_count;
+                    last_widget = i;
+                    if max_height >= area.height as _ {
+                        break
+                    }
+                },
+                _ => (),
             }
         }
 
@@ -170,10 +208,10 @@ impl Tui {
 
         let filter = |w: &&Widget| !w.hidden && w.line_count > 0;
 
-        let layout = Layout::vertical(widgets.iter().filter(filter).map(|w| w.constraint));
+        let layout = Layout::vertical(widgets.iter().map(|w| w.as_ref()).filter(filter).map(|w| w.constraint));
         let layouts = layout.split(area);
 
-        for (widget, layout) in widgets.iter().filter(filter).zip(layouts.iter()) {
+        for (widget, layout) in widgets.iter().map(|w| w.as_ref()).filter(filter).zip(layouts.iter()) {
             frame.render_widget(&widget.inner, *layout);
         }
 

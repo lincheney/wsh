@@ -66,15 +66,29 @@ pub enum TextParts {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-pub struct WidgetOptions {
+struct CommonWidgetOptions {
     id: Option<usize>,
     pub persist: Option<bool>,
     pub hidden: Option<bool>,
-    pub text: Option<TextParts>,
     #[serde(flatten)]
     pub style: TextStyleOptions,
     pub border: Option<BorderOptions>,
     pub height: Option<SerdeConstraint>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct WidgetOptions {
+    #[serde(flatten)]
+    options: CommonWidgetOptions,
+    pub text: Option<TextParts>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct AnsiWidgetOptions {
+    #[serde(flatten)]
+    options: CommonWidgetOptions,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -159,20 +173,8 @@ impl StyleOptions {
     }
 }
 
-fn set_widget_options(widget: &mut tui::Widget, options: WidgetOptions) {
-    if let Some(persist) = options.persist {
-        widget.persist = persist;
-    }
-
-    if let Some(hidden) = options.hidden {
-        widget.hidden = hidden;
-    }
-
-    if let Some(constraint) = options.height {
-        widget.constraint = constraint.0;
-    }
-
-    if let Some(text) = options.text {
+fn set_widget_text(widget: &mut tui::Widget, text: Option<TextParts>) {
+    if let Some(text) = text {
 
         // there's no way to set the text on an existing paragraph ...
         let mut lines: Vec<_> = match text {
@@ -199,7 +201,21 @@ fn set_widget_options(widget: &mut tui::Widget, options: WidgetOptions) {
         };
 
         lines.truncate(100);
-        widget.inner = Paragraph::new(lines);
+        widget.inner = Some(Paragraph::new(lines));
+    }
+}
+
+fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
+    if let Some(persist) = options.persist {
+        widget.persist = persist;
+    }
+
+    if let Some(hidden) = options.hidden {
+        widget.hidden = hidden;
+    }
+
+    if let Some(constraint) = options.height {
+        widget.constraint = constraint.0;
     }
 
     if let Some(align) = options.style.align { widget.align = align.0; }
@@ -235,32 +251,36 @@ fn set_widget_options(widget: &mut tui::Widget, options: WidgetOptions) {
         None => {},
     }
 
-    let p = std::mem::replace(&mut widget.inner, Paragraph::new(""));
-    widget.inner = p
+    let p = widget.inner.take().unwrap_or_else(|| Paragraph::default());
+    let p = p
         .alignment(widget.align)
         .style(widget.style)
         .block(widget.block.clone())
         .wrap(Wrap{trim: false})
     ;
+    widget.inner = Some(p);
 }
 
 async fn set_message(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
-    let options: WidgetOptions = lua.from_value(val)?;
+    let options: Option<WidgetOptions> = lua.from_value(val)?;
 
     let tui = &mut ui.inner.borrow_mut().await.tui;
-    if let Some(id) = options.id {
-        if let Some(widget) = tui.get_mut(id) {
-            set_widget_options(widget, options);
-            tui.dirty = true;
-            Ok(id)
-        } else {
-            Err(anyhow::anyhow!("can't find widget with id {}", id))
-        }
-    } else {
-        let mut widget = tui::Widget::default();
-        set_widget_options(&mut widget, options);
-        Ok(tui.add(widget))
+    let (id, widget) = match options.as_ref().and_then(|o| o.options.id).map(|id| (id, tui.get_mut(id))) {
+        Some((id, Some(widget))) => (id, widget),
+        None => {
+            let widget = tui::Widget::default();
+            tui.add(widget.into())
+        },
+        Some((id, None)) => return Err(anyhow::anyhow!("can't find widget with id {}", id)),
+    };
+
+    let widget = widget.as_mut();
+    if let Some(options) = options {
+        set_widget_text(widget, options.text);
+        set_widget_options(widget, options.options);
     }
+    tui.dirty = true;
+    Ok(id)
 }
 
 async fn clear_messages(mut ui: Ui, _lua: Lua, all: bool) -> Result<()> {
@@ -365,6 +385,40 @@ async fn add_buf_highlight_namespace(mut ui: Ui, _lua: Lua, _val: ()) -> Result<
     Ok(ui.buffer.highlight_counter)
 }
 
+async fn set_ansi_message(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
+    let options: Option<AnsiWidgetOptions> = lua.from_value(val)?;
+
+    let tui = &mut ui.inner.borrow_mut().await.tui;
+    let (id, widget) = match options.as_ref().and_then(|o| o.options.id).map(|id| (id, tui.get_mut(id))) {
+        Some((id, Some(widget))) => (id, widget),
+        None => {
+            let widget = tui::ansi::Parser::default();
+            tui.add(widget.into())
+        },
+        Some((id, None)) => return Err(anyhow::anyhow!("can't find widget with id {}", id)),
+    };
+
+    let widget = widget.as_mut();
+    if let Some(options) = options {
+        set_widget_options(widget, options.options);
+    }
+    tui.dirty = true;
+    Ok(id)
+}
+
+async fn feed_ansi_message(mut ui: Ui, _lua: Lua, (id, value): (usize, LuaString)) -> Result<()> {
+    let tui = &mut ui.inner.borrow_mut().await.tui;
+
+    match tui.get_mut(id) {
+        Some(tui::WidgetWrapper::Ansi(parser)) => {
+            parser.feed((&*value.as_bytes()).into());
+            tui.dirty = true;
+            Ok(())
+        },
+        _ => Err(anyhow::anyhow!("can't find widget with id {}", id)),
+    }
+}
+
 pub fn init_lua(ui: &Ui) -> Result<()> {
 
     ui.set_lua_async_fn("set_message", set_message)?;
@@ -374,6 +428,8 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_async_fn("add_buf_highlight_namespace", add_buf_highlight_namespace)?;
     ui.set_lua_async_fn("add_buf_highlight", add_buf_highlight)?;
     ui.set_lua_async_fn("clear_buf_highlights", clear_buf_highlights)?;
+    ui.set_lua_async_fn("set_ansi_message", set_ansi_message)?;
+    ui.set_lua_async_fn("feed_ansi_message", feed_ansi_message)?;
 
     Ok(())
 }
