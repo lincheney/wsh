@@ -2,7 +2,6 @@ use anyhow::Result;
 use mlua::{prelude::*, Function};
 use serde::{Deserialize, Serialize};
 use crate::ui::Ui;
-use crate::utils::*;
 use crossterm::event;
 
 macro_rules! event_types {

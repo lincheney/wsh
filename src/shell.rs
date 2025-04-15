@@ -218,12 +218,4 @@ impl ShellInner {
         }
     }
 
-    pub fn start_zle_scope(&mut self) {
-        zsh::start_zle_scope();
-    }
-
-    pub fn end_zle_scope(&mut self) {
-        zsh::end_zle_scope();
-    }
-
 }
