@@ -135,41 +135,23 @@ pub struct StyleOptions {
     pub blink: Option<bool>,
 }
 
-impl StyleOptions {
-    fn apply_to_style(&self, mut style: Style) -> Style {
-        if let Some(fg) = self.fg { style = style.fg(fg.0); }
-        if let Some(bg) = self.bg { style = style.bg(bg.0); }
-
-        macro_rules! set_modifier {
-            ($field:ident, $enum:ident) => (
-                if let Some($field) = self.$field {
-                    let value = Modifier::$enum;
-                    style = if $field { style.add_modifier(value) } else { style.remove_modifier(value) };
-                }
-            )
-        }
-
-        set_modifier!(bold, BOLD);
-        set_modifier!(dim, DIM);
-        set_modifier!(italic, ITALIC);
-        set_modifier!(strikethrough, CROSSED_OUT);
-        set_modifier!(reversed, REVERSED);
-        set_modifier!(blink, SLOW_BLINK);
-
-        match self.underline.as_ref() {
-            Some(UnderlineOptions::Bool(val)) => if *val {
-                style = style.add_modifier(Modifier::UNDERLINED);
-            } else {
-                style = style.remove_modifier(Modifier::UNDERLINED);
+impl Into<tui::StyleOptions> for StyleOptions {
+    fn into(self) -> tui::StyleOptions {
+        tui::StyleOptions {
+            fg: self.fg.map(|x| x.0),
+            bg: self.bg.map(|x| x.0),
+            bold: self.bold,
+            dim: self.dim,
+            italic: self.italic,
+            underline: match self.underline {
+                None | Some(UnderlineOptions::Bool(false)) => None,
+                Some(UnderlineOptions::Bool(true)) => Some(None),
+                Some(UnderlineOptions::Options(opts)) => Some(Some(opts.color.0)),
             },
-            Some(UnderlineOptions::Options(val)) => {
-                style = style.add_modifier(Modifier::UNDERLINED);
-                style = style.underline_color(val.color.0);
-            },
-            None => (),
-        }
-
-        style
+            strikethrough: self.strikethrough,
+            reversed: self.reversed,
+            blink: self.blink,
+       }
     }
 }
 
@@ -185,7 +167,8 @@ fn set_widget_text(widget: &mut tui::Widget, text: Option<TextParts>) {
             TextParts::Many(parts) => {
                 let mut lines = vec![Line::default()];
                 for part in parts.into_iter() {
-                    let style = part.style.style.apply_to_style(Style::default());
+                    let style: tui::StyleOptions = part.style.style.into();
+                    let style = style.as_style();
                     let text = tui::Widget::replace_tabs(part.text);
                     for (i, text) in text.split('\n').enumerate() {
                         if i > 0 {
@@ -219,7 +202,7 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
     }
 
     if let Some(align) = options.style.align { widget.align = align.0; }
-    widget.style = options.style.style.apply_to_style(widget.style);
+    widget.style = options.style.style.into();
 
     match options.border {
         // explicitly disabled
@@ -227,11 +210,13 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
             widget.block = Block::new();
         },
         Some(options) => {
-            widget.border_style = options.style.apply_to_style(widget.border_style);
+            let style: tui::StyleOptions = options.style.into();
+            widget.border_style = widget.border_style.patch(style.as_style());
             widget.border_type = options.r#type.unwrap_or(SerdeWrap(widget.border_type)).0;
 
             let mut block = if let Some(title) = options.title {
-                widget.border_title_style = title.style.apply_to_style(widget.border_title_style);
+                let style: tui::StyleOptions = title.style.into();
+                widget.border_title_style = widget.border_title_style.patch(style.as_style());
                 if let Some(text) = title.text {
                     Block::new().title(text)
                 } else {
@@ -254,7 +239,7 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
     let p = widget.inner.take().unwrap_or_else(|| Paragraph::default());
     let p = p
         .alignment(widget.align)
-        .style(widget.style)
+        .style(widget.style.as_style())
         .block(widget.block.clone())
         .wrap(Wrap{trim: false})
     ;
@@ -274,10 +259,10 @@ async fn set_message(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
         Some((id, None)) => return Err(anyhow::anyhow!("can't find widget with id {}", id)),
     };
 
-    let widget = widget.as_mut();
     if let Some(options) = options {
-        set_widget_text(widget, options.text);
-        set_widget_options(widget, options.options);
+        set_widget_text(widget.as_mut(), options.text);
+        set_widget_options(widget.as_mut(), options.options);
+        widget.flush();
     }
     tui.dirty = true;
     Ok(id)
@@ -398,9 +383,9 @@ async fn set_ansi_message(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> 
         Some((id, None)) => return Err(anyhow::anyhow!("can't find widget with id {}", id)),
     };
 
-    let widget = widget.as_mut();
     if let Some(options) = options {
-        set_widget_options(widget, options.options);
+        set_widget_options(widget.as_mut(), options.options);
+        widget.flush();
     }
     tui.dirty = true;
     Ok(id)

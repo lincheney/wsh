@@ -151,7 +151,7 @@ end)
 
 wish.set_keymap('<f12>', function()
     local code, stdout = wish.eval[[ls -l --color=always /tmp/]]
-    local id = wish.set_ansi_message()
+    local id = wish.set_ansi_message{dim = true}
     wish.feed_ansi_message(id, stdout)
 
     -- wish.set_var("path[${#path[@]}+1]", "hello")

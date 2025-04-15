@@ -17,13 +17,72 @@ use crate::ui::Ui;
 mod backend;
 pub mod ansi;
 
+#[derive(Debug, Default)]
+pub struct StyleOptions {
+    pub fg: Option<Color>,
+    pub bg: Option<Color>,
+    pub bold: Option<bool>,
+    pub dim: Option<bool>,
+    pub italic: Option<bool>,
+    pub underline: Option<Option<Color>>,
+    pub strikethrough: Option<bool>,
+    pub reversed: Option<bool>,
+    pub blink: Option<bool>,
+}
+
+impl StyleOptions {
+    pub fn as_style(&self) -> Style {
+        let mut style = Style {
+            fg: self.fg,
+            bg: self.bg,
+            underline_color: self.underline.flatten(),
+            add_modifier: Modifier::empty(),
+            sub_modifier: Modifier::empty(),
+        };
+
+        macro_rules! set_modifier {
+            ($field:ident, $enum:ident) => (
+                if let Some($field) = self.$field {
+                    let value = Modifier::$enum;
+                    if $field {
+                        style.add_modifier.insert(value);
+                    } else {
+                        style.sub_modifier.insert(value);
+                    }
+                }
+            )
+        }
+
+        set_modifier!(bold, BOLD);
+        set_modifier!(dim, DIM);
+        set_modifier!(italic, ITALIC);
+        set_modifier!(strikethrough, CROSSED_OUT);
+        set_modifier!(reversed, REVERSED);
+        set_modifier!(blink, SLOW_BLINK);
+
+        style
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.fg.is_none()
+        && self.bg.is_none()
+        && self.bold.is_none()
+        && self.dim.is_none()
+        && self.italic.is_none()
+        && self.underline.is_none()
+        && self.strikethrough.is_none()
+        && self.reversed.is_none()
+        && self.blink.is_none()
+    }
+}
+
 #[derive(Default, Debug)]
 pub struct Widget{
     id: usize,
     pub constraint: Constraint,
     pub inner: Option<Paragraph<'static>>,
     pub align: Alignment,
-    pub style: Style,
+    pub style: StyleOptions,
     pub border_style: Style,
     pub border_title_style: Style,
     pub border_type: BorderType,
@@ -64,6 +123,13 @@ impl WidgetWrapper {
         match self {
             Self::Widget(ref mut w) => w,
             Self::Ansi(p) => p.as_widget(),
+        }
+    }
+
+    pub fn flush(&mut self) {
+        match self {
+            Self::Widget(_) => (),
+            Self::Ansi(p) => p.flush(),
         }
     }
 }
