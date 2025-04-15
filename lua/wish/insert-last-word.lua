@@ -32,7 +32,7 @@ function M.handler(backward)
         value = wish.shell_split(value)
         value = value[#value] or ''
         local prev = #prefix - #state.original_buffer
-        wish.set_cursor(wish.str.from_byte_pos(buffer, cursor - prev) or 0)
+        wish.set_cursor(wish.str.from_byte_pos(buffer, cursor - prev) or #buffer)
         wish.set_buffer(value, prev)
         state.buffer = state.original_buffer .. value
     end
