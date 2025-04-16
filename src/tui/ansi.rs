@@ -263,6 +263,10 @@ impl Parser {
                     self.add_str(" ".repeat(len));
                     State::None
                 },
+                (State::None, 0..0x7f) if !(b' '..b'~').contains(c) => {
+                    // unprintable ascii
+                    State::None
+                },
                 (State::None, _) => {
                     self.buffer.push(*c);
                     State::None
