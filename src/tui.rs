@@ -284,6 +284,10 @@ impl Tui {
             match &w.inner {
                 Some(inner) if !w.hidden => {
                     w.line_count = inner.line_count(width);
+                    if let Constraint::Min(min) = w.constraint {
+                        w.line_count = w.line_count.max(min as _);
+                    }
+
                     max_height += w.line_count;
                     last_widget = i;
                     if max_height >= area.height as _ {
