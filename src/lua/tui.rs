@@ -201,8 +201,11 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
         widget.constraint = constraint.0;
     }
 
-    if let Some(align) = options.style.align { widget.align = align.0; }
-    widget.style = options.style.style.into();
+    if let Some(align) = options.style.align {
+        widget.align = align.0;
+    }
+
+    widget.style = widget.style.merge(&options.style.style.into());
 
     match options.border {
         // explicitly disabled

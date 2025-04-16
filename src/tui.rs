@@ -63,6 +63,20 @@ impl StyleOptions {
         style
     }
 
+    pub fn merge(&self, other: &Self) -> Self {
+        Self{
+            fg: other.fg.or(self.fg),
+            bg: other.bg.or(self.bg),
+            bold: other.bold.or(self.bold),
+            dim: other.dim.or(self.dim),
+            italic: other.italic.or(self.italic),
+            underline: other.underline.or(self.underline),
+            strikethrough: other.strikethrough.or(self.strikethrough),
+            reversed: other.reversed.or(self.reversed),
+            blink: other.blink.or(self.blink),
+        }
+    }
+
     pub fn is_empty(&self) -> bool {
         self.fg.is_none()
         && self.bg.is_none()
