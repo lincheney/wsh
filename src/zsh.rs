@@ -136,11 +136,13 @@ pub fn start_zle_scope() {
     unsafe {
         zsh_sys::startparamscope();
         crate::zsh::bindings::makezleparams(0);
+        zsh_sys::startparamscope();
     }
 }
 
 pub fn end_zle_scope() {
     unsafe {
+        zsh_sys::endparamscope();
         zsh_sys::endparamscope();
     }
 }

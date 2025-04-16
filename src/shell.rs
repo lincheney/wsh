@@ -191,6 +191,14 @@ impl ShellInner {
         unsafe{ zsh_sys::endparamscope() }
     }
 
+    pub fn start_zle_scope(&mut self) {
+        zsh::start_zle_scope()
+    }
+
+    pub fn end_zle_scope(&mut self) {
+        zsh::end_zle_scope()
+    }
+
     pub fn set_var(&mut self, name: &BStr, value: zsh::Value, local: bool) -> anyhow::Result<()> {
         zsh::Variable::set(name, value, local)
     }
