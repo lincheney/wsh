@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 use anyhow::Result;
 
 use crossterm::{
-    terminal::{Clear, ClearType, BeginSynchronizedUpdate, EndSynchronizedUpdate},
+    terminal::{Clear, ClearType},
     cursor::{self, position, MoveToColumn},
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     style,
@@ -33,7 +33,7 @@ impl crossterm::Command for SetScrollRegion {
     }
 }
 
-struct MoveUp(u16);
+pub struct MoveUp(pub u16);
 impl crossterm::Command for MoveUp {
     fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
         if self.0 > 0 {
@@ -44,7 +44,7 @@ impl crossterm::Command for MoveUp {
     }
 }
 
-struct MoveDown(u16);
+pub struct MoveDown(pub u16);
 impl crossterm::Command for MoveDown {
     fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
         if self.0 > 0 {
@@ -62,7 +62,6 @@ pub struct UiInner {
     pub events: crate::event_stream::EventLocker,
     is_running_process: bool,
     dirty: bool,
-    y_offset: u16,
     pub keybinds: Vec<crate::lua::KeybindMapping>,
     pub keybind_layer_counter: usize,
 
@@ -115,7 +114,6 @@ impl Ui {
             events,
             is_running_process: false,
             dirty: true,
-            y_offset: 0,
             tui: Default::default(),
             threads: HashSet::new(),
             buffer: Default::default(),
@@ -171,49 +169,9 @@ impl Ui {
             return Ok(())
         }
 
-        // if ui.dirty it means redraw everything from scratch
-        if ui.dirty {
-            queue!(
-                ui.stdout,
-                MoveUp(ui.y_offset),
-                Clear(ClearType::FromCursorDown),
-                MoveDown(ui.y_offset),
-            )?;
-        }
-
         crossterm::terminal::disable_raw_mode()?;
-        queue!(ui.stdout, BeginSynchronizedUpdate)?;
         ui.size = crossterm::terminal::size()?;
-
-        if ui.dirty || ui.prompt.dirty {
-            // move back to top of drawing area and redraw prompt
-            queue!(ui.stdout, MoveUp(ui.y_offset))?;
-            ui.dirty = ui.prompt.draw(&mut ui.stdout, &mut *shell.lock().await, ui.size)? || ui.dirty;
-        } else {
-            // move back to prompt line
-            queue!(ui.stdout, MoveUp(ui.buffer.y_offset as _))?;
-        }
-
-        if ui.dirty || ui.buffer.dirty {
-            // MUST start on same line as prompt
-            ui.dirty = ui.buffer.draw(&mut ui.stdout, ui.size, ui.prompt.width)? || ui.dirty;
-        } else {
-            // move to cursor
-            queue!(ui.stdout, MoveDown(ui.buffer.y_offset as _))?;
-        }
-
-        ui.y_offset = (ui.prompt.height + ui.buffer.y_offset - 1) as u16;
-
-        if ui.dirty || ui.tui.dirty {
-            // move to last line of buffer
-            let y_offset = (ui.buffer.height - ui.buffer.y_offset - 1) as u16;
-            execute!(ui.stdout, MoveDown(y_offset))?;
-            ui.tui.draw(&mut ui.stdout, ui.size, ui.dirty)?;
-            // then move back
-            queue!(ui.stdout, MoveUp(y_offset))?;
-        }
-
-        execute!(ui.stdout, EndSynchronizedUpdate)?;
+        ui.tui.draw(&mut ui.stdout, ui.size, &shell, &mut ui.prompt, &mut ui.buffer, ui.dirty).await?;
         crossterm::terminal::enable_raw_mode()?;
 
         ui.dirty = false;
@@ -350,7 +308,7 @@ impl Ui {
                 ui.deactivate()?;
 
                 // move to last line of buffer
-                let y_offset = (ui.buffer.height - ui.buffer.y_offset - 1) as u16;
+                let y_offset = (ui.prompt.height + ui.buffer.height - 1 - ui.buffer.cursor_coord.1) as u16;
                 execute!(
                     ui.stdout,
                     MoveDown(y_offset),
@@ -604,7 +562,6 @@ impl UiInner {
 
     fn reset(&mut self, shell: &mut ShellInner) {
         self.buffer.reset();
-        self.y_offset = 0;
         self.dirty = true;
         shell.set_curhist(i64::MAX);
     }

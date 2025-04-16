@@ -3,11 +3,14 @@ use bstr::{BString, ByteSlice, BStr};
 use anyhow::Result;
 use unicode_width::UnicodeWidthStr;
 use crossterm::{
-    queue,
-    terminal::{Clear, ClearType},
-    cursor,
     style::{ContentStyle, Attributes, Stylize},
 };
+use ratatui::{
+    *,
+    layout::*,
+    text::*,
+};
+use crate::prompt::Prompt;
 
 #[derive(Debug)]
 pub struct Edit {
@@ -83,8 +86,9 @@ pub struct Buffer {
 
     pub dirty: bool,
 
-    pub height: usize,
-    pub y_offset: usize,
+    pub height: u16,
+    pub width: u16,
+    pub cursor_coord: (u16, u16),
 
     pub highlights: Vec<Highlight>,
     pub highlight_counter: usize,
@@ -184,15 +188,6 @@ fn strip_colours(string: &mut String) {
             !in_esc
         });
     }
-}
-
-fn wrap(string: &str, width: usize) -> Vec<std::borrow::Cow<str>> {
-    // no word splitting
-    let options = textwrap::Options::new(width)
-        .word_separator(textwrap::WordSeparator::Custom(|line| {
-            Box::new(std::iter::once(textwrap::core::Word::from(line)))
-        }));
-    textwrap::wrap(string, options)
 }
 
 impl Buffer {
@@ -320,11 +315,12 @@ impl Buffer {
         self.history.clear();
         self.history_index = 0;
         self.cursor = 0;
-        self.y_offset = 0;
+        self.cursor_coord = (0, 0);
         self.saved_contents.clear();
         self.saved_cursor = 0;
         self.dirty = true;
         self.height = 0;
+        self.width = 0;
     }
 
     fn byte_pos(&self, pos: usize) -> usize {
@@ -339,79 +335,76 @@ impl Buffer {
         self.byte_pos(self.cursor)
     }
 
-    pub fn draw(
-        &mut self,
-        stdout: &mut std::io::Stdout,
-        (width, _height): (u16, u16),
-        prompt_width: usize,
-    ) -> Result<bool> {
-
-        let old = self.height;
-
-        let byte_pos = self.cursor_byte_pos();
-        let mut prefix = format!("{}", BufferContents{
-            inner: self.contents[..byte_pos].into(),
-            highlights: &mut self.highlights,
+    fn render_content(
+        &self,
+        content: &BStr,
+        area: Rect,
+        buf: &mut ratatui::buffer::Buffer,
+        mut offset: (u16, u16),
+    ) -> (u16, u16) {
+        // turn this into Text
+        let text = format!("{}", BufferContents{
+            inner: content,
+            highlights: &self.highlights,
             offset: 0,
         });
-        let suffix = format!("{}", BufferContents{
-            inner: self.contents[byte_pos..].into(),
-            highlights: &mut self.highlights,
-            offset: self.cursor,
-        });
-        // add an extra space for the cursor
-        if !suffix.is_empty() {
-            prefix += " ";
+        if text.is_empty() {
+            return offset
         }
 
-        // calculate heights
-        let mut text = " ".repeat(prompt_width) + &prefix;
-        strip_colours(&mut text);
-        self.y_offset = wrap(&text, width as _).len() - 1;
-
-        let height = if suffix.is_empty() {
-            self.y_offset + 1
-        } else {
-            // pop the space from the end
-            text.pop();
-            text += &suffix;
-            strip_colours(&mut text);
-            wrap(&text, width as _).len()
-        };
-
-        self.height = self.height.max(height);
-        let changed = old != self.height;
-
-        queue!(stdout, cursor::MoveToColumn(prompt_width as _))?;
-        if changed {
-            queue!(stdout, Clear(ClearType::FromCursorDown))?;
-        }
-        queue!(stdout, crossterm::style::Print(&prefix))?;
-        if !suffix.is_empty() {
-            // move back over the space
-            queue!(stdout, cursor::MoveLeft(1))?;
-        }
-        queue!(
-            stdout,
-            cursor::SavePosition,
-            crossterm::style::Print(&suffix),
-            Clear(ClearType::UntilNewLine),
-        )?;
-        if self.height > height {
-            for _ in height .. self.height {
-                queue!(
-                    stdout,
-                    cursor::MoveDown(1),
-                    cursor::MoveToColumn(0),
-                    Clear(ClearType::UntilNewLine),
-                )?;
+        let text = Text::raw(text);
+        let mut new_offset = offset;
+        for line in text.iter() {
+            offset = new_offset;
+            if offset.1 >= area.height {
+                break
             }
+
+            for graph in line.styled_graphemes(text.style) {
+
+                use unicode_width::UnicodeWidthStr;
+                let width = graph.symbol.width();
+                if width == 0 {
+                    continue
+                }
+                let symbol = if graph.symbol.is_empty() { " " } else { graph.symbol };
+                let cell = &mut buf[(area.x + offset.0, area.y + offset.1)];
+                cell.set_symbol(symbol);
+                cell.set_style(graph.style);
+                offset.0 += width as u16;
+
+                if offset.0 >= area.width {
+                    new_offset = (0, offset.1 + 1);
+                    if new_offset.1 >= area.height {
+                        break
+                    }
+                }
+            }
+
+            new_offset = (0, offset.1 + 1);
         }
-        queue!(stdout, cursor::RestorePosition)?;
 
+        offset
+    }
 
-        self.dirty = false;
-        Ok(changed)
+    pub fn render(&mut self, area: Rect, buf: &mut ratatui::buffer::Buffer, prompt: &Prompt) {
+        let byte_pos = self.cursor_byte_pos();
+        let prefix = self.contents[..byte_pos].into();
+        let suffix = self.contents[byte_pos..].into();
+
+        let offset = (prompt.width, prompt.height - 1);
+        let offset = self.render_content(prefix, area, buf, offset);
+        self.cursor_coord = offset;
+
+        let offset = self.render_content(suffix, area, buf, offset);
+        self.height = 1 + offset.1 - (prompt.height - 1);
+        self.width = offset.0;
+
+        // // add an extra space for the cursor
+        // if !suffix.is_empty() {
+            // prefix += " ";
+        // }
+
     }
 
 }

@@ -1,19 +1,13 @@
 use std::ffi::CString;
-use std::io::Write;
 use bstr::BStr;
-use anyhow::Result;
-use crossterm::{
-    queue,
-    terminal::{Clear, ClearType},
-};
 use crate::shell::ShellInner;
 
 #[derive(Default)]
 pub struct Prompt {
     prompt: CString,
     default_prompt: CString,
-    pub width: usize,
-    pub height: usize,
+    pub width: u16,
+    pub height: u16,
 
     pub dirty: bool,
 }
@@ -29,39 +23,21 @@ impl Prompt {
         Self{ default_prompt, ..Self::default() }
     }
 
-    fn refresh_prompt(&mut self, shell: &mut ShellInner) {
+    pub fn refresh_prompt(&mut self, shell: &mut ShellInner, width: u16,) {
         let prompt = shell.get_prompt(None, true).unwrap_or_else(|| self.default_prompt.clone());
         let size = shell.get_prompt_size(&prompt);
         self.prompt = ShellInner::remove_invisible_chars(&prompt).into();
-        self.width = size.0;
-        self.height = size.1;
-    }
-
-    pub fn draw(
-        &mut self,
-        stdout: &mut std::io::Stdout,
-        shell: &mut ShellInner,
-        (width, _height): (u16, u16),
-    ) -> Result<bool> {
-
-        let old = (self.width, self.height);
-        self.refresh_prompt(shell);
+        self.width = size.0 as _;
+        self.height = size.1 as _;
 
         // actually takes up whole line
         if self.width >= width as _ {
             self.height += 1;
         }
+    }
 
-        let changed = old != (self.width, self.height);
-
-        if changed {
-            queue!(stdout, Clear(ClearType::FromCursorDown))?;
-        }
-        queue!(stdout, crossterm::cursor::MoveToColumn(0))?;
-        stdout.write_all(self.prompt.as_bytes())?;
-        self.dirty = false;
-
-        Ok(changed)
+    pub fn as_bytes(&self) -> &[u8] {
+        self.prompt.as_bytes()
     }
 
 }

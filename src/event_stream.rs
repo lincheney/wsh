@@ -72,9 +72,6 @@ impl EventLocker {
         inner.lock_owned().await
     }
 
-    pub async fn get_cursor_position(&mut self) -> Result<(u16, u16), std::io::Error> {
-        self.lock().await.get_cursor_position()
-    }
 }
 
 impl EventStream {
