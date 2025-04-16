@@ -159,6 +159,11 @@ impl Ui {
         self.lua.globals().get("wish")
     }
 
+    pub async fn start_cmd(&mut self) -> Result<()> {
+        EventCallbacks::trigger_precmd_callbacks(self, ()).await;
+        self.draw().await
+    }
+
     pub async fn draw(&mut self) -> Result<()> {
         let shell = self.shell.clone();
         let mut ui = self.inner.borrow_mut().await;
@@ -349,12 +354,16 @@ impl Ui {
             // prefer the result error over the activate error
             result.and(ui.activate())?;
 
+            drop(ui);
+            drop(shell);
+            self.start_cmd().await?;
+
         } else {
             self.inner.borrow_mut().await.buffer.insert_at_cursor(b"\n");
             EventCallbacks::trigger_buffer_change_callbacks(self, ()).await;
+            self.draw().await?;
         }
 
-        self.draw().await?;
         Ok(true)
     }
 

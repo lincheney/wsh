@@ -106,6 +106,7 @@ event_types!(
     key(KeyEvent),
     accept_line(),
     buffer_change(),
+    precmd(),
     paste(LuaString),
 );
 

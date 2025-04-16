@@ -39,7 +39,7 @@ async fn main() -> Result<i32> {
 
     let mut ui = ui::Ui::new(event_locker).await?;
     ui.activate().await?;
-    ui.draw().await?;
+    ui.start_cmd().await?;
     let _ = STATE.set(ui.clone());
 
     drop(devnull);
