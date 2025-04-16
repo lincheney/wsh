@@ -17,6 +17,17 @@ use crate::ui::Ui;
 mod backend;
 pub mod ansi;
 
+fn buffer_nonempty_height(buffer: &Buffer) -> u16 {
+    let trailing_empty_lines = buffer.content()
+        .chunks(buffer.area.width as _)
+        .rev()
+        .take_while(|line| line.iter().all(|c| {
+            c.symbol() == " " && c.bg == Color::Reset && !c.modifier.intersects(Modifier::UNDERLINED | Modifier::REVERSED)
+        }))
+        .count();
+    buffer.area.height - trailing_empty_lines as u16
+}
+
 #[derive(Debug, Default)]
 pub struct StyleOptions {
     pub fg: Option<Color>,
@@ -94,7 +105,7 @@ impl StyleOptions {
 pub struct Widget{
     id: usize,
     pub constraint: Constraint,
-    pub inner: Option<Paragraph<'static>>,
+    pub inner: Option<Text<'static>>,
     pub align: Alignment,
     pub style: StyleOptions,
     pub border_style: Style,
@@ -117,13 +128,13 @@ impl Widget {
         text
     }
 
-    pub fn make_paragraph(&mut self) {
-        let p = self.inner.take().unwrap_or_else(|| Paragraph::default());
+    pub fn make_text(&mut self) {
+        let p = self.inner.take().unwrap_or_else(|| Text::default());
         let p = p
             .alignment(self.align)
             .style(self.style.as_style())
-            .block(self.block.clone())
-            .wrap(Wrap{trim: false})
+            // .block(self.block.clone())
+            // .wrap(Wrap{trim: false})
         ;
         self.inner = Some(p);
     }
@@ -183,6 +194,7 @@ pub struct Tui {
 
     old_buffer: Buffer,
     new_buffer: Buffer,
+    line_count_buffer: Buffer,
 }
 
 impl std::default::Default for Tui {
@@ -198,6 +210,7 @@ impl std::default::Default for Tui {
 
             old_buffer: Default::default(),
             new_buffer: Default::default(),
+            line_count_buffer: Default::default(),
         }
     }
 }
@@ -217,7 +230,9 @@ impl Tui {
         let mut widget = Widget::default();
         let message = Widget::replace_tabs(message);
         let message: Vec<_> = message.split('\n').map(|l| Line::from(l.to_owned())).collect();
-        widget.inner = Some(Paragraph::new(message).fg(Color::Red));
+        let mut text = Text::default().fg(Color::Red);
+        text.lines = message;
+        widget.inner = Some(text);
         self.add(widget.into())
     }
 
@@ -274,8 +289,8 @@ impl Tui {
             return
         }
 
-        let mut frame = self.terminal.get_frame();
-        std::mem::swap(frame.buffer_mut(), &mut self.new_buffer);
+        // let mut frame = self.terminal.get_frame();
+        // std::mem::swap(frame.buffer_mut(), &mut self.new_buffer);
 
         let mut max_height = 0;
         let mut last_widget = 0;
@@ -283,7 +298,8 @@ impl Tui {
             let w = w.as_mut();
             match &w.inner {
                 Some(inner) if !w.hidden => {
-                    w.line_count = inner.line_count(width);
+                    w.line_count = Self::line_count(&mut self.line_count_buffer, inner, &w.block, width, height).unwrap_or(height) as _;
+                    // w.line_count = inner.line_count(width);
                     if let Constraint::Min(min) = w.constraint {
                         w.line_count = w.line_count.max(min as _);
                     }
@@ -301,20 +317,79 @@ impl Tui {
         let widgets = &self.widgets[..=last_widget];
         area.height = area.height.min(max_height as _);
 
-        let filter = |w: &&Widget| !w.hidden && w.line_count > 0;
+        let filter = |w: &&Widget| !w.hidden && w.line_count > 0 && w.inner.is_some();
 
         let layout = Layout::vertical(widgets.iter().map(|w| w.as_ref()).filter(filter).map(|w| w.constraint));
         let layouts = layout.split(area);
 
         for (widget, layout) in widgets.iter().map(|w| w.as_ref()).filter(filter).zip(layouts.iter()) {
-            frame.render_widget(&widget.inner, *layout);
+            Self::render(widget.inner.as_ref().unwrap(), &widget.block, *layout, &mut self.new_buffer, true);
+            // frame.render_widget(&widget.inner, *layout);
         }
 
-        std::mem::swap(frame.buffer_mut(), &mut self.new_buffer);
+        // std::mem::swap(frame.buffer_mut(), &mut self.new_buffer);
     }
 
     fn swap_buffers(&mut self) {
         std::mem::swap(&mut self.new_buffer, &mut self.old_buffer);
+    }
+
+    fn render(text: &Text, block: &Block, area: Rect, buffer: &mut Buffer, style: bool) {
+        use ratatui::widgets::Widget;
+        buffer.set_style(area, text.style);
+        block.render(area, buffer);
+
+        let inner = block.inner(area);
+        let mut y_offset = 0;
+
+        for line in text.iter() {
+            let mut x_offset = 0;
+            for graph in line.styled_graphemes(Style::default()) {
+
+                use unicode_width::UnicodeWidthStr;
+                let width = graph.symbol.width();
+                if width == 0 {
+                    continue
+                }
+                let symbol = if graph.symbol.is_empty() { " " } else { graph.symbol };
+                let cell = &mut buffer[(inner.left() + x_offset, inner.top() + y_offset)];
+                cell.set_symbol(symbol);
+                if style {
+                    cell.set_style(graph.style);
+                }
+                x_offset += width as u16;
+
+                if x_offset >= inner.width {
+                    x_offset = 0;
+                    y_offset += 1;
+                    if y_offset >= inner.height {
+                        break
+                    }
+                }
+            }
+
+            y_offset += 1;
+            if y_offset >= inner.height {
+                break
+            }
+        }
+    }
+
+    fn line_count(buffer: &mut Buffer, text: &Text, block: &Block, width: u16, max_height: u16) -> Option<u16> {
+        if width < 1 {
+            return Some(0);
+        }
+
+        let area = Rect{x: 0, y: 0, width, height: max_height};
+        buffer.resize(area);
+        Self::render(text, block, area, buffer, false);
+
+        let height = buffer_nonempty_height(buffer);
+        if height == max_height {
+            None
+        } else {
+            Some(height)
+        }
     }
 
     pub fn draw(
@@ -342,17 +417,7 @@ impl Tui {
             self.refresh(width, max_height);
         }
 
-        self.height = {
-            let trailing_empty_lines = self.new_buffer.content()
-                .chunks(self.new_buffer.area.width as _)
-                .rev()
-                .take_while(|line| line.iter().all(|c| {
-                    c.symbol() == " " && c.bg == Color::Reset && !c.modifier.intersects(Modifier::UNDERLINED | Modifier::REVERSED)
-                }))
-                .count();
-            self.new_buffer.area.height - trailing_empty_lines as u16
-        };
-
+        self.height = buffer_nonempty_height(&self.new_buffer);
         if self.height == 0 {
             queue!(stdout, Clear(ClearType::FromCursorDown))?;
 

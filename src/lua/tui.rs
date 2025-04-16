@@ -184,7 +184,9 @@ fn set_widget_text(widget: &mut tui::Widget, text: Option<TextParts>) {
         };
 
         lines.truncate(100);
-        widget.inner = Some(Paragraph::new(lines));
+        let mut text = Text::default();
+        text.lines = lines;
+        widget.inner = Some(text);
     }
 }
 
@@ -239,7 +241,7 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
         None => {},
     }
 
-    widget.make_paragraph();
+    widget.make_text();
 }
 
 async fn set_message(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {

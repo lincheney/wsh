@@ -143,24 +143,26 @@ fn parse_ansi_col(mut style: Style, string: &BStr) -> Style {
 impl Parser {
 
     pub fn as_widget(&mut self) -> &mut super::Widget {
-        let mut text = self.text.clone();
-        if !self.widget.style.is_empty() {
-            let style = self.widget.style.as_style();
-            for line in text.lines.iter_mut() {
-                for span in line.spans.iter_mut() {
-                    *span = std::mem::replace(span, Span::default()).patch_style(style);
+        if self.widget.inner.is_none() {
+            let mut text = std::mem::replace(&mut self.text, Text::default());
+            if !self.widget.style.is_empty() {
+                let style = self.widget.style.as_style();
+                for line in text.lines.iter_mut() {
+                    for span in line.spans.iter_mut() {
+                        *span = std::mem::replace(span, Span::default()).patch_style(style);
+                    }
                 }
             }
-        }
-
-        if self.widget.inner.is_none() {
-            self.widget.inner = Some(Paragraph::new(text));
-            self.widget.make_paragraph();
+            self.widget.inner = Some(text);
+            self.widget.make_text();
         }
         &mut self.widget
     }
 
     fn add_line(&mut self) {
+        if let Some(text) = self.widget.inner.take() {
+            self.text = text;
+        }
         self.text.lines.push(Line::default());
         self.cursor_x = 0;
         self.need_newline = false;
@@ -178,9 +180,13 @@ impl Parser {
             return
         }
 
+        if let Some(text) = self.widget.inner.take() {
+            self.text = text;
+        }
         if self.need_newline || self.text.lines.is_empty() {
             self.add_line();
         }
+
         let line = self.text.lines.last_mut().unwrap();
         let span = Span::styled(string, self.style);
         let width = span.width();
@@ -191,33 +197,24 @@ impl Parser {
             let mut start = 0;
             line.spans.retain_mut(|sp| {
                 let w = sp.width();
-                let start_overlap = (self.cursor_x + width).saturating_sub(start);
-                let end_overlap = (start + w).saturating_sub(self.cursor_x);
+                let overlap_start = start.max(self.cursor_x);
+                let overlap_end = (start + w).min(self.cursor_x + width);
                 start += w;
 
-                if start_overlap > 0 && end_overlap > 0 {
+                if overlap_start == start && overlap_end == start + w {
                     // span is fully within the overwrite range
                     false
-                } else if start_overlap > 0 {
-                    // range overlaps start of this span
-                    let content = sp.styled_graphemes(Style::default())
-                        .skip(start_overlap)
-                        .map(|s| s.symbol)
-                        .collect::<Vec<_>>()
-                        .join("");
-                    *sp = std::mem::replace(sp, Span::default()).content(content);
-                    true
-                } else if end_overlap > 0 {
-                    // range overlaps end of this span
-                    let content = sp.styled_graphemes(Style::default())
-                        .take(w - end_overlap)
-                        .map(|s| s.symbol)
-                        .collect::<Vec<_>>()
-                        .join("");
-                    *sp = std::mem::replace(sp, Span::default()).content(content);
+                } else if overlap_start >= overlap_end {
+                    // no overlap
                     true
                 } else {
-                    // no overlap
+                    let content = sp.styled_graphemes(Style::default())
+                        .take(overlap_end - (start - w))
+                        .skip(overlap_start.saturating_sub(start - w))
+                        .map(|s| s.symbol)
+                        .collect::<Vec<_>>()
+                        .join("");
+                    *sp = std::mem::replace(sp, Span::default()).content(content);
                     true
                 }
             });
@@ -241,7 +238,9 @@ impl Parser {
     }
 
     pub fn flush(&mut self) {
-        self.widget.inner = None;
+        if let Some(text) = self.widget.inner.take() {
+            self.text = text;
+        }
     }
 
     pub fn feed(&mut self, string: &BStr) {
@@ -309,6 +308,7 @@ impl Parser {
     }
 
     pub fn clear(&mut self) {
+        self.flush();
         self.text = Text::default();
         self.buffer.clear();
         self.state = State::None;

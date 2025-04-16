@@ -15,6 +15,7 @@ local msg = wish.set_ansi_message{
 local buffer_change_callback = nil
 local accept_line_callback = nil
 local epoch = 0
+local drawing = false
 
 local function live_preview()
     wish.schedule(function()
@@ -28,7 +29,7 @@ local function live_preview()
             return
         end
 
-        wish.clear_ansi_message(msg)
+        local cleared = false
         wish.set_ansi_message{id = msg, border = {dim = false, title = {text = buffer}} }
         wish.redraw()
 
@@ -38,19 +39,46 @@ local function live_preview()
             stdout = 'piped',
             stderr = 'null',
         }
+        local stdout = ''
         while true do
-            local stdout = proc.stdout:read()
-            if not stdout or epoch ~= this_epoch then
+            local data = proc.stdout:read()
+            if not data or epoch ~= this_epoch then
                 break
             end
-            wish.set_ansi_message{id = msg, hidden = false}
-            wish.feed_ansi_message(msg, stdout)
-            wish.redraw()
+
+            stdout = stdout .. data
+            if #stdout == #data then
+                wish.schedule(function()
+                    wish.async.sleep(100)
+                    if epoch ~= this_epoch then
+                        return
+                    end
+                    local data = stdout
+                    stdout = ''
+                    if not cleared then
+                        cleared = true
+                        wish.clear_ansi_message(msg)
+                    end
+                    wish.feed_ansi_message(msg, data)
+                    wish.set_ansi_message{id = msg, hidden = false}
+                    wish.redraw()
+                end)
+            end
         end
+
         proc.wait()
         wish.set_ansi_message{id = msg, border = {dim = true}}
-        wish.redraw()
+        draw_soon()
     end)
+end
+
+local function stop()
+    wish.remove_event_callback(buffer_change_callback)
+    wish.remove_event_callback(accept_line_callback)
+    epoch = epoch + 1
+    wish.set_ansi_message{id = msg, hidden = true}
+    active = false
+    draw_soon()
 end
 
 local function start()
@@ -66,14 +94,6 @@ local function start()
 
     live_preview()
     active = true
-end
-
-local function stop()
-    wish.remove_event_callback(buffer_change_callback)
-    wish.remove_event_callback(accept_line_callback)
-    epoch = epoch + 1
-    wish.set_ansi_message{id = msg, hidden = true}
-    active = false
 end
 
 wish.set_keymap('<a-p>', function()
