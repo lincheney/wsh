@@ -29,46 +29,53 @@ local function live_preview()
             return
         end
 
-        local cleared = false
-        wish.set_ansi_message{id = msg, border = {dim = false, title = {text = buffer}} }
-        wish.redraw()
-
         local proc = wish.async.spawn{
             args = {'bash', '-c', 'exec 2>&1; ' .. buffer},
             stdin = 'null',
             stdout = 'piped',
             stderr = 'null',
         }
+        local cleared = false
         local stdout = ''
         while true do
             local data = proc.stdout:read()
-            if not data or epoch ~= this_epoch then
+            if epoch ~= this_epoch then
                 break
             end
 
-            stdout = stdout .. data
-            if #stdout == #data then
+            if data then
+                stdout = stdout .. data
+            end
+            if not data or #stdout == #data then
                 wish.schedule(function()
                     wish.async.sleep(100)
                     if epoch ~= this_epoch then
                         return
                     end
-                    local data = stdout
+                    local value = stdout
                     stdout = ''
                     if not cleared then
                         cleared = true
                         wish.clear_ansi_message(msg)
                     end
-                    wish.feed_ansi_message(msg, data)
-                    wish.set_ansi_message{id = msg, hidden = false}
+                    wish.feed_ansi_message(msg, value)
+                    wish.set_ansi_message{
+                        id = msg,
+                        hidden = false,
+                        border = {
+                            dim = not not data,
+                            title = {text = buffer},
+                        },
+                    }
                     wish.redraw()
                 end)
+            end
+            if not data then
+                break
             end
         end
 
         proc.wait()
-        wish.set_ansi_message{id = msg, border = {dim = true}}
-        draw_soon()
     end)
 end
 
@@ -78,7 +85,7 @@ local function stop()
     epoch = epoch + 1
     wish.set_ansi_message{id = msg, hidden = true}
     active = false
-    draw_soon()
+    wish.redraw()
 end
 
 local function start()
