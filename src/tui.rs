@@ -4,6 +4,7 @@ use anyhow::Result;
 use crossterm::{
     cursor,
     queue,
+    execute,
     terminal::{Clear, ClearType},
 };
 use ratatui::{
@@ -398,7 +399,7 @@ impl Tui {
                 });
         }
 
-        let offset = prompt.height as u16 + buffer.height + 1;
+        let offset = prompt.height as u16 + buffer.height - 1;
         let area = Rect{ y: area.y + offset, height: area.height - offset, ..area };
 
         if clear || self.dirty {
@@ -446,9 +447,9 @@ impl Tui {
             }
 
             // position the cursor
-            queue!(
+            execute!(
                 stdout,
-                crate::ui::MoveUp(self.height - 1 - buffer.cursor_coord.1),
+                crate::ui::MoveDown(buffer.cursor_coord.1),
                 cursor::MoveToColumn(buffer.cursor_coord.0),
                 crossterm::terminal::EndSynchronizedUpdate,
             )?;
