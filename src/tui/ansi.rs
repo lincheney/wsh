@@ -1,7 +1,6 @@
 use bstr::{BStr, BString, ByteSlice};
 use ratatui::{
     text::*,
-    widgets::*,
     style::*,
 };
 
@@ -20,7 +19,6 @@ enum State {
 
 #[derive(Debug, Default)]
 pub struct Parser {
-    text: Text<'static>,
     buffer: BString,
     style: Style,
     state: State,
@@ -143,27 +141,11 @@ fn parse_ansi_col(mut style: Style, string: &BStr) -> Style {
 impl Parser {
 
     pub fn as_widget(&mut self) -> &mut super::Widget {
-        if self.widget.inner.is_none() {
-            let mut text = std::mem::replace(&mut self.text, Text::default());
-            if !self.widget.style.is_empty() {
-                let style = self.widget.style.as_style();
-                for line in text.lines.iter_mut() {
-                    for span in line.spans.iter_mut() {
-                        *span = std::mem::replace(span, Span::default()).patch_style(style);
-                    }
-                }
-            }
-            self.widget.inner = Some(text);
-            self.widget.make_text();
-        }
         &mut self.widget
     }
 
     fn add_line(&mut self) {
-        if let Some(text) = self.widget.inner.take() {
-            self.text = text;
-        }
-        self.text.lines.push(Line::default());
+        self.widget.inner.lines.push(Line::default());
         self.cursor_x = 0;
         self.need_newline = false;
     }
@@ -180,14 +162,11 @@ impl Parser {
             return
         }
 
-        if let Some(text) = self.widget.inner.take() {
-            self.text = text;
-        }
-        if self.need_newline || self.text.lines.is_empty() {
+        if self.need_newline || self.widget.inner.lines.is_empty() {
             self.add_line();
         }
 
-        let line = self.text.lines.last_mut().unwrap();
+        let line = self.widget.inner.lines.last_mut().unwrap();
         let span = Span::styled(string, self.style);
         let width = span.width();
         if self.cursor_x >= line.width() {
@@ -234,13 +213,6 @@ impl Parser {
 
         }
         self.cursor_x += width;
-        self.flush();
-    }
-
-    pub fn flush(&mut self) {
-        if let Some(text) = self.widget.inner.take() {
-            self.text = text;
-        }
     }
 
     pub fn feed(&mut self, string: &BStr) {
@@ -308,8 +280,7 @@ impl Parser {
     }
 
     pub fn clear(&mut self) {
-        self.flush();
-        self.text = Text::default();
+        self.widget.inner.lines.clear();
         self.buffer.clear();
         self.state = State::None;
         self.cursor_x = 0;

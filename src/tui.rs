@@ -105,8 +105,7 @@ impl StyleOptions {
 pub struct Widget{
     id: usize,
     pub constraint: Constraint,
-    pub inner: Option<Text<'static>>,
-    pub align: Alignment,
+    pub inner: Text<'static>,
     pub style: StyleOptions,
     pub border_style: Style,
     pub border_title_style: Style,
@@ -115,7 +114,7 @@ pub struct Widget{
     pub persist: bool,
     pub hidden: bool,
 
-    line_count: usize,
+    line_count: u16,
 }
 
 impl Widget {
@@ -128,15 +127,62 @@ impl Widget {
         text
     }
 
-    pub fn make_text(&mut self) {
-        let p = self.inner.take().unwrap_or_else(|| Text::default());
-        let p = p
-            .alignment(self.align)
-            .style(self.style.as_style())
-            // .block(self.block.clone())
-            // .wrap(Wrap{trim: false})
-        ;
-        self.inner = Some(p);
+    fn render(&self, area: Rect, buffer: &mut Buffer, style: bool) {
+        if style {
+            buffer.set_style(area, self.inner.style);
+        }
+        self.block.render_ref(area, buffer);
+
+        let inner = self.block.inner(area);
+        let mut y_offset = 0;
+
+        for line in self.inner.iter() {
+            if y_offset >= inner.height {
+                break
+            }
+
+            let mut x_offset = 0;
+            for graph in line.styled_graphemes(self.style.as_style()) {
+
+                use unicode_width::UnicodeWidthStr;
+                let width = graph.symbol.width();
+                if width == 0 {
+                    continue
+                }
+                let symbol = if graph.symbol.is_empty() { " " } else { graph.symbol };
+                let cell = &mut buffer[(inner.left() + x_offset, inner.top() + y_offset)];
+                cell.set_symbol(symbol);
+                if style {
+                    cell.set_style(graph.style);
+                }
+                x_offset += width as u16;
+
+                if x_offset >= inner.width {
+                    x_offset = 0;
+                    y_offset += 1;
+                    if y_offset >= inner.height {
+                        break
+                    }
+                }
+            }
+
+            y_offset += 1;
+        }
+    }
+
+    fn line_count(&self, area: Rect, buffer: &mut Buffer) -> u16 {
+        let mut height = 0;
+        if let Constraint::Min(min) = self.constraint {
+            height = height.max(min);
+        }
+
+        if area.width >= 1 {
+            buffer.resize(area);
+            self.render(area, buffer, false);
+
+            height = height.max(buffer_nonempty_height(buffer))
+        }
+        height
     }
 
 }
@@ -161,13 +207,6 @@ impl WidgetWrapper {
             Self::Ansi(p) => p.as_widget(),
         }
     }
-
-    pub fn flush(&mut self) {
-        match self {
-            Self::Widget(_) => (),
-            Self::Ansi(p) => p.flush(),
-        }
-    }
 }
 
 impl Into<WidgetWrapper> for Widget {
@@ -183,7 +222,6 @@ impl Into<WidgetWrapper> for ansi::Parser {
 }
 
 pub struct Tui {
-    terminal: ratatui::DefaultTerminal,
     counter: usize,
     widgets: Vec<WidgetWrapper>,
 
@@ -200,7 +238,6 @@ pub struct Tui {
 impl std::default::Default for Tui {
     fn default() -> Self {
         Self{
-            terminal: ratatui::init_with_options(TerminalOptions{ viewport: Viewport::Inline(0) }),
             counter: 0,
             widgets: vec![],
             dirty: false,
@@ -230,9 +267,8 @@ impl Tui {
         let mut widget = Widget::default();
         let message = Widget::replace_tabs(message);
         let message: Vec<_> = message.split('\n').map(|l| Line::from(l.to_owned())).collect();
-        let mut text = Text::default().fg(Color::Red);
-        text.lines = message;
-        widget.inner = Some(text);
+        widget.inner = widget.inner.fg(Color::Red);
+        widget.inner.lines = message;
         self.add(widget.into())
     }
 
@@ -289,107 +325,36 @@ impl Tui {
             return
         }
 
-        // let mut frame = self.terminal.get_frame();
-        // std::mem::swap(frame.buffer_mut(), &mut self.new_buffer);
-
         let mut max_height = 0;
         let mut last_widget = 0;
+        let max_area = Rect{x: 0, y: 0, width, height};
         for (i, w) in self.widgets.iter_mut().enumerate() {
             let w = w.as_mut();
-            match &w.inner {
-                Some(inner) if !w.hidden => {
-                    w.line_count = Self::line_count(&mut self.line_count_buffer, inner, &w.block, width, height).unwrap_or(height) as _;
-                    // w.line_count = inner.line_count(width);
-                    if let Constraint::Min(min) = w.constraint {
-                        w.line_count = w.line_count.max(min as _);
-                    }
-
-                    max_height += w.line_count;
-                    last_widget = i;
-                    if max_height >= area.height as _ {
-                        break
-                    }
-                },
-                _ => (),
+            if !w.hidden {
+                w.line_count = w.line_count(max_area, &mut self.line_count_buffer);
+                max_height += w.line_count;
+                last_widget = i;
+                if max_height >= area.height as _ {
+                    break
+                }
             }
         }
 
         let widgets = &self.widgets[..=last_widget];
         area.height = area.height.min(max_height as _);
 
-        let filter = |w: &&Widget| !w.hidden && w.line_count > 0 && w.inner.is_some();
+        let filter = |w: &&Widget| !w.hidden && w.line_count > 0;
 
         let layout = Layout::vertical(widgets.iter().map(|w| w.as_ref()).filter(filter).map(|w| w.constraint));
         let layouts = layout.split(area);
 
         for (widget, layout) in widgets.iter().map(|w| w.as_ref()).filter(filter).zip(layouts.iter()) {
-            Self::render(widget.inner.as_ref().unwrap(), &widget.block, *layout, &mut self.new_buffer, true);
-            // frame.render_widget(&widget.inner, *layout);
+            widget.render(*layout, &mut self.new_buffer, true);
         }
-
-        // std::mem::swap(frame.buffer_mut(), &mut self.new_buffer);
     }
 
     fn swap_buffers(&mut self) {
         std::mem::swap(&mut self.new_buffer, &mut self.old_buffer);
-    }
-
-    fn render(text: &Text, block: &Block, area: Rect, buffer: &mut Buffer, style: bool) {
-        use ratatui::widgets::Widget;
-        buffer.set_style(area, text.style);
-        block.render(area, buffer);
-
-        let inner = block.inner(area);
-        let mut y_offset = 0;
-
-        for line in text.iter() {
-            let mut x_offset = 0;
-            for graph in line.styled_graphemes(Style::default()) {
-
-                use unicode_width::UnicodeWidthStr;
-                let width = graph.symbol.width();
-                if width == 0 {
-                    continue
-                }
-                let symbol = if graph.symbol.is_empty() { " " } else { graph.symbol };
-                let cell = &mut buffer[(inner.left() + x_offset, inner.top() + y_offset)];
-                cell.set_symbol(symbol);
-                if style {
-                    cell.set_style(graph.style);
-                }
-                x_offset += width as u16;
-
-                if x_offset >= inner.width {
-                    x_offset = 0;
-                    y_offset += 1;
-                    if y_offset >= inner.height {
-                        break
-                    }
-                }
-            }
-
-            y_offset += 1;
-            if y_offset >= inner.height {
-                break
-            }
-        }
-    }
-
-    fn line_count(buffer: &mut Buffer, text: &Text, block: &Block, width: u16, max_height: u16) -> Option<u16> {
-        if width < 1 {
-            return Some(0);
-        }
-
-        let area = Rect{x: 0, y: 0, width, height: max_height};
-        buffer.resize(area);
-        Self::render(text, block, area, buffer, false);
-
-        let height = buffer_nonempty_height(buffer);
-        if height == max_height {
-            None
-        } else {
-            Some(height)
-        }
     }
 
     pub fn draw(

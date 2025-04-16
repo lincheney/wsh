@@ -184,9 +184,8 @@ fn set_widget_text(widget: &mut tui::Widget, text: Option<TextParts>) {
         };
 
         lines.truncate(100);
-        let mut text = Text::default();
-        text.lines = lines;
-        widget.inner = Some(text);
+        widget.inner = Text::default();
+        widget.inner.lines = lines;
     }
 }
 
@@ -204,10 +203,8 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
     }
 
     if let Some(align) = options.style.align {
-        widget.align = align.0;
+        widget.inner = std::mem::replace(&mut widget.inner, Default::default()).alignment(align.0);
     }
-
-    widget.style = widget.style.merge(&options.style.style.into());
 
     match options.border {
         // explicitly disabled
@@ -241,7 +238,10 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
         None => {},
     }
 
-    widget.make_text();
+    widget.style = widget.style.merge(&options.style.style.into());
+    widget.inner = std::mem::replace(&mut widget.inner, Default::default()).style(widget.style.as_style());
+    widget.block = std::mem::replace(&mut widget.block, Default::default()).style(widget.style.as_style());
+
 }
 
 async fn set_message(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
@@ -260,7 +260,6 @@ async fn set_message(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
     if let Some(options) = options {
         set_widget_text(widget.as_mut(), options.text);
         set_widget_options(widget.as_mut(), options.options);
-        widget.flush();
     }
     tui.dirty = true;
     Ok(id)
@@ -383,7 +382,6 @@ async fn set_ansi_message(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> 
 
     if let Some(options) = options {
         set_widget_options(widget.as_mut(), options.options);
-        widget.flush();
     }
     tui.dirty = true;
     Ok(id)
