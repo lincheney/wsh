@@ -17,7 +17,7 @@ enum State {
     CsiOther,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Parser {
     buffer: BString,
     style: Style,
@@ -289,3 +289,15 @@ impl Parser {
 
 }
 
+impl std::default::Default for Parser {
+    fn default() -> Self {
+        Self {
+            buffer: Default::default(),
+            style: Default::default(),
+            state: Default::default(),
+            widget: super::Widget{ text_overrides_style: true, ..Default::default() },
+            cursor_x: 0,
+            need_newline: false,
+        }
+    }
+}

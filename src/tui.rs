@@ -115,6 +115,7 @@ pub struct Widget{
     pub hidden: bool,
 
     line_count: u16,
+    text_overrides_style: bool,
 }
 
 impl Widget {
@@ -142,7 +143,7 @@ impl Widget {
             }
 
             let mut x_offset = 0;
-            for graph in line.styled_graphemes(self.style.as_style()) {
+            for graph in line.styled_graphemes(self.inner.style) {
 
                 use unicode_width::UnicodeWidthStr;
                 let width = graph.symbol.width();
@@ -153,7 +154,11 @@ impl Widget {
                 let cell = &mut buffer[(inner.left() + x_offset, inner.top() + y_offset)];
                 cell.set_symbol(symbol);
                 if style {
-                    cell.set_style(graph.style);
+                    if self.text_overrides_style {
+                        cell.set_style(graph.style.patch(self.inner.style));
+                    } else {
+                        cell.set_style(graph.style);
+                    }
                 }
                 x_offset += width as u16;
 
