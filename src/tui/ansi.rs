@@ -308,5 +308,13 @@ impl Parser {
         }
     }
 
+    pub fn clear(&mut self) {
+        self.text = Text::default();
+        self.buffer.clear();
+        self.state = State::None;
+        self.cursor_x = 0;
+        self.need_newline = false;
+    }
+
 }
 

@@ -397,6 +397,19 @@ async fn feed_ansi_message(mut ui: Ui, _lua: Lua, (id, value): (usize, LuaString
     }
 }
 
+async fn clear_ansi_message(mut ui: Ui, _lua: Lua, id: usize) -> Result<()> {
+    let tui = &mut ui.inner.borrow_mut().await.tui;
+
+    match tui.get_mut(id) {
+        Some(tui::WidgetWrapper::Ansi(parser)) => {
+            parser.clear();
+            tui.dirty = true;
+            Ok(())
+        },
+        _ => Err(anyhow::anyhow!("can't find widget with id {}", id)),
+    }
+}
+
 pub fn init_lua(ui: &Ui) -> Result<()> {
 
     ui.set_lua_async_fn("set_message", set_message)?;
@@ -408,6 +421,7 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_async_fn("clear_buf_highlights", clear_buf_highlights)?;
     ui.set_lua_async_fn("set_ansi_message", set_ansi_message)?;
     ui.set_lua_async_fn("feed_ansi_message", feed_ansi_message)?;
+    ui.set_lua_async_fn("clear_ansi_message", clear_ansi_message)?;
 
     Ok(())
 }
