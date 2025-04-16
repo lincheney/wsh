@@ -100,8 +100,9 @@ wish.set_keymap('<c-d>', function()
     wish.set_message{text='hello '..wish.get_buffer()}
     wish.redraw()
     if not wish.get_buffer():find('%S') then
-        wish.set_buffer('exit')
-        wish.accept_line()
+        wish.exit()
+        -- wish.set_buffer('exit')
+        -- wish.accept_line()
     end
 end)
 

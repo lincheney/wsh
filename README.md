@@ -48,4 +48,5 @@ i wish i could have
 * [ ] selecting `print -s echo` in history is weird
 * [ ] silence parse warnings
 * [ ] custom buffer rendering, ghost text etc
+* [ ] fix segfault when letting zle exit by itself
 * [ ] 

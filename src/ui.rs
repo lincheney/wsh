@@ -533,6 +533,12 @@ impl Ui {
             Ui::allocate_height(&mut ui.inner.borrow_mut().await.stdout, height)
         })?;
 
+        self.set_lua_async_fn("exit", |mut ui, _lua, code: Option<i32>| async move {
+            let mut ui = ui.inner.borrow_mut().await;
+            ui.events.lock().await.exit(code.unwrap_or(0));
+            Ok(())
+        })?;
+
         crate::lua::init_lua(self).await?;
 
         let lua = self.lua.clone();

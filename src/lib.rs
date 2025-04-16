@@ -20,7 +20,7 @@ mod utils;
 
 static STATE: OnceLock<ui::Ui> = OnceLock::new();
 
-async fn main() -> Result<()> {
+async fn main() -> Result<i32> {
 
     let log_file = Box::new(std::fs::File::create("/tmp/wish.log").expect("Can't create log file"));
     env_logger::Builder::from_default_env()
@@ -79,9 +79,16 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
                 return 1;
             } else {
                 let rt = tokio::runtime::Runtime::new().unwrap();
-                rt.block_on(async {
-                    if let Err(err) = main().await {
-                        log::error!("{:?}", err);
+                return rt.block_on(async {
+                    match main().await {
+                        // Ok(code) => code,
+                        Ok(code) => {
+                            // i shouldn't have to do this and let zle exit instead, but zsh segfaults otherwise
+                            // TODO figure out why and fix it
+                            unsafe{ zsh_sys::zexit(code, zsh_sys::zexit_t_ZEXIT_NORMAL); }
+                            code
+                        },
+                        Err(err) => { log::error!("{:?}", err); 1 },
                     }
                 });
             }

@@ -1,8 +1,10 @@
 use std::sync::Arc;
+use std::default::Default;
 use futures::channel::mpsc;
 use futures::{select, SinkExt, StreamExt, FutureExt};
 use tokio::sync::{Mutex, MutexGuard, OwnedMutexGuard, RwLock};
 
+#[derive(Default)]
 struct Lock {
     inner: Arc<Mutex<UnlockedEvents>>,
     outer: RwLock<()>,
@@ -20,7 +22,10 @@ pub struct EventStream {
     receiver: mpsc::UnboundedReceiver<()>,
 }
 
-pub struct UnlockedEvents();
+#[derive(Default)]
+pub struct UnlockedEvents{
+    exit: Option<i32>,
+}
 
 impl UnlockedEvents {
     pub fn get_cursor_position(&self) -> Result<(u16, u16), std::io::Error> {
@@ -35,6 +40,10 @@ impl UnlockedEvents {
                 x => return x,
             }
         }
+    }
+
+    pub fn exit(&mut self, code: i32) {
+        self.exit = Some(code);
     }
 }
 
@@ -71,16 +80,13 @@ impl EventLocker {
 impl EventStream {
     pub fn new() -> (Self, EventLocker) {
         let (sender, receiver) = mpsc::unbounded::<()>();
-        let lock = Arc::new(Lock{
-            inner: Arc::new(Mutex::new(UnlockedEvents())),
-            outer: RwLock::new(()),
-        });
+        let lock: Arc<Lock> = Arc::new(Default::default());
         let stream = Self{ lock: lock.clone(), receiver };
         let locker = EventLocker{ lock, sender };
         (stream, locker)
     }
 
-    pub async fn run(&mut self, ui: &mut crate::ui::Ui) -> anyhow::Result<()> {
+    pub async fn run(&mut self, ui: &mut crate::ui::Ui) -> anyhow::Result<i32> {
         loop {
             let mut lock = None;
             let mut waker = self.receiver.next().fuse();
@@ -94,6 +100,9 @@ impl EventStream {
                     // get an exclusive lock
                     lock = Some(self.lock.lock_exclusive().await);
                 }
+                if let Some(exit_code) = lock.as_ref().unwrap().exit {
+                    return Ok(exit_code)
+                }
 
                 select! {
                     _ = waker => {
@@ -105,11 +114,11 @@ impl EventStream {
                         match e {
                             Some(Ok(event)) => {
                                 if !ui.handle_event(event).await? {
-                                    return Ok(())
+                                    return Ok(0)
                                 }
                             }
                             Some(Err(event)) => { println!("Error: {:?}\r", event); },
-                            None => return Ok(()),
+                            None => return Ok(0),
                         }
                         event = events.next().fuse();
                         lock = Some(self.lock.lock_exclusive().await);
