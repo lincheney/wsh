@@ -10,7 +10,7 @@ use tokio::sync::RwLock;
 use anyhow::Result;
 
 use crossterm::{
-    terminal::{Clear, ClearType},
+    terminal::{Clear, ClearType, BeginSynchronizedUpdate, EndSynchronizedUpdate},
     cursor::{self, position, MoveToColumn},
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     style,
@@ -326,6 +326,7 @@ impl Ui {
                 let y_offset = ui.prompt.height + ui.buffer.height - 1 - ui.buffer.cursor_coord.1 - 1;
                 execute!(
                     ui.stdout,
+                    BeginSynchronizedUpdate,
                     MoveDown(y_offset),
                     style::Print('\n'),
                     MoveToColumn(0),
@@ -338,6 +339,11 @@ impl Ui {
                 let buffer = expanded_buffer.as_ref().unwrap_or(buffer).as_ref();
                 shell.clear_completion_cache();
                 shell.push_history(buffer);
+
+                tokio::task::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    execute!(std::io::stdout(), EndSynchronizedUpdate)
+                });
 
                 if let Err(code) = shell.exec(buffer) {
                     eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
