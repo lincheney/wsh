@@ -109,6 +109,58 @@ pub struct Widget{
     text_overrides_style: bool,
 }
 
+pub fn render_text(
+    area: Rect,
+    buffer: &mut Buffer,
+    mut offset: (u16, u16),
+    text: &Text,
+    style: bool,
+    override_style: Option<Style>,
+) -> (u16, u16) {
+
+    let mut new_offset = offset;
+    for line in text.iter() {
+        offset = new_offset;
+        if offset.1 >= area.height {
+            break
+        }
+
+        for graph in line.styled_graphemes(text.style) {
+
+            use unicode_width::UnicodeWidthStr;
+            let width = graph.symbol.width();
+            if width == 0 {
+                continue
+            }
+
+            let symbol = if graph.symbol.is_empty() { " " } else { graph.symbol };
+            let cell = &mut buffer[(area.x + offset.0, area.y + offset.1)];
+            cell.set_symbol(symbol);
+
+            if style {
+                if let Some(style) = override_style {
+                    cell.set_style(graph.style.patch(style));
+                } else {
+                    cell.set_style(graph.style);
+                }
+            }
+
+            offset.0 += width as u16;
+            if offset.0 >= area.width {
+                new_offset = (0, offset.1 + 1);
+                if new_offset.1 >= area.height {
+                    break
+                }
+                offset = new_offset;
+            }
+        }
+
+        new_offset = (0, offset.1 + 1);
+    }
+
+    offset
+}
+
 impl Widget {
 
     pub fn replace_tabs(mut text: String) -> String {
@@ -119,51 +171,31 @@ impl Widget {
         text
     }
 
-    fn render(&self, area: Rect, buffer: &mut Buffer, style: bool) {
-        if style {
-            buffer.set_style(area, self.inner.style);
-        }
+    fn render(&self, area: Rect, buffer: &mut Buffer) {
+        buffer.set_style(area, self.inner.style);
         self.block.render_ref(area, buffer);
-
         let area = self.block.inner(area);
-        let mut y = 0;
+        render_text(
+            area,
+            buffer,
+            (0, 0),
+            &self.inner,
+            true,
+            if self.text_overrides_style { Some(self.inner.style) } else { None },
+        );
+    }
 
-        for line in self.inner.iter() {
-            if y >= area.height {
-                break
-            }
-
-            let mut x = 0;
-            for graph in line.styled_graphemes(self.inner.style) {
-
-                use unicode_width::UnicodeWidthStr;
-                let width = graph.symbol.width();
-                if width == 0 {
-                    continue
-                }
-                let symbol = if graph.symbol.is_empty() { "" } else { graph.symbol };
-                let cell = &mut buffer[(area.x + x, area.y + y)];
-                cell.set_symbol(symbol);
-                if style {
-                    if self.text_overrides_style {
-                        cell.set_style(graph.style.patch(self.inner.style));
-                    } else {
-                        cell.set_style(graph.style);
-                    }
-                }
-                x += width as u16;
-
-                if x >= area.width {
-                    x = 0;
-                    y += 1;
-                    if y >= area.height {
-                        break
-                    }
-                }
-            }
-
-            y += 1;
-        }
+    fn measure(&self, area: Rect, buffer: &mut Buffer) {
+        self.block.render_ref(area, buffer);
+        let area = self.block.inner(area);
+        render_text(
+            area,
+            buffer,
+            (0, 0),
+            &self.inner,
+            false,
+            None,
+        );
     }
 
     fn line_count(&self, area: Rect, buffer: &mut Buffer) -> u16 {
@@ -174,7 +206,7 @@ impl Widget {
 
         if area.width >= 1 {
             buffer.resize(area);
-            self.render(area, buffer, false);
+            self.measure(area, buffer);
 
             height = height.max(buffer_nonempty_height(buffer))
         }
@@ -332,7 +364,7 @@ impl Tui {
         let layout = Layout::vertical(widgets.iter().map(|w| w.as_ref()).filter(filter).map(|w| w.constraint));
         let layouts = layout.split(area);
         for (widget, layout) in widgets.iter().map(|w| w.as_ref()).filter(filter).zip(layouts.iter()) {
-            widget.render(*layout, &mut self.new_buffer, true);
+            widget.render(*layout, &mut self.new_buffer);
         }
     }
 
@@ -410,7 +442,7 @@ impl Tui {
         }
 
         self.height = buffer_nonempty_height(&self.new_buffer).max(buffer.cursor_coord.1 + 1);
-        let mut updates = self.old_buffer.diff(&self.new_buffer);
+        let updates = self.old_buffer.diff(&self.new_buffer);
         if !updates.is_empty() || prompt.dirty {
             queue!(stdout, crossterm::terminal::BeginSynchronizedUpdate)?;
 

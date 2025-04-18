@@ -344,7 +344,7 @@ impl Buffer {
         content: &BStr,
         area: Rect,
         buf: &mut ratatui::buffer::Buffer,
-        mut offset: (u16, u16),
+        offset: (u16, u16),
     ) -> (u16, u16) {
         // turn this into Text
         let text = format!("{}", BufferContents{
@@ -362,39 +362,7 @@ impl Buffer {
             text.lines.push(Line::default());
         }
 
-        let mut new_offset = offset;
-        for line in text.iter() {
-            offset = new_offset;
-            if offset.1 >= area.height {
-                break
-            }
-
-            for graph in line.styled_graphemes(text.style) {
-
-                use unicode_width::UnicodeWidthStr;
-                let width = graph.symbol.width();
-                if width == 0 {
-                    continue
-                }
-                let symbol = if graph.symbol.is_empty() { " " } else { graph.symbol };
-                let cell = &mut buf[(area.x + offset.0, area.y + offset.1)];
-                cell.set_symbol(symbol);
-                cell.set_style(graph.style);
-                offset.0 += width as u16;
-
-                if offset.0 >= area.width {
-                    new_offset = (0, offset.1 + 1);
-                    if new_offset.1 >= area.height {
-                        break
-                    }
-                    offset = new_offset;
-                }
-            }
-
-            new_offset = (0, offset.1 + 1);
-        }
-
-        offset
+        crate::tui::render_text(area, buf, offset, &text, true, None)
     }
 
     pub fn render(&mut self, area: Rect, buf: &mut ratatui::buffer::Buffer, prompt: &Prompt) {
