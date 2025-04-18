@@ -40,7 +40,7 @@ fn parse_ansi_col(mut style: Style, string: &BStr) -> Style {
                 (0, false)
             } else {
                 let (part, colon) = if part.ends_with(b":") {
-                    (&part[..part.len()-1], false)
+                    (&part[..part.len()-1], true)
                 } else if part.ends_with(b";") {
                     (&part[..part.len()-1], false)
                 } else {
