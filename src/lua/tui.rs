@@ -301,50 +301,12 @@ struct Highlight {
 
 async fn add_buf_highlight(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
     let hl: Highlight = lua.from_value(val)?;
-    let mut mask = crossterm::style::Attributes::default();
-    let mut style = crossterm::style::ContentStyle::new();
-    style.foreground_color = hl.style.fg.map(|x| x.0.into());
-    style.background_color = hl.style.bg.map(|x| x.0.into());
-
-    macro_rules! set_modifier {
-        ($field:ident, $enum:ident) => (
-            if let Some($field) = hl.style.$field {
-                let val = crossterm::style::Attribute::$enum;
-                if $field {
-                    style.attributes.set(val);
-                } else {
-                    style.attributes.unset(val);
-                }
-                mask.set(val);
-            }
-        )
-    }
-
-    set_modifier!(bold, Bold);
-    set_modifier!(dim, Dim);
-    set_modifier!(italic, Italic);
-    set_modifier!(strikethrough, CrossedOut);
-    set_modifier!(reversed, Reverse);
-    set_modifier!(blink, SlowBlink);
-
-    match hl.style.underline.as_ref() {
-        Some(UnderlineOptions::Bool(val)) => if *val {
-            style.attributes.set(crossterm::style::Attribute::Underlined);
-        } else {
-            style.attributes.unset(crossterm::style::Attribute::Underlined);
-        },
-        Some(UnderlineOptions::Options(val)) => {
-            style.attributes.set(crossterm::style::Attribute::Underlined);
-            style.underline_color = Some(val.color.0.into());
-        },
-        None => (),
-    }
+    let style: tui::StyleOptions = hl.style.into();
 
     ui.inner.borrow_mut().await.buffer.highlights.push(crate::buffer::Highlight{
         start: hl.start,
         end: hl.finish,
-        style,
-        attribute_mask: mask,
+        style: style.as_style(),
         namespace: hl.namespace.unwrap_or(0),
     });
 

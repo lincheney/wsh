@@ -1,14 +1,11 @@
 use std::ops::Range;
+use std::fmt::Write;
 use bstr::{BString, ByteSlice, BStr};
-use anyhow::Result;
 use unicode_width::UnicodeWidthStr;
-use crossterm::{
-    style::{ContentStyle, Attributes, Stylize},
-};
 use ratatui::{
-    *,
     layout::*,
     text::*,
+    style::*,
 };
 use crate::prompt::Prompt;
 
@@ -23,8 +20,7 @@ pub struct Edit {
 pub struct Highlight {
     pub start: usize,
     pub end: usize,
-    pub style: ContentStyle,
-    pub attribute_mask: Attributes,
+    pub style: Style,
     pub namespace: usize,
 }
 
@@ -53,21 +49,12 @@ impl Highlight {
 struct HighlightStack<'a>(Vec<&'a Highlight>);
 
 impl<'a> HighlightStack<'a> {
-    fn merge(&self) -> String {
-        let mut style = ContentStyle::new();
+    fn merge(&self) -> Style {
+        let mut style = Style::new();
         for h in self.0.iter() {
-            if let Some(fg) = h.style.foreground_color {
-                style = style.with(fg);
-            }
-            if let Some(bg) = h.style.background_color {
-                style = style.with(bg);
-            }
-            if let Some(ul) = h.style.underline_color {
-                style = style.underline(ul);
-            }
-            style.attributes = (style.attributes & (style.attributes ^ h.attribute_mask)) | (h.style.attributes & h.attribute_mask);
+            style = style.patch(h.style);
         }
-        format!("{}", style.apply(" "))
+        style
     }
 }
 
@@ -100,93 +87,62 @@ struct BufferContents<'a> {
     offset: usize,
 }
 
-impl std::fmt::Display for BufferContents<'_> {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+impl<'a> Into<Text<'a>> for BufferContents<'a> {
+    fn into(self) -> Text<'a> {
+        let mut text = Text::default();
+        text.lines.push(Line::default());
+        let mut line = text.lines.last_mut().unwrap();
 
-        let mut escaped = false;
-
-        let start_escape = |fmt: &mut std::fmt::Formatter, escaped: &mut bool| {
-            if !*escaped {
-                write!(fmt, "\x1b[31m")?;
-                *escaped = true;
-            }
-            Ok(())
-        };
-
-        let end_escape = |fmt: &mut std::fmt::Formatter, escaped: &mut bool| {
-            if *escaped {
-                write!(fmt, "\x1b[0m")?;
-                *escaped = false;
-            }
-            Ok(())
-        };
+        let escape_style = Style::default().fg(Color::Gray);
 
         let mut stack = HighlightStack(vec![]);
+        let mut buffer = String::new();
 
         for (i, (start, end, c)) in self.inner.grapheme_indices().enumerate() {
-            let mut changed = false;
-            for h in self.highlights.iter() {
-                if h.start == i + self.offset {
-                    changed = true;
-                    stack.0.push(h);
+            if self.highlights.iter().any(|h| h.start == i + self.offset) {
+                // flush buffer bc highlights have changed
+                if !buffer.is_empty() {
+                    line.spans.push(Span::styled(buffer, stack.merge()));
+                    buffer = String::new();
                 }
-            }
-            if changed {
-                fmt.write_str("\x1b[0m")?;
-                fmt.write_str(stack.merge().split_once(' ').unwrap().0)?;
+                stack.0.extend(self.highlights.iter().filter(|h| h.start == i + self.offset));
             }
 
-            if start + 1 == end && c == "\u{FFFD}" {
-                // invalid
-                start_escape(fmt, &mut escaped)?;
-                write!(fmt, "<{:02x}>", self.inner[start])?;
-            } else if c.width() > 0 || c == "\n" {
-                end_escape(fmt, &mut escaped)?;
-                fmt.write_str(c)?;
+            if c == "\n" {
+                text.lines.push(Line::default());
+                line = text.lines.last_mut().unwrap();
+            } else if c.width() > 0 && (start + 1 != end || c != "\u{FFFD}") {
+                buffer.push_str(c);
             } else {
+                let style = stack.merge();
+                // flush buffer
+                if !buffer.is_empty() {
+                    line.spans.push(Span::styled(buffer, style));
+                    buffer = String::new();
+                }
+
                 // invalid
-                start_escape(fmt, &mut escaped)?;
                 for c in self.inner[start..end].iter() {
-                    write!(fmt, "<u{:04x}>", c)?;
+                    write!(&mut buffer, "<u{:04x}>", c).unwrap();
                 }
+                line.spans.push(Span::styled(buffer, style.patch(escape_style)));
+                buffer = String::new();
             }
 
-            let mut changed = false;
-            stack.0.retain(|h| {
-                if h.end <= i + self.offset + 1 {
-                    changed = true;
-                    false
-                } else {
-                    true
+            if !stack.0.iter().all(|h| h.end > i + self.offset + 1) {
+                if !buffer.is_empty() {
+                    line.spans.push(Span::styled(buffer, stack.merge()));
+                    buffer = String::new();
                 }
-            });
-            if changed {
-                fmt.write_str("\x1b[0m")?;
-                fmt.write_str(stack.merge().split_once(' ').unwrap().0)?;
+                stack.0.retain(|h| h.end > i + self.offset + 1 );
             }
         }
-        end_escape(fmt, &mut escaped)?;
 
-        if !stack.0.is_empty() {
-            fmt.write_str("\x1b[0m")?;
+        if !buffer.is_empty() {
+            line.spans.push(Span::styled(buffer, stack.merge()));
         }
 
-        Ok(())
-    }
-}
-
-fn strip_colours(string: &mut String) {
-    if string.contains("\x1b") {
-        let mut in_esc = false;
-        string.retain(|c| {
-            if in_esc && c == 'm' {
-                in_esc = false;
-            } else if c == '\x1b' {
-                in_esc = true;
-            }
-
-            !in_esc
-        });
+        text
     }
 }
 
@@ -346,22 +302,17 @@ impl Buffer {
         buf: &mut ratatui::buffer::Buffer,
         offset: (u16, u16),
     ) -> (u16, u16) {
-        // turn this into Text
-        let text = format!("{}", BufferContents{
-            inner: content,
-            highlights: &self.highlights,
-            offset: 0,
-        });
-        if text.is_empty() {
+
+        if content.is_empty() {
             return offset
         }
 
-        let ends_with_newline = text.ends_with('\n');
-        let mut text = Text::raw(text);
-        if ends_with_newline {
-            text.lines.push(Line::default());
-        }
-
+        // turn this into Text
+        let text: Text = BufferContents{
+            inner: content,
+            highlights: &self.highlights,
+            offset: 0,
+        }.into();
         crate::tui::render_text(area, buf, offset, &text, true, None)
     }
 
