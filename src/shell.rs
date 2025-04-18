@@ -226,4 +226,8 @@ impl ShellInner {
         }
     }
 
+    pub fn get_cwd(&mut self) -> BString {
+        zsh::get_cwd()
+    }
+
 }

@@ -164,3 +164,10 @@ pub fn get_zle_buffer() -> (BString, Option<i64>) {
         _ => (buffer, None),
     }
 }
+
+pub fn get_cwd() -> BString {
+    unsafe {
+        let ptr = zsh_sys::zgetcwd();
+        CStr::from_ptr(ptr).to_bytes().into()
+    }
+}

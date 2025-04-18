@@ -506,6 +506,10 @@ impl Ui {
             Ok(())
         })?;
 
+        self.set_lua_async_fn("get_cwd", |ui, _lua, _: ()| async move {
+            Ok(ui.shell.lock().await.get_cwd())
+        })?;
+
         crate::lua::init_lua(self).await?;
 
         let lua = self.lua.clone();
