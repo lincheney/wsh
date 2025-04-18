@@ -209,7 +209,7 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
     match options.border {
         // explicitly disabled
         Some(BorderOptions{enabled: Some(false), ..}) => {
-            widget.block = Block::new();
+            widget.block = None;
         },
         Some(options) => {
             let style: tui::StyleOptions = options.style.into();
@@ -220,27 +220,27 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
                 let style: tui::StyleOptions = title.style.into();
                 widget.border_title_style = widget.border_title_style.patch(style.as_style());
                 if let Some(text) = title.text {
-                    Block::new().title(text)
+                    Some(Block::new().title(text))
                 } else {
                     widget.block.clone()
                 }
             } else {
                 widget.block.clone()
-            };
+            }.unwrap_or_else(|| Block::new());
 
             block = block.borders(Borders::ALL);
             block = block.border_style(widget.border_style);
             block = block.border_type(widget.border_type);
             block = block.title_style(widget.border_title_style);
 
-            widget.block = block;
+            widget.block = Some(block);
         },
         None => {},
     }
 
     widget.style = widget.style.merge(&options.style.style.into());
     widget.inner = std::mem::take(&mut widget.inner).style(widget.style.as_style());
-    widget.block = std::mem::take(&mut widget.block).style(widget.style.as_style());
+    widget.block = std::mem::take(&mut widget.block).map(|b| b.style(widget.style.as_style()));
 
 }
 
@@ -375,6 +375,18 @@ async fn clear_ansi_message(mut ui: Ui, _lua: Lua, id: usize) -> Result<()> {
     }
 }
 
+async fn set_status_bar(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
+    let options: Option<WidgetOptions> = lua.from_value(val)?;
+    let mut ui = ui.inner.borrow_mut().await;
+    let widget = ui.status_bar.inner.get_or_insert_default();
+    if let Some(options) = options {
+        set_widget_text(widget, options.text);
+        set_widget_options(widget, options.options);
+    }
+    ui.status_bar.dirty = true;
+    Ok(())
+}
+
 pub fn init_lua(ui: &Ui) -> Result<()> {
 
     ui.set_lua_async_fn("set_message", set_message)?;
@@ -387,6 +399,7 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_async_fn("set_ansi_message", set_ansi_message)?;
     ui.set_lua_async_fn("feed_ansi_message", feed_ansi_message)?;
     ui.set_lua_async_fn("clear_ansi_message", clear_ansi_message)?;
+    ui.set_lua_async_fn("set_status_bar", set_status_bar)?;
 
     Ok(())
 }

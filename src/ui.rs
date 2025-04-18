@@ -67,6 +67,7 @@ pub struct UiInner {
 
     pub buffer: crate::buffer::Buffer,
     pub prompt: crate::prompt::Prompt,
+    pub status_bar: crate::tui::status_bar::StatusBar,
 
     pub threads: HashSet<nix::unistd::Pid>,
     stdout: std::io::Stdout,
@@ -118,6 +119,7 @@ impl Ui {
             threads: HashSet::new(),
             buffer: Default::default(),
             prompt: crate::prompt::Prompt::new(None),
+            status_bar: Default::default(),
             keybinds: Default::default(),
             keybind_layer_counter: Default::default(),
             stdout: std::io::stdout(),
@@ -176,7 +178,15 @@ impl Ui {
 
         crossterm::terminal::disable_raw_mode()?;
         ui.size = crossterm::terminal::size()?;
-        ui.tui.draw(&mut ui.stdout, ui.size, &shell, &mut ui.prompt, &mut ui.buffer, ui.dirty).await?;
+        ui.tui.draw(
+            &mut ui.stdout,
+            ui.size,
+            &shell,
+            &mut ui.prompt,
+            &mut ui.buffer,
+            &mut ui.status_bar,
+            ui.dirty,
+        ).await?;
         crossterm::terminal::enable_raw_mode()?;
 
         ui.dirty = false;
@@ -313,7 +323,7 @@ impl Ui {
                 ui.deactivate()?;
 
                 // move to last line of buffer
-                let y_offset = ui.prompt.height + ui.buffer.height - 1 - ui.buffer.cursor_coord.1;
+                let y_offset = ui.prompt.height + ui.buffer.height - 1 - ui.buffer.cursor_coord.1 - 1;
                 execute!(
                     ui.stdout,
                     MoveDown(y_offset),
@@ -476,6 +486,7 @@ impl Ui {
             prompt: bool,
             buffer: bool,
             messages: bool,
+            status_bar: bool,
             all: bool,
         }
         self.set_lua_async_fn("redraw", |mut ui, lua, val: Option<LuaValue>| async move {
@@ -486,6 +497,7 @@ impl Ui {
                 if val.prompt { ui.prompt.dirty = true; }
                 if val.buffer { ui.buffer.dirty = true; }
                 if val.messages { ui.tui.dirty = true; }
+                if val.status_bar { ui.status_bar.dirty = true; }
             }
 
             ui.draw().await

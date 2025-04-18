@@ -230,3 +230,10 @@ wish.add_event_callback('accept_line', function()
     wish.clear_buf_highlights(PASTE_NS)
     wish.redraw{buffer = true}
 end)
+
+wish.set_status_bar{
+    text = 'asd',
+    align = 'Center',
+    bg = 'darkgrey',
+}
+wish.redraw()

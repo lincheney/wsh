@@ -17,6 +17,7 @@ use ratatui::{
 };
 use crate::ui::Ui;
 mod backend;
+pub mod status_bar;
 pub mod ansi;
 
 fn buffer_nonempty_height(buffer: &Buffer) -> u16 {
@@ -101,7 +102,7 @@ pub struct Widget{
     pub border_style: Style,
     pub border_title_style: Style,
     pub border_type: BorderType,
-    pub block: Block<'static>,
+    pub block: Option<Block<'static>>,
     pub persist: bool,
     pub hidden: bool,
 
@@ -173,8 +174,12 @@ impl Widget {
 
     fn render(&self, area: Rect, buffer: &mut Buffer) {
         buffer.set_style(area, self.inner.style);
-        self.block.render_ref(area, buffer);
-        let area = self.block.inner(area);
+        let area = if let Some(ref block) = self.block {
+            block.render_ref(area, buffer);
+            block.inner(area)
+        } else {
+            area
+        };
         render_text(
             area,
             buffer,
@@ -185,9 +190,15 @@ impl Widget {
         );
     }
 
-    fn measure(&self, area: Rect, buffer: &mut Buffer) {
-        self.block.render_ref(area, buffer);
-        let area = self.block.inner(area);
+    fn measure(&self, mut area: Rect, buffer: &mut Buffer) {
+        if let Some(ref block) = self.block {
+            block.render_ref(Rect{ height: 3, ..area }, buffer);
+            let height = buffer_nonempty_height(buffer);
+            if height == 3 {
+                area = Rect{ y: 1, ..area };
+            }
+        }
+
         render_text(
             area,
             buffer,
@@ -206,9 +217,10 @@ impl Widget {
 
         if area.width >= 1 {
             buffer.resize(area);
+            buffer.reset();
             self.measure(area, buffer);
 
-            height = height.max(buffer_nonempty_height(buffer))
+            height = height.max(buffer_nonempty_height(buffer));
         }
         height
     }
@@ -262,6 +274,8 @@ pub struct Tui {
     old_buffer: Buffer,
     new_buffer: Buffer,
     line_count_buffer: Buffer,
+    old_status_bar_buffer: Buffer,
+    new_status_bar_buffer: Buffer,
 }
 
 impl Tui {
@@ -358,13 +372,14 @@ impl Tui {
         std::mem::swap(&mut self.new_buffer, &mut self.old_buffer);
     }
 
-    pub async fn draw(
+    pub async fn draw<'a>(
         &mut self,
         stdout: &mut std::io::Stdout,
         (width, height): (u16, u16),
         shell: &crate::shell::Shell,
         prompt: &mut crate::prompt::Prompt,
         buffer: &mut crate::buffer::Buffer,
+        status_bar: &mut status_bar::StatusBar,
         mut clear: bool,
     ) -> Result<()> {
 
@@ -383,10 +398,11 @@ impl Tui {
             clear = true;
         }
 
-        let new_buffer = clear || self.dirty || prompt.dirty || buffer.dirty;
+        let new_buffer = clear || self.dirty || prompt.dirty || buffer.dirty || status_bar.dirty;
         if new_buffer {
             self.swap_buffers();
             self.new_buffer.reset();
+            self.new_status_bar_buffer.reset();
         }
 
         let area = Rect{x: 0, y: 0, width, height: max_height};
@@ -403,11 +419,13 @@ impl Tui {
                 .for_each(|cell| {
                     cell.reset();
                 });
+            buffer.dirty = true;
         }
 
         if clear || buffer.dirty {
             // refresh the buffer
             buffer.render(area, &mut self.new_buffer, prompt);
+            self.dirty = true;
         } else if new_buffer {
             // copy over from old buffer
             self.old_buffer.content.iter()
@@ -423,11 +441,25 @@ impl Tui {
         let offset = prompt.height + buffer.height - 1;
         let area = Rect{ y: area.y + offset, height: area.height - offset, ..area };
 
-        if clear || self.dirty {
+        if clear || self.dirty || status_bar.dirty {
+
+            let mut area = area;
+            if let Some(ref mut widget) = status_bar.inner {
+                widget.line_count = widget.line_count(area, &mut self.line_count_buffer);
+                area.height = area.height.saturating_sub(widget.line_count);
+            }
+
             self.refresh(area);
+            self.height = buffer_nonempty_height(&self.new_buffer).max(offset);
+
+            if let Some(ref widget) = status_bar.inner {
+                let bar_height = widget.line_count.min(max_height - self.height);
+                self.height += bar_height;
+            }
         }
 
-        self.height = buffer_nonempty_height(&self.new_buffer).max(buffer.cursor_coord.1 + 1);
+        self.height = self.height.max(offset);
+
         let updates = self.old_buffer.diff(&self.new_buffer);
         if !updates.is_empty() || prompt.dirty {
             queue!(stdout, crossterm::terminal::BeginSynchronizedUpdate)?;
@@ -469,6 +501,30 @@ impl Tui {
                 )?;
             }
 
+            if clear || status_bar.dirty {
+                if let Some(ref widget) = status_bar.inner {
+                    let bar_height = widget.line_count.min(max_height - self.height);
+                    queue!(
+                        stdout,
+                        cursor::SavePosition,
+                        crate::ui::MoveDown(height * 10),
+                        crate::ui::MoveUp(bar_height - 1),
+                    )?;
+
+                    let area = Rect{ y: 0, height: bar_height, ..area };
+                    self.new_status_bar_buffer.resize(area);
+                    self.old_status_bar_buffer.resize(area);
+
+                    std::mem::swap(&mut self.new_status_bar_buffer, &mut self.old_status_bar_buffer);
+                    widget.render(area, &mut self.new_status_bar_buffer);
+
+                    let updates = self.old_status_bar_buffer.diff(&self.new_status_bar_buffer);
+                    backend::draw(stdout, updates.into_iter())?;
+
+                    queue!(stdout, cursor::RestorePosition)?;
+                }
+            }
+
             // position the cursor
             if cursor_is_at_end {
                 // cursor is at the very very end of line
@@ -494,6 +550,7 @@ impl Tui {
         self.dirty = false;
         prompt.dirty = false;
         buffer.dirty = false;
+        status_bar.dirty = false;
         Ok(())
     }
 
