@@ -193,7 +193,7 @@ impl Parser {
                         .map(|s| s.symbol)
                         .collect::<Vec<_>>()
                         .join("");
-                    *sp = std::mem::replace(sp, Span::default()).content(content);
+                    *sp = std::mem::take(sp).content(content);
                     true
                 }
             });

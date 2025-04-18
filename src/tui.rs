@@ -237,18 +237,19 @@ impl WidgetWrapper {
     }
 }
 
-impl Into<WidgetWrapper> for Widget {
-    fn into(self) -> WidgetWrapper {
-        WidgetWrapper::Widget(self)
+impl From<Widget> for WidgetWrapper {
+    fn from(widget: Widget) -> Self {
+        Self::Widget(widget)
     }
 }
 
-impl Into<WidgetWrapper> for ansi::Parser {
-    fn into(self) -> WidgetWrapper {
-        WidgetWrapper::Ansi(self)
+impl From<ansi::Parser> for WidgetWrapper {
+    fn from(parser: ansi::Parser) -> Self {
+        Self::Ansi(parser)
     }
 }
 
+#[derive(Default)]
 pub struct Tui {
     counter: usize,
     widgets: Vec<WidgetWrapper>,
@@ -261,23 +262,6 @@ pub struct Tui {
     old_buffer: Buffer,
     new_buffer: Buffer,
     line_count_buffer: Buffer,
-}
-
-impl std::default::Default for Tui {
-    fn default() -> Self {
-        Self{
-            counter: 0,
-            widgets: vec![],
-            dirty: false,
-            width: 0,
-            height: 0,
-            max_height: 0,
-
-            old_buffer: Default::default(),
-            new_buffer: Default::default(),
-            line_count_buffer: Default::default(),
-        }
-    }
 }
 
 impl Tui {
@@ -434,7 +418,7 @@ impl Tui {
                 });
         }
 
-        let offset = prompt.height as u16 + buffer.height - 1;
+        let offset = prompt.height + buffer.height - 1;
         let area = Rect{ y: area.y + offset, height: area.height - offset, ..area };
 
         if clear || self.dirty {

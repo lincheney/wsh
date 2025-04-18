@@ -87,8 +87,8 @@ struct BufferContents<'a> {
     offset: usize,
 }
 
-impl<'a> Into<Text<'a>> for BufferContents<'a> {
-    fn into(self) -> Text<'a> {
+impl<'a> From<BufferContents<'a>> for Text<'a> {
+    fn from(contents: BufferContents<'a>) -> Self {
         let mut text = Text::default();
         text.lines.push(Line::default());
         let mut line = text.lines.last_mut().unwrap();
@@ -98,14 +98,14 @@ impl<'a> Into<Text<'a>> for BufferContents<'a> {
         let mut stack = HighlightStack(vec![]);
         let mut buffer = String::new();
 
-        for (i, (start, end, c)) in self.inner.grapheme_indices().enumerate() {
-            if self.highlights.iter().any(|h| h.start == i + self.offset) {
+        for (i, (start, end, c)) in contents.inner.grapheme_indices().enumerate() {
+            if contents.highlights.iter().any(|h| h.start == i + contents.offset) {
                 // flush buffer bc highlights have changed
                 if !buffer.is_empty() {
                     line.spans.push(Span::styled(buffer, stack.merge()));
                     buffer = String::new();
                 }
-                stack.0.extend(self.highlights.iter().filter(|h| h.start == i + self.offset));
+                stack.0.extend(contents.highlights.iter().filter(|h| h.start == i + contents.offset));
             }
 
             if c == "\n" {
@@ -122,19 +122,19 @@ impl<'a> Into<Text<'a>> for BufferContents<'a> {
                 }
 
                 // invalid
-                for c in self.inner[start..end].iter() {
+                for c in contents.inner[start..end].iter() {
                     write!(&mut buffer, "<u{:04x}>", c).unwrap();
                 }
                 line.spans.push(Span::styled(buffer, style.patch(escape_style)));
                 buffer = String::new();
             }
 
-            if !stack.0.iter().all(|h| h.end > i + self.offset + 1) {
+            if !stack.0.iter().all(|h| h.end > i + contents.offset + 1) {
                 if !buffer.is_empty() {
                     line.spans.push(Span::styled(buffer, stack.merge()));
                     buffer = String::new();
                 }
-                stack.0.retain(|h| h.end > i + self.offset + 1 );
+                stack.0.retain(|h| h.end > i + contents.offset + 1 );
             }
         }
 

@@ -135,22 +135,22 @@ pub struct StyleOptions {
     pub blink: Option<bool>,
 }
 
-impl Into<tui::StyleOptions> for StyleOptions {
-    fn into(self) -> tui::StyleOptions {
-        tui::StyleOptions {
-            fg: self.fg.map(|x| x.0),
-            bg: self.bg.map(|x| x.0),
-            bold: self.bold,
-            dim: self.dim,
-            italic: self.italic,
-            underline: match self.underline {
+impl From<StyleOptions> for tui::StyleOptions {
+    fn from(style: StyleOptions) -> Self {
+        Self {
+            fg: style.fg.map(|x| x.0),
+            bg: style.bg.map(|x| x.0),
+            bold: style.bold,
+            dim: style.dim,
+            italic: style.italic,
+            underline: match style.underline {
                 None | Some(UnderlineOptions::Bool(false)) => None,
                 Some(UnderlineOptions::Bool(true)) => Some(None),
                 Some(UnderlineOptions::Options(opts)) => Some(Some(opts.color.0)),
             },
-            strikethrough: self.strikethrough,
-            reversed: self.reversed,
-            blink: self.blink,
+            strikethrough: style.strikethrough,
+            reversed: style.reversed,
+            blink: style.blink,
        }
     }
 }
@@ -203,7 +203,7 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
     }
 
     if let Some(align) = options.style.align {
-        widget.inner = std::mem::replace(&mut widget.inner, Default::default()).alignment(align.0);
+        widget.inner = std::mem::take(&mut widget.inner).alignment(align.0);
     }
 
     match options.border {
@@ -239,8 +239,8 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
     }
 
     widget.style = widget.style.merge(&options.style.style.into());
-    widget.inner = std::mem::replace(&mut widget.inner, Default::default()).style(widget.style.as_style());
-    widget.block = std::mem::replace(&mut widget.block, Default::default()).style(widget.style.as_style());
+    widget.inner = std::mem::take(&mut widget.inner).style(widget.style.as_style());
+    widget.block = std::mem::take(&mut widget.block).style(widget.style.as_style());
 
 }
 

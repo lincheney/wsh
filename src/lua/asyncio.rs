@@ -144,10 +144,10 @@ pub async fn init_lua(ui: &Ui) -> Result<()> {
     // this exists bc mlua calls coroutine.resume all the time so we can't use it
     tbl.set("promise", ui.lua.create_function(|lua, ()| {
         let (sender, receiver) = tokio::sync::oneshot::channel();
-        Ok(lua.pack_multi((
+        lua.pack_multi((
             Sender(Some(sender)),
             Receiver(Some(receiver)),
-        ))?)
+        ))
     })?)?;
 
     Ok(())

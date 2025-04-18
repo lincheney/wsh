@@ -313,7 +313,7 @@ impl Ui {
                 ui.deactivate()?;
 
                 // move to last line of buffer
-                let y_offset = (ui.prompt.height + ui.buffer.height - 1 - ui.buffer.cursor_coord.1) as u16;
+                let y_offset = ui.prompt.height + ui.buffer.height - 1 - ui.buffer.cursor_coord.1;
                 execute!(
                     ui.stdout,
                     MoveDown(y_offset),
