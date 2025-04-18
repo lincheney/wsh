@@ -192,11 +192,11 @@ impl Widget {
 
     fn measure(&self, mut area: Rect, buffer: &mut Buffer) {
         if let Some(ref block) = self.block {
-            block.render_ref(Rect{ height: 3, ..area }, buffer);
-            let height = buffer_nonempty_height(buffer);
-            if height == 3 {
-                area = Rect{ y: 1, ..area };
-            }
+            let inner = block.inner(area);
+            area = Rect{
+                y: area.y + area.height - inner.height,
+                ..inner
+            };
         }
 
         render_text(
