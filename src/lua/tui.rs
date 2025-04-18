@@ -199,7 +199,7 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
     }
 
     if let Some(constraint) = options.height {
-        widget.constraint = constraint.0;
+        widget.constraint = Some(constraint.0);
     }
 
     if let Some(align) = options.style.align {

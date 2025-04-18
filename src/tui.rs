@@ -95,8 +95,7 @@ impl StyleOptions {
 #[derive(Default, Debug)]
 pub struct Widget{
     id: usize,
-    pub constraint: Constraint,
-    current_constraint: Constraint,
+    pub constraint: Option<Constraint>,
     pub inner: Text<'static>,
     pub style: StyleOptions,
     pub border_style: Style,
@@ -201,7 +200,7 @@ impl Widget {
 
     fn line_count(&self, area: Rect, buffer: &mut Buffer) -> u16 {
         let mut height = 0;
-        if let Constraint::Min(min) = self.constraint {
+        if let Some(Constraint::Min(min)) = self.constraint {
             height = height.max(min);
         }
 
@@ -334,7 +333,6 @@ impl Tui {
             let w = w.as_mut();
             if !w.hidden {
                 w.line_count = w.line_count(area, &mut self.line_count_buffer);
-                w.current_constraint = Constraint::Max(w.line_count);
                 max_height += w.line_count;
                 last_widget = i;
                 if max_height >= area.height as _ {
@@ -348,7 +346,7 @@ impl Tui {
         let widgets = &self.widgets[..=last_widget];
         let widgets = widgets.iter().map(|w| w.as_ref()).filter(|w| !w.hidden && w.line_count > 0);
 
-        let layout = Layout::vertical(widgets.clone().map(|w| w.current_constraint));
+        let layout = Layout::vertical(widgets.clone().map(|w| w.constraint.unwrap_or(Constraint::Max(w.line_count))));
         let layouts = layout.split(area);
 
         for (widget, layout) in widgets.zip(layouts.iter()) {
