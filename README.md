@@ -36,7 +36,7 @@ i wish i could have
 * [ ] drop history entries which are space etc
 * [x] general selection widget interface
 * [x] embed process output in a tui message
-* [ ] draw prompt and buffer using ratatui
+* [x] draw prompt and buffer using ratatui
 * [ ] status bar
 * [ ] poc async prompt
 * [x] call lua from zsh
