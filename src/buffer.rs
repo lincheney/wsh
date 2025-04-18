@@ -309,6 +309,10 @@ impl Buffer {
         self.fix_cursor();
     }
 
+    pub fn cursor_is_at_end(&self) -> bool {
+        self.cursor_byte_pos() >= self.contents.len()
+    }
+
     pub fn reset(&mut self) {
         self.contents.clear();
         self.len = None;
@@ -352,7 +356,12 @@ impl Buffer {
             return offset
         }
 
-        let text = Text::raw(text);
+        let ends_with_newline = text.ends_with('\n');
+        let mut text = Text::raw(text);
+        if ends_with_newline {
+            text.lines.push(Line::default());
+        }
+
         let mut new_offset = offset;
         for line in text.iter() {
             offset = new_offset;
@@ -378,6 +387,7 @@ impl Buffer {
                     if new_offset.1 >= area.height {
                         break
                     }
+                    offset = new_offset;
                 }
             }
 

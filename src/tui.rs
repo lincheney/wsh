@@ -355,7 +355,10 @@ impl Tui {
             self.old_buffer.reset();
             queue!(stdout, Clear(ClearType::FromCursorDown))?;
             self.dirty = true;
+            self.height = 0;
         }
+        let old_height = self.height;
+        let old_cursor_coord = buffer.cursor_coord;
 
         let max_height = (height * 2 / 3).max(1);
         if max_height != self.max_height || width != self.width {
@@ -406,33 +409,35 @@ impl Tui {
             self.refresh(area);
         }
 
-        self.height = buffer_nonempty_height(&self.new_buffer).max(1);
-        let updates = self.old_buffer.diff(&self.new_buffer);
+        self.height = buffer_nonempty_height(&self.new_buffer).max(buffer.cursor_coord.1 + 1);
+        let mut updates = self.old_buffer.diff(&self.new_buffer);
         if !updates.is_empty() || prompt.dirty {
-            Ui::allocate_height(stdout, self.height - 1)?;
+            queue!(stdout, crossterm::terminal::BeginSynchronizedUpdate)?;
+
+            Ui::allocate_height(stdout, self.height.saturating_sub(old_cursor_coord.1 + 1))?;
 
             // move back to top of drawing area and redraw
+            if self.height < old_height {
+                let offset = self.height.saturating_sub(old_cursor_coord.1);
+                queue!(
+                    stdout,
+                    // clear everything below
+                    cursor::MoveToColumn(0),
+                    crate::ui::MoveDown(offset),
+                    Clear(ClearType::FromCursorDown),
+                    crate::ui::MoveUp(offset),
+                )?;
+            }
+
             queue!(
                 stdout,
-                crossterm::terminal::BeginSynchronizedUpdate,
                 // move to top left
                 cursor::MoveToColumn(0),
-                crate::ui::MoveUp(buffer.cursor_coord.1),
-                // clear everything below
-                crate::ui::MoveDown(self.height - 1),
-                Clear(ClearType::FromCursorDown),
-                crate::ui::MoveUp(self.height - 1),
+                crate::ui::MoveUp(old_cursor_coord.1),
                 cursor::SavePosition,
             )?;
 
-            // if !updates.is_empty() {
-            // the last line will have been cleared so always redraw it
-            let old = &mut self.old_buffer.content;
-            let start = ((self.height - 1) * width) as usize;
-            for cell in old[start .. start + width as usize].iter_mut() {
-                cell.reset();
-            }
-            let updates = self.old_buffer.diff(&self.new_buffer);
+            let cursor_is_at_end = buffer.cursor_coord.1 == width && buffer.cursor_is_at_end();
             backend::draw(stdout, updates.into_iter())?;
             queue!(stdout, cursor::RestorePosition)?;
 
@@ -447,12 +452,25 @@ impl Tui {
             }
 
             // position the cursor
-            execute!(
-                stdout,
-                crate::ui::MoveDown(buffer.cursor_coord.1),
-                cursor::MoveToColumn(buffer.cursor_coord.0),
-                crossterm::terminal::EndSynchronizedUpdate,
-            )?;
+            if cursor_is_at_end {
+                // cursor is at the very very end of line
+                // only way i know of to get back there is to redraw that line
+                let start = (buffer.cursor_coord.1 * width) as usize;
+                for cell in self.old_buffer.content[start .. start + width as usize].iter_mut() {
+                    cell.reset();
+                }
+                let updates = self.old_buffer.diff(&self.new_buffer);
+                backend::draw(stdout, updates.into_iter().filter(|(_, y, _)| *y == buffer.cursor_coord.1))?;
+            } else {
+                // otherwise just position it normally
+                queue!(
+                    stdout,
+                    crate::ui::MoveDown(buffer.cursor_coord.1),
+                    cursor::MoveToColumn(buffer.cursor_coord.0),
+                    crossterm::terminal::EndSynchronizedUpdate,
+                )?;
+            }
+            execute!(stdout, crossterm::terminal::EndSynchronizedUpdate)?;
         }
 
         self.dirty = false;
