@@ -1,5 +1,9 @@
 # wsh
 
+This is super experimental.
+I *don't* use this a daily driver.
+Expect segfaults.
+
 # wish-list
 
 i wish i could have
