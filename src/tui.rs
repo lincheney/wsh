@@ -273,6 +273,7 @@ pub struct Tui {
 
     old_buffer: Buffer,
     new_buffer: Buffer,
+    old_cursor_coord: (u16, u16),
     line_count_buffer: Buffer,
     old_status_bar_buffer: Buffer,
     new_status_bar_buffer: Buffer,
@@ -333,9 +334,9 @@ impl Tui {
         self.dirty = true;
     }
 
-    fn refresh(&mut self, area: Rect) {
+    fn refresh(&mut self, area: Rect, max_height: u16) {
         self.width = area.width;
-        self.max_height = area.height;
+        self.max_height = max_height;
 
         if self.widgets.is_empty() {
             return
@@ -430,8 +431,8 @@ impl Tui {
             // copy over from old buffer
             self.old_buffer.content.iter()
                 .zip(self.new_buffer.content.iter_mut())
-                .skip((prompt.height * area.width + prompt.width) as usize)
-                .take((buffer.height * area.width + buffer.width) as usize)
+                .skip((prompt.height.saturating_sub(1) * area.width + prompt.width) as usize)
+                .take((buffer.height.saturating_sub(1) * area.width + buffer.width) as usize)
                 .for_each(|(old, new)| {
                     new.set_symbol(old.symbol());
                     new.set_style(old.style());
@@ -449,7 +450,7 @@ impl Tui {
                 area.height = area.height.saturating_sub(widget.line_count);
             }
 
-            self.refresh(area);
+            self.refresh(area, max_height);
             self.height = buffer_nonempty_height(&self.new_buffer).max(offset);
 
             if let Some(ref widget) = status_bar.inner {
@@ -461,7 +462,9 @@ impl Tui {
         self.height = self.height.max(offset);
 
         let updates = self.old_buffer.diff(&self.new_buffer);
-        if !updates.is_empty() || prompt.dirty {
+        let redraw = !updates.is_empty() || prompt.dirty;
+
+        if redraw {
             queue!(stdout, crossterm::terminal::BeginSynchronizedUpdate)?;
 
             Ui::allocate_height(stdout, self.height.saturating_sub(old_cursor_coord.1 + 1))?;
@@ -487,7 +490,6 @@ impl Tui {
                 cursor::SavePosition,
             )?;
 
-            let cursor_is_at_end = buffer.cursor_coord.1 == width && buffer.cursor_is_at_end();
             backend::draw(stdout, updates.into_iter())?;
             queue!(stdout, cursor::RestorePosition)?;
 
@@ -504,27 +506,32 @@ impl Tui {
             if clear || status_bar.dirty {
                 if let Some(ref widget) = status_bar.inner {
                     let bar_height = widget.line_count.min(max_height - self.height);
-                    queue!(
-                        stdout,
-                        cursor::SavePosition,
-                        crate::ui::MoveDown(height * 10),
-                        crate::ui::MoveUp(bar_height - 1),
-                    )?;
+                    if bar_height > 0 {
+                        queue!(
+                            stdout,
+                            cursor::SavePosition,
+                            crate::ui::MoveDown(height * 10),
+                            crate::ui::MoveUp(bar_height - 1),
+                        )?;
 
-                    let area = Rect{ y: 0, height: bar_height, ..area };
-                    self.new_status_bar_buffer.resize(area);
-                    self.old_status_bar_buffer.resize(area);
+                        let area = Rect{ y: 0, height: bar_height, ..area };
+                        self.new_status_bar_buffer.resize(area);
+                        self.old_status_bar_buffer.resize(area);
 
-                    std::mem::swap(&mut self.new_status_bar_buffer, &mut self.old_status_bar_buffer);
-                    widget.render(area, &mut self.new_status_bar_buffer);
+                        std::mem::swap(&mut self.new_status_bar_buffer, &mut self.old_status_bar_buffer);
+                        widget.render(area, &mut self.new_status_bar_buffer);
 
-                    let updates = self.old_status_bar_buffer.diff(&self.new_status_bar_buffer);
-                    backend::draw(stdout, updates.into_iter())?;
+                        let updates = self.old_status_bar_buffer.diff(&self.new_status_bar_buffer);
+                        backend::draw(stdout, updates.into_iter())?;
 
-                    queue!(stdout, cursor::RestorePosition)?;
+                        queue!(stdout, cursor::RestorePosition)?;
+                    }
                 }
             }
+        }
 
+        if redraw || buffer.cursor_coord != self.old_cursor_coord {
+            let cursor_is_at_end = buffer.cursor_coord.1 == width && buffer.cursor_is_at_end();
             // position the cursor
             if cursor_is_at_end {
                 // cursor is at the very very end of line
