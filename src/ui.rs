@@ -95,11 +95,11 @@ struct WeakUi {
 }
 
 impl ThreadsafeUiInner {
-    pub async fn borrow(&self) -> tokio::sync::RwLockReadGuard<UiInner> {
+    pub async fn borrow(&self) -> tokio::sync::RwLockReadGuard<'_, UiInner> {
         self.0.read().await
     }
 
-    pub async fn borrow_mut(&mut self) -> tokio::sync::RwLockWriteGuard<UiInner> {
+    pub async fn borrow_mut(&mut self) -> tokio::sync::RwLockWriteGuard<'_, UiInner> {
         self.0.write().await
     }
 }

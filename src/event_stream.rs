@@ -11,7 +11,7 @@ struct Lock {
 }
 
 impl Lock {
-    async fn lock_exclusive(&self) -> MutexGuard<UnlockedEvents> {
+    async fn lock_exclusive(&self) -> MutexGuard<'_, UnlockedEvents> {
         let _outer = self.outer.write().await;
         self.inner.lock().await
     }
@@ -53,7 +53,7 @@ pub struct EventLocker {
 }
 
 impl EventLocker {
-    pub async fn lock(&mut self) -> MutexGuard<UnlockedEvents> {
+    pub async fn lock(&mut self) -> MutexGuard<'_, UnlockedEvents> {
         let _outer = self.lock.outer.read().await;
         if let Ok(lock) = self.lock.inner.try_lock() {
             return lock;

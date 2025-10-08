@@ -22,7 +22,7 @@ impl Shell {
         })))
     }
 
-    pub async fn lock(&self) -> MutexGuard<ShellInner> {
+    pub async fn lock(&self) -> MutexGuard<'_, ShellInner> {
         self.0.lock().await
     }
 }
@@ -96,7 +96,7 @@ impl ShellInner {
         (width as _, height as _)
     }
 
-    pub fn remove_invisible_chars(string: &CStr) -> std::borrow::Cow<CStr> {
+    pub fn remove_invisible_chars(string: &CStr) -> std::borrow::Cow<'_, CStr> {
         let bytes = string.to_bytes();
         if bytes.contains(&(zsh::Inpar as _)) || bytes.contains(&(zsh::Outpar as _)) || bytes.contains(&(zsh::Meta as _)) {
             let mut bytes = bytes.to_owned();
