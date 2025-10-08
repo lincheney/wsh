@@ -182,34 +182,28 @@ pub fn restore_compadd() {
 // zsh completion is intimately tied to zle
 // so there's no "low-level" function to hook into
 // the best we can do is emulate completecall()
-pub fn get_completions(line: &BStr) -> anyhow::Result<(AsyncArcMutex<StreamConsumer>, ArcMutex<Streamer>)> {
-    if let Some(compadd) = COMPADD_STATE.get() {
-        let (producer, consumer) = {
-            let mut compadd = compadd.lock().unwrap();
-            // if let Some(streamer) = compadd.streamer.as_ref().filter(|s| s.lock().unwrap().buffer == line) {
-                // return Ok(Streamer::make_consumer(&streamer))
-            // }
-            let producer = ArcMutexNew!(Streamer {
-                buffer: line.to_owned(),
-                completion_word_len: 0,
-                finished: false,
-                matches: vec![],
-                wakers: vec![],
-                thread: None,
-            });
-            let consumer = Streamer::make_consumer(&producer);
-            compadd.streamer = Some(producer.clone());
-            (producer, consumer)
-        };
-
-        Ok((consumer, producer))
-
-    } else {
-        Err(anyhow::anyhow!("ui is not running"))
-    }
+pub fn get_completions(line: &BStr) -> (AsyncArcMutex<StreamConsumer>, ArcMutex<Streamer>) {
+    // if let Some(streamer) = compadd.streamer.as_ref().filter(|s| s.lock().unwrap().buffer == line) {
+        // return Ok(Streamer::make_consumer(&streamer))
+    // }
+    let producer = ArcMutexNew!(Streamer {
+        buffer: line.to_owned(),
+        completion_word_len: 0,
+        finished: false,
+        matches: vec![],
+        wakers: vec![],
+        thread: None,
+    });
+    let consumer = Streamer::make_consumer(&producer);
+    (consumer, producer)
 }
 
-pub fn _get_completions(streamer: &Mutex<Streamer>) {
+pub fn _get_completions(streamer: &Arc<Mutex<Streamer>>) {
+    if let Some(compadd) = COMPADD_STATE.get() {
+        compadd.lock().unwrap().streamer = Some(streamer.clone());
+    } else {
+        panic!("ui is not running");
+    }
     streamer.lock().unwrap().thread = Some(nix::sys::pthread::pthread_self());
 
     {

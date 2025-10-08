@@ -3,22 +3,35 @@ use std::ffi::{CString, CStr};
 use std::default::Default;
 use std::sync::{Arc, Weak};
 use std::ptr::null_mut;
-use tokio::sync::{Mutex, Semaphore, SemaphorePermit};
+use std::sync::Mutex;
+use tokio::sync::{Semaphore, SemaphorePermit};
 use bstr::{BStr, BString};
 
 use crate::zsh;
 
+struct Private;
+
 pub struct ShellInner<'a> {
     // pub closed: bool,
-    permit: SemaphorePermit<'a>
+    parent: &'a Shell,
+    _permit: SemaphorePermit<'a>,
+    _private: Private,
 }
 
 #[derive(Clone)]
 pub struct Shell{
-    pub inner: Arc<Semaphore>,
+    // this needs to be a semaphore so i can add more permits
+    inner: Arc<Semaphore>,
+    // many functions are ok to call and are re-entrant
+    // but some are not e.g. completion
+    exclusive_lock: Arc<Mutex<()>>,
 }
 
-pub type WeakShell = Weak<Semaphore>;
+#[derive(Clone)]
+pub struct WeakShell{
+    inner: Weak<Semaphore>,
+    exclusive_lock: Weak<Mutex<()>>,
+}
 
 pub struct TmpPermit<'a>(&'a Shell);
 impl<'a> Drop for TmpPermit<'a> {
@@ -31,13 +44,15 @@ impl Shell {
     pub fn new() -> Self {
         Self{
             inner: Arc::new(Semaphore::new(1)),
+            exclusive_lock: Arc::new(Mutex::new(())),
         }
     }
 
     pub async fn lock(&self) -> ShellInner<'_> {
-        let permit = self.inner.acquire().await.unwrap();
         ShellInner{
-            permit
+            parent: self,
+            _permit: self.inner.acquire().await.unwrap(),
+            _private: Private,
         }
     }
 
@@ -47,28 +62,39 @@ impl Shell {
     }
 
     pub fn downgrade(&self) -> WeakShell {
-        Arc::downgrade(&self.inner)
+        WeakShell{
+            inner: Arc::downgrade(&self.inner),
+            exclusive_lock: Arc::downgrade(&self.exclusive_lock),
+        }
     }
 
     pub fn upgrade(weak: &WeakShell) -> Option<Self> {
-        Some(Self{ inner: weak.upgrade()? })
+        Some(Self{
+            inner: weak.inner.upgrade()?,
+            exclusive_lock: weak.exclusive_lock.upgrade()?,
+        })
     }
 }
 
 #[derive(Clone)]
-pub struct CompletionStarter(Arc<std::sync::Mutex<zsh::completion::Streamer>>);
+pub struct Completer{
+    inner: Arc<Mutex<zsh::completion::Streamer>>,
+    exclusive_lock: Arc<Mutex<()>>,
+}
 
-impl CompletionStarter {
-    pub fn start(&self, _shell: &ShellInner) {
-        zsh::completion::_get_completions(&self.0);
+impl Completer {
+    pub fn run(&self, _shell: &ShellInner) {
+        let lock = self.exclusive_lock.lock().unwrap();
+        zsh::completion::_get_completions(&self.inner);
+        drop(lock);
     }
 
     pub fn cancel(&self) -> anyhow::Result<()> {
-        self.0.lock().unwrap().cancel()
+        self.inner.lock().unwrap().cancel()
     }
 
     pub fn get_completion_word_len(&self) -> usize {
-        self.0.lock().unwrap().completion_word_len
+        self.inner.lock().unwrap().completion_word_len
     }
 }
 
@@ -98,9 +124,13 @@ impl<'a> ShellInner<'a> {
         if code > 0 { Err(code) } else { Ok(BString::new(vec![])) }
     }
 
-    pub fn get_completions(&self, string: &BStr) -> anyhow::Result<(Arc<Mutex<zsh::completion::StreamConsumer>>, CompletionStarter)> {
-        let (consumer, producer) = zsh::completion::get_completions(string)?;
-        Ok((consumer, CompletionStarter(producer)))
+    pub fn get_completions(&self, string: &BStr) -> anyhow::Result<(Arc<tokio::sync::Mutex<zsh::completion::StreamConsumer>>, Completer)> {
+        let (consumer, producer) = zsh::completion::get_completions(string);
+        let completer = Completer{
+            inner: producer,
+            exclusive_lock: self.parent.exclusive_lock.clone(),
+        };
+        Ok((consumer, completer))
     }
 
     pub fn clear_completion_cache(&self) {

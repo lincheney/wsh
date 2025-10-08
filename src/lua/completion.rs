@@ -7,7 +7,7 @@ use crate::utils::*;
 #[derive(FromLua, Clone)]
 struct CompletionStream {
     inner: AsyncArcMutex<crate::zsh::completion::StreamConsumer>,
-    parent: crate::shell::CompletionStarter,
+    parent: crate::shell::Completer,
 }
 
 #[derive(FromLua, Clone)]
@@ -61,7 +61,8 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Compl
                 shell.await
             })
         });
-        producer.start(&shell);
+        // this blocks
+        producer.run(&shell);
         drop(shell);
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
