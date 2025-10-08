@@ -1,29 +1,57 @@
 use std::os::raw::{c_long};
 use std::ffi::{CString, CStr};
 use std::default::Default;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::ptr::null_mut;
-use tokio::sync::{Mutex, MutexGuard};
+use tokio::sync::{Mutex, Semaphore, SemaphorePermit};
 use bstr::{BStr, BString};
 
 use crate::zsh;
 
-pub struct ShellInner {
+pub struct ShellInner<'a> {
     // pub closed: bool,
+    permit: SemaphorePermit<'a>
 }
 
 #[derive(Clone)]
-pub struct Shell(pub Arc<Mutex<ShellInner>>);
+pub struct Shell{
+    pub inner: Arc<Semaphore>,
+}
+
+pub type WeakShell = Weak<Semaphore>;
+
+pub struct TmpPermit<'a>(&'a Shell);
+impl<'a> Drop for TmpPermit<'a> {
+    fn drop(&mut self) {
+        self.0.inner.forget_permits(1);
+    }
+}
 
 impl Shell {
     pub fn new() -> Self {
-        Self(Arc::new(Mutex::new(ShellInner{
-            // closed: false,
-        })))
+        Self{
+            inner: Arc::new(Semaphore::new(1)),
+        }
     }
 
-    pub async fn lock(&self) -> MutexGuard<'_, ShellInner> {
-        self.0.lock().await
+    pub async fn lock(&self) -> ShellInner<'_> {
+        let permit = self.inner.acquire().await.unwrap();
+        ShellInner{
+            permit
+        }
+    }
+
+    pub fn add_tmp_permit(&self) -> TmpPermit<'_> {
+        self.inner.add_permits(1);
+        TmpPermit(self)
+    }
+
+    pub fn downgrade(&self) -> WeakShell {
+        Arc::downgrade(&self.inner)
+    }
+
+    pub fn upgrade(weak: &WeakShell) -> Option<Self> {
+        Some(Self{ inner: weak.upgrade()? })
     }
 }
 
@@ -44,7 +72,7 @@ impl CompletionStarter {
     }
 }
 
-impl ShellInner {
+impl<'a> ShellInner<'a> {
 
     pub fn init_interactive(&mut self) {
         unsafe {

@@ -1,6 +1,6 @@
 use std::time::Duration;
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::ops::DerefMut;
 use std::collections::HashSet;
 use std::default::Default;
@@ -60,7 +60,6 @@ pub struct UiInner {
     pub tui: crate::tui::Tui,
 
     pub events: crate::event_stream::EventLocker,
-    is_running_process: bool,
     dirty: bool,
     pub keybinds: Vec<crate::lua::KeybindMapping>,
     pub keybind_layer_counter: usize,
@@ -84,14 +83,16 @@ pub struct Ui {
     pub lua: Arc<Lua>,
     pub shell: Shell,
     pub event_callbacks: ArcMutex<EventCallbacks>,
+    is_running_process: Arc<AtomicBool>,
 }
 
 #[derive(Clone)]
 struct WeakUi {
     pub inner: std::sync::Weak<RwLock<UiInner>>,
     pub lua: std::sync::Weak<Lua>,
-    pub shell: std::sync::Weak<tokio::sync::Mutex<ShellInner>>,
+    pub shell: crate::shell::WeakShell,
     pub event_callbacks: std::sync::Weak<std::sync::Mutex<EventCallbacks>>,
+    pub is_running_process: std::sync::Weak<AtomicBool>,
 }
 
 impl ThreadsafeUiInner {
@@ -113,7 +114,6 @@ impl Ui {
 
         let mut ui = UiInner{
             events,
-            is_running_process: false,
             dirty: true,
             tui: Default::default(),
             threads: HashSet::new(),
@@ -136,13 +136,14 @@ impl Ui {
             shell.init_interactive();
         }
         log::info!("loaded history in {:?}", start.elapsed());
-        ui.reset(&mut *shell.lock().await);
+        ui.reset(&mut shell.lock().await);
 
         let ui = Self{
             inner: ThreadsafeUiInner(Arc::new(RwLock::new(ui))),
             lua: Arc::new(lua),
             shell,
             event_callbacks: Default::default(),
+            is_running_process: Arc::new(false.into()),
         };
         ui.init_lua().await?;
 
@@ -166,13 +167,21 @@ impl Ui {
         self.draw().await
     }
 
+    pub fn is_running_process(&self) -> bool {
+        self.is_running_process.load(Ordering::Relaxed)
+    }
+
     pub async fn draw(&mut self) -> Result<()> {
+        // do NOT render ui elements if there is a foreground process
+        if self.is_running_process() {
+            return Ok(())
+        }
+
         let shell = self.shell.clone();
         let mut ui = self.inner.borrow_mut().await;
         let ui = ui.deref_mut();
 
-        // do NOT render ui elements if there is a foreground process
-        if !(ui.dirty || ui.buffer.dirty || ui.prompt.dirty || ui.tui.dirty) || ui.is_running_process {
+        if !(ui.dirty || ui.buffer.dirty || ui.prompt.dirty || ui.tui.dirty) {
             return Ok(())
         }
 
@@ -313,10 +322,10 @@ impl Ui {
         if complete {
             EventCallbacks::trigger_accept_line_callbacks(self, ()).await;
 
+            self.is_running_process.store(true, Ordering::Relaxed);
             let mut ui = self.inner.borrow_mut().await;
             let mut shell = self.shell.lock().await;
 
-            ui.is_running_process = true;
             ui.tui.clear_non_persistent();
 
             let mut result: Result<()> = (|| {
@@ -349,7 +358,7 @@ impl Ui {
                     eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
                 }
                 ui.reset(&mut shell);
-                ui.is_running_process = false;
+                self.is_running_process.store(false, Ordering::Relaxed);
                 Ok(())
             })();
 
@@ -366,7 +375,7 @@ impl Ui {
                 })();
             }
 
-            ui.is_running_process = false;
+            self.is_running_process.store(false, Ordering::Relaxed);
             // prefer the result error over the activate error
             result.and(ui.activate())?;
 
@@ -387,8 +396,9 @@ impl Ui {
         WeakUi{
             inner: Arc::downgrade(&self.inner.0),
             lua: Arc::downgrade(&self.lua),
-            shell: Arc::downgrade(&self.shell.0),
+            shell: self.shell.downgrade(),
             event_callbacks: Arc::downgrade(&self.event_callbacks),
+            is_running_process: Arc::downgrade(&self.is_running_process),
         }
     }
 
@@ -635,9 +645,10 @@ impl WeakUi {
     fn upgrade(&self) -> Option<Ui> {
         Some(Ui{
             inner: ThreadsafeUiInner(self.inner.upgrade()?),
-            shell: Shell(self.shell.upgrade()?),
+            shell: Shell::upgrade(&self.shell)?,
             lua: self.lua.upgrade()?,
             event_callbacks: self.event_callbacks.upgrade()?,
+            is_running_process: self.is_running_process.upgrade()?,
         })
     }
 

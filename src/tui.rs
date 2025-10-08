@@ -413,7 +413,7 @@ impl Tui {
         if clear || prompt.dirty {
             // refresh the prompt
             prompt.dirty = true;
-            prompt.refresh_prompt(&mut *shell.lock().await, area.width);
+            prompt.refresh_prompt(&mut shell.lock().await, area.width);
             // reset here
             self.new_buffer.content.iter_mut()
                 .take((prompt.height * area.width + prompt.width) as usize)
