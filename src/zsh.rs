@@ -105,7 +105,8 @@ pub fn metafy(value: &[u8]) -> *mut c_char {
             *ptr = 0;
             ptr
         } else {
-            zsh_sys::metafy(value.as_ptr() as _, value.len() as _, zsh_sys::META_USEHEAP as _)
+            // metafy will ALWAYS write a terminating null no matter what
+            zsh_sys::metafy(value.as_ptr() as _, value.len() as _, zsh_sys::META_HEAPDUP as _)
         }
     }
 }
