@@ -59,10 +59,9 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
             if let Some(ui) = STATE.get() {
                 let result = tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current().block_on(async {
-                        let permit = ui.shell.add_tmp_permit();
-                        let result = ui.lua.load(argv.get(1).map(|s| s.as_slice()).unwrap_or(b"")).exec_async().await;
-                        drop(permit);
-                        result
+                        ui.shell.with_tmp_permit(|| async {
+                            ui.lua.load(argv.get(1).map(|s| s.as_slice()).unwrap_or(b"")).exec_async().await
+                        }).await
                     })
                 });
                 if let Err(err) = result {

@@ -33,13 +33,6 @@ pub struct WeakShell{
     exclusive_lock: Weak<Mutex<()>>,
 }
 
-pub struct TmpPermit<'a>(&'a Shell);
-impl<'a> Drop for TmpPermit<'a> {
-    fn drop(&mut self) {
-        self.0.inner.forget_permits(1);
-    }
-}
-
 impl Shell {
     pub fn new() -> Self {
         Self{
@@ -56,9 +49,11 @@ impl Shell {
         }
     }
 
-    pub fn add_tmp_permit(&self) -> TmpPermit<'_> {
+    pub async fn with_tmp_permit<R, T: std::future::Future<Output=R>, F: FnOnce() -> T>(&self, f: F) -> R {
         self.inner.add_permits(1);
-        TmpPermit(self)
+        let result = f().await;
+        self.inner.acquire().await.unwrap().forget();
+        result
     }
 
     pub fn downgrade(&self) -> WeakShell {
