@@ -79,19 +79,17 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
     let mut tokens = vec![];
     let mut start = 0;
 
-    macro_rules! push_token {
-        ($tokstr:expr, $kind:expr, $has_meta:expr) => (
-            let range = if $has_meta {
-                let mut tokstr = $tokstr.to_owned();
-                super::unmetafy_owned(&mut tokstr);
-                find_str(BStr::new(tokstr.as_slice()), cmd.as_ref(), start).unwrap()
-            } else {
-                find_str(BStr::new($tokstr), cmd.as_ref(), start).unwrap()
-            };
-            start = range.end;
-            tokens.push(Token{range, kind: $kind});
-        )
-    }
+    let mut push_token = |tokstr: &[u8], kind: Option<TokenKind>, has_meta| {
+        let range = if has_meta {
+            let mut tokstr = tokstr.to_owned();
+            super::unmetafy_owned(&mut tokstr);
+            find_str(BStr::new(tokstr.as_slice()), cmd.as_ref(), start).unwrap()
+        } else {
+            find_str(BStr::new(tokstr), cmd.as_ref(), start).unwrap()
+        };
+        start = range.end;
+        tokens.push(Token{range, kind});
+    };
 
     // do similar to bufferwords
     unsafe {
@@ -125,7 +123,7 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
                 #[allow(static_mut_refs)]
                 if let Some(tokstr) = zsh_sys::tokstrings.get(zsh_sys::tok as usize).filter(|t| !t.is_null()) {
                     let tokstr = CStr::from_ptr(*tokstr).to_bytes();
-                    push_token!(tokstr, kind, false);
+                    push_token(tokstr, kind, false);
 
                 } else {
                     // TODO what am i meant to do here?
@@ -154,19 +152,19 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
                     } else if *c >= bindings::token::Pound as _ && *c < bindings::token::Nularg as _ { // token
 
                         if i > slice_start {
-                            push_token!(&tokstr[slice_start..i], kind, has_meta);
+                            push_token(&tokstr[slice_start..i], kind, has_meta);
                         }
                         has_meta = false;
                         slice_start = i + 1;
 
                         let kind: Option<TokenKind> = num::FromPrimitive::from_u8(*c).map(TokenKind::Token);
                         let c = [*ztokens.add((*c - bindings::token::Pound as u8) as usize) as u8];
-                        push_token!(&c[..], kind, false);
+                        push_token(&c[..], kind, false);
                     }
                 }
 
                 if tokstr.len() > slice_start {
-                    push_token!(&tokstr[slice_start..], kind, has_meta);
+                    push_token(&tokstr[slice_start..], kind, has_meta);
                 }
             }
 
