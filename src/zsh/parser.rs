@@ -95,6 +95,7 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
 
     // do similar to bufferwords
     unsafe {
+        zsh_sys::zcontext_save();
         zsh_sys::inpush(ptr, 0, null_mut());
         zsh_sys::zlemetall = cmd.len() as _;
         zsh_sys::zlemetacs = zsh_sys::zlemetall;
@@ -182,6 +183,7 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
         zsh_sys::inpop();
         zsh_sys::errflag &= !zsh_sys::errflag_bits_ERRFLAG_ERROR as i32;
         zsh_sys::noaliases = old_noaliases;
+        zsh_sys::zcontext_restore();
     }
 
     // detect subshells
