@@ -184,4 +184,8 @@ mod_export int lastchar_wide;
 
 int execzlefunc(Thingy func, char **args, int set_bindk, int set_lbindk);
 
+/* != 0 if we're done editing */
+
+/**/
+int done;
 int acceptline();

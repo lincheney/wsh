@@ -315,4 +315,8 @@ impl<'a> ShellInner<'a> {
         unsafe { zsh::acceptline(); }
     }
 
+    pub fn has_accepted_line(&mut self) -> bool {
+        unsafe{ zsh::done != 0 }
+    }
+
 }

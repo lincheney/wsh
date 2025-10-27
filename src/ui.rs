@@ -372,20 +372,10 @@ impl Ui {
                     execute!(std::io::stdout(), EndSynchronizedUpdate)
                 });
 
+                shell.clear_completion_cache();
                 self.trampoline.jump_out().await;
 
-                // // expand history e.g. !!
-                // let buffer = ui.buffer.get_contents();
-                // let expanded_buffer = shell.expandhistory(buffer.clone());
-                // let buffer = expanded_buffer.as_ref().unwrap_or(buffer).as_ref();
-                // shell.clear_completion_cache();
-                // // shell.push_history(buffer);
-
                 drop(lock_events);
-
-                // if let Err(code) = shell.exec(buffer) {
-                // eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
-                // }
 
                 ui.reset(&mut shell);
                 self.is_running_process.store(false, Ordering::Relaxed);
@@ -603,6 +593,14 @@ impl Ui {
                 let (buffer, cursor) = shell.get_zle_buffer();
 
                 ui.buffer.set(Some(buffer.as_ref()), Some(cursor.unwrap_or(buffer.len() as _) as _));
+
+                // this widget may have called accept-line somewhere inside
+                if shell.has_accepted_line() {
+                    drop(shell);
+                    drop(ui);
+                    return Some(self.accept_line().await);
+                }
+
                 Some(Ok(true))
             },
             KeybindValue::String(string) => {

@@ -27,6 +27,7 @@ pub use bindings::{
     acceptline,
     lastchar,
     lastchar_wide,
+    done,
 };
 
 // pub type HandlerFunc = unsafe extern "C" fn(name: *mut c_char, argv: *mut *mut c_char, options: *mut zsh_sys::options, func: c_int) -> c_int;
