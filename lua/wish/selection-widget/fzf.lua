@@ -89,6 +89,10 @@ function M.start(opts)
 end
 
 function M.add_lines(lines)
+    if not state then
+        return
+    end
+
     if lines and #lines > 0 then
         local str = {}
         for i = 1, #lines do
