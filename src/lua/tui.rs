@@ -226,7 +226,7 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
                 }
             } else {
                 widget.block.clone()
-            }.unwrap_or_else(|| Block::new());
+            }.unwrap_or_else(Block::new);
 
             block = block.borders(Borders::ALL);
             block = block.border_style(widget.border_style);

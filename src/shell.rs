@@ -282,7 +282,7 @@ impl<'a> ShellInner<'a> {
 
     pub fn get_zle_buffer(&mut self) -> (BString, Option<i64>) {
         zsh::start_zle_scope();
-        let buffer = zsh::Variable::get("BUFFER").unwrap().to_bytes();
+        let buffer = zsh::Variable::get("BUFFER").unwrap().as_bytes();
         let cursor = zsh::Variable::get("CURSOR").unwrap().try_as_int();
         zsh::end_zle_scope();
         match cursor {
@@ -297,7 +297,7 @@ impl<'a> ShellInner<'a> {
     }
 
     pub fn exec_zle_widget<'b, I: Iterator<Item=&'b BStr> + ExactSizeIterator>(&mut self, widget: zsh::ZleWidget, args: I) -> i32 {
-        return zsh::exec_zle_widget(widget, args)
+        zsh::exec_zle_widget(widget, args)
     }
 
     pub fn set_lastchar(&mut self, char: &[u8]) {

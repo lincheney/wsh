@@ -87,7 +87,7 @@ pub fn get_prompt(prompt: Option<&BStr>, escaped: bool) -> Option<CString> {
     let prompt = if let Some(prompt) = prompt {
         CString::new(prompt.to_vec()).unwrap()
     } else {
-        let prompt = variables::Variable::get("PROMPT")?.to_bytes();
+        let prompt = variables::Variable::get("PROMPT")?.as_bytes();
         CString::new(prompt).unwrap()
     };
 
@@ -173,7 +173,7 @@ pub fn set_zle_buffer(buffer: BString, cursor: i64) {
 
 pub fn get_zle_buffer() -> (BString, Option<i64>) {
     start_zle_scope();
-    let buffer = Variable::get("BUFFER").unwrap().to_bytes();
+    let buffer = Variable::get("BUFFER").unwrap().as_bytes();
     let cursor = Variable::get("CURSOR").unwrap().try_as_int();
     end_zle_scope();
     match cursor {

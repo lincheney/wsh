@@ -103,8 +103,6 @@ fn keyevent_to_cursor<W: Write>(key: KeyEvent, mut cursor: W) {
     } else if let KeyCode::Char(c) = key.code {
         write!(cursor, "{c}").unwrap();
     }
-
-    return
 }
 
 pub fn keyevent_to_bytes<const N: usize>(key: KeyEvent, buf: &mut [u8; N]) -> Option<&[u8]> {

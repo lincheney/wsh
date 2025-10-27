@@ -43,7 +43,7 @@ impl ZleWidget {
             }
         }
 
-        return w
+        w
     }
 
     pub fn is_self_insert(&self) -> bool {
@@ -78,12 +78,11 @@ impl ZleWidget {
 
     pub(crate) fn exec<'a, I: Iterator<Item=&'a BStr> + ExactSizeIterator>(&self, args: I) -> c_int {
         let mut null = std::ptr::null_mut();
-        let args_ptr;
-        if args.len() == 0 {
-            args_ptr = &raw mut null;
+        let args_ptr = if args.len() == 0 {
+            &raw mut null
         } else {
-            args_ptr = CStringArray::from_iter(args).ptr;
-        }
+            CStringArray::from_iter(args).ptr
+        };
 
         unsafe {
             bindings::execzlefunc(self.0.as_ptr(), args_ptr, 0, 0)

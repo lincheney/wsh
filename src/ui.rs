@@ -229,10 +229,8 @@ impl Ui {
         if let Err(err) = result {
             log::error!("{}", err);
             self.show_error_message(format!("ERROR: {}", err)).await;
-        } else if draw {
-            if let Err(err) = self.draw().await {
-                log::error!("{:?}", err);
-            }
+        } else if draw && let Err(err) = self.draw().await {
+            log::error!("{:?}", err);
         }
     }
 

@@ -243,8 +243,8 @@ impl WidgetWrapper {
 
     pub fn as_mut(&mut self) -> &mut Widget {
         match self {
-            &mut Self::Widget(ref mut w) => w,
-            &mut Self::Ansi(ref mut p) => p.as_widget(),
+            Self::Widget(w) => w,
+            Self::Ansi(p) => p.as_widget(),
         }
     }
 }
@@ -373,7 +373,7 @@ impl Tui {
         std::mem::swap(&mut self.new_buffer, &mut self.old_buffer);
     }
 
-    pub async fn draw<'a>(
+    pub async fn draw(
         &mut self,
         stdout: &mut std::io::Stdout,
         (width, height): (u16, u16),
@@ -503,29 +503,27 @@ impl Tui {
                 )?;
             }
 
-            if clear || status_bar.dirty {
-                if let Some(ref widget) = status_bar.inner {
-                    let bar_height = widget.line_count.min(max_height - self.height);
-                    if bar_height > 0 {
-                        queue!(
-                            stdout,
-                            cursor::SavePosition,
-                            crate::ui::MoveDown(height * 10),
-                            crate::ui::MoveUp(bar_height - 1),
-                        )?;
+            if (clear || status_bar.dirty) && let Some(ref widget) = status_bar.inner {
+                let bar_height = widget.line_count.min(max_height - self.height);
+                if bar_height > 0 {
+                    queue!(
+                        stdout,
+                        cursor::SavePosition,
+                        crate::ui::MoveDown(height * 10),
+                        crate::ui::MoveUp(bar_height - 1),
+                    )?;
 
-                        let area = Rect{ y: 0, height: bar_height, ..area };
-                        self.new_status_bar_buffer.resize(area);
-                        self.old_status_bar_buffer.resize(area);
+                    let area = Rect{ y: 0, height: bar_height, ..area };
+                    self.new_status_bar_buffer.resize(area);
+                    self.old_status_bar_buffer.resize(area);
 
-                        std::mem::swap(&mut self.new_status_bar_buffer, &mut self.old_status_bar_buffer);
-                        widget.render(area, &mut self.new_status_bar_buffer);
+                    std::mem::swap(&mut self.new_status_bar_buffer, &mut self.old_status_bar_buffer);
+                    widget.render(area, &mut self.new_status_bar_buffer);
 
-                        let updates = self.old_status_bar_buffer.diff(&self.new_status_bar_buffer);
-                        backend::draw(stdout, updates.into_iter())?;
+                    let updates = self.old_status_bar_buffer.diff(&self.new_status_bar_buffer);
+                    backend::draw(stdout, updates.into_iter())?;
 
-                        queue!(stdout, cursor::RestorePosition)?;
-                    }
+                    queue!(stdout, cursor::RestorePosition)?;
                 }
             }
         }

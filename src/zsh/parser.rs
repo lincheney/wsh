@@ -83,9 +83,9 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
         let range = if has_meta {
             let mut tokstr = tokstr.to_owned();
             super::unmetafy_owned(&mut tokstr);
-            find_str(BStr::new(tokstr.as_slice()), cmd.as_ref(), start).unwrap()
+            find_str(BStr::new(tokstr.as_slice()), cmd, start).unwrap()
         } else {
-            find_str(BStr::new(tokstr), cmd.as_ref(), start).unwrap()
+            find_str(BStr::new(tokstr), cmd, start).unwrap()
         };
         start = range.end;
         tokens.push(Token{range, kind});
