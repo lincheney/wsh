@@ -71,10 +71,7 @@ async fn get_ui() -> Result<(ui::Ui, bool)> {
 async fn main() -> Result<i32> {
 
     let (ui, new) = get_ui().await?;
-    if !new {
-        ui.accept_line_notify.1.notify_one();
-    }
-    ui.accept_line_notify.0.notified().await;
+    ui.trampoline.jump_in(!new).await;
     Ok(0)
 }
 

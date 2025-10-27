@@ -56,7 +56,6 @@ impl crossterm::Command for MoveDown {
 }
 
 pub struct UiInner {
-
     pub tui: crate::tui::Tui,
 
     pub events: crate::event_stream::EventLocker,
@@ -89,6 +88,26 @@ impl ThreadsafeUiInner for Arc<RwLock<UiInner>> {
     }
 }
 
+#[derive(Default)]
+pub struct Trampoline {
+    out_notify: tokio::sync::Notify,
+    in_notify: tokio::sync::Notify,
+}
+
+impl Trampoline {
+    pub async fn jump_out(&self) {
+        self.out_notify.notify_one();
+        self.in_notify.notified().await;
+    }
+
+    pub async fn jump_in(&self, notify: bool) {
+        if notify {
+            self.in_notify.notify_one();
+        }
+        self.out_notify.notified().await;
+    }
+}
+
 crate::strong_weak_wrapper! {
     pub struct Ui {
         pub inner: Arc::<RwLock<UiInner>> [WeakArc::<RwLock<UiInner>>],
@@ -96,7 +115,7 @@ crate::strong_weak_wrapper! {
         pub shell: Shell [crate::shell::WeakShell],
         pub event_callbacks: ArcMutex::<EventCallbacks> [WeakArc::<std::sync::Mutex<EventCallbacks>>],
         is_running_process: Arc::<AtomicBool> [WeakArc::<AtomicBool>],
-        pub accept_line_notify: Arc::<(tokio::sync::Notify, tokio::sync::Notify)> [WeakArc::<(tokio::sync::Notify, tokio::sync::Notify)>],
+        pub trampoline: Arc::<Trampoline> [WeakArc::<Trampoline>],
     }
 }
 
@@ -139,7 +158,7 @@ impl Ui {
             shell,
             event_callbacks: Default::default(),
             is_running_process: Arc::new(false.into()),
-            accept_line_notify: Arc::new((tokio::sync::Notify::new(), tokio::sync::Notify::new())),
+            trampoline: Arc::new(Trampoline::default()),
         };
         ui.init_lua().await?;
 
@@ -350,7 +369,12 @@ impl Ui {
             if result.is_ok() {
                 // separate this bc it has an await
                 let lock_events = ui.events.lock().await;
-                self.accept_line_notify.0.notify_one();
+                tokio::task::spawn(async {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    execute!(std::io::stdout(), EndSynchronizedUpdate)
+                });
+
+                self.trampoline.jump_out().await;
 
                 // // expand history e.g. !!
                 // let buffer = ui.buffer.get_contents();
@@ -359,12 +383,6 @@ impl Ui {
                 // shell.clear_completion_cache();
                 // // shell.push_history(buffer);
 
-                tokio::task::spawn(async {
-                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                    execute!(std::io::stdout(), EndSynchronizedUpdate)
-                });
-
-                self.accept_line_notify.1.notified().await;
                 drop(lock_events);
 
                 // if let Err(code) = shell.exec(buffer) {
