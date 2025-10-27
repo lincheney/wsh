@@ -12,7 +12,7 @@ pub mod completion;
 pub mod parser;
 pub use variables::*;
 pub use string::ZString;
-pub use bindings::{cmatch, Inpar, Outpar, Meta, expandhistory, selectkeymap, initundo};
+pub use bindings::{cmatch, Inpar, Outpar, Meta, expandhistory, selectkeymap, initundo, acceptline};
 
 // pub type HandlerFunc = unsafe extern "C" fn(name: *mut c_char, argv: *mut *mut c_char, options: *mut zsh_sys::options, func: c_int) -> c_int;
 

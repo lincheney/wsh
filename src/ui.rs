@@ -84,6 +84,7 @@ pub struct Ui {
     pub shell: Shell,
     pub event_callbacks: ArcMutex<EventCallbacks>,
     is_running_process: Arc<AtomicBool>,
+    pub accept_line_notify: Arc<(tokio::sync::Notify, tokio::sync::Notify)>,
 }
 
 #[derive(Clone)]
@@ -93,6 +94,7 @@ struct WeakUi {
     pub shell: crate::shell::WeakShell,
     pub event_callbacks: std::sync::Weak<std::sync::Mutex<EventCallbacks>>,
     pub is_running_process: std::sync::Weak<AtomicBool>,
+    pub accept_line_notify: std::sync::Weak<(tokio::sync::Notify, tokio::sync::Notify)>,
 }
 
 impl ThreadsafeUiInner {
@@ -131,9 +133,9 @@ impl Ui {
         let start = std::time::Instant::now();
         let shell = Shell::new();
         {
-            let mut shell = shell.lock().await;
-            shell.readhistfile();
-            shell.init_interactive();
+            // let mut shell = shell.lock().await;
+            // shell.readhistfile();
+            // shell.init_interactive();
         }
         log::info!("loaded history in {:?}", start.elapsed());
         ui.reset(&mut shell.lock().await);
@@ -144,6 +146,7 @@ impl Ui {
             shell,
             event_callbacks: Default::default(),
             is_running_process: Arc::new(false.into()),
+            accept_line_notify: Arc::new((tokio::sync::Notify::new(), tokio::sync::Notify::new())),
         };
         ui.init_lua().await?;
 
@@ -342,28 +345,42 @@ impl Ui {
                     Clear(ClearType::FromCursorDown),
                 )?;
 
-                // expand history e.g. !!
                 let buffer = ui.buffer.get_contents();
-                let expanded_buffer = shell.expandhistory(buffer.clone());
-                let buffer = expanded_buffer.as_ref().unwrap_or(buffer).as_ref();
-                shell.clear_completion_cache();
-                shell.push_history(buffer);
-
-                tokio::task::spawn(async move {
-                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                    execute!(std::io::stdout(), EndSynchronizedUpdate)
-                });
-
-                if let Err(code) = shell.exec(buffer) {
-                    eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
-                }
-                ui.reset(&mut shell);
-                self.is_running_process.store(false, Ordering::Relaxed);
+                let cursor = buffer.len() as i64 + 1;
+                crate::zsh::set_zle_buffer(buffer.clone(), cursor);
+                // acceptline doesn't actually accept the line right now
+                // only when we return control to zle
+                unsafe{ crate::zsh::acceptline(); }
                 Ok(())
             })();
 
             if result.is_ok() {
                 // separate this bc it has an await
+                let lock_events = ui.events.lock().await;
+                self.accept_line_notify.0.notify_one();
+
+                // // expand history e.g. !!
+                // let buffer = ui.buffer.get_contents();
+                // let expanded_buffer = shell.expandhistory(buffer.clone());
+                // let buffer = expanded_buffer.as_ref().unwrap_or(buffer).as_ref();
+                // shell.clear_completion_cache();
+                // // shell.push_history(buffer);
+
+                tokio::task::spawn(async {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    execute!(std::io::stdout(), EndSynchronizedUpdate)
+                });
+
+                self.accept_line_notify.1.notified().await;
+                drop(lock_events);
+
+                // if let Err(code) = shell.exec(buffer) {
+                // eprintln!("DEBUG(atlas) \t{}\t= {:?}", stringify!(code), code);
+                // }
+
+                ui.reset(&mut shell);
+                self.is_running_process.store(false, Ordering::Relaxed);
+
                 let cursor = ui.events.lock().await.get_cursor_position();
                 result = (|| {
                     // move down one line if not at start of line
@@ -399,6 +416,7 @@ impl Ui {
             shell: self.shell.downgrade(),
             event_callbacks: Arc::downgrade(&self.event_callbacks),
             is_running_process: Arc::downgrade(&self.is_running_process),
+            accept_line_notify: Arc::downgrade(&self.accept_line_notify),
         }
     }
 
@@ -604,7 +622,7 @@ impl UiInner {
     fn reset(&mut self, shell: &mut ShellInner) {
         self.buffer.reset();
         self.dirty = true;
-        shell.set_curhist(i64::MAX);
+        // shell.set_curhist(i64::MAX);
     }
 
 }
@@ -649,6 +667,7 @@ impl WeakUi {
             lua: self.lua.upgrade()?,
             event_callbacks: self.event_callbacks.upgrade()?,
             is_running_process: self.is_running_process.upgrade()?,
+            accept_line_notify: self.accept_line_notify.upgrade()?,
         })
     }
 

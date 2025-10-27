@@ -95,14 +95,18 @@ wish.set_keymap('<a-_>', function()
     wish.redo_buffer()
 end)
 
+wish.set_keymap('<a-cr>', function()
+    wish.set_buffer('\n')
+end)
+
 -- there ought to be a better way of doing this
 wish.set_keymap('<c-d>', function()
     wish.set_message{text='hello '..wish.get_buffer()}
     wish.redraw()
     if not wish.get_buffer():find('%S') then
-        wish.exit()
-        -- wish.set_buffer('exit')
-        -- wish.accept_line()
+        -- wish.exit()
+        wish.set_buffer('exit')
+        wish.accept_line()
     end
 end)
 

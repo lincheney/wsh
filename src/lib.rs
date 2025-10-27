@@ -1,3 +1,5 @@
+use std::ops::DerefMut;
+use std::sync::{Mutex};
 use anyhow::Result;
 use std::ops::Deref;
 use std::os::fd::AsRawFd;
@@ -19,36 +21,61 @@ mod lua;
 mod utils;
 
 static STATE: OnceLock<ui::Ui> = OnceLock::new();
+static X: Mutex<Option<ui::Ui>> = Mutex::new(None);
+static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
+    tokio::runtime::Runtime::new().unwrap()
+});
+
+async fn get_ui() -> Result<(ui::Ui, bool)> {
+    let mut lock = X.lock().unwrap();
+    let store = lock.deref_mut();
+
+    if let Some(ui) = store {
+        Ok((ui.clone(), false))
+
+    } else {
+        let log_file = Box::new(std::fs::File::create("/tmp/wish.log").expect("Can't create log file"));
+        env_logger::Builder::from_default_env()
+            .target(env_logger::Target::Pipe(log_file))
+            .format_source_path(true)
+            .format_timestamp_millis()
+            .init();
+
+        // crossterm will default to opening fd 0
+        // but zsh will mangle this halfway through
+        // so trick crossterm into opening a separate fd to the tty
+        let devnull = std::fs::File::open("/dev/null").unwrap();
+        let old_stdin = nix::unistd::dup(0)?;
+        nix::unistd::dup2(devnull.as_raw_fd(), 0)?;
+
+        let (mut events, event_locker) = event_stream::EventStream::new();
+
+        let mut ui = ui::Ui::new(event_locker).await?;
+        ui.activate().await?;
+        ui.start_cmd().await?;
+        *store = Some(ui.clone());
+
+        drop(devnull);
+        nix::unistd::dup2(old_stdin, 0)?;
+        nix::unistd::close(old_stdin)?;
+
+        let mut event_ui = ui.clone();
+        tokio::task::spawn(async move {
+            events.run(&mut event_ui).await
+        });
+
+        Ok((ui, true))
+    }
+}
 
 async fn main() -> Result<i32> {
 
-    let log_file = Box::new(std::fs::File::create("/tmp/wish.log").expect("Can't create log file"));
-    env_logger::Builder::from_default_env()
-        .target(env_logger::Target::Pipe(log_file))
-        .format_source_path(true)
-        .init();
-
-    // crossterm will default to opening fd 0
-    // but zsh will mangle this halfway through
-    // so trick crossterm into opening a separate fd to the tty
-    let devnull = std::fs::File::open("/dev/null").unwrap();
-    let old_stdin = nix::unistd::dup(0)?;
-    nix::unistd::dup2(devnull.as_raw_fd(), 0)?;
-
-    let (mut events, event_locker) = event_stream::EventStream::new();
-
-    let mut ui = ui::Ui::new(event_locker).await?;
-    ui.activate().await?;
-    ui.start_cmd().await?;
-    let _ = STATE.set(ui.clone());
-
-    drop(devnull);
-    nix::unistd::dup2(old_stdin, 0)?;
-    nix::unistd::close(old_stdin)?;
-
-    let result = events.run(&mut ui).await;
-    let _ = ui.deactivate().await;
-    result
+    let (ui, new) = get_ui().await?;
+    if !new {
+        ui.accept_line_notify.1.notify_one();
+    }
+    ui.accept_line_notify.0.notified().await;
+    Ok(0)
 }
 
 
@@ -76,24 +103,23 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
         },
         None => {
             // no args
-            if STATE.get().is_some() {
-                eprintln!("wsh is already running");
-                return 1;
-            } else {
-                let rt = tokio::runtime::Runtime::new().unwrap();
-                return rt.block_on(async {
+            // if STATE.get().is_some() {
+                // eprintln!("wsh is already running");
+                // return 1;
+            // } else {
+                return RUNTIME.block_on(async {
                     match main().await {
                         // Ok(code) => code,
                         Ok(code) => {
                             // i shouldn't have to do this and let zle exit instead, but zsh segfaults otherwise
                             // TODO figure out why and fix it
-                            unsafe{ zsh_sys::zexit(code, zsh_sys::zexit_t_ZEXIT_NORMAL); }
+                            // unsafe{ zsh_sys::zexit(code, zsh_sys::zexit_t_ZEXIT_NORMAL); }
                             code
                         },
                         Err(err) => { log::error!("{:?}", err); 1 },
                     }
                 });
-            }
+            // }
         },
     }
 

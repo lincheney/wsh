@@ -158,3 +158,5 @@ int expandhistory();
 void set_histno(void* pm, long x);
 int selectkeymap(char *name, int fb);
 void initundo(void);
+
+int acceptline();

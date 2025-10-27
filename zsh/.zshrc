@@ -28,7 +28,11 @@ PROMPT=$'%F{10}>>> %f'
 eval "_aws(){ $(cat /home/qianli/setup/vendor/aws-cli-completion.git/zsh/_aws); }; compdef _aws aws"
 # eval "_aws(){ compadd x; }; compdef _aws aws"
 
-builtin wsh
+
+zle-line-init(){
+    builtin wsh
+}
+zle -N zle-line-init
 
 # _main_complete() {
     # echo 123 >/dev/tty
