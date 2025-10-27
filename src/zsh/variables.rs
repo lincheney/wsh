@@ -148,7 +148,7 @@ impl Variable {
         unsafe{ &mut *self.value.pm }
     }
 
-    pub fn as_bytes(&mut self) -> BString {
+    pub fn to_bytes(&mut self) -> BString {
         let str = unsafe{
             let var = zsh_sys::getstrvalue(&mut self.value as *mut _);
             if var.is_null() {
@@ -163,7 +163,7 @@ impl Variable {
         Ok(
             if self.value.flags & zsh_sys::VALFLAG_INV as c_int != 0 {
                 Some(self.value.start as _)
-            } else if self.param().node.flags == zsh_sys::PM_INTEGER as c_int {
+            } else if self.param().node.flags & zsh_sys::PM_INTEGER as c_int != 0 {
                 Some(unsafe{ (*self.param().gsu.i).getfn.ok_or(anyhow::anyhow!("gsu.i.getfn is missing"))?(self.param()) })
             } else {
                 None
@@ -211,6 +211,8 @@ impl Variable {
         Ok(
             if self.param().node.flags & (zsh_sys::PM_EFLOAT | zsh_sys::PM_FFLOAT) as c_int != 0 {
                 Some(unsafe{ (*self.param().gsu.f).getfn.ok_or(anyhow::anyhow!("gsu.f.getfn is missing"))?(self.param()) })
+            } else if let Some(val) = self.try_as_int()? {
+                Some(val as _)
             } else {
                 None
             }
@@ -223,12 +225,12 @@ impl Variable {
                 x.into()
             } else if let Some(x) = self.try_as_array() {
                 x.into()
-            } else if let Some(x) = self.try_as_float()? {
-                x.into()
             } else if let Some(x) = self.try_as_int()? {
                 x.into()
+            } else if let Some(x) = self.try_as_float()? {
+                x.into()
             } else {
-                self.as_bytes().into()
+                self.to_bytes().into()
             }
         )
     }

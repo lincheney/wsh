@@ -158,5 +158,26 @@ int expandhistory();
 void set_histno(void* pm, long x);
 int selectkeymap(char *name, int fb);
 void initundo(void);
+typedef void* Keymap;
+Keymap curkeymap;
+Keymap localkeymap;
+
+typedef void* HashNode;
+typedef void* Widget;
+typedef struct thingy* Thingy;
+struct thingy {
+    HashNode next;	/* next node in the hash chain */
+    char *nam;		/* name of the thingy */
+    int flags;		/* TH_* flags (see below) */
+    int rc;		/* reference count */
+    Widget widget;	/* widget named by this thingy */
+    Thingy samew;	/* `next' thingy (circularly) naming the same widget */
+};
+struct thingy thingies; // this is actually an array
+Thingy keybind(Keymap km, char *seq, char **strp);
+int lastchar;
+int lastchar_wide;
+
+int execzlefunc(Thingy func, char **args, int set_bindk, int set_lbindk);
 
 int acceptline();

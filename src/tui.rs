@@ -236,15 +236,15 @@ pub enum WidgetWrapper {
 impl WidgetWrapper {
     pub fn as_ref(&self) -> &Widget {
         match self {
-            Self::Widget(ref w) => w,
+            Self::Widget(w) => w,
             Self::Ansi(p) => &p.widget,
         }
     }
 
     pub fn as_mut(&mut self) -> &mut Widget {
         match self {
-            Self::Widget(ref mut w) => w,
-            Self::Ansi(p) => p.as_widget(),
+            &mut Self::Widget(ref mut w) => w,
+            &mut Self::Ansi(ref mut p) => p.as_widget(),
         }
     }
 }

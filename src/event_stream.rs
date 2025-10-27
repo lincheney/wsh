@@ -30,7 +30,7 @@ pub struct UnlockedEvents{
 impl UnlockedEvents {
     pub fn get_cursor_position(&self) -> Result<(u16, u16), std::io::Error> {
         loop {
-            let now = std::time::SystemTime::now();
+            // let now = std::time::SystemTime::now();
             match crossterm::cursor::position() {
                 // Err(e) if now.elapsed().unwrap().as_millis() < 1500 && format!("{}", e) == "The cursor position could not be read within a normal duration" => {
                     // // crossterm times out in 2s

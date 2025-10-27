@@ -18,7 +18,7 @@ use crossterm::{
     queue,
 };
 
-use crate::shell::{Shell, ShellInner, UpgradeShell};
+use crate::shell::{Shell, ShellInner, UpgradeShell, KeybindValue};
 use crate::utils::*;
 use crate::lua::EventCallbacks;
 
@@ -261,6 +261,13 @@ impl Ui {
                 self.call_lua_fn(true, callback, ()).await;
                 return Ok(true)
             }
+
+            if self.try_zle_keybinding(key).await {
+                EventCallbacks::trigger_buffer_change_callbacks(self, ()).await;
+                self.draw().await?;
+                return Ok(true)
+            }
+
         }
 
         match event {
@@ -359,10 +366,10 @@ impl Ui {
 
                 let buffer = ui.buffer.get_contents();
                 let cursor = buffer.len() as i64 + 1;
-                crate::zsh::set_zle_buffer(buffer.clone(), cursor);
+                shell.set_zle_buffer(buffer.clone(), cursor);
                 // acceptline doesn't actually accept the line right now
-                // only when we return control to zle
-                unsafe{ crate::zsh::acceptline(); }
+                // only when we return control to zle using the trampoline
+                shell.acceptline();
                 Ok(())
             })();
 
@@ -576,6 +583,40 @@ impl Ui {
         Ok(())
     }
 
+    async fn try_zle_keybinding(&mut self, key: KeyEvent) -> bool {
+        let mut buf = [0; 128];
+        let Some(key) = crate::keybind::keyevent_to_bytes(key, &mut buf)
+            else { return false };
+
+        let mut shell = self.shell.lock().await;
+
+        match shell.get_keybinding(key.into()) {
+            Some(KeybindValue::Widget(widget)) => {
+                // execute the widget
+
+                let mut ui = self.inner.borrow_mut().await;
+                let buffer = ui.buffer.get_contents();
+                let cursor = buffer.len() + 1;
+
+                shell.set_zle_buffer(buffer.clone(), cursor as _);
+                shell.set_lastchar(key);
+                shell.exec_zle_widget(widget, [].into_iter());
+                let (buffer, cursor) = shell.get_zle_buffer();
+
+                ui.buffer.set(Some(buffer.as_ref()), Some(cursor.unwrap_or(buffer.len() as _) as _));
+                true
+            },
+            Some(KeybindValue::String(string)) => {
+                // i assume this is text we can just insert into the buffer
+                let mut ui = self.inner.borrow_mut().await;
+                ui.buffer.insert_at_cursor(string.as_ref());
+                true
+            },
+            None => return false,
+        }
+
+    }
+
 }
 
 impl UiInner {
@@ -619,7 +660,7 @@ impl UiInner {
         Ok(())
     }
 
-    fn reset(&mut self, shell: &mut ShellInner) {
+    fn reset(&mut self, _shell: &mut ShellInner) {
         self.buffer.reset();
         self.dirty = true;
         // shell.set_curhist(i64::MAX);

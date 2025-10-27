@@ -1,3 +1,6 @@
+use crate::c_string_array::{CStringArray};
+use std::os::raw::{c_char};
+use std::ptr::NonNull;
 use std::ffi::{CString, CStr};
 use std::os::raw::*;
 use std::default::Default;
@@ -12,7 +15,18 @@ pub mod completion;
 pub mod parser;
 pub use variables::*;
 pub use string::ZString;
-pub use bindings::{cmatch, Inpar, Outpar, Meta, expandhistory, selectkeymap, initundo, acceptline};
+pub use bindings::{
+    cmatch,
+    Inpar,
+    Outpar,
+    Meta,
+    expandhistory,
+    selectkeymap,
+    initundo,
+    acceptline,
+    lastchar,
+    lastchar_wide,
+};
 
 // pub type HandlerFunc = unsafe extern "C" fn(name: *mut c_char, argv: *mut *mut c_char, options: *mut zsh_sys::options, func: c_int) -> c_int;
 
@@ -71,7 +85,7 @@ pub fn get_prompt(prompt: Option<&BStr>, escaped: bool) -> Option<CString> {
     let prompt = if let Some(prompt) = prompt {
         CString::new(prompt.to_vec()).unwrap()
     } else {
-        let prompt = variables::Variable::get("PROMPT")?.as_bytes();
+        let prompt = variables::Variable::get("PROMPT")?.to_bytes();
         CString::new(prompt).unwrap()
     };
 
@@ -157,7 +171,7 @@ pub fn set_zle_buffer(buffer: BString, cursor: i64) {
 
 pub fn get_zle_buffer() -> (BString, Option<i64>) {
     start_zle_scope();
-    let buffer = Variable::get("BUFFER").unwrap().as_bytes();
+    let buffer = Variable::get("BUFFER").unwrap().to_bytes();
     let cursor = Variable::get("CURSOR").unwrap().try_as_int();
     end_zle_scope();
     match cursor {
@@ -170,5 +184,61 @@ pub fn get_cwd() -> BString {
     unsafe {
         let ptr = zsh_sys::zgetcwd();
         CStr::from_ptr(ptr).to_bytes().into()
+    }
+}
+
+pub struct ZleWidget(pub NonNull<bindings::thingy>);
+unsafe impl Send for ZleWidget {}
+unsafe impl Sync for ZleWidget {}
+pub enum KeybindValue {
+    String(BString),
+    Widget(ZleWidget),
+}
+
+pub fn get_keybinding(key: &BStr, recursive: bool) -> Option<KeybindValue> {
+    let mut strp: *mut c_char = std::ptr::null_mut();
+    let mut key = metafy(key.into());
+    let mut hops = 20;
+
+    let keymap = unsafe{ NonNull::new(bindings::localkeymap).map_or(bindings::curkeymap, |x| x.as_ptr()) };
+
+    loop {
+        let keybind = unsafe{ bindings::keybind(keymap, key, &raw mut strp) };
+        log::debug!("DEBUG(dewey) \t{}\t= {:?}", stringify!(keybind), keybind);
+        if let Some(keybind) = NonNull::new(keybind) {
+            // if keybind.as_ptr() == unsafe{ bindings::t_undefinedkey } {
+                // return None
+            // } else {
+                return Some(KeybindValue::Widget(ZleWidget(keybind)))
+            // }
+        }
+        if strp.is_null() {
+            return None
+        }
+        let strp = unsafe{ CStr::from_ptr(strp) }.to_bytes();
+        if !recursive {
+            return Some(KeybindValue::String(strp.into()))
+        }
+        hops -= 1;
+        if hops == 0 {
+            // string inserting another one too many times
+            return None
+        }
+        key = metafy(strp);
+    }
+}
+
+pub fn exec_zle_widget<'a, I: Iterator<Item=&'a BStr> + ExactSizeIterator>(widget: ZleWidget, args: I) -> c_int {
+
+    let mut null = std::ptr::null_mut();
+    let args_ptr;
+    if args.len() == 0 {
+        args_ptr = &raw mut null;
+    } else {
+        args_ptr = CStringArray::from_iter(args).ptr;
+    }
+
+    unsafe {
+        bindings::execzlefunc(widget.0.as_ptr(), args_ptr, 0, 0)
     }
 }

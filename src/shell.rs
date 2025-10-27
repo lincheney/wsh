@@ -8,6 +8,7 @@ use tokio::sync::{Semaphore, SemaphorePermit};
 use bstr::{BStr, BString};
 
 use crate::zsh;
+pub use crate::zsh::KeybindValue;
 
 struct Private;
 
@@ -260,9 +261,9 @@ impl<'a> ShellInner<'a> {
 
     pub fn expandhistory(&mut self, buffer: BString) -> Option<BString> {
         let cursor = buffer.len() as i64 + 1;
-        zsh::set_zle_buffer(buffer, cursor);
+        self.set_zle_buffer(buffer, cursor);
         if unsafe{ zsh::expandhistory() } == 0 {
-            Some(zsh::get_zle_buffer().0)
+            Some(self.get_zle_buffer().0)
         } else {
             None
         }
@@ -270,6 +271,48 @@ impl<'a> ShellInner<'a> {
 
     pub fn get_cwd(&mut self) -> BString {
         zsh::get_cwd()
+    }
+
+    pub fn set_zle_buffer(&mut self, buffer: BString, cursor: i64) {
+        zsh::start_zle_scope();
+        zsh::Variable::set(b"BUFFER", buffer.into(), true).unwrap();
+        zsh::Variable::set(b"CURSOR", cursor.into(), true).unwrap();
+        zsh::end_zle_scope();
+    }
+
+    pub fn get_zle_buffer(&mut self) -> (BString, Option<i64>) {
+        zsh::start_zle_scope();
+        let buffer = zsh::Variable::get("BUFFER").unwrap().to_bytes();
+        let cursor = zsh::Variable::get("CURSOR").unwrap().try_as_int();
+        zsh::end_zle_scope();
+        match cursor {
+            Ok(Some(cursor)) => (buffer, Some(cursor)),
+            _ => (buffer, None),
+        }
+    }
+
+    pub fn get_keybinding(&mut self, key: &BStr) -> Option<KeybindValue> {
+        // TODO recursive keymaps don't work
+        zsh::get_keybinding(key, false)
+    }
+
+    pub fn exec_zle_widget<'b, I: Iterator<Item=&'b BStr> + ExactSizeIterator>(&mut self, widget: zsh::ZleWidget, args: I) -> i32 {
+        return zsh::exec_zle_widget(widget, args)
+    }
+
+    pub fn set_lastchar(&mut self, char: &[u8]) {
+        let mut c: i32 = 0;
+        for i in char.iter().take(4) {
+            c = (c << 8) + *i as i32;
+        }
+        unsafe {
+            zsh::lastchar = c;
+            zsh::lastchar_wide = c;
+        }
+    }
+
+    pub fn acceptline(&mut self) {
+        unsafe { zsh::acceptline(); }
     }
 
 }

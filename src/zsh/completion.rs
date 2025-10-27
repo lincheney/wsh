@@ -113,39 +113,41 @@ static COMPADD_STATE: OnceLock<Mutex<CompaddState>> = OnceLock::new();
 unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_char, options: zsh_sys::Options, func: c_int) -> c_int {
     // eprintln!("DEBUG(bombay)\t{}\t= {:?}\r", stringify!(nam), nam);
 
-    let compadd = COMPADD_STATE.get().unwrap().lock().unwrap();
-    let result = (*compadd.original).handlerfunc.unwrap()(nam, argv, options, func);
+    unsafe {
+        let compadd = COMPADD_STATE.get().unwrap().lock().unwrap();
+        let result = (*compadd.original).handlerfunc.unwrap()(nam, argv, options, func);
 
-    let mut streamer = if let Some(streamer) = compadd.streamer.as_ref() {
-        streamer.lock().unwrap()
-    } else {
-        return result
-    };
+        let mut streamer = if let Some(streamer) = compadd.streamer.as_ref() {
+            streamer.lock().unwrap()
+        } else {
+            return result
+        };
 
-    if !bindings::amatches.is_null() && !(*bindings::amatches).name.is_null() {
-        // let g = CStr::from_ptr((*bindings::amatches).name);
-        // eprintln!("DEBUG(dachas)\t{}\t= {:?}\r", stringify!(g), g);
+        if !bindings::amatches.is_null() && !(*bindings::amatches).name.is_null() {
+            // let g = CStr::from_ptr((*bindings::amatches).name);
+            // eprintln!("DEBUG(dachas)\t{}\t= {:?}\r", stringify!(g), g);
+        }
+
+        if !bindings::matches.is_null() {
+            let len = streamer.matches.len();
+            let iter = super::iter_linked_list(bindings::matches)
+                .filter_map(|ptr| {
+                    let ptr = ptr as *mut bindings::cmatch;
+                    if ptr.is_null() {
+                        None
+                    } else {
+                        Some(Arc::new((*ptr).clone()))
+                    }
+                }).skip(len);
+            streamer.matches.extend(iter);
+            streamer.completion_word_len = (zsh_sys::we - zsh_sys::wb).max(0) as usize;
+            streamer.wake();
+                // eprintln!("DEBUG(pucks) \t{}\t= {:?}\r", stringify!(node), (std::ffi::CStr::from_ptr((*dat).str_), (*dat).gnum));
+            // }
+        }
+
+        result
     }
-
-    if !bindings::matches.is_null() {
-        let len = streamer.matches.len();
-        let iter = super::iter_linked_list(bindings::matches)
-            .filter_map(|ptr| {
-                let ptr = ptr as *mut bindings::cmatch;
-                if ptr.is_null() {
-                    None
-                } else {
-                    Some(Arc::new((*ptr).clone()))
-                }
-            }).skip(len);
-        streamer.matches.extend(iter);
-        streamer.completion_word_len = (zsh_sys::we - zsh_sys::wb).max(0) as usize;
-        streamer.wake();
-            // eprintln!("DEBUG(pucks) \t{}\t= {:?}\r", stringify!(node), (std::ffi::CStr::from_ptr((*dat).str_), (*dat).gnum));
-        // }
-    }
-
-    result
 }
 
 pub fn override_compadd() {
@@ -248,13 +250,8 @@ pub fn insert_completion(line: &BStr, completion_word_len: usize, m: &bindings::
         bindings::do_single(m as *const _ as *mut _);
         bindings::unmetafy_line();
 
-        zsh_sys::startparamscope();
-        bindings::makezleparams(0);
-        let buffer = super::Variable::get("BUFFER").unwrap().as_bytes();
-        let cursor = super::Variable::get("CURSOR").unwrap().as_bytes();
-        zsh_sys::endparamscope();
-
-        let cursor = std::str::from_utf8(&cursor).ok().and_then(|s| s.parse().ok()).unwrap_or(buffer.len());
-        (buffer, cursor)
+        let (buffer, cursor) = super::get_zle_buffer();
+        let buflen = buffer.len() as _;
+        (buffer, cursor.unwrap_or(buflen) as _)
     }
 }

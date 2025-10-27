@@ -1,3 +1,4 @@
+use bstr::BStr;
 use std::ffi::{CStr};
 use std::os::raw::{c_char};
 use bstr::BString;
@@ -35,6 +36,18 @@ impl CStrArray {
     pub fn to_vec(&self) -> Vec<BString> {
         self.iter().map(|s| s.to_bytes().to_owned()).map(BString::new).collect()
     }
+
+    pub fn from_iter<'a, I: Iterator<Item=&'a BStr> + ExactSizeIterator>(iter: I) -> Self {
+        unsafe {
+            let len = iter.len();
+            let ptr: *mut *mut c_char = zsh_sys::zalloc(std::mem::size_of::<*mut c_char>() * (len + 1)) as _;
+            for (i, string) in iter.enumerate() {
+                *ptr.add(i) = zsh_sys::ztrduppfx(string.as_ptr() as _, string.len() as _);
+            }
+            *ptr.add(len) = std::ptr::null_mut();
+            ptr.into()
+        }
+    }
 }
 
 impl CStringArray {
@@ -43,6 +56,10 @@ impl CStringArray {
         // leak it
         std::mem::forget(self);
         ptr
+    }
+
+    pub fn from_iter<'a, I: Iterator<Item=&'a BStr> + ExactSizeIterator>(iter: I) -> Self {
+        Self{ inner: CStrArray::from_iter(iter) }
     }
 }
 
@@ -88,14 +105,6 @@ impl From<*mut *mut c_char> for CStringArray {
 
 impl From<Vec<BString>> for CStringArray {
     fn from(vec: Vec<BString>) -> Self {
-        unsafe {
-            let ptr: *mut *mut c_char = zsh_sys::zalloc(std::mem::size_of::<*mut c_char>() * (vec.len() + 1)) as _;
-            for (i, string) in vec.iter().enumerate() {
-                *ptr.add(i) = zsh_sys::ztrduppfx(string.as_ptr() as _, string.len() as _);
-            }
-            *ptr.add(vec.len()) = std::ptr::null_mut();
-            Self{ inner: ptr.into() }
-        }
+        CStringArray::from_iter(vec.iter().map(|x| x.as_ref()))
     }
 }
-

@@ -173,7 +173,7 @@ impl Buffer {
             self.highlights.clear();
             self.contents.resize(contents.len(), 0);
             self.cursor = 0;
-            self.splice_at_cursor(contents, None);
+            self.splice_at_cursor(contents, Some(self.contents.len()));
         }
         if let Some(cursor) = cursor {
             self.cursor = cursor;
