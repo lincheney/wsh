@@ -18,20 +18,16 @@ pub struct ShellInner<'a> {
     _private: Private,
 }
 
-#[derive(Clone)]
-pub struct Shell{
-    // this needs to be a semaphore so i can add more permits
-    inner: Arc<Semaphore>,
-    // many functions are ok to call and are re-entrant
-    // but some are not e.g. completion
-    exclusive_lock: Arc<Mutex<()>>,
+crate::strong_weak_wrapper! {
+    pub struct Shell{
+        // this needs to be a semaphore so i can add more permits
+        inner: Arc::<Semaphore> [Weak::<Semaphore>],
+        // many functions are ok to call and are re-entrant
+        // but some are not e.g. completion
+        exclusive_lock: Arc::<Mutex<()>> [Weak::<Mutex<()>>],
+    }
 }
 
-#[derive(Clone)]
-pub struct WeakShell{
-    inner: Weak<Semaphore>,
-    exclusive_lock: Weak<Mutex<()>>,
-}
 
 impl Shell {
     pub fn new() -> Self {
@@ -61,13 +57,6 @@ impl Shell {
             inner: Arc::downgrade(&self.inner),
             exclusive_lock: Arc::downgrade(&self.exclusive_lock),
         }
-    }
-
-    pub fn upgrade(weak: &WeakShell) -> Option<Self> {
-        Some(Self{
-            inner: weak.inner.upgrade()?,
-            exclusive_lock: weak.exclusive_lock.upgrade()?,
-        })
     }
 }
 

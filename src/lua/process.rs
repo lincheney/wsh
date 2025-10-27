@@ -10,7 +10,7 @@ use tokio::io::{BufReader, BufWriter};
 use tokio::process::Command;
 use tokio::sync::oneshot;
 use serde::{Deserialize, Deserializer, de};
-use crate::ui::Ui;
+use crate::ui::{Ui, ThreadsafeUiInner};
 use super::asyncio::{ReadableFile, WriteableFile};
 
 #[derive(Debug, Copy, Clone)]

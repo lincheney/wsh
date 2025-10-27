@@ -3,7 +3,7 @@ use std::default::Default;
 use anyhow::Result;
 use mlua::{prelude::*, Function};
 use crossterm::event::{KeyCode, KeyModifiers};
-use crate::ui::Ui;
+use crate::ui::{Ui, ThreadsafeUiInner};
 
 #[derive(Default)]
 pub struct KeybindMapping {

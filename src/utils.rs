@@ -1,5 +1,7 @@
 use std::sync::{Arc, Mutex};
 use tokio::sync::Mutex as AsyncMutex;
+#[macro_use]
+pub mod strong_weak_wrapper;
 
 pub type ArcMutex<T> = Arc<Mutex<T>>;
 pub type AsyncArcMutex<T> = Arc<AsyncMutex<T>>;

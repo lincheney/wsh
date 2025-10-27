@@ -1,6 +1,6 @@
 use anyhow::Result;
 use mlua::{prelude::*};
-use crate::ui::Ui;
+use crate::ui::{Ui, ThreadsafeUiInner};
 use bstr::*;
 
 async fn get_history(ui: Ui, _lua: Lua, _val: ()) -> Result<(usize, Vec<usize>, Vec<BString>)> {

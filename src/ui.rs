@@ -1,6 +1,6 @@
 use std::time::Duration;
 use std::future::Future;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{Arc, Weak as WeakArc, atomic::{AtomicBool, Ordering}};
 use std::ops::DerefMut;
 use std::collections::HashSet;
 use std::default::Default;
@@ -18,7 +18,7 @@ use crossterm::{
     queue,
 };
 
-use crate::shell::{Shell, ShellInner};
+use crate::shell::{Shell, ShellInner, UpgradeShell};
 use crate::utils::*;
 use crate::lua::EventCallbacks;
 
@@ -74,36 +74,29 @@ pub struct UiInner {
     size: (u16, u16),
 }
 
-#[derive(Clone)]
-pub struct ThreadsafeUiInner(Arc<RwLock<UiInner>>);
-
-#[derive(Clone)]
-pub struct Ui {
-    pub inner: ThreadsafeUiInner,
-    pub lua: Arc<Lua>,
-    pub shell: Shell,
-    pub event_callbacks: ArcMutex<EventCallbacks>,
-    is_running_process: Arc<AtomicBool>,
-    pub accept_line_notify: Arc<(tokio::sync::Notify, tokio::sync::Notify)>,
+pub trait ThreadsafeUiInner {
+    async fn borrow(&self) -> tokio::sync::RwLockReadGuard<'_, UiInner>;
+    async fn borrow_mut(&mut self) -> tokio::sync::RwLockWriteGuard<'_, UiInner>;
 }
 
-#[derive(Clone)]
-struct WeakUi {
-    pub inner: std::sync::Weak<RwLock<UiInner>>,
-    pub lua: std::sync::Weak<Lua>,
-    pub shell: crate::shell::WeakShell,
-    pub event_callbacks: std::sync::Weak<std::sync::Mutex<EventCallbacks>>,
-    pub is_running_process: std::sync::Weak<AtomicBool>,
-    pub accept_line_notify: std::sync::Weak<(tokio::sync::Notify, tokio::sync::Notify)>,
-}
-
-impl ThreadsafeUiInner {
-    pub async fn borrow(&self) -> tokio::sync::RwLockReadGuard<'_, UiInner> {
-        self.0.read().await
+impl ThreadsafeUiInner for Arc<RwLock<UiInner>> {
+    async fn borrow(&self) -> tokio::sync::RwLockReadGuard<'_, UiInner> {
+        self.read().await
     }
 
-    pub async fn borrow_mut(&mut self) -> tokio::sync::RwLockWriteGuard<'_, UiInner> {
-        self.0.write().await
+    async fn borrow_mut(&mut self) -> tokio::sync::RwLockWriteGuard<'_, UiInner> {
+        self.write().await
+    }
+}
+
+crate::strong_weak_wrapper! {
+    pub struct Ui {
+        pub inner: Arc::<RwLock<UiInner>> [WeakArc::<RwLock<UiInner>>],
+        pub lua: Arc::<Lua> [WeakArc::<Lua>],
+        pub shell: Shell [crate::shell::WeakShell],
+        pub event_callbacks: ArcMutex::<EventCallbacks> [WeakArc::<std::sync::Mutex<EventCallbacks>>],
+        is_running_process: Arc::<AtomicBool> [WeakArc::<AtomicBool>],
+        pub accept_line_notify: Arc::<(tokio::sync::Notify, tokio::sync::Notify)> [WeakArc::<(tokio::sync::Notify, tokio::sync::Notify)>],
     }
 }
 
@@ -141,7 +134,7 @@ impl Ui {
         ui.reset(&mut shell.lock().await);
 
         let ui = Self{
-            inner: ThreadsafeUiInner(Arc::new(RwLock::new(ui))),
+            inner: Arc::new(RwLock::new(ui)),
             lua: Arc::new(lua),
             shell,
             event_callbacks: Default::default(),
@@ -409,17 +402,6 @@ impl Ui {
         Ok(true)
     }
 
-    fn downgrade(&self) -> WeakUi {
-        WeakUi{
-            inner: Arc::downgrade(&self.inner.0),
-            lua: Arc::downgrade(&self.lua),
-            shell: self.shell.downgrade(),
-            event_callbacks: Arc::downgrade(&self.event_callbacks),
-            is_running_process: Arc::downgrade(&self.is_running_process),
-            accept_line_notify: Arc::downgrade(&self.accept_line_notify),
-        }
-    }
-
     pub fn set_lua_fn<F, A, R>(&self, name: &str, func: F) -> LuaResult<()>
     where
         F: Fn(&Self, &Lua, A) -> Result<R> + mlua::MaybeSend + 'static,
@@ -660,17 +642,6 @@ fn print_events() -> Result<()> {
 }
 
 impl WeakUi {
-    fn upgrade(&self) -> Option<Ui> {
-        Some(Ui{
-            inner: ThreadsafeUiInner(self.inner.upgrade()?),
-            shell: Shell::upgrade(&self.shell)?,
-            lua: self.lua.upgrade()?,
-            event_callbacks: self.event_callbacks.upgrade()?,
-            is_running_process: self.is_running_process.upgrade()?,
-            accept_line_notify: self.accept_line_notify.upgrade()?,
-        })
-    }
-
     fn try_upgrade(&self) -> LuaResult<Ui> {
         if let Some(ui) = self.upgrade() {
             Ok(ui)

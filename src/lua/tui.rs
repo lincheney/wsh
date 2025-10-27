@@ -9,7 +9,7 @@ use ratatui::{
     style::*,
 };
 use mlua::{prelude::*};
-use crate::ui::Ui;
+use crate::ui::{Ui, ThreadsafeUiInner};
 use crate::tui;
 
 #[derive(Debug, Copy, Clone)]

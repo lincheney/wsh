@@ -1,7 +1,7 @@
+use crate::ui::{Ui, ThreadsafeUiInner};
 use anyhow::Result;
 use mlua::{prelude::*, UserData, UserDataMethods, MetaMethod};
 use std::sync::Arc;
-use crate::ui::Ui;
 use crate::utils::*;
 
 #[derive(FromLua, Clone)]
