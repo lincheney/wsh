@@ -1,4 +1,3 @@
-use crate::c_string_array::{CStringArray};
 use std::os::raw::{c_char};
 use std::ptr::NonNull;
 use std::ffi::{CString, CStr};
@@ -10,6 +9,8 @@ use bstr::{BStr, BString};
 mod string;
 mod bindings;
 mod variables;
+mod widget;
+pub use widget::ZleWidget;
 pub mod history;
 pub mod completion;
 pub mod parser;
@@ -187,12 +188,9 @@ pub fn get_cwd() -> BString {
     }
 }
 
-pub struct ZleWidget(pub NonNull<bindings::thingy>);
-unsafe impl Send for ZleWidget {}
-unsafe impl Sync for ZleWidget {}
 pub enum KeybindValue {
     String(BString),
-    Widget(ZleWidget),
+    Widget(widget::ZleWidget),
 }
 
 pub fn get_keybinding(key: &BStr, recursive: bool) -> Option<KeybindValue> {
@@ -204,13 +202,8 @@ pub fn get_keybinding(key: &BStr, recursive: bool) -> Option<KeybindValue> {
 
     loop {
         let keybind = unsafe{ bindings::keybind(keymap, key, &raw mut strp) };
-        log::debug!("DEBUG(dewey) \t{}\t= {:?}", stringify!(keybind), keybind);
         if let Some(keybind) = NonNull::new(keybind) {
-            // if keybind.as_ptr() == unsafe{ bindings::t_undefinedkey } {
-                // return None
-            // } else {
-                return Some(KeybindValue::Widget(ZleWidget(keybind)))
-            // }
+            return Some(KeybindValue::Widget(ZleWidget::new(keybind)))
         }
         if strp.is_null() {
             return None
@@ -229,16 +222,5 @@ pub fn get_keybinding(key: &BStr, recursive: bool) -> Option<KeybindValue> {
 }
 
 pub fn exec_zle_widget<'a, I: Iterator<Item=&'a BStr> + ExactSizeIterator>(widget: ZleWidget, args: I) -> c_int {
-
-    let mut null = std::ptr::null_mut();
-    let args_ptr;
-    if args.len() == 0 {
-        args_ptr = &raw mut null;
-    } else {
-        args_ptr = CStringArray::from_iter(args).ptr;
-    }
-
-    unsafe {
-        bindings::execzlefunc(widget.0.as_ptr(), args_ptr, 0, 0)
-    }
+    widget.exec(args)
 }

@@ -223,3 +223,8 @@ pub enum token {
 
     Nularg     = 0xa1,
 }
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum WidgetFlag {
+    WIDGET_INT = 1 << 0,
+}

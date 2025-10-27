@@ -262,10 +262,11 @@ impl Ui {
                 return Ok(true)
             }
 
-            if self.try_zle_keybinding(key).await {
+            if let Some(result) = self.try_zle_keybinding(key).await {
+                let result = result?;
                 EventCallbacks::trigger_buffer_change_callbacks(self, ()).await;
                 self.draw().await?;
-                return Ok(true)
+                return Ok(result)
             }
 
         }
@@ -310,16 +311,6 @@ impl Ui {
                 state: _,
             }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
                 return self.accept_line().await;
-            },
-
-            Event::Key(KeyEvent{
-                code: KeyCode::F(11),
-                modifiers: _,
-                kind: event::KeyEventKind::Press,
-                state: _,
-            }) => {
-                // eprintln!("DEBUG(feign) \t{}\t= {:?}", stringify!(shell.lock().await.get_history().collect::<Vec<_>>()), shell.lock().await.get_history().collect::<Vec<_>>());
-                // let (complete, tokens) = shell.lock().await.parse("echo $(");
             },
 
             Event::Paste(data) => {
@@ -583,15 +574,23 @@ impl Ui {
         Ok(())
     }
 
-    async fn try_zle_keybinding(&mut self, key: KeyEvent) -> bool {
+    async fn try_zle_keybinding(&mut self, key: KeyEvent) -> Option<Result<bool>> {
         let mut buf = [0; 128];
-        let Some(key) = crate::keybind::keyevent_to_bytes(key, &mut buf)
-            else { return false };
+        let key = crate::keybind::keyevent_to_bytes(key, &mut buf)?;
 
         let mut shell = self.shell.lock().await;
+        match shell.get_keybinding(key.into())? {
+            KeybindValue::Widget(widget) => {
+                // skip not found or where we have our own impl
+                if widget.is_self_insert() || widget.is_undefined_key() {
+                    return None
+                }
+                // need to run our accept_line with a trampoline
+                if widget.is_accept_line() {
+                    drop(shell);
+                    return Some(self.accept_line().await);
+                }
 
-        match shell.get_keybinding(key.into()) {
-            Some(KeybindValue::Widget(widget)) => {
                 // execute the widget
 
                 let mut ui = self.inner.borrow_mut().await;
@@ -604,15 +603,14 @@ impl Ui {
                 let (buffer, cursor) = shell.get_zle_buffer();
 
                 ui.buffer.set(Some(buffer.as_ref()), Some(cursor.unwrap_or(buffer.len() as _) as _));
-                true
+                Some(Ok(true))
             },
-            Some(KeybindValue::String(string)) => {
+            KeybindValue::String(string) => {
                 // i assume this is text we can just insert into the buffer
                 let mut ui = self.inner.borrow_mut().await;
                 ui.buffer.insert_at_cursor(string.as_ref());
-                true
+                Some(Ok(true))
             },
-            None => return false,
         }
 
     }

@@ -163,7 +163,11 @@ Keymap curkeymap;
 Keymap localkeymap;
 
 typedef void* HashNode;
-typedef void* Widget;
+struct widget {
+    int flags;		/* flags (see below) */
+    // there's more, but sure
+};
+typedef struct widget* Widget;
 typedef struct thingy* Thingy;
 struct thingy {
     HashNode next;	/* next node in the hash chain */
@@ -175,8 +179,8 @@ struct thingy {
 };
 struct thingy thingies; // this is actually an array
 Thingy keybind(Keymap km, char *seq, char **strp);
-int lastchar;
-int lastchar_wide;
+mod_export int lastchar;
+mod_export int lastchar_wide;
 
 int execzlefunc(Thingy func, char **args, int set_bindk, int set_lbindk);
 
