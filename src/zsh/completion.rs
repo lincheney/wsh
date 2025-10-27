@@ -221,6 +221,9 @@ pub fn _get_completions(streamer: &Arc<Mutex<Streamer>>) {
         // zsh will switch up the pgid if monitor and interactive are set
         super::execstring("set +o monitor", Default::default());
         bindings::menucomplete(null_mut());
+        // prevent completion list from showing
+        bindings::showinglist = 0;
+        // bindings::invalidate_list();
         // soft exit menu completion
         bindings::minfo.cur = null_mut();
         super::execstring("set -o monitor", Default::default());
