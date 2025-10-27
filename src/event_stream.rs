@@ -1,8 +1,7 @@
 use std::sync::Arc;
 use std::default::Default;
-use futures::channel::mpsc;
-use futures::{select, SinkExt, StreamExt, FutureExt};
-use tokio::sync::{Mutex, MutexGuard, OwnedMutexGuard, RwLock};
+use futures::StreamExt;
+use tokio::sync::{Mutex, MutexGuard, OwnedMutexGuard, RwLock, mpsc};
 
 #[derive(Default)]
 struct Lock {
@@ -58,7 +57,7 @@ impl EventLocker {
         if let Ok(lock) = self.lock.inner.try_lock() {
             return lock;
         }
-        self.sender.send(()).await.unwrap();
+        self.sender.send(()).unwrap();
         self.lock.inner.lock().await
     }
 
@@ -68,7 +67,7 @@ impl EventLocker {
         if let Ok(lock) = inner.clone().try_lock_owned() {
             return lock;
         }
-        self.sender.send(()).await.unwrap();
+        self.sender.send(()).unwrap();
         inner.lock_owned().await
     }
 
@@ -76,7 +75,7 @@ impl EventLocker {
 
 impl EventStream {
     pub fn new() -> (Self, EventLocker) {
-        let (sender, receiver) = mpsc::unbounded::<()>();
+        let (sender, receiver) = mpsc::unbounded_channel::<()>();
         let lock: Arc<Lock> = Arc::new(Default::default());
         let stream = Self{ lock: lock.clone(), receiver };
         let locker = EventLocker{ lock, sender };
@@ -86,10 +85,7 @@ impl EventStream {
     pub async fn run(&mut self, ui: &mut crate::ui::Ui) -> anyhow::Result<i32> {
         loop {
             let mut lock = None;
-            let mut waker = self.receiver.next().fuse();
-
             let mut events = crossterm::event::EventStream::new();
-            let mut event = events.next().fuse();
 
             // keep looping over events until woken up
             loop {
@@ -101,11 +97,11 @@ impl EventStream {
                     return Ok(exit_code)
                 }
 
-                select! {
-                    _ = waker => {
+                tokio::select! {
+                    _ = self.receiver.recv() => {
                         break;
                     },
-                    e = event => {
+                    e = events.next() => {
                         drop(lock.take());
 
                         match e {
@@ -117,7 +113,6 @@ impl EventStream {
                             Some(Err(event)) => { println!("Error: {:?}\r", event); },
                             None => return Ok(0),
                         }
-                        event = events.next().fuse();
                         lock = Some(self.lock.lock_exclusive().await);
                     }
                 };

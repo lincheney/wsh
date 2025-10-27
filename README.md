@@ -37,7 +37,7 @@ i wish i could have
 * [ ] ~~control over zerr, zwarning~~
 * [ ] ~~silence zerr, zwarning during parsing~~
 * [ ] ~~capture zerr, zwarning during completion~~
-* [ ] drop history entries which are space etc
+* [x] drop history entries which are space etc
 * [x] general selection widget interface
 * [x] embed process output in a tui message
 * [x] draw prompt and buffer using ratatui
@@ -52,5 +52,9 @@ i wish i could have
 * [ ] selecting `print -s echo` in history is weird
 * [ ] silence parse warnings
 * [ ] custom buffer rendering, ghost text etc
-* [ ] fix segfault when letting zle exit by itself
-* [ ] 
+* [x] fix segfault when letting zle exit by itself
+* [ ] try switch to termion
+* [ ] remove extra zle prompt after accept line
+* [ ] lag when exiting. does it happen in release?
+* [ ] calling exit within widget causes hang
+* [ ]
