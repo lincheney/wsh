@@ -706,30 +706,6 @@ impl Drop for UiInner {
     }
 }
 
-fn print_events() -> Result<()> {
-    loop {
-        // Blocking read
-        let event = event::read()?;
-
-        println!("Event: {:?}\r", event);
-
-        if event == event::Event::Key(event::KeyCode::Char('c').into()) {
-            println!("Cursor position: {:?}\r", position());
-        }
-
-        if let event::Event::Resize(x, y) = event {
-            let (original_size, new_size) = flush_resize_events((x, y));
-            println!("Resize from: {:?}, to: {:?}\r", original_size, new_size);
-        }
-
-        if event == event::Event::Key(event::KeyCode::Esc.into()) {
-            break;
-        }
-    }
-
-    Ok(())
-}
-
 impl WeakUi {
     fn try_upgrade(&self) -> LuaResult<Ui> {
         if let Some(ui) = self.upgrade() {
