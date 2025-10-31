@@ -5,7 +5,6 @@ use std::sync::{Arc, Weak as WeakArc, atomic::{AtomicBool, Ordering}};
 use std::ops::DerefMut;
 use std::collections::HashSet;
 use std::default::Default;
-use serde::{Deserialize};
 use mlua::prelude::*;
 use tokio::sync::RwLock;
 use anyhow::Result;
@@ -66,7 +65,7 @@ pub struct UiInner {
     pub tui: crate::tui::Tui,
 
     pub events: crate::event_stream::EventController,
-    dirty: bool,
+    pub dirty: bool,
     pub keybinds: Vec<crate::lua::KeybindMapping>,
     pub keybind_layer_counter: usize,
 
@@ -267,7 +266,7 @@ impl Ui {
         Ok(true)
     }
 
-    async fn accept_line(&mut self) -> Result<bool> {
+    pub async fn accept_line(&mut self) -> Result<bool> {
         let (complete, _tokens) = {
             let ui = self.inner.borrow().await;
             let buffer = ui.buffer.get_contents().as_ref();
@@ -405,86 +404,6 @@ impl Ui {
     }
 
     async fn init_lua(&self) -> Result<()> {
-        self.set_lua_async_fn("get_cursor", |ui, _lua, ()| async move {
-            Ok(ui.inner.borrow().await.buffer.get_cursor())
-        })?;
-        self.set_lua_async_fn("get_buffer", |ui, lua, ()| async move {
-            Ok(lua.create_string(ui.inner.borrow().await.buffer.get_contents())?)
-        })?;
-
-        self.set_lua_async_fn("set_cursor", |mut ui, _lua, val: usize| async move {
-            ui.inner.borrow_mut().await.buffer.set_cursor(val);
-            Ok(())
-        })?;
-
-        self.set_lua_async_fn("set_buffer", |mut ui, _lua, (val, replace_len): (mlua::String, Option<usize>)| async move {
-            {
-                let mut ui = ui.inner.borrow_mut().await;
-                ui.buffer.splice_at_cursor(&val.as_bytes(), replace_len);
-            }
-            EventCallbacks::trigger_buffer_change_callbacks(&mut ui, ()).await;
-            Ok(())
-        })?;
-
-        self.set_lua_async_fn("undo_buffer", |mut ui, _lua, ()| async move {
-            if ui.inner.borrow_mut().await.buffer.move_in_history(false) {
-                EventCallbacks::trigger_buffer_change_callbacks(&mut ui, ()).await;
-            }
-            Ok(())
-        })?;
-        self.set_lua_async_fn("redo_buffer", |mut ui, _lua, ()| async move {
-            if ui.inner.borrow_mut().await.buffer.move_in_history(true) {
-                EventCallbacks::trigger_buffer_change_callbacks(&mut ui, ()).await;
-            }
-            Ok(())
-        })?;
-
-        self.set_lua_async_fn("accept_line", |mut ui, _lua, _val: ()| async move {
-            ui.accept_line().await
-        })?;
-
-        #[derive(Debug, Default, Deserialize)]
-        #[serde(default)]
-        struct RedrawOptions {
-            prompt: bool,
-            buffer: bool,
-            messages: bool,
-            status_bar: bool,
-            all: bool,
-        }
-        self.set_lua_async_fn("redraw", |mut ui, lua, val: Option<LuaValue>| async move {
-            if let Some(val) = val {
-                let val: RedrawOptions = lua.from_value(val)?;
-                let mut ui = ui.inner.borrow_mut().await;
-                if val.all { ui.dirty = true; }
-                if val.prompt { ui.prompt.dirty = true; }
-                if val.buffer { ui.buffer.dirty = true; }
-                if val.messages { ui.tui.dirty = true; }
-                if val.status_bar { ui.status_bar.dirty = true; }
-            }
-
-            ui.draw().await
-        })?;
-
-        self.set_lua_async_fn("eval", |ui, lua, (cmd, stderr): (mlua::String, bool)| async move {
-            let data = ui.shell.lock().await.eval((*cmd.as_bytes()).into(), stderr).unwrap();
-            Ok(lua.create_string(data)?)
-        })?;
-
-        self.set_lua_async_fn("allocate_height", |mut ui, _lua, height: u16| async move {
-            Ui::allocate_height(&mut ui.inner.borrow_mut().await.stdout, height)
-        })?;
-
-        self.set_lua_async_fn("exit", |mut ui, _lua, code: Option<i32>| async move {
-            let mut ui = ui.inner.borrow_mut().await;
-            ui.events.exit(code.unwrap_or(0)).await;
-            Ok(())
-        })?;
-
-        self.set_lua_async_fn("get_cwd", |ui, _lua, _: ()| async move {
-            Ok(ui.shell.lock().await.get_cwd())
-        })?;
-
         crate::lua::init_lua(self).await?;
 
         let lua = self.lua.clone();
