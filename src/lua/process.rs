@@ -296,7 +296,7 @@ async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue>
 
                 if args.foreground {
                     ui.report_error(true, ui.activate().await).await;
-                    ui.inner.borrow_mut().await.events.resume();
+                    ui.inner.borrow_mut().await.events.resume().await;
                 }
                 // ignore error
                 let _ = sender.send(Ok(code as _));

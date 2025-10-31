@@ -1,5 +1,4 @@
 use std::ops::Range;
-use std::io::{Write};
 use bstr::{BString};
 use std::collections::VecDeque;
 
@@ -156,7 +155,7 @@ impl Parser {
             })
     }
 
-    pub fn get_one_event<W: Write>(&mut self, dst: &mut W) -> Option<Event> {
+    pub fn get_one_event(&mut self) -> Option<(Event, BString)> {
         let c = self.buffer.front()?;
 
         let mut len = 1;
@@ -209,15 +208,15 @@ impl Parser {
                                 Some(Event::Key(KeyEvent{ key: Key::Function(suffix - b'P' + 1), modifiers }))
                             },
 
-                            ([Some(1), m @ ..], b'A'..=b'H') if matches!(m, [] | [None | Some(0..=7)]) => {
+                            (m @ ([] | [Some(1)] | [Some(1), None | Some(0..=7)]), b'A'..=b'H') => {
                                 let key = match suffix {
                                     b'A' => Key::Up,
                                     b'B' => Key::Down,
                                     b'C' => Key::Right,
                                     b'D' => Key::Left,
                                     b'E' => Key::Begin,
-                                    b'F' => Key::Home,
-                                    b'H' => Key::End,
+                                    b'F' => Key::End,
+                                    b'H' => Key::Home,
                                     _ => unreachable!(),
                                 };
                                 let modifiers = m.get(0).unwrap_or(&None).map_or(0, |m| m as u8 - b'0');
@@ -308,9 +307,12 @@ impl Parser {
             _ => Event::Unknown,
         };
 
-        for c in self.buffer.drain(..len) {
-            dst.write_all(&[c]).unwrap();
-        }
-        Some(event)
+        let buf = self.buffer.drain(..len).collect();
+        Some((event, buf))
     }
+
+    pub fn iter(&mut self) -> impl Iterator<Item=(Event, BString)> {
+        std::iter::from_fn(|| self.get_one_event())
+    }
+
 }

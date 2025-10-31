@@ -58,6 +58,11 @@ impl crossterm::Command for MoveDown {
     }
 }
 
+enum KeybindOutput {
+    String(BString),
+    Value(Result<bool>),
+}
+
 pub struct UiInner {
     pub tui: crate::tui::Tui,
 
@@ -249,21 +254,9 @@ impl Ui {
     }
 
     pub async fn handle_event(&mut self, event: Event, event_buffer: BString) -> Result<bool> {
-
-        if let Event::Key(event @ KeyEvent{key, modifiers}) = event {
+        if let Event::Key(event) = event {
             EventCallbacks::trigger_key_callbacks(self, event.into()).await;
-
-            let callback = self.inner.borrow().await.keybinds
-                .iter()
-                .rev()
-                .find_map(|k| k.inner.get(&(key, modifiers)))
-                .cloned();
-            if let Some(callback) = callback {
-                self.call_lua_fn(true, callback, ()).await;
-                return Ok(true)
-            }
-
-            if let Some(result) = self.try_zle_keybinding(event_buffer.as_ref()).await {
+            if let Some(result) = self.handle_key(event, event_buffer.as_ref()).await {
                 let result = result?;
                 EventCallbacks::trigger_buffer_change_callbacks(self, ()).await;
                 self.draw().await?;
@@ -271,42 +264,7 @@ impl Ui {
             }
 
         }
-
-        match event {
-
-            Event::Key(KeyEvent{ key: Key::Escape, .. }) => {
-                nix::sys::signal::kill(nix::unistd::Pid::from_raw(0), nix::sys::signal::Signal::SIGTERM)?;
-                for pid in self.inner.borrow().await.threads.iter() {
-                    nix::sys::signal::kill(*pid, nix::sys::signal::Signal::SIGINT)?;
-                }
-            },
-
-            Event::Key(KeyEvent{ key: Key::Char(c), modifiers }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
-                {
-                    {
-                        let mut ui = self.inner.borrow_mut().await;
-                        let mut buf = [0; 4];
-                        ui.buffer.insert_at_cursor(c.encode_utf8(&mut buf).as_bytes());
-                    }
-
-                    EventCallbacks::trigger_buffer_change_callbacks(self, ()).await;
-                }
-
-                self.draw().await?;
-            },
-
-            Event::Key(KeyEvent{ key: Key::Enter, modifiers }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
-                return self.accept_line().await;
-            },
-
-            Event::BracketedPaste(data) => {
-                let data = self.lua.create_string(data)?;
-                EventCallbacks::trigger_paste_callbacks(self, data).await;
-            },
-
-            _ => {},
-        }
-
+        self.handle_key_default(event, event_buffer.as_ref()).await?;
         Ok(true)
     }
 
@@ -548,9 +506,77 @@ impl Ui {
         Ok(())
     }
 
-    async fn try_zle_keybinding(&mut self, key: &BStr) -> Option<Result<bool>> {
+    async fn handle_key(&mut self, event: KeyEvent, buf: &BStr) -> Option<Result<bool>> {
+        let mut mapping = match self.handle_key_simple(event, buf).await? {
+            KeybindOutput::Value(x) => return Some(x),
+            KeybindOutput::String(string) => string,
+        };
+
+        // shucks, gotta do recursion
+        let mut success = true;
+        for _hop in 0..20 {
+            let mut parser = crate::keybind::parser::Parser::new();
+            parser.feed(mapping.as_ref());
+            mapping.clear();
+            for (event, buf) in parser.iter() {
+                if let Event::Key(event) = event {
+                    match self.handle_key_simple(event, buf.as_ref()).await {
+                        Some(KeybindOutput::Value(x)) => {
+                            if let Ok(x) = x {
+                                success = success && x;
+                                continue
+                            } else {
+                                return Some(x) // error
+                            }
+                        },
+                        Some(KeybindOutput::String(mut string)) => {
+                            mapping.append(&mut string);
+                            continue
+                        },
+                        None => (),
+                    }
+                }
+
+                let x = self.handle_key_default(event, buf.as_ref()).await;
+                if let Ok(x) = x {
+                    success = success && x;
+                } else {
+                    return Some(x) // error
+                }
+            }
+
+            if mapping.is_empty() {
+                return Some(Ok(success))
+            }
+        }
+
+        // TODO we still have a mapping
+        // let mut ui = self.inner.borrow_mut().await;
+        // ui.buffer.insert_at_cursor(string.as_ref());
+        // return Some(Ok(true))
+
+        Some(Ok(true))
+    }
+
+    async fn handle_key_simple(&mut self, event: KeyEvent, buf: &BStr) -> Option<KeybindOutput> {
+        // look for a lua callback
+        let callback = self.inner.borrow().await.keybinds
+            .iter()
+            .rev()
+            .find_map(|k| k.inner.get(&(event.key, event.modifiers)))
+            .cloned();
+        if let Some(callback) = callback {
+            self.call_lua_fn(true, callback, ()).await;
+            return Some(KeybindOutput::Value(Ok(true)))
+        }
+
         let mut shell = self.shell.lock().await;
-        match shell.get_keybinding(key.into())? {
+        // look for a zle widget
+        match shell.get_keybinding(buf)? {
+            KeybindValue::String(string) => {
+                // recurse
+                return Some(KeybindOutput::String(string))
+            },
             KeybindValue::Widget(widget) => {
                 // skip not found or where we have our own impl
                 if widget.is_self_insert() || widget.is_undefined_key() {
@@ -559,7 +585,7 @@ impl Ui {
                 // need to run our accept_line with a trampoline
                 if widget.is_accept_line() {
                     drop(shell);
-                    return Some(self.accept_line().await);
+                    return Some(KeybindOutput::Value(self.accept_line().await));
                 }
 
                 // execute the widget
@@ -569,7 +595,7 @@ impl Ui {
                 let cursor = buffer.len() + 1;
 
                 shell.set_zle_buffer(buffer.clone(), cursor as _);
-                shell.set_lastchar(key);
+                shell.set_lastchar(buf);
                 shell.exec_zle_widget(widget, [].into_iter());
                 let (buffer, cursor) = shell.get_zle_buffer();
 
@@ -579,19 +605,46 @@ impl Ui {
                 if shell.has_accepted_line() {
                     drop(shell);
                     drop(ui);
-                    return Some(self.accept_line().await);
+                    return Some(KeybindOutput::Value(self.accept_line().await))
                 }
 
-                Some(Ok(true))
-            },
-            KeybindValue::String(string) => {
-                // i assume this is text we can just insert into the buffer
-                let mut ui = self.inner.borrow_mut().await;
-                ui.buffer.insert_at_cursor(string.as_ref());
-                Some(Ok(true))
+                return Some(KeybindOutput::Value(Ok(true)))
             },
         }
+    }
 
+    async fn handle_key_default(&mut self, event: Event, _buf: &BStr) -> Result<bool> {
+        match event {
+
+            Event::Key(KeyEvent{ key: Key::Escape, .. }) => {
+                nix::sys::signal::kill(nix::unistd::Pid::from_raw(0), nix::sys::signal::Signal::SIGTERM)?;
+                for pid in self.inner.borrow().await.threads.iter() {
+                    nix::sys::signal::kill(*pid, nix::sys::signal::Signal::SIGINT)?;
+                }
+            },
+
+            Event::Key(KeyEvent{ key: Key::Char(c), modifiers }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
+                {
+                    let mut ui = self.inner.borrow_mut().await;
+                    let mut buf = [0; 4];
+                    ui.buffer.insert_at_cursor(c.encode_utf8(&mut buf).as_bytes());
+                }
+                EventCallbacks::trigger_buffer_change_callbacks(self, ()).await;
+                self.draw().await?;
+            },
+
+            Event::Key(KeyEvent{ key: Key::Enter, modifiers }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
+                return self.accept_line().await;
+            },
+
+            Event::BracketedPaste(data) => {
+                let data = self.lua.create_string(data)?;
+                EventCallbacks::trigger_paste_callbacks(self, data).await;
+            },
+
+            _ => (),
+        }
+        Ok(true)
     }
 
 }

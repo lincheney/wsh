@@ -57,4 +57,8 @@ i wish i could have
 * [ ] remove extra zle prompt after accept line
 * [ ] lag when exiting. does it happen in release?
 * [ ] calling exit within widget causes hang
+* [ ] magic space for completion
+* [ ] snippets?
+* [x] recursive keymaps
+* [ ] recursive keymaps in lua
 * [ ]

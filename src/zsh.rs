@@ -194,32 +194,18 @@ pub enum KeybindValue {
     Widget(widget::ZleWidget),
 }
 
-pub fn get_keybinding(key: &BStr, recursive: bool) -> Option<KeybindValue> {
+pub fn get_keybinding(key: &BStr) -> Option<KeybindValue> {
     let mut strp: *mut c_char = std::ptr::null_mut();
-    let mut key = metafy(key.into());
-    let mut hops = 20;
+    let key = metafy(key.into());
 
     let keymap = unsafe{ NonNull::new(bindings::localkeymap).map_or(bindings::curkeymap, |x| x.as_ptr()) };
-
-    loop {
-        let keybind = unsafe{ bindings::keybind(keymap, key, &raw mut strp) };
-        if let Some(keybind) = NonNull::new(keybind) {
-            return Some(KeybindValue::Widget(ZleWidget::new(keybind)))
-        }
-        if strp.is_null() {
-            return None
-        }
-        let strp = unsafe{ CStr::from_ptr(strp) }.to_bytes();
-        if !recursive {
-            return Some(KeybindValue::String(strp.into()))
-        }
-        hops -= 1;
-        if hops == 0 {
-            // string inserting another one too many times
-            return None
-        }
-        key = metafy(strp);
+    let keybind = unsafe{ bindings::keybind(keymap, key, &raw mut strp) };
+    if let Some(keybind) = NonNull::new(keybind) {
+        return Some(KeybindValue::Widget(ZleWidget::new(keybind)))
     }
+    let strp = NonNull::new(strp)?;
+    let strp = unsafe{ CStr::from_ptr(strp.as_ptr()) }.to_bytes();
+    Some(KeybindValue::String(strp.into()))
 }
 
 pub fn exec_zle_widget<'a, I: Iterator<Item=&'a BStr> + ExactSizeIterator>(widget: ZleWidget, args: I) -> c_int {

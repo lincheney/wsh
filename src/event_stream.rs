@@ -1,5 +1,4 @@
 use anyhow::Result;
-use std::io::{Cursor};
 use std::os::fd::AsRawFd;
 use std::io::Read;
 use tokio::sync::{mpsc, oneshot, watch};
@@ -70,7 +69,6 @@ impl EventStream {
             let mut paused = paused.clone();
             tokio::task::spawn(async move {
                 let mut buf = [0; 1024];
-                let mut event_buffer = Cursor::new(vec![]);
                 loop {
                     tokio::select!(
 
@@ -84,7 +82,7 @@ impl EventStream {
                                 Ok(n) => {
                                     parser.feed(&buf[..n]);
                                     log::debug!("DEBUG(bypass)\t{}\t= {:?}", stringify!(bstr::BString::from(&buf[..n])), bstr::BString::from(&buf[..n]));
-                                    while let Some(event) = parser.get_one_event(&mut event_buffer) {
+                                    for (event, event_buffer) in parser.iter() {
                                         log::debug!("DEBUG(timmy) \t{}\t= {:?}", stringify!(event), event);
                                         match event {
                                             parser::Event::CursorPosition{x, y} => {
@@ -98,8 +96,7 @@ impl EventStream {
                                                 }
                                             },
                                             _ => {
-                                                event_sender.send((event, event_buffer.into_inner()))?;
-                                                event_buffer = Cursor::new(vec![]);
+                                                event_sender.send((event, event_buffer))?;
                                             },
                                         }
                                     }

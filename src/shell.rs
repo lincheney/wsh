@@ -293,7 +293,7 @@ impl<'a> ShellInner<'a> {
 
     pub fn get_keybinding(&mut self, key: &BStr) -> Option<KeybindValue> {
         // TODO recursive keymaps don't work
-        zsh::get_keybinding(key, false)
+        zsh::get_keybinding(key)
     }
 
     pub fn exec_zle_widget<'b, I: Iterator<Item=&'b BStr> + ExactSizeIterator>(&mut self, widget: zsh::ZleWidget, args: I) -> i32 {
