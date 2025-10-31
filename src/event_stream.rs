@@ -160,17 +160,17 @@ impl EventStream {
                 },
                 InputMessage::Exit(code, result) => {
                     if let Some(result) = result {
-                        result.send(());
+                        let _ = result.send(());
                     }
                     return Ok(code)
                 },
                 InputMessage::Pause(result) => {
                     pauser.send(true)?;
-                    result.send(());
+                    let _ = result.send(());
                 },
                 InputMessage::Resume(result) => {
                     pauser.send(false)?;
-                    result.send(());
+                    let _ = result.send(());
                 },
             }
         }

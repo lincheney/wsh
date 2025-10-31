@@ -13,9 +13,8 @@ use crate::keybind::parser::{Event, KeyEvent, Key, KeyModifiers};
 
 use crossterm::{
     terminal::{Clear, ClearType, BeginSynchronizedUpdate, EndSynchronizedUpdate},
-    cursor::{self, position, MoveToColumn},
+    cursor::{self, MoveToColumn},
     event,
-    // event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     style,
     execute,
     queue,

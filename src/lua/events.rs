@@ -41,11 +41,13 @@ macro_rules! event_types {
                 }
             }
 
+            #[allow(dead_code)]
             pub fn [<has_ $name _callbacks>](&self) -> bool {
                 !self.[<callbacks_ $name>].is_empty()
             }
         )*
 
+            #[allow(dead_code)]
             fn get_callbacks(&self, typ: EventType) -> &Vec<(usize, Function)> {
                 match typ {
                 $( EventType::$name => &self.[<callbacks_ $name>], )*
