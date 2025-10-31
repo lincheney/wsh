@@ -301,13 +301,19 @@ impl<'a> ShellInner<'a> {
     }
 
     pub fn set_lastchar(&mut self, char: &[u8]) {
-        let mut c: i32 = 0;
-        for i in char.iter().take(4) {
-            c = (c << 8) + *i as i32;
-        }
+        let char: u32 = match std::str::from_utf8(char) {
+            Ok(c) => c.chars().next().unwrap().into(),
+            Err(e) => if e.valid_up_to() == 0 {
+                // invalid utf8, use the first byte? or space?
+                *char.get(0).unwrap_or(&b' ') as _
+            } else {
+                std::str::from_utf8(&char[..e.valid_up_to()]).unwrap().chars().next().unwrap().into()
+            },
+        };
+        let char: i32 = char as _;
         unsafe {
-            zsh::lastchar = c;
-            zsh::lastchar_wide = c;
+            zsh::lastchar = char;
+            zsh::lastchar_wide = char;
         }
     }
 
