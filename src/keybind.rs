@@ -1,3 +1,4 @@
+pub mod parser;
 use std::io::{Write, Cursor};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, KeyEventState};
 

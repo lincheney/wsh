@@ -161,14 +161,11 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     command.stdout(args.stdout);
     command.stderr(args.stderr);
 
-    let lock = if args.foreground {
+    if args.foreground {
         // this essentially locks ui
-        let lock = ui.inner.borrow_mut().await.events.lock_owned().await;
+        ui.inner.borrow_mut().await.events.pause().await;
         ui.deactivate().await?;
-        Some(lock)
-    } else {
-        None
-    };
+    }
 
     let mut proc = command.spawn()?;
     let pid = proc.id().unwrap();
@@ -198,9 +195,9 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
             },
         };
 
-        if let Some(lock) = lock {
+        if args.foreground {
             ui.report_error(true, ui.activate().await).await;
-            drop(lock);
+            ui.inner.borrow_mut().await.events.resume().await;
         }
         // ignore error
         let _ = sender.send(result.map(|r| r.into_raw()));
@@ -239,14 +236,11 @@ async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue>
 
     let (sender, receiver) = oneshot::channel();
 
-    let mut lock = if args.foreground {
+    if args.foreground {
         // this essentially locks ui
-        let lock = ui.inner.borrow_mut().await.events.lock_owned().await;
+        ui.inner.borrow_mut().await.events.pause().await;
         ui.deactivate().await?;
-        Some(lock)
-    } else {
-        None
-    };
+    }
 
     macro_rules! stdio_pipe {
         ($name:ident, true) => (
@@ -300,8 +294,9 @@ async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue>
                     ui.report_error(true, restore_fd(stderr, std::io::stderr())).await;
                 }
 
-                if lock.take().is_some() {
+                if args.foreground {
                     ui.report_error(true, ui.activate().await).await;
+                    ui.inner.borrow_mut().await.events.resume();
                 }
                 // ignore error
                 let _ = sender.send(Ok(code as _));

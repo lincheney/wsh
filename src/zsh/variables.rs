@@ -211,10 +211,8 @@ impl Variable {
         Ok(
             if self.param().node.flags & (zsh_sys::PM_EFLOAT | zsh_sys::PM_FFLOAT) as c_int != 0 {
                 Some(unsafe{ (*self.param().gsu.f).getfn.ok_or(anyhow::anyhow!("gsu.f.getfn is missing"))?(self.param()) })
-            } else if let Some(val) = self.try_as_int()? {
-                Some(val as _)
             } else {
-                None
+                self.try_as_int()?.map(|val| val as _)
             }
         )
     }

@@ -1,8 +1,8 @@
+use std::os::fd::AsRawFd;
 use std::ops::DerefMut;
 use std::sync::{Mutex};
 use anyhow::Result;
 use std::ops::Deref;
-use std::os::fd::AsRawFd;
 use std::os::raw::{c_char, c_int};
 use std::ptr::null_mut;
 use std::sync::{LazyLock, OnceLock};
@@ -42,27 +42,33 @@ async fn get_ui() -> Result<(ui::Ui, bool)> {
             .format_timestamp_millis()
             .init();
 
-        // crossterm will default to opening fd 0
-        // but zsh will mangle this halfway through
-        // so trick crossterm into opening a separate fd to the tty
-        let devnull = std::fs::File::open("/dev/null").unwrap();
-        let old_stdin = nix::unistd::dup(0)?;
-        nix::unistd::dup2(devnull.as_raw_fd(), 0)?;
+        // // crossterm will default to opening fd 0
+        // // but zsh will mangle this halfway through
+        // // so trick crossterm into opening a separate fd to the tty
+        // let devnull = std::fs::File::open("/dev/null").unwrap();
+        // let old_stdin = nix::unistd::dup(0)?;
+        // nix::unistd::dup2(devnull.as_raw_fd(), 0)?;
 
-        let (mut events, event_locker) = event_stream::EventStream::new();
+        let (events, event_ctrl) = event_stream::EventStream::new();
 
-        let mut ui = ui::Ui::new(event_locker).await?;
+        let mut ui = ui::Ui::new(event_ctrl).await?;
         ui.activate().await?;
         ui.start_cmd().await?;
         *store = Some(ui.clone());
 
-        drop(devnull);
-        nix::unistd::dup2(old_stdin, 0)?;
-        nix::unistd::close(old_stdin)?;
+        // drop(devnull);
+        // nix::unistd::dup2(old_stdin, 0)?;
+        // nix::unistd::close(old_stdin)?;
 
-        let mut event_ui = ui.clone();
+        let event_ui = ui.clone();
         tokio::task::spawn(async move {
-            events.run(&mut event_ui).await
+            let tty = std::fs::File::open("/dev/tty").unwrap();
+            let raw_fd = tty.as_raw_fd();
+            // 3. Set non-blocking mode
+            let flags = nix::fcntl::fcntl(raw_fd, nix::fcntl::FcntlArg::F_GETFL).unwrap();
+            let new_flags = nix::fcntl::OFlag::from_bits_truncate(flags) | nix::fcntl::OFlag::O_NONBLOCK;
+            nix::fcntl::fcntl(raw_fd, nix::fcntl::FcntlArg::F_SETFL(new_flags)).unwrap();
+            events.run(tty, event_ui).await.unwrap();
         });
 
         Ok((ui, true))

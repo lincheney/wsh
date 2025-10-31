@@ -2,7 +2,6 @@ use anyhow::Result;
 use mlua::{prelude::*, Function};
 use serde::{Deserialize, Serialize};
 use crate::ui::Ui;
-use crossterm::event;
 
 macro_rules! event_types {
     ($( $name:ident($($arg:ty),*), )*) => (
@@ -91,13 +90,13 @@ pub struct KeyEvent {
     alt: bool,
 }
 
-impl From<event::KeyEvent> for KeyEvent {
-    fn from(ev: event::KeyEvent) -> Self {
-        Self{
-            key: ev.code.to_string(),
-            control: ev.modifiers.contains(event::KeyModifiers::CONTROL),
-            shift: ev.modifiers.contains(event::KeyModifiers::SHIFT),
-            alt: ev.modifiers.contains(event::KeyModifiers::ALT),
+impl From<crate::keybind::parser::KeyEvent> for KeyEvent {
+    fn from(ev: crate::keybind::parser::KeyEvent) -> Self {
+        Self {
+            key: ev.key.to_string(),
+            control: ev.modifiers.contains(crate::keybind::parser::KeyModifiers::CONTROL),
+            shift: ev.modifiers.contains(crate::keybind::parser::KeyModifiers::SHIFT),
+            alt: ev.modifiers.contains(crate::keybind::parser::KeyModifiers::ALT),
         }
     }
 }

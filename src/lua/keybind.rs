@@ -2,13 +2,13 @@ use std::collections::HashMap;
 use std::default::Default;
 use anyhow::Result;
 use mlua::{prelude::*, Function};
-use crossterm::event::{KeyCode, KeyModifiers};
+use crate::keybind::parser::{Key, KeyModifiers};
 use crate::ui::{Ui, ThreadsafeUiInner};
 
 #[derive(Default)]
 pub struct KeybindMapping {
     id: usize,
-    pub inner: HashMap<(KeyCode, KeyModifiers), Function>,
+    pub inner: HashMap<(Key, KeyModifiers), Function>,
 }
 
 
@@ -37,33 +37,32 @@ async fn set_keymap(mut ui: Ui, _lua: Lua, (key, callback, layer): (String, Func
     }
 
     let key = match key {
-        "bs" if special => KeyCode::Backspace,
-        "cr" if special => KeyCode::Enter,
-        "left" if special => KeyCode::Left,
-        "right" if special => KeyCode::Right,
-        "up" if special => KeyCode::Up,
-        "down" if special => KeyCode::Down,
-        "home" if special => KeyCode::Home,
-        "end" if special => KeyCode::End,
-        "pageup" if special => KeyCode::PageUp,
-        "pagedown" if special => KeyCode::PageDown,
-        "tab" if special => KeyCode::Tab,
-        "backtab" if special => KeyCode::BackTab,
-        "delete" if special => KeyCode::Delete,
-        "insert" if special => KeyCode::Insert,
-        "null" if special => KeyCode::Null,
-        "esc" if special => KeyCode::Esc,
-        "capslock" if special => KeyCode::CapsLock,
-        "scrolllock" if special => KeyCode::ScrollLock,
-        "numlock" if special => KeyCode::NumLock,
-        "printscreen" if special => KeyCode::PrintScreen,
-        "pause" if special => KeyCode::Pause,
-        "menu" if special => KeyCode::Menu,
+        "bs" if special => Key::Backspace,
+        "cr" if special => Key::Enter,
+        "left" if special => Key::Left,
+        "right" if special => Key::Right,
+        "up" if special => Key::Up,
+        "down" if special => Key::Down,
+        "home" if special => Key::Home,
+        "end" if special => Key::End,
+        "pageup" if special => Key::Pageup,
+        "pagedown" if special => Key::Pagedown,
+        "tab" if special => Key::Char('\t'),
+        // "backtab" if special => Key::BackTab,
+        "delete" if special => Key::Delete,
+        "insert" if special => Key::Insert,
+        "esc" if special => Key::Escape,
+        // "capslock" if special => Key::CapsLock,
+        // "scrolllock" if special => Key::ScrollLock,
+        // "numlock" if special => Key::NumLock,
+        // "printscreen" if special => Key::PrintScreen,
+        // "pause" if special => Key::Pause,
+        // "menu" if special => Key::Menu,
 
-        "lt" if special => KeyCode::Char('<'),
-        key if key.len() == 1 && &key[0..1] != "<" && key.is_ascii() => KeyCode::Char(key.chars().next().unwrap()),
+        "lt" if special => Key::Char('<'),
+        key if key.len() == 1 && &key[0..1] != "<" && key.is_ascii() => Key::Char(key.chars().next().unwrap()),
         key if special && key.starts_with("f") && key[1..].parse::<u8>().is_ok() => {
-            KeyCode::F(key[1..].parse::<u8>().unwrap())
+            Key::Function(key[1..].parse().unwrap())
         },
 
         _ => {

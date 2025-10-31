@@ -53,7 +53,7 @@ i wish i could have
 * [ ] silence parse warnings
 * [ ] custom buffer rendering, ghost text etc
 * [x] fix segfault when letting zle exit by itself
-* [ ] try switch to termion
+* [ ] ~~try switch to termion~~
 * [ ] remove extra zle prompt after accept line
 * [ ] lag when exiting. does it happen in release?
 * [ ] calling exit within widget causes hang

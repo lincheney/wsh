@@ -1,125 +1,182 @@
-use std::sync::Arc;
-use std::default::Default;
-use futures::StreamExt;
-use tokio::sync::{Mutex, MutexGuard, OwnedMutexGuard, RwLock, mpsc};
+use anyhow::Result;
+use std::io::{Cursor};
+use std::os::fd::AsRawFd;
+use std::io::Read;
+use tokio::sync::{mpsc, oneshot, watch};
+use tokio::io::unix::AsyncFd;
+use crate::keybind::parser;
 
-#[derive(Default)]
-struct Lock {
-    inner: Arc<Mutex<UnlockedEvents>>,
-    outer: RwLock<()>,
+#[derive(Debug)]
+enum InputMessage {
+    CursorPosition(oneshot::Sender<(usize, usize)>),
+    Pause(oneshot::Sender<()>),
+    Resume(oneshot::Sender<()>),
+    Exit(i32, Option<oneshot::Sender<()>>),
 }
 
-impl Lock {
-    async fn lock_exclusive(&self) -> MutexGuard<'_, UnlockedEvents> {
-        let _outer = self.outer.write().await;
-        self.inner.lock().await
+#[derive(Clone)]
+pub struct EventController {
+    queue: mpsc::UnboundedSender<InputMessage>,
+}
+
+impl EventController {
+    pub async fn pause(&mut self) {
+        let (sender, receiver) = oneshot::channel();
+        let _ = self.queue.send(InputMessage::Pause(sender));
+        receiver.await.unwrap()
+    }
+
+    pub async fn resume(&mut self) {
+        let (sender, receiver) = oneshot::channel();
+        let _ = self.queue.send(InputMessage::Resume(sender));
+        receiver.await.unwrap()
+    }
+
+    pub async fn get_cursor_position(&mut self) -> (usize, usize) {
+        let (sender, receiver) = oneshot::channel();
+        let _ = self.queue.send(InputMessage::CursorPosition(sender)).unwrap();
+        receiver.await.unwrap()
+    }
+
+    pub async fn exit(&mut self, code: i32) {
+        let (sender, receiver) = oneshot::channel();
+        let _ = self.queue.send(InputMessage::Exit(code, Some(sender))).unwrap();
+        receiver.await.unwrap()
     }
 }
 
 pub struct EventStream {
-    lock: Arc<Lock>,
-    receiver: mpsc::UnboundedReceiver<()>,
-}
-
-#[derive(Default)]
-pub struct UnlockedEvents{
-    exit: Option<i32>,
-}
-
-impl UnlockedEvents {
-    pub fn get_cursor_position(&self) -> Result<(u16, u16), std::io::Error> {
-        loop {
-            // let now = std::time::SystemTime::now();
-            match crossterm::cursor::position() {
-                // Err(e) if now.elapsed().unwrap().as_millis() < 1500 && format!("{}", e) == "The cursor position could not be read within a normal duration" => {
-                    // // crossterm times out in 2s
-                    // // but it also fails on EINTR whereas we would like to retry
-                    // log::debug!("{:?}", e);
-                // },
-                x => return x,
-            }
-        }
-    }
-
-    pub fn exit(&mut self, code: i32) {
-        self.exit = Some(code);
-    }
-}
-
-pub struct EventLocker {
-    lock: Arc<Lock>,
-    sender: mpsc::UnboundedSender<()>,
-}
-
-impl EventLocker {
-    pub async fn lock(&mut self) -> MutexGuard<'_, UnlockedEvents> {
-        let _outer = self.lock.outer.read().await;
-        if let Ok(lock) = self.lock.inner.try_lock() {
-            return lock;
-        }
-        self.sender.send(()).unwrap();
-        self.lock.inner.lock().await
-    }
-
-    pub async fn lock_owned(&mut self) -> OwnedMutexGuard<UnlockedEvents> {
-        let _outer = self.lock.outer.read().await;
-        let inner = self.lock.inner.clone();
-        if let Ok(lock) = inner.clone().try_lock_owned() {
-            return lock;
-        }
-        self.sender.send(()).unwrap();
-        inner.lock_owned().await
-    }
-
+    queue: mpsc::UnboundedReceiver<InputMessage>,
 }
 
 impl EventStream {
-    pub fn new() -> (Self, EventLocker) {
-        let (sender, receiver) = mpsc::unbounded_channel::<()>();
-        let lock: Arc<Lock> = Arc::new(Default::default());
-        let stream = Self{ lock: lock.clone(), receiver };
-        let locker = EventLocker{ lock, sender };
-        (stream, locker)
+    pub fn new() -> (Self, EventController) {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        (
+            Self { queue: receiver },
+            EventController { queue: sender },
+        )
     }
 
-    pub async fn run(&mut self, ui: &mut crate::ui::Ui) -> anyhow::Result<i32> {
-        loop {
-            let mut lock = None;
-            let mut events = crossterm::event::EventStream::new();
+    pub async fn run<T: Read+AsRawFd+Send+Sync+'static>(mut self, file: T, mut ui: crate::ui::Ui) -> anyhow::Result<i32> {
+        let (event_sender, mut event_receiver) = mpsc::unbounded_channel();
+        let (pauser, mut paused) = watch::channel(false);
+        let (position_sender, mut position_receiver) = mpsc::unbounded_channel::<oneshot::Sender<_>>();
 
-            // keep looping over events until woken up
-            loop {
-                if lock.is_none() {
-                    // get an exclusive lock
-                    lock = Some(self.lock.lock_exclusive().await);
-                }
-                if let Some(exit_code) = lock.as_ref().unwrap().exit {
-                    return Ok(exit_code)
-                }
+        // read events
+        let _: tokio::task::JoinHandle<Result<()>> = {
+            let mut reader = AsyncFd::new(file)?;
+            let mut parser = parser::Parser::new();
+            let mut paused = paused.clone();
+            tokio::task::spawn(async move {
+                let mut buf = [0; 1024];
+                let mut event_buffer = Cursor::new(vec![]);
+                loop {
+                    tokio::select!(
 
-                tokio::select! {
-                    _ = self.receiver.recv() => {
-                        break;
-                    },
-                    e = events.next() => {
-                        drop(lock.take());
+                        guard = reader.readable() => {
+                            guard?.clear_ready();
+                            match reader.get_mut().read(&mut buf) {
+                                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => (),
+                                Ok(0) => return Ok(()),
+                                Err(err) => return Err(err)?,
 
-                        match e {
-                            Some(Ok(event)) => {
-                                if !ui.handle_event(event).await? {
-                                    return Ok(0)
-                                }
+                                Ok(n) => {
+                                    parser.feed(&buf[..n]);
+                                    log::debug!("DEBUG(bypass)\t{}\t= {:?}", stringify!(bstr::BString::from(&buf[..n])), bstr::BString::from(&buf[..n]));
+                                    while let Some(event) = parser.get_one_event(&mut event_buffer) {
+                                        log::debug!("DEBUG(timmy) \t{}\t= {:?}", stringify!(event), event);
+                                        match event {
+                                            parser::Event::CursorPosition{x, y} => {
+                                                log::debug!("DEBUG(damps) \t{}\t= {:?}", stringify!((x,y)), (x,y));
+                                                match position_receiver.try_recv() {
+                                                    Ok(sender) => {
+                                                        log::debug!("DEBUG(nadir) \t{}\t= {:?}", stringify!(sender), sender);
+                                                        let _ = sender.send((x, y));
+                                                    },
+                                                    Err(_) => (),
+                                                }
+                                            },
+                                            _ => {
+                                                event_sender.send((event, event_buffer.into_inner()))?;
+                                                event_buffer = Cursor::new(vec![]);
+                                            },
+                                        }
+                                    }
+                                },
                             }
-                            Some(Err(event)) => { println!("Error: {:?}\r", event); },
-                            None => return Ok(0),
-                        }
-                        lock = Some(self.lock.lock_exclusive().await);
-                    }
-                };
-            };
+                        },
 
-            drop(events);
-            drop(lock);
+                        mut result = paused.changed() => loop {
+                            log::debug!("DEBUG(roll)  \t{}\t= {:?}", stringify!(result), result);
+                            match result {
+                                Err(_) => return Ok(()),
+                                Ok(()) => if !*paused.borrow_and_update() {
+                                    log::debug!("DEBUG(pass)  \t{}\t= {:?}", stringify!("resulme"), "resulme");
+                                    break;
+                                },
+                            }
+                            result = paused.changed().await;
+                        },
+
+                    );
+                }
+            })
+        };
+
+        // process events
+        let _: tokio::task::JoinHandle<Result<()>> = tokio::task::spawn(async move {
+            loop {
+                tokio::select!(
+                    item = event_receiver.recv() => {
+                        let Some((event, event_buffer)) = item else { return Ok(()) };
+                        if !ui.handle_event(event, event_buffer.into()).await? {
+                            return Ok(())
+                        }
+                    },
+
+                    mut result = paused.changed() => loop {
+                        match result {
+                            Err(_) => return Ok(()),
+                            Ok(()) => if !*paused.borrow_and_update() {
+                                break;
+                            },
+                        }
+                        result = paused.changed().await;
+                    },
+                );
+            }
+        });
+
+        // read messages
+        loop {
+            let msg = self.queue.recv().await;
+            log::debug!("DEBUG(domain)\t{}\t= {:?}", stringify!(msg), msg);
+            let msg = msg.unwrap_or(InputMessage::Exit(0, None));
+            match msg {
+                InputMessage::CursorPosition(result) => {
+                    position_sender.send(result)?;
+                    crossterm::execute!(
+                        std::io::stdout(),
+                        crossterm::style::Print("\x1b[6n"),
+                    )?;
+                },
+                InputMessage::Exit(code, result) => {
+                    if let Some(result) = result {
+                        result.send(());
+                    }
+                    return Ok(code)
+                },
+                InputMessage::Pause(result) => {
+                    pauser.send(true)?;
+                    result.send(());
+                },
+                InputMessage::Resume(result) => {
+                    pauser.send(false)?;
+                    result.send(());
+                },
+            }
         }
+
     }
 }

@@ -1,3 +1,4 @@
+use bstr::{BStr, BString};
 use std::time::Duration;
 use std::future::Future;
 use std::sync::{Arc, Weak as WeakArc, atomic::{AtomicBool, Ordering}};
@@ -8,11 +9,13 @@ use serde::{Deserialize};
 use mlua::prelude::*;
 use tokio::sync::RwLock;
 use anyhow::Result;
+use crate::keybind::parser::{Event, KeyEvent, Key, KeyModifiers};
 
 use crossterm::{
     terminal::{Clear, ClearType, BeginSynchronizedUpdate, EndSynchronizedUpdate},
     cursor::{self, position, MoveToColumn},
-    event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
+    event,
+    // event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
     style,
     execute,
     queue,
@@ -58,7 +61,7 @@ impl crossterm::Command for MoveDown {
 pub struct UiInner {
     pub tui: crate::tui::Tui,
 
-    pub events: crate::event_stream::EventLocker,
+    pub events: crate::event_stream::EventController,
     dirty: bool,
     pub keybinds: Vec<crate::lua::KeybindMapping>,
     pub keybind_layer_counter: usize,
@@ -121,7 +124,7 @@ crate::strong_weak_wrapper! {
 
 impl Ui {
 
-    pub async fn new(events: crate::event_stream::EventLocker) -> Result<Self> {
+    pub async fn new(events: crate::event_stream::EventController) -> Result<Self> {
         let lua = Lua::new();
         let lua_api = lua.create_table()?;
         lua.globals().set("wish", &lua_api)?;
@@ -245,22 +248,22 @@ impl Ui {
         }
     }
 
-    pub async fn handle_event(&mut self, event: Event) -> Result<bool> {
+    pub async fn handle_event(&mut self, event: Event, event_buffer: BString) -> Result<bool> {
 
-        if let Event::Key(key @ KeyEvent{code, modifiers, kind: event::KeyEventKind::Press, ..}) = event {
-            EventCallbacks::trigger_key_callbacks(self, key.into()).await;
+        if let Event::Key(event @ KeyEvent{key, modifiers}) = event {
+            EventCallbacks::trigger_key_callbacks(self, event.into()).await;
 
             let callback = self.inner.borrow().await.keybinds
                 .iter()
                 .rev()
-                .find_map(|k| k.inner.get(&(code, modifiers)))
+                .find_map(|k| k.inner.get(&(key, modifiers)))
                 .cloned();
             if let Some(callback) = callback {
                 self.call_lua_fn(true, callback, ()).await;
                 return Ok(true)
             }
 
-            if let Some(result) = self.try_zle_keybinding(key).await {
+            if let Some(result) = self.try_zle_keybinding(event_buffer.as_ref()).await {
                 let result = result?;
                 EventCallbacks::trigger_buffer_change_callbacks(self, ()).await;
                 self.draw().await?;
@@ -271,24 +274,14 @@ impl Ui {
 
         match event {
 
-            Event::Key(KeyEvent{
-                code: KeyCode::Esc,
-                modifiers: _,
-                kind: event::KeyEventKind::Press,
-                state: _,
-            }) => {
+            Event::Key(KeyEvent{ key: Key::Escape, .. }) => {
                 nix::sys::signal::kill(nix::unistd::Pid::from_raw(0), nix::sys::signal::Signal::SIGTERM)?;
                 for pid in self.inner.borrow().await.threads.iter() {
                     nix::sys::signal::kill(*pid, nix::sys::signal::Signal::SIGINT)?;
                 }
             },
 
-            Event::Key(KeyEvent{
-                code: KeyCode::Char(c),
-                modifiers,
-                kind: event::KeyEventKind::Press,
-                state: _,
-            }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
+            Event::Key(KeyEvent{ key: Key::Char(c), modifiers }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
                 {
                     {
                         let mut ui = self.inner.borrow_mut().await;
@@ -302,17 +295,12 @@ impl Ui {
                 self.draw().await?;
             },
 
-            Event::Key(KeyEvent{
-                code: KeyCode::Enter,
-                modifiers,
-                kind: event::KeyEventKind::Press,
-                state: _,
-            }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
+            Event::Key(KeyEvent{ key: Key::Enter, modifiers }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
                 return self.accept_line().await;
             },
 
-            Event::Paste(data) => {
-                let data = self.lua.create_string(data.as_bytes())?;
+            Event::BracketedPaste(data) => {
+                let data = self.lua.create_string(data)?;
                 EventCallbacks::trigger_paste_callbacks(self, data).await;
             },
 
@@ -364,7 +352,7 @@ impl Ui {
 
             if result.is_ok() {
                 // separate this bc it has an await
-                let lock_events = ui.events.lock().await;
+                ui.events.pause().await;
                 tokio::task::spawn(async {
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                     execute!(std::io::stdout(), EndSynchronizedUpdate)
@@ -372,16 +360,14 @@ impl Ui {
 
                 shell.clear_completion_cache();
                 self.trampoline.jump_out().await;
-
-                drop(lock_events);
-
+                ui.events.resume().await;
                 ui.reset(&mut shell);
                 self.is_running_process.store(false, Ordering::Relaxed);
 
-                let cursor = ui.events.lock().await.get_cursor_position();
+                let cursor = ui.events.get_cursor_position().await;
                 result = (|| {
                     // move down one line if not at start of line
-                    if cursor?.0 != 0 {
+                    if cursor.0 != 0 {
                         ui.size = crossterm::terminal::size()?;
                         queue!(ui.stdout, style::Print("\r\n"))?;
                     }
@@ -534,7 +520,7 @@ impl Ui {
 
         self.set_lua_async_fn("exit", |mut ui, _lua, code: Option<i32>| async move {
             let mut ui = ui.inner.borrow_mut().await;
-            ui.events.lock().await.exit(code.unwrap_or(0));
+            ui.events.exit(code.unwrap_or(0)).await;
             Ok(())
         })?;
 
@@ -562,10 +548,7 @@ impl Ui {
         Ok(())
     }
 
-    async fn try_zle_keybinding(&mut self, key: KeyEvent) -> Option<Result<bool>> {
-        let mut buf = [0; 128];
-        let key = crate::keybind::keyevent_to_bytes(key, &mut buf)?;
-
+    async fn try_zle_keybinding(&mut self, key: &BStr) -> Option<Result<bool>> {
         let mut shell = self.shell.lock().await;
         match shell.get_keybinding(key.into())? {
             KeybindValue::Widget(widget) => {
