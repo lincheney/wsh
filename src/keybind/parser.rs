@@ -219,7 +219,7 @@ impl Parser {
                                     b'H' => Key::Home,
                                     _ => unreachable!(),
                                 };
-                                let modifiers = m.get(0).unwrap_or(&None).map_or(0, |m| m as u8 - b'0');
+                                let modifiers = m.get(1).unwrap_or(&None).map_or(0, |m| m as u8 - b'0');
                                 let modifiers = KeyModifiers::from_bits_truncate(modifiers);
                                 Some(Event::Key(KeyEvent{ key, modifiers }))
                             },
@@ -266,7 +266,7 @@ impl Parser {
                                 };
 
                                 key.map(|key| {
-                                    let modifiers = m.get(0).unwrap_or(&None).map_or(0, |m| m as u8 - b'0');
+                                    let modifiers = m.first().unwrap_or(&None).map_or(0, |m| m as u8 - b'0');
                                     let modifiers = KeyModifiers::from_bits_truncate(modifiers);
                                     Event::Key(KeyEvent{ key, modifiers })
                                 })

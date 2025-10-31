@@ -574,21 +574,16 @@ impl Ui {
         match shell.get_keybinding(buf)? {
             KeybindValue::String(string) => {
                 // recurse
-                return Some(KeybindOutput::String(string))
+                Some(KeybindOutput::String(string))
+            },
+            // skip not found or where we have our own impl
+            KeybindValue::Widget(widget) if widget.is_self_insert() || widget.is_undefined_key() => None,
+            KeybindValue::Widget(widget) if widget.is_accept_line() => {
+                drop(shell);
+                Some(KeybindOutput::Value(self.accept_line().await))
             },
             KeybindValue::Widget(widget) => {
-                // skip not found or where we have our own impl
-                if widget.is_self_insert() || widget.is_undefined_key() {
-                    return None
-                }
-                // need to run our accept_line with a trampoline
-                if widget.is_accept_line() {
-                    drop(shell);
-                    return Some(KeybindOutput::Value(self.accept_line().await));
-                }
-
                 // execute the widget
-
                 let mut ui = self.inner.borrow_mut().await;
                 let buffer = ui.buffer.get_contents();
                 let cursor = buffer.len() + 1;
@@ -604,10 +599,10 @@ impl Ui {
                 if shell.has_accepted_line() {
                     drop(shell);
                     drop(ui);
-                    return Some(KeybindOutput::Value(self.accept_line().await))
+                    Some(KeybindOutput::Value(self.accept_line().await))
+                } else {
+                    Some(KeybindOutput::Value(Ok(true)))
                 }
-
-                return Some(KeybindOutput::Value(Ok(true)))
             },
         }
     }

@@ -33,13 +33,13 @@ impl EventController {
 
     pub async fn get_cursor_position(&mut self) -> (usize, usize) {
         let (sender, receiver) = oneshot::channel();
-        let _ = self.queue.send(InputMessage::CursorPosition(sender)).unwrap();
+        self.queue.send(InputMessage::CursorPosition(sender)).unwrap();
         receiver.await.unwrap()
     }
 
     pub async fn exit(&mut self, code: i32) {
         let (sender, receiver) = oneshot::channel();
-        let _ = self.queue.send(InputMessage::Exit(code, Some(sender))).unwrap();
+        self.queue.send(InputMessage::Exit(code, Some(sender))).unwrap();
         receiver.await.unwrap()
     }
 }
@@ -63,7 +63,7 @@ impl EventStream {
         let (position_sender, mut position_receiver) = mpsc::unbounded_channel::<oneshot::Sender<_>>();
 
         // read events
-        let _: tokio::task::JoinHandle<Result<()>> = {
+        let _x: tokio::task::JoinHandle<Result<()>> = {
             let mut reader = AsyncFd::new(file)?;
             let mut parser = parser::Parser::new();
             let mut paused = paused.clone();
@@ -87,12 +87,9 @@ impl EventStream {
                                         match event {
                                             parser::Event::CursorPosition{x, y} => {
                                                 log::debug!("DEBUG(damps) \t{}\t= {:?}", stringify!((x,y)), (x,y));
-                                                match position_receiver.try_recv() {
-                                                    Ok(sender) => {
-                                                        log::debug!("DEBUG(nadir) \t{}\t= {:?}", stringify!(sender), sender);
-                                                        let _ = sender.send((x, y));
-                                                    },
-                                                    Err(_) => (),
+                                                if let Ok(sender) = position_receiver.try_recv() {
+                                                    log::debug!("DEBUG(nadir) \t{}\t= {:?}", stringify!(sender), sender);
+                                                    let _ = sender.send((x, y));
                                                 }
                                             },
                                             _ => {
@@ -122,12 +119,12 @@ impl EventStream {
         };
 
         // process events
-        let _: tokio::task::JoinHandle<Result<()>> = tokio::task::spawn(async move {
+        let _x: tokio::task::JoinHandle<Result<()>> = tokio::task::spawn(async move {
             loop {
                 tokio::select!(
                     item = event_receiver.recv() => {
                         let Some((event, event_buffer)) = item else { return Ok(()) };
-                        if !ui.handle_event(event, event_buffer.into()).await? {
+                        if !ui.handle_event(event, event_buffer).await? {
                             return Ok(())
                         }
                     },

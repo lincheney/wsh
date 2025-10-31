@@ -42,23 +42,12 @@ async fn get_ui() -> Result<(ui::Ui, bool)> {
             .format_timestamp_millis()
             .init();
 
-        // // crossterm will default to opening fd 0
-        // // but zsh will mangle this halfway through
-        // // so trick crossterm into opening a separate fd to the tty
-        // let devnull = std::fs::File::open("/dev/null").unwrap();
-        // let old_stdin = nix::unistd::dup(0)?;
-        // nix::unistd::dup2(devnull.as_raw_fd(), 0)?;
-
         let (events, event_ctrl) = event_stream::EventStream::new();
 
         let mut ui = ui::Ui::new(event_ctrl).await?;
         ui.activate().await?;
         ui.start_cmd().await?;
         *store = Some(ui.clone());
-
-        // drop(devnull);
-        // nix::unistd::dup2(old_stdin, 0)?;
-        // nix::unistd::close(old_stdin)?;
 
         let event_ui = ui.clone();
         tokio::task::spawn(async move {
