@@ -29,6 +29,14 @@ bitflags::bitflags! {
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
+pub enum MouseButton {
+    Left,
+    Right,
+    Middle,
+    Button(usize),
+}
+
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
 pub enum Key {
     Char(char),
     Enter,
@@ -46,6 +54,8 @@ pub enum Key {
     End,
     Pageup,
     Pagedown,
+    MouseButton{x: usize, y: usize, button: MouseButton, release: bool},
+    MouseScroll{x: usize, y: usize, down: bool},
 }
 
 impl std::fmt::Display for Key {
@@ -67,6 +77,18 @@ impl std::fmt::Display for Key {
             Key::End => write!(f, "end"),
             Key::Pageup => write!(f, "pageup"),
             Key::Pagedown => write!(f, "pagedown"),
+            Key::MouseButton{button, release, ..} => match button {
+                MouseButton::Left if *release => write!(f, "leftmouse-release"),
+                MouseButton::Left => write!(f, "leftmouse"),
+                MouseButton::Right if *release => write!(f, "rightmouse-release"),
+                MouseButton::Right => write!(f, "rightmouse"),
+                MouseButton::Middle if *release => write!(f, "middlemouse-release"),
+                MouseButton::Middle => write!(f, "middlemouse"),
+                MouseButton::Button(n) if *release => write!(f, "button{n}-release"),
+                MouseButton::Button(n) => write!(f, "button{n}"),
+            },
+            Key::MouseScroll{down, ..} if *down => write!(f, "scrolldown"),
+            Key::MouseScroll{..} => write!(f, "scrollup"),
         }
     }
 }
@@ -155,10 +177,153 @@ impl Parser {
             })
     }
 
+    fn parse_sgr_mouse(&self) -> Option<(Event, usize)> {
+        // assuming prefix is \x1b[<
+
+        // find the end of this escape sequence
+        let len = 4 + self.buffer.range(3..).position(|c| !matches!(c, b'0'..=b'9' | b';'))?;
+        let release = match self.buffer[len-1] {
+            b'M' => false,
+            b'm' => true,
+            _ => return Some((Event::Unknown, len)),
+        };
+
+        let Some(([Some(button), Some(x), Some(y), ..], 3)) = self.read_params::<4>(3 .. len-1)
+            else {
+                return Some((Event::Unknown, len))
+            };
+
+        let mut modifiers = KeyModifiers::NONE;
+        if button & 4 > 0 {
+            modifiers.insert(KeyModifiers::SHIFT);
+        }
+        if button & 8 > 0 {
+            modifiers.insert(KeyModifiers::ALT);
+        }
+        if button & 16 > 0 {
+            modifiers.insert(KeyModifiers::CONTROL);
+        }
+        let event = match button & !4 & !8 & !16 {
+            0  => Event::Key(KeyEvent{ key: Key::MouseButton{x, y, button: MouseButton::Left, release}, modifiers }),
+            1  => Event::Key(KeyEvent{ key: Key::MouseButton{x, y, button: MouseButton::Middle, release}, modifiers }),
+            2  => Event::Key(KeyEvent{ key: Key::MouseButton{x, y, button: MouseButton::Right, release}, modifiers }),
+            64 => Event::Key(KeyEvent{ key: Key::MouseScroll{x, y, down: false}, modifiers }),
+            65 => Event::Key(KeyEvent{ key: Key::MouseScroll{x, y, down: true}, modifiers }),
+            x  => Event::Key(KeyEvent{ key: Key::MouseButton{x, y, button: MouseButton::Button(x & !64 & !128), release}, modifiers }),
+        };
+        Some((event, len))
+    }
+
+    fn parse_csi(&self) -> Option<(Event, usize)> {
+        // assuming prefix is \x1b[
+
+        // find the end of this escape sequence
+        let mut len = 3 + self.buffer.range(2..).position(|c| !matches!(c, b'0'..=b'9' | b';'))?;
+
+        // this is none if there are MORE than 4 params
+        let Some((params, param_len)) = self.read_params::<4>(2 .. len-1)
+            else {
+                return Some((Event::Unknown, len))
+            };
+
+        let params = &params[..param_len];
+        let suffix = self.buffer[len - 1];
+        let event;
+        let event = match (params, suffix) {
+            ([], b'I') => Event::Focus(true),
+            ([], b'O') => Event::Focus(false),
+
+            ([], b'<') => {
+                (event, len) = self.parse_sgr_mouse()?;
+                event
+            },
+
+            ([Some(200)], b'~') => {
+                // bracketed paste
+                const PASTE_END: &[u8] = b"\x1b[201~";
+                len = 6 + PASTE_END.len() + self.find(6, PASTE_END)?;
+                Event::BracketedPaste(self.buffer.range(6 .. len - PASTE_END.len()).copied().collect())
+            },
+
+            ([Some(y), Some(x)], b'R') => Event::CursorPosition{x: *x, y: *y},
+
+            ([Some(0), m @ (None | Some(0..=7))], b'P'..=b'S') => {
+                let modifiers = KeyModifiers::from_bits_truncate(m.map_or(0, |m| m as u8 - b'0'));
+                Event::Key(KeyEvent{ key: Key::Function(suffix - b'P' + 1), modifiers })
+            },
+
+            (m @ ([] | [Some(1)] | [Some(1), None | Some(0..=7)]), b'A'..=b'H') => {
+                let key = match suffix {
+                    b'A' => Key::Up,
+                    b'B' => Key::Down,
+                    b'C' => Key::Right,
+                    b'D' => Key::Left,
+                    b'E' => Key::Begin,
+                    b'F' => Key::End,
+                    b'H' => Key::Home,
+                    _ => unreachable!(),
+                };
+                let modifiers = m.get(1).unwrap_or(&None).map_or(0, |m| m as u8 - b'0');
+                let modifiers = KeyModifiers::from_bits_truncate(modifiers);
+                Event::Key(KeyEvent{ key, modifiers })
+            },
+
+            ([Some(num), m @ .. ], b'~') if matches!(m, [] | [None | Some(0..=7)]) => {
+
+                let key = match num {
+                    2 => Key::Insert,
+                    3 => Key::Delete,
+                    5 => Key::Pageup,
+                    6 => Key::Pagedown,
+                    15 => Key::Function(5),
+                    17 => Key::Function(6),
+                    18 => Key::Function(7),
+                    19 => Key::Function(8),
+                    20 => Key::Function(9),
+                    21 => Key::Function(10),
+                    23 => Key::Function(11),
+                    24 => Key::Function(12),
+                    25 => Key::Function(13),
+                    26 => Key::Function(14),
+                    28 => Key::Function(15),
+                    29 => Key::Function(16),
+                    31 => Key::Function(17),
+                    32 => Key::Function(18),
+                    33 => Key::Function(19),
+                    34 => Key::Function(20),
+                    42 => Key::Function(21),
+                    43 => Key::Function(22),
+                    44 => Key::Function(23),
+                    45 => Key::Function(24),
+                    46 => Key::Function(25),
+                    47 => Key::Function(26),
+                    48 => Key::Function(27),
+                    49 => Key::Function(28),
+                    50 => Key::Function(29),
+                    51 => Key::Function(30),
+                    52 => Key::Function(31),
+                    53 => Key::Function(32),
+                    54 => Key::Function(33),
+                    55 => Key::Function(34),
+                    56 => Key::Function(35),
+                    _ => return Some((Event::Unknown, len)),
+                };
+
+                let modifiers = m.first().unwrap_or(&None).map_or(0, |m| m as u8 - b'0');
+                let modifiers = KeyModifiers::from_bits_truncate(modifiers);
+                Event::Key(KeyEvent{ key, modifiers })
+            },
+
+            _ => Event::Unknown,
+        };
+        Some((event, len))
+    }
+
     pub fn get_one_event(&mut self) -> Option<(Event, BString)> {
         let c = self.buffer.front()?;
 
         let mut len = 1;
+        let event;
         let event = match c {
             b'\r' | b'\n'       => Key::Enter.into(),
             b'\x7f'             => Key::Backspace.into(),
@@ -182,105 +347,12 @@ impl Parser {
 
             b'\x1b' => match self.buffer.get(1) {
                 Some(b'[') => {
-                    // find the end of this escape sequence
-                    len = 3 + self.buffer.range(2..).position(|c| !matches!(c, b'0'..=b'9' | b';'))?;
-                    log::debug!("DEBUG(fast)  \t{}\t= {:?}", stringify!(self.buffer), self.buffer);
-
-                    // this is none if there are MORE than 4 params
-                    if let Some((params, param_len)) = self.read_params::<4>(2 .. len-1) {
-                        let params = &params[..param_len];
-                        let suffix = self.buffer[len - 1];
-                        match (params, suffix) {
-                            ([], b'I') => Some(Event::Focus(true)),
-                            ([], b'O') => Some(Event::Focus(false)),
-
-                            ([Some(200)], b'~') => {
-                                // bracketed paste
-                                const PASTE_END: &[u8] = b"\x1b[201~";
-                                len = 6 + PASTE_END.len() + self.find(6, PASTE_END)?;
-                                Some(Event::BracketedPaste(self.buffer.range(6 .. len - PASTE_END.len()).copied().collect()))
-                            },
-
-                            ([Some(y), Some(x)], b'R') => Some(Event::CursorPosition{x: *x, y: *y}),
-
-                            ([Some(0), m @ (None | Some(0..=7))], b'P'..=b'S') => {
-                                let modifiers = KeyModifiers::from_bits_truncate(m.map_or(0, |m| m as u8 - b'0'));
-                                Some(Event::Key(KeyEvent{ key: Key::Function(suffix - b'P' + 1), modifiers }))
-                            },
-
-                            (m @ ([] | [Some(1)] | [Some(1), None | Some(0..=7)]), b'A'..=b'H') => {
-                                let key = match suffix {
-                                    b'A' => Key::Up,
-                                    b'B' => Key::Down,
-                                    b'C' => Key::Right,
-                                    b'D' => Key::Left,
-                                    b'E' => Key::Begin,
-                                    b'F' => Key::End,
-                                    b'H' => Key::Home,
-                                    _ => unreachable!(),
-                                };
-                                let modifiers = m.get(1).unwrap_or(&None).map_or(0, |m| m as u8 - b'0');
-                                let modifiers = KeyModifiers::from_bits_truncate(modifiers);
-                                Some(Event::Key(KeyEvent{ key, modifiers }))
-                            },
-
-                            ([Some(num), m @ .. ], b'~') if matches!(m, [] | [None | Some(0..=7)]) => {
-
-                                let key = match num {
-                                    2 => Some(Key::Insert),
-                                    3 => Some(Key::Delete),
-                                    5 => Some(Key::Pageup),
-                                    6 => Some(Key::Pagedown),
-                                    15 => Some(Key::Function(5)),
-                                    17 => Some(Key::Function(6)),
-                                    18 => Some(Key::Function(7)),
-                                    19 => Some(Key::Function(8)),
-                                    20 => Some(Key::Function(9)),
-                                    21 => Some(Key::Function(10)),
-                                    23 => Some(Key::Function(11)),
-                                    24 => Some(Key::Function(12)),
-                                    25 => Some(Key::Function(13)),
-                                    26 => Some(Key::Function(14)),
-                                    28 => Some(Key::Function(15)),
-                                    29 => Some(Key::Function(16)),
-                                    31 => Some(Key::Function(17)),
-                                    32 => Some(Key::Function(18)),
-                                    33 => Some(Key::Function(19)),
-                                    34 => Some(Key::Function(20)),
-                                    42 => Some(Key::Function(21)),
-                                    43 => Some(Key::Function(22)),
-                                    44 => Some(Key::Function(23)),
-                                    45 => Some(Key::Function(24)),
-                                    46 => Some(Key::Function(25)),
-                                    47 => Some(Key::Function(26)),
-                                    48 => Some(Key::Function(27)),
-                                    49 => Some(Key::Function(28)),
-                                    50 => Some(Key::Function(29)),
-                                    51 => Some(Key::Function(30)),
-                                    52 => Some(Key::Function(31)),
-                                    53 => Some(Key::Function(32)),
-                                    54 => Some(Key::Function(33)),
-                                    55 => Some(Key::Function(34)),
-                                    56 => Some(Key::Function(35)),
-                                    _ => None,
-                                };
-
-                                key.map(|key| {
-                                    let modifiers = m.first().unwrap_or(&None).map_or(0, |m| m as u8 - b'0');
-                                    let modifiers = KeyModifiers::from_bits_truncate(modifiers);
-                                    Event::Key(KeyEvent{ key, modifiers })
-                                })
-                            },
-
-                            _ => None,
-                        }
-                    } else {
-                        None
-                    }
+                    (event, len) = self.parse_csi()?;
+                    event
                 },
                 Some(b'O') => {
                     let (array, array_len) = self.extract::<2>(0, 0);
-                    Some(match &array {
+                    match &array {
                         [c @ b'P'..=b'S', _] => { len = 3; Key::Function(c - b'P' + 1).into() },
                         [b'I', _] => { len = 3; Key::Char('\t').into() },
                         [b' ', _] => { len = 3; Key::Char(' ').into() },
@@ -298,11 +370,11 @@ impl Parser {
                         [b'3', b'~'] => { len = 4; Key::Delete.into() },
                         _ if array_len == 0 => return None,
                         _ => { len = 3; Event::Unknown },
-                    })
+                    }
                 },
                 // otherwise treat as a single escape key
-                _ => Some(Key::Escape.into()),
-            }.unwrap_or(Event::Unknown),
+                _ => Key::Escape.into(),
+            },
 
             _ => Event::Unknown,
         };
