@@ -513,9 +513,9 @@ impl Ui {
                 let buffer = ui.buffer.get_contents();
                 let cursor = buffer.len() + 1;
 
-                shell.set_zle_buffer(buffer.clone(), cursor as _);
-                shell.set_lastchar(buf);
-                shell.exec_zle_widget(widget, 1, [].into_iter());
+                widget.shell.set_zle_buffer(buffer.clone(), cursor as _);
+                widget.shell.set_lastchar(buf);
+                widget.exec(1, [].into_iter());
                 let (buffer, cursor) = shell.get_zle_buffer();
 
                 ui.buffer.set(Some(buffer.as_ref()), Some(cursor.unwrap_or(buffer.len() as _) as _));

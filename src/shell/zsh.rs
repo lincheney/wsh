@@ -1,5 +1,4 @@
 use std::os::raw::{c_char};
-use std::ptr::NonNull;
 use std::ffi::{CString, CStr};
 use std::os::raw::*;
 use std::default::Default;
@@ -168,30 +167,4 @@ pub fn get_zle_buffer() -> (BString, Option<i64>) {
         Ok(Some(cursor)) => (buffer, Some(cursor)),
         _ => (buffer, None),
     }
-}
-
-pub fn get_cwd() -> BString {
-    unsafe {
-        let ptr = zsh_sys::zgetcwd();
-        CStr::from_ptr(ptr).to_bytes().into()
-    }
-}
-
-pub enum KeybindValue {
-    String(BString),
-    Widget(widget::ZleWidget),
-}
-
-pub fn get_keybinding(key: &BStr) -> Option<KeybindValue> {
-    let mut strp: *mut c_char = std::ptr::null_mut();
-    let key = metafy(key.into());
-
-    let keymap = unsafe{ NonNull::new(bindings::localkeymap).map_or(bindings::curkeymap, |x| x.as_ptr()) };
-    let keybind = unsafe{ bindings::keybind(keymap, key, &raw mut strp) };
-    if let Some(keybind) = NonNull::new(keybind) {
-        return Some(KeybindValue::Widget(ZleWidget::new(keybind)))
-    }
-    let strp = NonNull::new(strp)?;
-    let strp = unsafe{ CStr::from_ptr(strp.as_ptr()) }.to_bytes();
-    Some(KeybindValue::String(strp.into()))
 }

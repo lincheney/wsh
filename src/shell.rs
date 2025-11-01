@@ -1,4 +1,5 @@
-use std::os::raw::{c_long};
+use std::ptr::NonNull;
+use std::os::raw::{c_long, c_char};
 use std::ffi::{CString, CStr};
 use std::default::Default;
 use std::sync::{Arc, Weak};
@@ -9,13 +10,18 @@ use bstr::{BStr, BString};
 
 mod externs;
 mod zsh;
-pub use zsh::KeybindValue;
 pub use zsh::{
     completion,
     history,
     variables,
 };
 use variables::Variable;
+
+pub enum KeybindValue<'a, 'b> {
+    String(BString),
+    Widget(zsh::ZleWidget<'a, 'b>),
+}
+
 
 struct Private;
 
@@ -277,7 +283,10 @@ impl<'a> ShellInner<'a> {
     }
 
     pub fn get_cwd(&mut self) -> BString {
-        zsh::get_cwd()
+        unsafe {
+            let ptr = zsh_sys::zgetcwd();
+            CStr::from_ptr(ptr).to_bytes().into()
+        }
     }
 
     pub fn set_zle_buffer(&mut self, buffer: BString, cursor: i64) {
@@ -298,13 +307,18 @@ impl<'a> ShellInner<'a> {
         }
     }
 
-    pub fn get_keybinding(&mut self, key: &BStr) -> Option<KeybindValue> {
-        // TODO recursive keymaps don't work
-        zsh::get_keybinding(key)
-    }
+    pub fn get_keybinding<'b>(&'b mut self, key: &BStr) -> Option<KeybindValue<'b, 'a>> {
+        let mut strp: *mut c_char = std::ptr::null_mut();
+        let key = zsh::metafy(key.into());
 
-    pub fn exec_zle_widget<'b, I: Iterator<Item=&'b BStr> + ExactSizeIterator>(&mut self, widget: zsh::ZleWidget, ntimes: u16, args: I) -> i32 {
-        widget.exec(ntimes, args)
+        let keymap = unsafe{ NonNull::new(zsh::localkeymap).map_or(zsh::curkeymap, |x| x.as_ptr()) };
+        let keybind = unsafe{ zsh::keybind(keymap, key, &raw mut strp) };
+        if let Some(keybind) = NonNull::new(keybind) {
+            return Some(KeybindValue::Widget(zsh::ZleWidget::new(keybind, self)))
+        }
+        let strp = NonNull::new(strp)?;
+        let strp = unsafe{ CStr::from_ptr(strp.as_ptr()) }.to_bytes();
+        Some(KeybindValue::String(strp.into()))
     }
 
     pub fn set_lastchar(&mut self, char: &[u8]) {

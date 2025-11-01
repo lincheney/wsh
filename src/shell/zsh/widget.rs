@@ -18,13 +18,17 @@ static IMMORTAL_UNDEFINED_KEY: OnceLock<Widget> = OnceLock::new();
 static ACCEPT_LINE: OnceLock<Widget> = OnceLock::new();
 static IMMORTAL_ACCEPT_LINE: OnceLock<Widget> = OnceLock::new();
 
-pub struct ZleWidget(NonNull<bindings::thingy>);
-unsafe impl Send for ZleWidget {}
-unsafe impl Sync for ZleWidget {}
+pub struct ZleWidget<'a, 'b> {
+    ptr: NonNull<bindings::thingy>,
+    pub shell: &'a mut crate::shell::ShellInner<'b>,
+}
 
-impl ZleWidget {
-    pub fn new(ptr: NonNull<bindings::thingy>) -> Self {
-        let w = Self(ptr);
+unsafe impl Send for ZleWidget<'_, '_> {}
+unsafe impl Sync for ZleWidget<'_, '_> {}
+
+impl<'a, 'b> ZleWidget<'a, 'b> {
+    pub fn new(ptr: NonNull<bindings::thingy>, shell: &'a mut crate::shell::ShellInner<'b>) -> Self {
+        let w = Self{ptr, shell};
 
         if w.is_internal() && let Some(widget) = w.widget() {
             // these are just caches
@@ -65,18 +69,18 @@ impl ZleWidget {
     }
 
     fn widget(&self) -> Option<Widget> {
-        Some(Widget(NonNull::new(unsafe{ self.0.as_ref() }.widget)?))
+        Some(Widget(NonNull::new(unsafe{ self.ptr.as_ref() }.widget)?))
     }
 
     pub fn is_internal(&self) -> bool {
-        unsafe{ (*self.0.as_ref().widget).flags & bindings::WidgetFlag::WIDGET_INT as i32 != 0 }
+        unsafe{ (*self.ptr.as_ref().widget).flags & bindings::WidgetFlag::WIDGET_INT as i32 != 0 }
     }
 
     pub fn name(&self) -> &CStr {
-        unsafe{ CStr::from_ptr(self.0.as_ref().nam) }
+        unsafe{ CStr::from_ptr(self.ptr.as_ref().nam) }
     }
 
-    pub(crate) fn exec<'a, I: Iterator<Item=&'a BStr> + ExactSizeIterator>(&self, ntimes: u16, args: I) -> c_int {
+    pub(crate) fn exec<'c, I: Iterator<Item=&'c BStr> + ExactSizeIterator>(&self, ntimes: u16, args: I) -> c_int {
         let mut null = std::ptr::null_mut();
         let args_ptr = if args.len() == 0 {
             &raw mut null
@@ -86,7 +90,7 @@ impl ZleWidget {
 
         unsafe {
             bindings::zmod.mult = ntimes as _;
-            bindings::execzlefunc(self.0.as_ptr(), args_ptr, 0, 0)
+            bindings::execzlefunc(self.ptr.as_ptr(), args_ptr, 0, 0)
         }
     }
 
