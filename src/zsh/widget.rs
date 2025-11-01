@@ -76,7 +76,7 @@ impl ZleWidget {
         unsafe{ CStr::from_ptr(self.0.as_ref().nam) }
     }
 
-    pub(crate) fn exec<'a, I: Iterator<Item=&'a BStr> + ExactSizeIterator>(&self, args: I) -> c_int {
+    pub(crate) fn exec<'a, I: Iterator<Item=&'a BStr> + ExactSizeIterator>(&self, ntimes: u16, args: I) -> c_int {
         let mut null = std::ptr::null_mut();
         let args_ptr = if args.len() == 0 {
             &raw mut null
@@ -85,6 +85,7 @@ impl ZleWidget {
         };
 
         unsafe {
+            bindings::zmod.mult = ntimes as _;
             bindings::execzlefunc(self.0.as_ptr(), args_ptr, 0, 0)
         }
     }

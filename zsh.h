@@ -183,6 +183,15 @@ struct thingy thingies; // this is actually an array
 Thingy keybind(Keymap km, char *seq, char **strp);
 mod_export int lastchar;
 mod_export int lastchar_wide;
+mod_export int lastchar_wide_valid;
+struct modifier {
+    int flags;		/* MOD_* flags (see below) */
+    int mult;		/* repeat count */
+    int tmult;		/* repeat count actually being edited */
+    int vibuf;		/* vi cut buffer */
+    int base;		/* numeric base for digit arguments (usually 10) */
+};
+mod_export struct modifier zmod;
 
 int execzlefunc(Thingy func, char **args, int set_bindk, int set_lbindk);
 
@@ -191,3 +200,8 @@ int execzlefunc(Thingy func, char **args, int set_bindk, int set_lbindk);
 /**/
 int done;
 int acceptline();
+mod_export char * zlegetline(int *ll, int *cs);
+mod_export void selectlocalmap(Keymap m);
+int selectkeymap(char *name, int fb);
+mod_export char *zlemetaline;
+mod_export int zlemetacs, zlemetall;

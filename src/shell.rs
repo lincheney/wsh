@@ -296,8 +296,8 @@ impl<'a> ShellInner<'a> {
         zsh::get_keybinding(key)
     }
 
-    pub fn exec_zle_widget<'b, I: Iterator<Item=&'b BStr> + ExactSizeIterator>(&mut self, widget: zsh::ZleWidget, args: I) -> i32 {
-        zsh::exec_zle_widget(widget, args)
+    pub fn exec_zle_widget<'b, I: Iterator<Item=&'b BStr> + ExactSizeIterator>(&mut self, widget: zsh::ZleWidget, ntimes: u16, args: I) -> i32 {
+        zsh::exec_zle_widget(widget, ntimes, args)
     }
 
     pub fn set_lastchar(&mut self, char: &[u8]) {
@@ -314,6 +314,7 @@ impl<'a> ShellInner<'a> {
         unsafe {
             zsh::lastchar = char;
             zsh::lastchar_wide = char;
+            zsh::lastchar_wide_valid = 1;
         }
     }
 

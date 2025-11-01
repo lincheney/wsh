@@ -81,14 +81,10 @@ impl EventStream {
 
                                 Ok(n) => {
                                     parser.feed(&buf[..n]);
-                                    log::debug!("DEBUG(bypass)\t{}\t= {:?}", stringify!(bstr::BString::from(&buf[..n])), bstr::BString::from(&buf[..n]));
                                     for (event, event_buffer) in parser.iter() {
-                                        log::debug!("DEBUG(timmy) \t{}\t= {:?}", stringify!(event), event);
                                         match event {
                                             parser::Event::CursorPosition{x, y} => {
-                                                log::debug!("DEBUG(damps) \t{}\t= {:?}", stringify!((x,y)), (x,y));
                                                 if let Ok(sender) = position_receiver.try_recv() {
-                                                    log::debug!("DEBUG(nadir) \t{}\t= {:?}", stringify!(sender), sender);
                                                     let _ = sender.send((x, y));
                                                 }
                                             },
@@ -102,11 +98,9 @@ impl EventStream {
                         },
 
                         mut result = paused.changed() => loop {
-                            log::debug!("DEBUG(roll)  \t{}\t= {:?}", stringify!(result), result);
                             match result {
                                 Err(_) => return Ok(()),
                                 Ok(()) => if !*paused.borrow_and_update() {
-                                    log::debug!("DEBUG(pass)  \t{}\t= {:?}", stringify!("resulme"), "resulme");
                                     break;
                                 },
                             }
@@ -145,7 +139,6 @@ impl EventStream {
         // read messages
         loop {
             let msg = self.queue.recv().await;
-            log::debug!("DEBUG(domain)\t{}\t= {:?}", stringify!(msg), msg);
             let msg = msg.unwrap_or(InputMessage::Exit(0, None));
             match msg {
                 InputMessage::CursorPosition(result) => {

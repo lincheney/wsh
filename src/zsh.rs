@@ -27,7 +27,12 @@ pub use bindings::{
     acceptline,
     lastchar,
     lastchar_wide,
+    lastchar_wide_valid,
     done,
+    zlegetline,
+    selectlocalmap,
+    zlemetaline,
+    zlemetall,
 };
 
 // pub type HandlerFunc = unsafe extern "C" fn(name: *mut c_char, argv: *mut *mut c_char, options: *mut zsh_sys::options, func: c_int) -> c_int;
@@ -152,7 +157,7 @@ pub fn unmetafy_owned(value: &mut Vec<u8>) {
 pub fn start_zle_scope() {
     unsafe {
         zsh_sys::startparamscope();
-        crate::zsh::bindings::makezleparams(0);
+        bindings::makezleparams(0);
         zsh_sys::startparamscope();
     }
 }
@@ -208,6 +213,6 @@ pub fn get_keybinding(key: &BStr) -> Option<KeybindValue> {
     Some(KeybindValue::String(strp.into()))
 }
 
-pub fn exec_zle_widget<'a, I: Iterator<Item=&'a BStr> + ExactSizeIterator>(widget: ZleWidget, args: I) -> c_int {
-    widget.exec(args)
+pub fn exec_zle_widget<'a, I: Iterator<Item=&'a BStr> + ExactSizeIterator>(widget: ZleWidget, ntimes: u16, args: I) -> c_int {
+    widget.exec(ntimes, args)
 }

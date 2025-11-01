@@ -22,13 +22,13 @@ mod keybind;
 mod utils;
 
 static STATE: OnceLock<ui::Ui> = OnceLock::new();
-static X: Mutex<Option<ui::Ui>> = Mutex::new(None);
+static UI: Mutex<Option<ui::Ui>> = Mutex::new(None);
 static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
     tokio::runtime::Runtime::new().unwrap()
 });
 
 async fn get_ui() -> Result<(ui::Ui, bool)> {
-    let mut lock = X.lock().unwrap();
+    let mut lock = UI.lock().unwrap();
     let store = lock.deref_mut();
 
     if let Some(ui) = store {
@@ -65,7 +65,6 @@ async fn get_ui() -> Result<(ui::Ui, bool)> {
 }
 
 async fn main() -> Result<i32> {
-
     let (ui, new) = get_ui().await?;
     ui.trampoline.jump_in(!new).await;
     Ok(0)
@@ -162,9 +161,37 @@ static MODULE_FEATURES: LazyLock<Features> = LazyLock::new(|| {
     })
 });
 
+static ORIGINAL_ZLE_ENTRY_PTR: OnceLock<zsh_sys::ZleEntryPoint> = OnceLock::new();
+static IS_RUNNING: Mutex<()> = Mutex::new(());
+
+#[unsafe(no_mangle)]
+#[allow(clippy::missing_safety_doc)]
+unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_list_tag) -> *mut c_char {
+    unsafe {
+        if cmd == zsh_sys::ZLE_CMD_READ as _ && let Ok(_lock) = IS_RUNNING.try_lock() {
+            zsh::done = 0;
+            zsh::selectlocalmap(std::ptr::null_mut());
+            zsh::selectkeymap(c"main".as_ptr() as _, 1);
+            RUNTIME.block_on(async {
+                match main().await {
+                    // Ok(code) => code,
+                    Ok(code) => code,
+                    Err(err) => { log::error!("{:?}", err); 1 },
+                }
+            });
+            zsh::zlegetline(std::ptr::null_mut(), std::ptr::null_mut())
+        } else {
+            ORIGINAL_ZLE_ENTRY_PTR.get().unwrap().unwrap()(cmd, ap)
+        }
+    }
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn setup_() -> c_int {
+    unsafe{
+        ORIGINAL_ZLE_ENTRY_PTR.get_or_init(|| zsh_sys::zle_entry_ptr);
+        zsh_sys::zle_entry_ptr = Some(zle_entry_ptr_override);
+    }
     0
 }
 

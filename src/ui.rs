@@ -283,7 +283,9 @@ impl Ui {
 
             ui.tui.clear_non_persistent();
 
-            let mut result: Result<()> = (|| {
+                ui.events.pause().await;
+
+            // let mut result: Result<()> = (|| {
                 ui.deactivate()?;
 
                 // move to last line of buffer
@@ -299,16 +301,19 @@ impl Ui {
 
                 let buffer = ui.buffer.get_contents();
                 let cursor = buffer.len() as i64 + 1;
-                shell.set_zle_buffer(buffer.clone(), cursor);
+            let mut buffer = buffer.clone();
+            buffer.push(b'\n');
+
+                // shell.set_var(b"x".into(), buffer.clone().into(), false);
+                shell.set_zle_buffer(buffer, cursor);
                 // acceptline doesn't actually accept the line right now
                 // only when we return control to zle using the trampoline
                 shell.acceptline();
-                Ok(())
-            })();
+                // Ok(())
+            // })();
 
-            if result.is_ok() {
+            // if result.is_ok() {
                 // separate this bc it has an await
-                ui.events.pause().await;
                 tokio::task::spawn(async {
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                     execute!(std::io::stdout(), EndSynchronizedUpdate)
@@ -316,24 +321,25 @@ impl Ui {
 
                 shell.clear_completion_cache();
                 self.trampoline.jump_out().await;
+                ui.activate()?;
                 ui.events.resume().await;
                 ui.reset(&mut shell);
                 self.is_running_process.store(false, Ordering::Relaxed);
 
                 let cursor = ui.events.get_cursor_position().await;
-                result = (|| {
+                // result = (|| {
                     // move down one line if not at start of line
                     if cursor.0 != 0 {
                         ui.size = crossterm::terminal::size()?;
                         queue!(ui.stdout, style::Print("\r\n"))?;
                     }
-                    Ok(())
-                })();
-            }
+                    // Ok(())
+                // })();
+            // }
 
             self.is_running_process.store(false, Ordering::Relaxed);
             // prefer the result error over the activate error
-            result.and(ui.activate())?;
+            // result.and(ui.activate())?;
 
             drop(ui);
             drop(shell);
@@ -509,7 +515,7 @@ impl Ui {
 
                 shell.set_zle_buffer(buffer.clone(), cursor as _);
                 shell.set_lastchar(buf);
-                shell.exec_zle_widget(widget, [].into_iter());
+                shell.exec_zle_widget(widget, 1, [].into_iter());
                 let (buffer, cursor) = shell.get_zle_buffer();
 
                 ui.buffer.set(Some(buffer.as_ref()), Some(cursor.unwrap_or(buffer.len() as _) as _));
