@@ -205,3 +205,8 @@ mod_export void selectlocalmap(Keymap m);
 int selectkeymap(char *name, int fb);
 mod_export char *zlemetaline;
 mod_export int zlemetacs, zlemetall;
+
+mod_export void zsetterm(void);
+struct ttyinfo {}
+mod_export struct ttyinfo shttyinfo;
+mod_export void gettyinfo(struct ttyinfo *ti);

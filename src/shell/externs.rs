@@ -9,6 +9,7 @@ use std::ptr::null_mut;
 use std::sync::{LazyLock, OnceLock};
 use std::ffi::CString;
 use anyhow::Result;
+use crate::shell::zsh;
 
 static STATE: OnceLock<Ui> = OnceLock::new();
 static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
@@ -137,10 +138,19 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
     // this is the real entrypoint
     unsafe {
         if cmd == zsh_sys::ZLE_CMD_READ as _ && let Ok(_lock) = IS_RUNNING.try_lock() {
-            crate::shell::zsh::done = 0;
-            crate::shell::zsh::selectlocalmap(null_mut());
-            crate::shell::zsh::selectkeymap(c"main".as_ptr() as _, 1);
-            match main() {
+            zsh::done = 0;
+            zsh::selectlocalmap(null_mut());
+            zsh::selectkeymap(c"main".as_ptr() as _, 1);
+
+            let result = main();
+
+            // zsh will reset the tty settings to its saved values
+            // but it may have saved it at a bad time!
+            // e.g. when we were running a foreground process
+            // so save it again now while we're good
+            zsh::gettyinfo(&raw mut zsh::shttyinfo);
+
+            match result {
                 Ok(Some(mut string)) => {
                     // MUST have a newline here
                     string.push(b'\n');
@@ -187,14 +197,14 @@ pub unsafe extern "C" fn enables_(module: zsh_sys::Module, enables: *mut *mut c_
 
 #[unsafe(no_mangle)]
 pub extern "C" fn boot_() -> c_int {
-    crate::shell::zsh::completion::override_compadd();
+    zsh::completion::override_compadd();
     0
 }
 
 #[unsafe(no_mangle)]
 #[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn cleanup_(module: zsh_sys::Module) -> c_int {
-    crate::shell::zsh::completion::restore_compadd();
+    zsh::completion::restore_compadd();
     let module_features: &zsh_sys::features = &MODULE_FEATURES.deref().0;
     unsafe{ zsh_sys::setfeatureenables(module, module_features as *const _ as *mut _, null_mut()) }
 }
