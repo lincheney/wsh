@@ -94,24 +94,7 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
             return 1;
         },
         None => {
-            // no args
-            // if STATE.get().is_some() {
-                // eprintln!("wsh is already running");
-                // return 1;
-            // } else {
-                return RUNTIME.block_on(async {
-                    match main().await {
-                        // Ok(code) => code,
-                        Ok(code) => {
-                            // i shouldn't have to do this and let zle exit instead, but zsh segfaults otherwise
-                            // TODO figure out why and fix it
-                            // unsafe{ zsh_sys::zexit(code, zsh_sys::zexit_t_ZEXIT_NORMAL); }
-                            code
-                        },
-                        Err(err) => { log::error!("{:?}", err); 1 },
-                    }
-                });
-            // }
+            return 0;
         },
     }
 
@@ -167,6 +150,7 @@ static IS_RUNNING: Mutex<()> = Mutex::new(());
 #[unsafe(no_mangle)]
 #[allow(clippy::missing_safety_doc)]
 unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_list_tag) -> *mut c_char {
+    // this is the real entrypoint
     unsafe {
         if cmd == zsh_sys::ZLE_CMD_READ as _ && let Ok(_lock) = IS_RUNNING.try_lock() {
             zsh::done = 0;
