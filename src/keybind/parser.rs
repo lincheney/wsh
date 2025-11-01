@@ -55,6 +55,7 @@ pub enum Key {
     Pageup,
     Pagedown,
     MouseButton{x: usize, y: usize, button: MouseButton, release: bool},
+    MouseMove{x: usize, y: usize, button: MouseButton},
     MouseScroll{x: usize, y: usize, down: bool},
 }
 
@@ -86,6 +87,12 @@ impl std::fmt::Display for Key {
                 MouseButton::Middle => write!(f, "middlemouse"),
                 MouseButton::Button(n) if *release => write!(f, "button{n}-release"),
                 MouseButton::Button(n) => write!(f, "button{n}"),
+            },
+            Key::MouseMove{button, ..} => match button {
+                MouseButton::Left => write!(f, "leftmouse-move"),
+                MouseButton::Right => write!(f, "rightmouse-move"),
+                MouseButton::Middle => write!(f, "middlemouse-move"),
+                MouseButton::Button(n) => write!(f, "button{n}-move"),
             },
             Key::MouseScroll{down, ..} if *down => write!(f, "scrolldown"),
             Key::MouseScroll{..} => write!(f, "scrollup"),
@@ -203,15 +210,23 @@ impl Parser {
         if button & 16 > 0 {
             modifiers.insert(KeyModifiers::CONTROL);
         }
-        let event = match button & !4 & !8 & !16 {
-            0  => Event::Key(KeyEvent{ key: Key::MouseButton{x, y, button: MouseButton::Left, release}, modifiers }),
-            1  => Event::Key(KeyEvent{ key: Key::MouseButton{x, y, button: MouseButton::Middle, release}, modifiers }),
-            2  => Event::Key(KeyEvent{ key: Key::MouseButton{x, y, button: MouseButton::Right, release}, modifiers }),
-            64 => Event::Key(KeyEvent{ key: Key::MouseScroll{x, y, down: false}, modifiers }),
-            65 => Event::Key(KeyEvent{ key: Key::MouseScroll{x, y, down: true}, modifiers }),
-            x  => Event::Key(KeyEvent{ key: Key::MouseButton{x, y, button: MouseButton::Button(x & !64 & !128), release}, modifiers }),
+        let button = button & !4 & !8 & !16 & !32;
+        let mouse = match button {
+            64 | 65 => return Some((Event::Key(KeyEvent{ key: Key::MouseScroll{x, y, down: button == 65}, modifiers }), len)),
+
+            0  => MouseButton::Left,
+            1  => MouseButton::Middle,
+            2  => MouseButton::Right,
+            x  => MouseButton::Button(x & !64 & !128),
         };
-        Some((event, len))
+
+        let event = if button & 32 > 0 {
+            Key::MouseMove{x, y, button: mouse}
+        } else {
+            Key::MouseButton{x, y, button: mouse, release}
+        };
+
+        Some((Event::Key(KeyEvent{ key: event, modifiers }), len))
     }
 
     fn parse_csi(&self) -> Option<(Event, usize)> {
