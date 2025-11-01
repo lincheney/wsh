@@ -16,7 +16,7 @@ mod asyncio;
 mod parser;
 mod variables;
 pub use keybind::KeybindMapping;
-pub use events::EventCallbacks;
+pub use events::{EventCallbacks, HasEventCallbacks};
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -43,20 +43,20 @@ async fn set_cursor(mut ui: Ui, _lua: Lua, val: usize) -> Result<()> {
 
 async fn set_buffer(mut ui: Ui, _lua: Lua, (val, len): (mlua::String, Option<usize>)) -> Result<()> {
     ui.inner.borrow_mut().await.buffer.splice_at_cursor(&val.as_bytes(), len);
-    EventCallbacks::trigger_buffer_change_callbacks(&mut ui, ()).await;
+    ui.trigger_buffer_change_callbacks(()).await;
     Ok(())
 }
 
 async fn undo_buffer(mut ui: Ui, _lua: Lua, (): ()) -> Result<()> {
     if ui.inner.borrow_mut().await.buffer.move_in_history(false) {
-        EventCallbacks::trigger_buffer_change_callbacks(&mut ui, ()).await;
+        ui.trigger_buffer_change_callbacks(()).await;
     }
     Ok(())
 }
 
 async fn redo_buffer(mut ui: Ui, _lua: Lua, (): ()) -> Result<()> {
     if ui.inner.borrow_mut().await.buffer.move_in_history(true) {
-        EventCallbacks::trigger_buffer_change_callbacks(&mut ui, ()).await;
+        ui.trigger_buffer_change_callbacks(()).await;
     }
     Ok(())
 }

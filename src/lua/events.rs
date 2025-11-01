@@ -26,23 +26,8 @@ macro_rules! event_types {
 
         impl EventCallbacks {
         $(
-            #[allow(unused_parens)]
-            pub async fn [<trigger_ $name _callbacks>](ui: &mut Ui, val: ($($arg),*)) {
-                let callbacks = {
-                    let callbacks = &ui.event_callbacks.lock().unwrap().[<callbacks_ $name>];
-                    if callbacks.is_empty() {
-                        return;
-                    }
-                    callbacks.clone()
-                };
-                let val = ui.lua.to_value(&val).unwrap();
-                for (_, cb) in callbacks.iter() {
-                    ui.call_lua_fn(false, cb.clone(), val.clone()).await;
-                }
-            }
-
             #[allow(dead_code)]
-            pub fn [<has_ $name _callbacks>](&self) -> bool {
+            fn [<has_ $name _callbacks>](&self) -> bool {
                 !self.[<callbacks_ $name>].is_empty()
             }
         )*
@@ -78,6 +63,33 @@ macro_rules! event_types {
             }
 
         }
+
+        pub trait HasEventCallbacks {
+        $(
+            #[allow(unused_parens)]
+            async fn [<trigger_ $name _callbacks>](&self, val: ($($arg),*));
+        )*
+        }
+
+        impl HasEventCallbacks for Ui {
+        $(
+            #[allow(unused_parens)]
+            async fn [<trigger_ $name _callbacks>](&self, val: ($($arg),*)) {
+                let callbacks = {
+                    let callbacks = &self.event_callbacks.lock().unwrap().[<callbacks_ $name>];
+                    if callbacks.is_empty() {
+                        return;
+                    }
+                    callbacks.clone()
+                };
+                let val = self.lua.to_value(&val).unwrap();
+                for (_, cb) in callbacks.iter() {
+                    self.call_lua_fn(false, cb.clone(), val.clone()).await;
+                }
+            }
+        )*
+        }
+
     }
 
     )

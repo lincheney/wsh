@@ -21,7 +21,7 @@ use crossterm::{
 
 use crate::shell::{Shell, ShellInner, UpgradeShell, KeybindValue};
 use crate::utils::*;
-use crate::lua::EventCallbacks;
+use crate::lua::{EventCallbacks, HasEventCallbacks};
 
 fn lua_error<T>(msg: &str) -> Result<T, mlua::Error> {
     Err(mlua::Error::RuntimeError(msg.to_string()))
@@ -198,7 +198,7 @@ impl Ui {
     }
 
     pub async fn start_cmd(&mut self) -> Result<()> {
-        EventCallbacks::trigger_precmd_callbacks(self, ()).await;
+        self.trigger_precmd_callbacks(()).await;
         self.draw().await
     }
 
@@ -267,10 +267,10 @@ impl Ui {
 
     pub async fn handle_event(&mut self, event: Event, event_buffer: BString) -> Result<bool> {
         if let Event::Key(event) = event {
-            EventCallbacks::trigger_key_callbacks(self, event.into()).await;
+            self.trigger_key_callbacks(event.into()).await;
             if let Some(result) = self.handle_key(event, event_buffer.as_ref()).await {
                 let result = result?;
-                EventCallbacks::trigger_buffer_change_callbacks(self, ()).await;
+                self.trigger_buffer_change_callbacks(()).await;
                 self.draw().await?;
                 return Ok(result)
             }
@@ -289,7 +289,7 @@ impl Ui {
 
         // time to execute
         if complete {
-            EventCallbacks::trigger_accept_line_callbacks(self, ()).await;
+            self.trigger_accept_line_callbacks(()).await;
 
             self.is_running_process.store(true, Ordering::Relaxed);
             let mut ui = self.inner.borrow_mut().await;
@@ -346,7 +346,7 @@ impl Ui {
 
         } else {
             self.inner.borrow_mut().await.buffer.insert_at_cursor(b"\n");
-            EventCallbacks::trigger_buffer_change_callbacks(self, ()).await;
+            self.trigger_buffer_change_callbacks(()).await;
             self.draw().await?;
         }
 
@@ -547,7 +547,7 @@ impl Ui {
                     let mut buf = [0; 4];
                     ui.buffer.insert_at_cursor(c.encode_utf8(&mut buf).as_bytes());
                 }
-                EventCallbacks::trigger_buffer_change_callbacks(self, ()).await;
+                self.trigger_buffer_change_callbacks(()).await;
                 self.draw().await?;
             },
 
@@ -557,7 +557,7 @@ impl Ui {
 
             Event::BracketedPaste(data) => {
                 let data = self.lua.create_string(data)?;
-                EventCallbacks::trigger_paste_callbacks(self, data).await;
+                self.trigger_paste_callbacks(data).await;
             },
 
             _ => (),

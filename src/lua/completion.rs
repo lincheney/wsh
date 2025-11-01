@@ -1,3 +1,4 @@
+use crate::lua::{HasEventCallbacks};
 use crate::ui::{Ui, ThreadsafeUiInner};
 use anyhow::Result;
 use mlua::{prelude::*, UserData, UserDataMethods, MetaMethod};
@@ -98,7 +99,7 @@ async fn insert_completion(mut ui: Ui, _lua: Lua, (stream, val): (CompletionStre
             ui.buffer.set(Some(&new_buffer), Some(new_pos));
         }
     }
-    super::events::EventCallbacks::trigger_buffer_change_callbacks(&mut ui, ()).await;
+    ui.trigger_buffer_change_callbacks(()).await;
 
     ui.draw().await?;
     Ok(())
