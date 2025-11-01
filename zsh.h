@@ -207,6 +207,8 @@ mod_export char *zlemetaline;
 mod_export int zlemetacs, zlemetall;
 
 mod_export void zsetterm(void);
-struct ttyinfo {}
+struct ttyinfo {
+    char x; // this is FAKE
+}
 mod_export struct ttyinfo shttyinfo;
 mod_export void gettyinfo(struct ttyinfo *ti);

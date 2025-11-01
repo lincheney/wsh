@@ -1,7 +1,7 @@
 use bstr::{BStr, BString};
 use std::time::Duration;
 use std::future::Future;
-use std::sync::{Arc, Weak as WeakArc, atomic::{AtomicBool, Ordering}};
+use std::sync::{Arc, Weak as WeakArc};
 use std::ops::DerefMut;
 use std::collections::HashSet;
 use std::default::Default;
@@ -133,7 +133,7 @@ crate::strong_weak_wrapper! {
         pub lua: Arc::<Lua> [WeakArc::<Lua>],
         pub shell: Shell [crate::shell::WeakShell],
         pub event_callbacks: ArcMutex::<EventCallbacks> [WeakArc::<std::sync::Mutex<EventCallbacks>>],
-        is_running_process: Arc::<AtomicBool> [WeakArc::<AtomicBool>],
+        pub is_running_process: AsyncArcMutex::<()> [WeakArc::<tokio::sync::Mutex<()>>],
         trampoline: Arc::<TrampolineOut> [WeakArc::<TrampolineOut>],
     }
 }
@@ -177,7 +177,7 @@ impl Ui {
             lua: Arc::new(lua),
             shell,
             event_callbacks: Default::default(),
-            is_running_process: Arc::new(false.into()),
+            is_running_process: Default::default(),
             trampoline: Arc::new(trampoline.1),
         };
         ui.init_lua().await?;
@@ -202,15 +202,12 @@ impl Ui {
         self.draw().await
     }
 
-    pub fn is_running_process(&self) -> bool {
-        self.is_running_process.load(Ordering::Relaxed)
-    }
-
     pub async fn draw(&mut self) -> Result<()> {
         // do NOT render ui elements if there is a foreground process
-        if self.is_running_process() {
+        let Ok(_lock) = self.is_running_process.try_lock()
+        else {
             return Ok(())
-        }
+        };
 
         let shell = self.shell.clone();
         let mut ui = self.inner.borrow_mut().await;
@@ -289,9 +286,9 @@ impl Ui {
 
         // time to execute
         if complete {
-            self.trigger_accept_line_callbacks(()).await;
+            let lock = self.is_running_process.lock().await;
 
-            self.is_running_process.store(true, Ordering::Relaxed);
+            self.trigger_accept_line_callbacks(()).await;
             let mut ui = self.inner.borrow_mut().await;
             let mut shell = self.shell.lock().await;
 
@@ -327,7 +324,6 @@ impl Ui {
             ui.activate()?;
             ui.events.resume().await;
             ui.reset(&mut shell);
-            self.is_running_process.store(false, Ordering::Relaxed);
 
             let cursor = ui.events.get_cursor_position().await;
             // move down one line if not at start of line
@@ -336,10 +332,10 @@ impl Ui {
                 queue!(ui.stdout, style::Print("\r\n"))?;
             }
 
-            self.is_running_process.store(false, Ordering::Relaxed);
             // prefer the result error over the activate error
             // result.and(ui.activate())?;
 
+            drop(lock);
             drop(ui);
             drop(shell);
             self.start_cmd().await?;

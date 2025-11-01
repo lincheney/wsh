@@ -161,11 +161,14 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     command.stdout(args.stdout);
     command.stderr(args.stderr);
 
-    if args.foreground {
+    let lock = if args.foreground {
         // this essentially locks ui
         ui.inner.borrow_mut().await.events.pause().await;
         ui.deactivate().await?;
-    }
+        Some(ui.is_running_process.clone().lock_owned().await)
+    } else {
+        None
+    };
 
     let mut proc = command.spawn()?;
     let pid = proc.id().unwrap();
@@ -201,6 +204,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         }
         // ignore error
         let _ = sender.send(result.map(|r| r.into_raw()));
+        drop(lock);
     });
 
     Ok(lua.pack_multi((
@@ -236,11 +240,14 @@ async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue>
 
     let (sender, receiver) = oneshot::channel();
 
-    if args.foreground {
+    let lock = if args.foreground {
         // this essentially locks ui
         ui.inner.borrow_mut().await.events.pause().await;
         ui.deactivate().await?;
-    }
+        Some(ui.is_running_process.clone().lock_owned().await)
+    } else {
+        None
+    };
 
     macro_rules! stdio_pipe {
         ($name:ident, true) => (
@@ -300,6 +307,7 @@ async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue>
                 }
                 // ignore error
                 let _ = sender.send(Ok(code as _));
+                drop(lock);
             });
 
         })
