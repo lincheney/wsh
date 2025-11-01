@@ -3,21 +3,22 @@ use bstr::BString;
 use crate::ui::Ui;
 use anyhow::Result;
 use mlua::prelude::*;
+use crate::shell::variables;
 
 async fn get_var(ui: Ui, lua: Lua, name: BString) -> Result<LuaValue> {
     let val = match ui.shell.lock().await.get_var(name.as_ref())? {
-        Some(crate::zsh::Value::String(val)) => val.into_lua(&lua)?,
-        Some(crate::zsh::Value::Array(val)) => val.into_lua(&lua)?,
-        Some(crate::zsh::Value::HashMap(val)) => val.into_lua(&lua)?,
-        Some(crate::zsh::Value::Integer(val)) => val.into_lua(&lua)?,
-        Some(crate::zsh::Value::Float(val)) => val.into_lua(&lua)?,
+        Some(variables::Value::String(val)) => val.into_lua(&lua)?,
+        Some(variables::Value::Array(val)) => val.into_lua(&lua)?,
+        Some(variables::Value::HashMap(val)) => val.into_lua(&lua)?,
+        Some(variables::Value::Integer(val)) => val.into_lua(&lua)?,
+        Some(variables::Value::Float(val)) => val.into_lua(&lua)?,
         None => LuaValue::Nil,
     };
     Ok(val)
 }
 
 async fn set_var(ui: Ui, lua: Lua, (name, val, global): (BString, LuaValue, Option<bool>)) -> Result<()> {
-    let val: crate::zsh::Value = match val {
+    let val: variables::Value = match val {
         LuaValue::Integer(val) => val.into(),
         LuaValue::Number(val) => val.into(),
         LuaValue::String(val) => BString::new(val.as_bytes().to_owned()).into(),

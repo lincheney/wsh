@@ -50,7 +50,7 @@ async fn goto_history(mut ui: Ui, _lua: Lua, val: usize) -> Result<(usize, Optio
 
     let save = shell.get_curhist().1.is_none();
     let (curhist, entry) = shell.set_curhist(val as _);
-    let text = entry.map(|e| crate::zsh::history::Entry::from(e).text);
+    let text = entry.map(|e| crate::shell::history::Entry::from(e).text);
 
     let mut ui = ui.inner.borrow_mut().await;
     // save the buffer if moving to another history

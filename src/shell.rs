@@ -7,8 +7,15 @@ use std::sync::Mutex;
 use tokio::sync::{Semaphore, SemaphorePermit};
 use bstr::{BStr, BString};
 
-use crate::zsh;
-pub use crate::zsh::KeybindValue;
+mod externs;
+mod zsh;
+pub use zsh::KeybindValue;
+pub use zsh::{
+    completion,
+    history,
+    variables,
+};
+use variables::Variable;
 
 struct Private;
 
@@ -218,8 +225,8 @@ impl<'a> ShellInner<'a> {
         None
     }
 
-    pub fn get_var(&mut self, name: &BStr) -> anyhow::Result<Option<zsh::Value>> {
-        if let Some(mut v) = zsh::Variable::get(name) {
+    pub fn get_var(&mut self, name: &BStr) -> anyhow::Result<Option<variables::Value>> {
+        if let Some(mut v) = Variable::get(name) {
             Ok(Some(v.as_value()?))
         } else {
             Ok(None)
@@ -242,16 +249,16 @@ impl<'a> ShellInner<'a> {
         zsh::end_zle_scope()
     }
 
-    pub fn set_var(&mut self, name: &BStr, value: zsh::Value, local: bool) -> anyhow::Result<()> {
-        zsh::Variable::set(name, value, local)
+    pub fn set_var(&mut self, name: &BStr, value: variables::Value, local: bool) -> anyhow::Result<()> {
+        Variable::set(name, value, local)
     }
 
     pub fn unset_var(&mut self, name: &BStr) {
-        zsh::Variable::unset(name)
+        Variable::unset(name)
     }
 
     pub fn export_var(&mut self, name: &BStr) -> bool {
-        if let Some(var) = zsh::Variable::get(name) {
+        if let Some(var) = Variable::get(name) {
             var.export();
             true
         } else {
@@ -275,15 +282,15 @@ impl<'a> ShellInner<'a> {
 
     pub fn set_zle_buffer(&mut self, buffer: BString, cursor: i64) {
         zsh::start_zle_scope();
-        zsh::Variable::set(b"BUFFER", buffer.into(), true).unwrap();
-        zsh::Variable::set(b"CURSOR", cursor.into(), true).unwrap();
+        Variable::set(b"BUFFER", buffer.into(), true).unwrap();
+        Variable::set(b"CURSOR", cursor.into(), true).unwrap();
         zsh::end_zle_scope();
     }
 
     pub fn get_zle_buffer(&mut self) -> (BString, Option<i64>) {
         zsh::start_zle_scope();
-        let buffer = zsh::Variable::get("BUFFER").unwrap().as_bytes();
-        let cursor = zsh::Variable::get("CURSOR").unwrap().try_as_int();
+        let buffer = Variable::get("BUFFER").unwrap().as_bytes();
+        let cursor = Variable::get("CURSOR").unwrap().try_as_int();
         zsh::end_zle_scope();
         match cursor {
             Ok(Some(cursor)) => (buffer, Some(cursor)),
@@ -297,7 +304,7 @@ impl<'a> ShellInner<'a> {
     }
 
     pub fn exec_zle_widget<'b, I: Iterator<Item=&'b BStr> + ExactSizeIterator>(&mut self, widget: zsh::ZleWidget, ntimes: u16, args: I) -> i32 {
-        zsh::exec_zle_widget(widget, ntimes, args)
+        widget.exec(ntimes, args)
     }
 
     pub fn set_lastchar(&mut self, char: &[u8]) {

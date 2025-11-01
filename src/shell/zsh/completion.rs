@@ -10,6 +10,9 @@ use bstr::{BStr, BString};
 use super::bindings;
 use crate::utils::*;
 
+#[allow(unused_imports)]
+pub use super::bindings::cmatch;
+
 pub struct WaitForChunk<'a> {
     consumer: &'a mut StreamConsumer,
 }

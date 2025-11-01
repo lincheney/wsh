@@ -6,13 +6,13 @@ use crate::utils::*;
 
 #[derive(FromLua, Clone)]
 struct CompletionStream {
-    inner: AsyncArcMutex<crate::zsh::completion::StreamConsumer>,
+    inner: AsyncArcMutex<crate::shell::completion::StreamConsumer>,
     parent: crate::shell::Completer,
 }
 
 #[derive(FromLua, Clone)]
 struct CompletionMatch {
-    inner: Arc<crate::zsh::cmatch>,
+    inner: Arc<crate::shell::completion::cmatch>,
 }
 
 impl UserData for CompletionStream {

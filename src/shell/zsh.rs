@@ -8,32 +8,15 @@ use bstr::{BStr, BString};
 
 mod string;
 mod bindings;
-mod variables;
+pub mod variables;
 mod widget;
 pub use widget::ZleWidget;
 pub mod history;
 pub mod completion;
 pub mod parser;
-pub use variables::*;
 pub use string::ZString;
-pub use bindings::{
-    cmatch,
-    Inpar,
-    Outpar,
-    Meta,
-    expandhistory,
-    selectkeymap,
-    initundo,
-    acceptline,
-    lastchar,
-    lastchar_wide,
-    lastchar_wide_valid,
-    done,
-    zlegetline,
-    selectlocalmap,
-    zlemetaline,
-    zlemetall,
-};
+pub(crate) use bindings::*;
+use variables::{Variable};
 
 // pub type HandlerFunc = unsafe extern "C" fn(name: *mut c_char, argv: *mut *mut c_char, options: *mut zsh_sys::options, func: c_int) -> c_int;
 
@@ -211,8 +194,4 @@ pub fn get_keybinding(key: &BStr) -> Option<KeybindValue> {
     let strp = NonNull::new(strp)?;
     let strp = unsafe{ CStr::from_ptr(strp.as_ptr()) }.to_bytes();
     Some(KeybindValue::String(strp.into()))
-}
-
-pub fn exec_zle_widget<'a, I: Iterator<Item=&'a BStr> + ExactSizeIterator>(widget: ZleWidget, ntimes: u16, args: I) -> c_int {
-    widget.exec(ntimes, args)
 }
