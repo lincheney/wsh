@@ -6,7 +6,7 @@ use std::ops::DerefMut;
 use std::collections::HashSet;
 use std::default::Default;
 use mlua::prelude::*;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, Notify, mpsc};
 use anyhow::Result;
 use crate::keybind::parser::{Event, KeyEvent, Key, KeyModifiers};
 
@@ -94,24 +94,37 @@ impl ThreadsafeUiInner for Arc<RwLock<UiInner>> {
     }
 }
 
-#[derive(Default)]
-pub struct Trampoline {
-    out_notify: tokio::sync::Notify,
-    in_notify: tokio::sync::Notify,
+struct TrampolineOut {
+    out_sender: mpsc::UnboundedSender<BString>,
+    in_notify: Arc<Notify>,
 }
 
-impl Trampoline {
-    pub async fn jump_out(&self) {
-        self.out_notify.notify_one();
-        self.in_notify.notified().await;
-    }
+pub struct TrampolineIn {
+    out_receiver: mpsc::UnboundedReceiver<BString>,
+    in_notify: Arc<Notify>,
+}
 
-    pub async fn jump_in(&self, notify: bool) {
+impl TrampolineOut {
+    pub async fn jump_out(&self, string: BString) -> Result<()> {
+        self.out_sender.send(string)?;
+        self.in_notify.notified().await;
+        Ok(())
+    }
+}
+
+impl TrampolineIn {
+    pub async fn jump_in(&mut self, notify: bool) -> Option<BString> {
         if notify {
             self.in_notify.notify_one();
         }
-        self.out_notify.notified().await;
+        self.out_receiver.recv().await
     }
+}
+
+fn new_trampoline() -> (TrampolineIn, TrampolineOut) {
+    let (out_sender, out_receiver) = mpsc::unbounded_channel();
+    let in_notify = Arc::new(Notify::new());
+    (TrampolineIn{out_receiver, in_notify: in_notify.clone()}, TrampolineOut{out_sender, in_notify})
 }
 
 crate::strong_weak_wrapper! {
@@ -121,13 +134,13 @@ crate::strong_weak_wrapper! {
         pub shell: Shell [crate::shell::WeakShell],
         pub event_callbacks: ArcMutex::<EventCallbacks> [WeakArc::<std::sync::Mutex<EventCallbacks>>],
         is_running_process: Arc::<AtomicBool> [WeakArc::<AtomicBool>],
-        pub trampoline: Arc::<Trampoline> [WeakArc::<Trampoline>],
+        trampoline: Arc::<TrampolineOut> [WeakArc::<TrampolineOut>],
     }
 }
 
 impl Ui {
 
-    pub async fn new(events: crate::event_stream::EventController) -> Result<Self> {
+    pub async fn new(events: crate::event_stream::EventController) -> Result<(Self, TrampolineIn)> {
         let lua = Lua::new();
         let lua_api = lua.create_table()?;
         lua.globals().set("wish", &lua_api)?;
@@ -158,17 +171,18 @@ impl Ui {
         log::info!("loaded history in {:?}", start.elapsed());
         ui.reset(&mut shell.lock().await);
 
+        let trampoline = new_trampoline();
         let ui = Self{
             inner: Arc::new(RwLock::new(ui)),
             lua: Arc::new(lua),
             shell,
             event_callbacks: Default::default(),
             is_running_process: Arc::new(false.into()),
-            trampoline: Arc::new(Trampoline::default()),
+            trampoline: Arc::new(trampoline.1),
         };
         ui.init_lua().await?;
 
-        Ok(ui)
+        Ok((ui, trampoline.0))
     }
 
     pub async fn activate(&self) -> Result<()> {
@@ -283,59 +297,44 @@ impl Ui {
 
             ui.tui.clear_non_persistent();
 
-                ui.events.pause().await;
+            // TODO handle errors here properly
+            ui.events.pause().await;
+            ui.deactivate()?;
 
-            // let mut result: Result<()> = (|| {
-                ui.deactivate()?;
+            // move to last line of buffer
+            let y_offset = ui.prompt.height + ui.buffer.height - 1 - ui.buffer.cursor_coord.1 - 1;
+            execute!(
+                ui.stdout,
+                BeginSynchronizedUpdate,
+                MoveDown(y_offset),
+                style::Print('\n'),
+                MoveToColumn(0),
+                Clear(ClearType::FromCursorDown),
+            )?;
 
-                // move to last line of buffer
-                let y_offset = ui.prompt.height + ui.buffer.height - 1 - ui.buffer.cursor_coord.1 - 1;
-                execute!(
-                    ui.stdout,
-                    BeginSynchronizedUpdate,
-                    MoveDown(y_offset),
-                    style::Print('\n'),
-                    MoveToColumn(0),
-                    Clear(ClearType::FromCursorDown),
-                )?;
+            let buffer = ui.buffer.get_contents().clone();
 
-                let buffer = ui.buffer.get_contents();
-                let cursor = buffer.len() as i64 + 1;
-            let mut buffer = buffer.clone();
-            buffer.push(b'\n');
+            tokio::task::spawn(async {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                execute!(std::io::stdout(), EndSynchronizedUpdate)
+            });
 
-                // shell.set_var(b"x".into(), buffer.clone().into(), false);
-                shell.set_zle_buffer(buffer, cursor);
-                // acceptline doesn't actually accept the line right now
-                // only when we return control to zle using the trampoline
-                shell.acceptline();
-                // Ok(())
-            // })();
+            shell.clear_completion_cache();
+            // acceptline doesn't actually accept the line right now
+            // only when we return control to zle using the trampoline
+            // shell.acceptline();
+            self.trampoline.jump_out(buffer).await?;
+            ui.activate()?;
+            ui.events.resume().await;
+            ui.reset(&mut shell);
+            self.is_running_process.store(false, Ordering::Relaxed);
 
-            // if result.is_ok() {
-                // separate this bc it has an await
-                tokio::task::spawn(async {
-                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                    execute!(std::io::stdout(), EndSynchronizedUpdate)
-                });
-
-                shell.clear_completion_cache();
-                self.trampoline.jump_out().await;
-                ui.activate()?;
-                ui.events.resume().await;
-                ui.reset(&mut shell);
-                self.is_running_process.store(false, Ordering::Relaxed);
-
-                let cursor = ui.events.get_cursor_position().await;
-                // result = (|| {
-                    // move down one line if not at start of line
-                    if cursor.0 != 0 {
-                        ui.size = crossterm::terminal::size()?;
-                        queue!(ui.stdout, style::Print("\r\n"))?;
-                    }
-                    // Ok(())
-                // })();
-            // }
+            let cursor = ui.events.get_cursor_position().await;
+            // move down one line if not at start of line
+            if cursor.0 != 0 {
+                ui.size = crossterm::terminal::size()?;
+                queue!(ui.stdout, style::Print("\r\n"))?;
+            }
 
             self.is_running_process.store(false, Ordering::Relaxed);
             // prefer the result error over the activate error
