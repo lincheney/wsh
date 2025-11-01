@@ -199,6 +199,8 @@ impl Parser {
             else {
                 return Some((Event::Unknown, len))
             };
+        let x = x.saturating_sub(1);
+        let y = y.saturating_sub(1);
 
         let mut modifiers = KeyModifiers::NONE;
         if button & 4 > 0 {
@@ -217,7 +219,7 @@ impl Parser {
             0  => MouseButton::Left,
             1  => MouseButton::Middle,
             2  => MouseButton::Right,
-            x  => MouseButton::Button(x & !64 & !128),
+            n  => MouseButton::Button(n & !64 & !128),
         };
 
         let event = if button & 32 > 0 {
@@ -260,7 +262,7 @@ impl Parser {
                 Event::BracketedPaste(self.buffer.range(6 .. len - PASTE_END.len()).copied().collect())
             },
 
-            ([Some(y), Some(x)], b'R') => Event::CursorPosition{x: *x, y: *y},
+            ([Some(y), Some(x)], b'R') => Event::CursorPosition{x: x.saturating_sub(1), y: y.saturating_sub(1)},
 
             ([Some(0), m @ (None | Some(0..=7))], b'P'..=b'S') => {
                 let modifiers = KeyModifiers::from_bits_truncate(m.map_or(0, |m| m as u8 - b'0'));
