@@ -326,7 +326,7 @@ impl<'a> ShellInner<'a> {
             Ok(c) => c.chars().next().unwrap().into(),
             Err(e) => if e.valid_up_to() == 0 {
                 // invalid utf8, use the first byte? or space?
-                *char.get(0).unwrap_or(&b' ') as _
+                *char.first().unwrap_or(&b' ') as _
             } else {
                 std::str::from_utf8(&char[..e.valid_up_to()]).unwrap().chars().next().unwrap().into()
             },
