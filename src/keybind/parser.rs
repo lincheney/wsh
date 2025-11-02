@@ -336,31 +336,46 @@ impl Parser {
         Some((event, len))
     }
 
+    fn parse_char(&self, start: usize) -> Option<Option<(Event, usize)>> {
+        let Some(c) = self.buffer.get(start)
+            else { return Some(None) }; // if None, it means its incomplete
+
+        let event = match c {
+            b'\r' | b'\n'       => Key::Enter.into(),
+            b'\t' | b' '..=b'~' => Key::Char((*c).into()).into(),
+            // utf8
+            b'\xc2'..=b'\xf4' => {
+                let (array, array_len) = self.extract::<4>(start, 0);
+                match std::str::from_utf8(&array[..array_len]) {
+                    Ok(s) => {
+                        let len = s.as_bytes().len();
+                        let c = s.chars().next().unwrap();
+                        return Some(Some((Key::Char(c).into(), len)))
+                    },
+                    Err(e) => {
+                        let Some(len) = e.error_len()
+                            else { return Some(None) }; // if None, it means its incomplete
+
+                        let mut invalid = [0; 4];
+                        invalid.copy_from_slice(&array[..len]);
+                        return Some(Some((Event::InvalidUtf8(invalid), len)))
+                    },
+                }
+            },
+            _ => return None,
+        };
+        Some(Some((event, 1)))
+    }
+
     pub fn get_one_event(&mut self) -> Option<(Event, BString)> {
         let c = self.buffer.front()?;
 
         let mut len = 1;
         let event;
         let event = match c {
-            b'\r' | b'\n'       => Key::Enter.into(),
             b'\x7f'             => Key::Backspace.into(),
-            b'\t' | b' '..=b'~' => Key::Char((*c).into()).into(),
             b'\x00'..=b'\x1a'   => Event::Key(KeyEvent{ key: Key::Char((c + 0x60).into()), modifiers: KeyModifiers::CONTROL }),
             b'\x1c'..=b'\x1f'   => Event::Key(KeyEvent{ key: Key::Char((c + b'3' - 0x1b).into()), modifiers: KeyModifiers::CONTROL }),
-
-            // utf8
-            b'\xc2'..=b'\xf4' => {
-                let (array, array_len) = self.extract::<4>(0, 0);
-                match std::str::from_utf8(&array[..array_len]) {
-                    Ok(s) => Key::Char(s.chars().next().unwrap()).into(),
-                    Err(e) => {
-                        len = e.error_len()?; // if None, it means its incomplete
-                        let mut invalid = [0; 4];
-                        invalid.copy_from_slice(&array[..len]);
-                        Event::InvalidUtf8(invalid)
-                    },
-                }
-            },
 
             b'\x1b' => match self.buffer.get(1) {
                 Some(b'[') => {
@@ -389,11 +404,18 @@ impl Parser {
                         _ => { len = 3; Event::Unknown },
                     }
                 },
-                // otherwise treat as a single escape key
-                _ => Key::Escape.into(),
+                _ => {
+                    // check for alt-key otherwise treat as a single escape key
+                    (event, len) = self.parse_char(1).unwrap_or(Some((Key::Escape.into(), 0)))?;
+                    len += 1;
+                    event
+                },
             },
 
-            _ => Event::Unknown,
+            _ => {
+                (event, len) = self.parse_char(0).unwrap_or(Some((Event::Unknown, len)))?;
+                event
+            },
         };
 
         let buf = self.buffer.drain(..len).collect();
