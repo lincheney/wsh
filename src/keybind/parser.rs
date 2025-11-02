@@ -62,6 +62,7 @@ pub enum Key {
 impl std::fmt::Display for Key {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
+            Key::Char('\t') => write!(f, "tab"),
             Key::Char(c) => write!(f, "{c}"),
             Key::Function(n) => write!(f, "f{n}"),
             Key::Enter => write!(f, "enter"),
@@ -349,7 +350,7 @@ impl Parser {
                 let (array, array_len) = self.extract::<4>(start, 0);
                 match std::str::from_utf8(&array[..array_len]) {
                     Ok(s) => {
-                        len = s.as_bytes().len();
+                        len = s.len();
                         let c = s.chars().next().unwrap();
                         Key::Char(c)
                     },
@@ -370,53 +371,56 @@ impl Parser {
     }
 
     pub fn get_one_event(&mut self) -> Option<(Event, BString)> {
-        let c = self.buffer.front()?;
-
         let mut len = 1;
+
+        let c = self.buffer.front()?;
         let event;
-        let event = match c {
-            b'\x7f'             => Key::Backspace.into(),
-            b'\x00'..=b'\x1a'   => Event::Key(KeyEvent{ key: Key::Char((c + 0x60).into()), modifiers: KeyModifiers::CONTROL }),
-            b'\x1c'..=b'\x1f'   => Event::Key(KeyEvent{ key: Key::Char((c + b'3' - 0x1b).into()), modifiers: KeyModifiers::CONTROL }),
+        let event = match self.parse_char(0, KeyModifiers::NONE) {
 
-            b'\x1b' => match self.buffer.get(1) {
-                Some(b'[') => {
-                    (event, len) = self.parse_csi()?;
-                    event
-                },
-                Some(b'O') => {
-                    let (array, array_len) = self.extract::<2>(0, 0);
-                    match &array {
-                        [c @ b'P'..=b'S', _] => { len = 3; Key::Function(c - b'P' + 1).into() },
-                        [b'I', _] => { len = 3; Key::Char('\t').into() },
-                        [b' ', _] => { len = 3; Key::Char(' ').into() },
-                        [b'j', _] => { len = 3; Key::Char('*').into() },
-                        [b'k', _] => { len = 3; Key::Char('+').into() },
-                        [b'l', _] => { len = 3; Key::Char(',').into() },
-                        [b'm', _] => { len = 3; Key::Char('-').into() },
-                        [b'n', _] => { len = 3; Key::Char('.').into() },
-                        [b'o', _] => { len = 3; Key::Char('/').into() },
-                        [b'X', _] => { len = 3; Key::Char('=').into()},
-                        [b'M', _] => { len = 3; Key::Enter.into() },
-                        [b'F', _] => { len = 3; Key::End.into() },
-                        [b'H', _] => { len = 3; Key::Home.into() },
-                        [b'2', b'~'] => { len = 4; Key::Insert.into() },
-                        [b'3', b'~'] => { len = 4; Key::Delete.into() },
-                        _ if array_len == 0 => return None,
-                        _ => { len = 3; Event::Unknown },
-                    }
-                },
-                _ => {
-                    // check for alt-key otherwise treat as a single escape key
-                    (event, len) = self.parse_char(1, KeyModifiers::ALT).unwrap_or(Some((Key::Escape.into(), 0)))?;
-                    len += 1;
-                    event
-                },
-            },
+            Some(None) => return None,
+            Some(Some((e, l))) => { len = l; e },
 
-            _ => {
-                (event, len) = self.parse_char(0, KeyModifiers::NONE).unwrap_or(Some((Event::Unknown, len)))?;
-                event
+            None => match c {
+                b'\x7f'             => Key::Backspace.into(),
+                b'\x00'..=b'\x1a'   => Event::Key(KeyEvent{ key: Key::Char((c + 0x60).into()), modifiers: KeyModifiers::CONTROL }),
+                b'\x1c'..=b'\x1f'   => Event::Key(KeyEvent{ key: Key::Char((c + b'3' - 0x1b).into()), modifiers: KeyModifiers::CONTROL }),
+
+                b'\x1b' => match self.buffer.get(1) {
+                    Some(b'[') => {
+                        (event, len) = self.parse_csi()?;
+                        event
+                    },
+                    Some(b'O') => {
+                        let (array, array_len) = self.extract::<2>(0, 0);
+                        match &array {
+                            [c @ b'P'..=b'S', _] => { len = 3; Key::Function(c - b'P' + 1).into() },
+                            [b'I', _] => { len = 3; Key::Char('\t').into() },
+                            [b' ', _] => { len = 3; Key::Char(' ').into() },
+                            [b'j', _] => { len = 3; Key::Char('*').into() },
+                            [b'k', _] => { len = 3; Key::Char('+').into() },
+                            [b'l', _] => { len = 3; Key::Char(',').into() },
+                            [b'm', _] => { len = 3; Key::Char('-').into() },
+                            [b'n', _] => { len = 3; Key::Char('.').into() },
+                            [b'o', _] => { len = 3; Key::Char('/').into() },
+                            [b'X', _] => { len = 3; Key::Char('=').into()},
+                            [b'M', _] => { len = 3; Key::Enter.into() },
+                            [b'F', _] => { len = 3; Key::End.into() },
+                            [b'H', _] => { len = 3; Key::Home.into() },
+                            [b'2', b'~'] => { len = 4; Key::Insert.into() },
+                            [b'3', b'~'] => { len = 4; Key::Delete.into() },
+                            _ if array_len == 0 => return None,
+                            _ => { len = 3; Event::Unknown },
+                        }
+                    },
+                    _ => {
+                        // check for alt-key otherwise treat as a single escape key
+                        (event, len) = self.parse_char(1, KeyModifiers::ALT).unwrap_or(Some((Key::Escape.into(), 0)))?;
+                        len += 1;
+                        event
+                    },
+                },
+
+                _ => Event::Unknown,
             },
         };
 
