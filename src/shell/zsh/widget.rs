@@ -26,6 +26,20 @@ pub struct ZleWidget<'a, 'b> {
 unsafe impl Send for ZleWidget<'_, '_> {}
 unsafe impl Sync for ZleWidget<'_, '_> {}
 
+pub struct WidgetArgs {
+    times: u16,
+    insert: bool,
+}
+
+impl Default for WidgetArgs {
+    fn default() -> Self {
+        Self {
+            times: 1,
+            insert: true,
+        }
+    }
+}
+
 impl<'a, 'b> ZleWidget<'a, 'b> {
     pub fn new(ptr: NonNull<bindings::thingy>, shell: &'a mut crate::shell::ShellInner<'b>) -> Self {
         let w = Self{ptr, shell};
@@ -80,7 +94,8 @@ impl<'a, 'b> ZleWidget<'a, 'b> {
         unsafe{ CStr::from_ptr(self.ptr.as_ref().nam) }
     }
 
-    pub(crate) fn exec<'c, I: Iterator<Item=&'c BStr> + ExactSizeIterator>(&self, ntimes: u16, args: I) -> c_int {
+    pub(crate) fn exec<'c, I: Iterator<Item=&'c BStr> + ExactSizeIterator>(&self, opts: Option<WidgetArgs>, args: I) -> c_int {
+        let opts = opts.unwrap_or_default();
         let mut null = std::ptr::null_mut();
         let args_ptr = if args.len() == 0 {
             &raw mut null
@@ -89,7 +104,8 @@ impl<'a, 'b> ZleWidget<'a, 'b> {
         };
 
         unsafe {
-            bindings::zmod.mult = ntimes as _;
+            bindings::zmod.mult = opts.times as _;
+            bindings::insmode = if opts.insert { 1 } else { 0 };
             bindings::execzlefunc(self.ptr.as_ptr(), args_ptr, 0, 0)
         }
     }

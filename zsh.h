@@ -181,6 +181,7 @@ struct thingy {
 };
 struct thingy thingies; // this is actually an array
 Thingy keybind(Keymap km, char *seq, char **strp);
+int insmode;
 mod_export int lastchar;
 mod_export int lastchar_wide;
 mod_export int lastchar_wide_valid;

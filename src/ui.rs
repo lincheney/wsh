@@ -508,13 +508,13 @@ impl Ui {
                 let lock = self.is_running_process.lock().await;
                 let mut ui = self.inner.borrow_mut().await;
                 let buffer = ui.buffer.get_contents();
-                let cursor = buffer.len() + 1;
+                let cursor = ui.buffer.get_cursor();
 
                 widget.shell.set_zle_buffer(buffer.clone(), cursor as _);
                 widget.shell.set_lastchar(buf);
                 // executing a widget may block
                 tokio::task::block_in_place(|| {
-                    widget.exec(1, [].into_iter());
+                    widget.exec(None, [].into_iter());
                 });
                 let (buffer, cursor) = shell.get_zle_buffer();
 
