@@ -512,7 +512,10 @@ impl Ui {
 
                 widget.shell.set_zle_buffer(buffer.clone(), cursor as _);
                 widget.shell.set_lastchar(buf);
-                widget.exec(1, [].into_iter());
+                // executing a widget may block
+                tokio::task::block_in_place(|| {
+                    widget.exec(1, [].into_iter());
+                });
                 let (buffer, cursor) = shell.get_zle_buffer();
 
                 ui.buffer.set(Some(buffer.as_ref()), Some(cursor.unwrap_or(buffer.len() as _) as _));
