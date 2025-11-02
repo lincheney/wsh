@@ -391,7 +391,7 @@ impl Parser {
                         event
                     },
                     Some(b'O') => {
-                        let (array, array_len) = self.extract::<2>(0, 0);
+                        let (array, array_len) = self.extract::<2>(2, 0);
                         match &array {
                             [c @ b'P'..=b'S', _] => { len = 3; Key::Function(c - b'P' + 1).into() },
                             [b'I', _] => { len = 3; Key::Char('\t').into() },
