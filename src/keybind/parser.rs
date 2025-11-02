@@ -265,12 +265,12 @@ impl Parser {
 
             ([Some(y), Some(x)], b'R') => Event::CursorPosition{x: x.saturating_sub(1), y: y.saturating_sub(1)},
 
-            ([Some(0), m @ (None | Some(0..=7))], b'P'..=b'S') => {
-                let modifiers = KeyModifiers::from_bits_truncate(m.map_or(0, |m| m as u8 - b'0'));
+            ([Some(0), m @ (None | Some(1..=8))], b'P'..=b'S') => {
+                let modifiers = KeyModifiers::from_bits_truncate(m.unwrap_or(1) as u8 - 1);
                 Event::Key(KeyEvent{ key: Key::Function(suffix - b'P' + 1), modifiers })
             },
 
-            (m @ ([] | [Some(1)] | [Some(1), None | Some(0..=7)]), b'A'..=b'H') => {
+            (m @ ([] | [Some(1)] | [Some(1), None | Some(1..=8)]), b'A'..=b'H') => {
                 let key = match suffix {
                     b'A' => Key::Up,
                     b'B' => Key::Down,
@@ -281,12 +281,12 @@ impl Parser {
                     b'H' => Key::Home,
                     _ => unreachable!(),
                 };
-                let modifiers = m.get(1).unwrap_or(&None).map_or(0, |m| m as u8 - b'0');
-                let modifiers = KeyModifiers::from_bits_truncate(modifiers);
+                let modifiers = m.get(1).unwrap_or(&None).unwrap_or(1) - 1;
+                let modifiers = KeyModifiers::from_bits_truncate(modifiers as _);
                 Event::Key(KeyEvent{ key, modifiers })
             },
 
-            ([Some(num), m @ .. ], b'~') if matches!(m, [] | [None | Some(0..=7)]) => {
+            ([Some(num), m @ .. ], b'~') if matches!(m, [] | [None | Some(1..=8)]) => {
 
                 let key = match num {
                     2 => Key::Insert,
@@ -327,8 +327,8 @@ impl Parser {
                     _ => return Some((Event::Unknown, len)),
                 };
 
-                let modifiers = m.first().unwrap_or(&None).map_or(0, |m| m as u8 - b'0');
-                let modifiers = KeyModifiers::from_bits_truncate(modifiers);
+                let modifiers = m.first().unwrap_or(&None).unwrap_or(1) - 1;
+                let modifiers = KeyModifiers::from_bits_truncate(modifiers as _);
                 Event::Key(KeyEvent{ key, modifiers })
             },
 
