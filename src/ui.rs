@@ -504,6 +504,8 @@ impl Ui {
             },
             KeybindValue::Widget(widget) => {
                 // execute the widget
+                // a widget may run subprocesses so lock the ui
+                let lock = self.is_running_process.lock().await;
                 let mut ui = self.inner.borrow_mut().await;
                 let buffer = ui.buffer.get_contents();
                 let cursor = buffer.len() + 1;
@@ -514,6 +516,7 @@ impl Ui {
                 let (buffer, cursor) = shell.get_zle_buffer();
 
                 ui.buffer.set(Some(buffer.as_ref()), Some(cursor.unwrap_or(buffer.len() as _) as _));
+                drop(lock);
 
                 // this widget may have called accept-line somewhere inside
                 if shell.has_accepted_line() {
