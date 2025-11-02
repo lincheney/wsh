@@ -11,11 +11,10 @@ use std::ffi::CString;
 use anyhow::Result;
 use crate::shell::zsh;
 
-static STATE: OnceLock<Ui> = OnceLock::new();
 static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
     tokio::runtime::Runtime::new().unwrap()
 });
-static UI: Mutex<Option<TrampolineIn>> = Mutex::new(None);
+static UI: Mutex<Option<(Ui, TrampolineIn)>> = Mutex::new(None);
 
 fn main() -> Result<Option<BString>> {
     RUNTIME.block_on(async {
@@ -23,8 +22,8 @@ fn main() -> Result<Option<BString>> {
         let store = lock.deref_mut();
         let new = store.is_none();
 
-        let trampoline = if let Some(trampoline) = store {
-            trampoline
+        let (_ui, trampoline) = if let Some(x) = store {
+            x
 
         } else {
             let log_file = Box::new(std::fs::File::create("/tmp/wish.log").expect("Can't create log file"));
@@ -39,17 +38,20 @@ fn main() -> Result<Option<BString>> {
             ui.activate().await?;
             ui.start_cmd().await?;
 
-            tokio::task::spawn(async move {
-                let tty = std::fs::File::open("/dev/tty").unwrap();
-                let raw_fd = tty.as_raw_fd();
-                // 3. Set non-blocking mode
-                let flags = nix::fcntl::fcntl(raw_fd, nix::fcntl::FcntlArg::F_GETFL).unwrap();
-                let new_flags = nix::fcntl::OFlag::from_bits_truncate(flags) | nix::fcntl::OFlag::O_NONBLOCK;
-                nix::fcntl::fcntl(raw_fd, nix::fcntl::FcntlArg::F_SETFL(new_flags)).unwrap();
-                events.run(tty, ui).await.unwrap();
-            });
+            {
+                let ui = ui.clone();
+                tokio::task::spawn(async move {
+                    let tty = std::fs::File::open("/dev/tty").unwrap();
+                    let raw_fd = tty.as_raw_fd();
+                    // 3. Set non-blocking mode
+                    let flags = nix::fcntl::fcntl(raw_fd, nix::fcntl::FcntlArg::F_GETFL).unwrap();
+                    let new_flags = nix::fcntl::OFlag::from_bits_truncate(flags) | nix::fcntl::OFlag::O_NONBLOCK;
+                    nix::fcntl::fcntl(raw_fd, nix::fcntl::FcntlArg::F_SETFL(new_flags)).unwrap();
+                    events.run(tty, ui).await.unwrap();
+                });
+            }
 
-            store.get_or_insert(trampoline)
+            store.get_or_insert((ui, trampoline))
         };
 
         Ok(trampoline.jump_in(!new).await)
@@ -57,33 +59,38 @@ fn main() -> Result<Option<BString>> {
 }
 
 unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _options: zsh_sys::Options, _func: c_int) -> c_int {
+
     let argv = c_string_array::CStrArray::from(argv).to_vec();
     match argv.first().map(|s| s.as_slice()) {
         Some(b"lua") => {
-            if let Some(ui) = STATE.get() {
-                let result = tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(async {
-                        ui.shell.with_tmp_permit(|| async {
-                            ui.lua.load(argv.get(1).map(|s| s.as_slice()).unwrap_or(b"")).exec_async().await
-                        }).await
-                    })
-                });
-                if let Err(err) = result {
-                    eprintln!("{:?}", err);
-                    return 1;
+            return tokio::task::block_in_place(|| {
+                match UI.lock() {
+                    Err(e) => { eprintln!("{:?}", e); return 1; },
+                    Ok(value) => if let Some((ui, _)) = &*value {
+                        let result = RUNTIME.block_on(async {
+                            ui.shell.with_tmp_permit(|| async {
+                                ui.lua.load(argv.get(1).map(|s| s.as_slice()).unwrap_or(b"")).exec_async().await
+                            }).await
+                        });
+                        if let Err(e) = result {
+                            eprintln!("{:?}", e);
+                            return 1;
+                        }
+                    },
                 }
-            }
+                0
+            });
         },
+
         Some(_) => {
             eprintln!("unknown arguments: {:?}", argv);
             return 1;
         },
+
         None => {
             return 0;
         },
     }
-
-    0
 }
 
 #[derive(Debug)]
