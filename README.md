@@ -50,7 +50,7 @@ i wish i could have
 * [x] alias, history expansion
 * [ ] heredocs
 * [ ] selecting `print -s echo` in history is weird
-* [ ] silence parse warnings
+* [x] silence parse warnings
 * [ ] custom buffer rendering, ghost text etc
 * [x] fix segfault when letting zle exit by itself
 * [ ] ~~try switch to termion~~

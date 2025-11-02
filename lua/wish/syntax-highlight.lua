@@ -48,12 +48,12 @@ wish.add_event_callback('buffer_change', function()
     if buffer ~= prev_buffer then
         -- rehighlight
         -- is this going to be slow? do we need a debounce or something?
-        local complete, starts, ends, kinds = wish.parse(buffer, true)
+        local complete, tokens = wish.parse(buffer, true)
 
         wish.clear_buf_highlights(NAMESPACE)
-        for i = 1, #kinds do
-            local hl = highlights[kinds[i]]
-            if not hl and kinds[i] ~= 'STRING' and not buffer:sub(starts[i]+1, ends[i]):find('%w') then
+        for i = 1, #tokens do
+            local hl = highlights[tokens[i]]
+            if not hl and tokens[i].kind ~= 'STRING' and not buffer:sub(tokens[i].start+1, tokens[i].finish):find('%w') then
                 hl = PUNCTUATION
             end
 
@@ -62,8 +62,8 @@ wish.add_event_callback('buffer_change', function()
                 for k, v in pairs(hl) do
                     arg[k] = v
                 end
-                arg.start = starts[i]
-                arg.finish = ends[i]
+                arg.start = tokens[i].start
+                arg.finish = tokens[i].finish
                 arg.namespace = NAMESPACE
                 wish.add_buf_highlight(arg)
             end

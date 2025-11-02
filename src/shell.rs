@@ -14,6 +14,7 @@ pub use zsh::{
     completion,
     history,
     variables,
+    parser::Token,
 };
 use variables::Variable;
 

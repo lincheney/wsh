@@ -4,30 +4,33 @@ use std::ptr::null_mut;
 use bstr::{BStr, ByteSlice};
 use super::bindings;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum TokenKind {
     Lextok(bindings::lextok),
     Token(bindings::token),
     Comment,
 }
 
-#[derive(Debug)]
+impl std::fmt::Display for TokenKind {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+        match self {
+            TokenKind::Lextok(k) => write!(fmt, "{:?}", k),
+            TokenKind::Token(k) => write!(fmt, "{:?}", k),
+            TokenKind::Comment => write!(fmt, "comment"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Token {
     pub range: Range<usize>,
-    kind: Option<TokenKind>,
+    pub kind: Option<TokenKind>,
+    pub nested: Option<Vec<Token>>,
 }
 
 impl Token {
     pub fn as_str<'a>(&self, cmd: &'a BStr) -> &'a BStr {
         &cmd[self.range.clone()]
-    }
-
-    pub fn kind_as_str(&self) -> Option<String> {
-        Some(match self.kind? {
-            TokenKind::Lextok(k) => format!("{:?}", k),
-            TokenKind::Token(k) => format!("{:?}", k),
-            TokenKind::Comment => "comment".into(),
-        })
     }
 }
 
@@ -57,7 +60,7 @@ pub fn parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
             tokens.pop();
         } else {
             // otherwise it must be joined onto an incomplete token
-            if last.kind != Some(TokenKind::Comment) {
+            if !matches!(last.kind, Some(TokenKind::Comment)) {
                 complete = false;
             }
             last.range.end -= dummy.len();
@@ -79,7 +82,7 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
     let mut tokens = vec![];
     let mut start = 0;
 
-    let mut push_token = |tokstr: &[u8], kind: Option<TokenKind>, has_meta| {
+    let mut push_token = |tokens: &mut Vec<Token>, tokstr: &[u8], kind: Option<TokenKind>, has_meta| {
         let range = if has_meta {
             let mut tokstr = tokstr.to_owned();
             super::unmetafy_owned(&mut tokstr);
@@ -88,7 +91,7 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
             find_str(BStr::new(tokstr), cmd, start).unwrap()
         };
         start = range.end;
-        tokens.push(Token{range, kind});
+        tokens.push(Token{range, kind, nested: None});
     };
 
     // do similar to bufferwords
@@ -116,7 +119,7 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
                 break
             }
 
-            let mut kind: Option<TokenKind> = num::FromPrimitive::from_u32(zsh_sys::tok).map(TokenKind::Lextok);
+            let kind: Option<TokenKind> = num::FromPrimitive::from_u32(zsh_sys::tok).map(TokenKind::Lextok);
 
             if zsh_sys::tokstr.is_null() {
                 // no tokstr, so get string from tokstring table
@@ -124,7 +127,7 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
                 #[allow(static_mut_refs)]
                 if let Some(tokstr) = zsh_sys::tokstrings.get(zsh_sys::tok as usize).filter(|t| !t.is_null()) {
                     let tokstr = CStr::from_ptr(*tokstr).to_bytes();
-                    push_token(tokstr, kind, false);
+                    push_token(&mut tokens, tokstr, kind, false);
 
                 } else {
                     // TODO what am i meant to do here?
@@ -136,14 +139,11 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
 
                 let tokstr = CStr::from_ptr(zsh_sys::tokstr).to_bytes();
 
-                if kind == Some(TokenKind::Lextok(bindings::lextok::STRING)) && tokstr.starts_with(b"#") {
-                    kind = Some(TokenKind::Comment);
-                }
-
                 let mut slice_start = 0;
                 let mut meta = false;
                 let mut has_meta = false;
 
+                let mut nested = vec![];
                 for (i, c) in tokstr.iter().enumerate() {
                     if meta {
                         meta = false;
@@ -153,19 +153,33 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
                     } else if *c >= bindings::token::Pound as _ && *c < bindings::token::Nularg as _ { // token
 
                         if i > slice_start {
-                            push_token(&tokstr[slice_start..i], kind, has_meta);
+                            push_token(&mut nested, &tokstr[slice_start..i], None, has_meta);
                         }
                         has_meta = false;
                         slice_start = i + 1;
 
                         let kind: Option<TokenKind> = num::FromPrimitive::from_u8(*c).map(TokenKind::Token);
                         let c = [*ztokens.add((*c - bindings::token::Pound as u8) as usize) as u8];
-                        push_token(&c[..], kind, false);
+                        push_token(&mut nested, &c[..], kind, false);
                     }
                 }
 
-                if tokstr.len() > slice_start {
-                    push_token(&tokstr[slice_start..], kind, has_meta);
+                let kind = if matches!(kind, Some(TokenKind::Lextok(bindings::lextok::STRING))) && tokstr.starts_with(b"#") {
+                    Some(TokenKind::Comment)
+                } else {
+                    kind
+                };
+
+                if slice_start == 0 {
+                    // no inner tokens
+                    push_token(&mut tokens, &tokstr, kind, has_meta)
+
+                } else {
+                    if tokstr.len() > slice_start {
+                        push_token(&mut nested, &tokstr[slice_start..], None, has_meta);
+                    }
+                    let range = nested[0].range.start .. nested.last().unwrap().range.end;
+                    tokens.push(Token{range, kind, nested: Some(nested)});
                 }
             }
 
@@ -191,7 +205,7 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
     if recursive {
         let mut i = 2;
         while i < tokens.len() {
-            let kinds = tokens[i-2].kind.zip(tokens[i-1].kind).zip(tokens[i].kind);
+            let kinds = tokens[i-2].kind.as_ref().zip(tokens[i-1].kind.as_ref()).zip(tokens[i].kind.as_ref());
             if matches!(kinds, Some(((
                 TokenKind::Token(
                     bindings::token::String // $(

@@ -2,21 +2,27 @@ use crate::ui::Ui;
 use anyhow::Result;
 use mlua::prelude::*;
 
-async fn parse(ui: Ui, lua: Lua, (val, recursive): (bstr::BString, Option<bool>)) -> Result<(bool, LuaTable, LuaTable, LuaTable)> {
-    let val = val.as_ref();
-    let (complete, tokens) = ui.shell.lock().await.parse(val, recursive.unwrap_or(false));
-
-    let starts = lua.create_table()?;
-    let ends = lua.create_table()?;
-    let kinds = lua.create_table()?;
-
-    for t in tokens {
-        starts.raw_push(t.range.start)?;
-        ends.raw_push(t.range.end)?;
-        kinds.raw_push(t.kind_as_str())?;
+fn tokens_to_lua(tokens: &Vec<crate::shell::Token>, lua: &Lua) -> Result<LuaTable> {
+    let tbl = lua.create_table()?;
+    for token in tokens {
+        let t = lua.create_table()?;
+        t.raw_set("start", token.range.start)?;
+        t.raw_set("finish", token.range.end)?;
+        if let Some(kind) = &token.kind {
+            t.raw_set("kind", kind.to_string())?;
+        }
+        if let Some(nested) = &token.nested {
+            t.raw_set("nested", tokens_to_lua(nested, lua)?)?;
+        }
+        tbl.raw_push(t)?;
     }
+    Ok(tbl)
+}
 
-    Ok((complete, starts, ends, kinds))
+async fn parse(ui: Ui, lua: Lua, (val, recursive): (bstr::BString, Option<bool>)) -> Result<(bool, LuaTable)> {
+    let (complete, tokens) = ui.shell.lock().await.parse(val.as_ref(), recursive.unwrap_or(false));
+    let tokens = tokens_to_lua(&tokens, &lua)?;
+    Ok((complete, tokens))
 }
 
 pub fn init_lua(ui: &Ui) -> Result<()> {
