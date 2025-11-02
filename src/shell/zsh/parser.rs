@@ -98,6 +98,7 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
         zsh_sys::zlemetall = cmd.len() as _;
         zsh_sys::zlemetacs = zsh_sys::zlemetall;
         zsh_sys::strinbeg(0);
+        let old_noerrs = super::set_error_verbosity(super::ErrorVerbosity::Ignore);
         let old_noaliases = zsh_sys::noaliases;
         zsh_sys::noaliases = 1;
 
@@ -181,6 +182,7 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
         zsh_sys::inpop();
         zsh_sys::errflag &= !zsh_sys::errflag_bits_ERRFLAG_ERROR as i32;
         zsh_sys::noaliases = old_noaliases;
+        super::set_error_verbosity(old_noerrs);
         zsh_sys::zcontext_restore();
     }
 

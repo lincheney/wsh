@@ -168,3 +168,23 @@ pub fn get_zle_buffer() -> (BString, Option<i64>) {
         _ => (buffer, None),
     }
 }
+
+pub enum ErrorVerbosity {
+    Normal = 0,
+    Quiet = 1,
+    Ignore = 2,
+}
+
+pub fn set_error_verbosity(verbosity: ErrorVerbosity) -> ErrorVerbosity {
+    unsafe {
+        let old_value = zsh_sys::noerrs;
+        zsh_sys::noerrs = verbosity as _;
+        if old_value <= 0 {
+            ErrorVerbosity::Normal
+        } else if old_value >= 2 {
+            ErrorVerbosity::Ignore
+        } else {
+            ErrorVerbosity::Quiet
+        }
+    }
+}
