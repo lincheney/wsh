@@ -8,7 +8,7 @@ pub enum Event {
     BracketedPaste(BString),
     Focus(bool),
     CursorPosition{x: usize, y: usize},
-    InvalidUtf8([u8; 4]),
+    InvalidUtf8([u8; 4], KeyModifiers),
     Unknown,
 }
 
@@ -336,21 +336,22 @@ impl Parser {
         Some((event, len))
     }
 
-    fn parse_char(&self, start: usize) -> Option<Option<(Event, usize)>> {
+    fn parse_char(&self, start: usize, modifiers: KeyModifiers) -> Option<Option<(Event, usize)>> {
         let Some(c) = self.buffer.get(start)
             else { return Some(None) }; // if None, it means its incomplete
 
-        let event = match c {
-            b'\r' | b'\n'       => Key::Enter.into(),
-            b'\t' | b' '..=b'~' => Key::Char((*c).into()).into(),
+        let mut len = 1;
+        let key = match c {
+            b'\r' | b'\n'       => Key::Enter,
+            b'\t' | b' '..=b'~' => Key::Char((*c).into()),
             // utf8
             b'\xc2'..=b'\xf4' => {
                 let (array, array_len) = self.extract::<4>(start, 0);
                 match std::str::from_utf8(&array[..array_len]) {
                     Ok(s) => {
-                        let len = s.as_bytes().len();
+                        len = s.as_bytes().len();
                         let c = s.chars().next().unwrap();
-                        return Some(Some((Key::Char(c).into(), len)))
+                        Key::Char(c)
                     },
                     Err(e) => {
                         let Some(len) = e.error_len()
@@ -358,13 +359,14 @@ impl Parser {
 
                         let mut invalid = [0; 4];
                         invalid.copy_from_slice(&array[..len]);
-                        return Some(Some((Event::InvalidUtf8(invalid), len)))
+                        return Some(Some((Event::InvalidUtf8(invalid, modifiers), len)))
                     },
                 }
             },
             _ => return None,
         };
-        Some(Some((event, 1)))
+        let event = Event::Key(KeyEvent{ key, modifiers });
+        Some(Some((event, len)))
     }
 
     pub fn get_one_event(&mut self) -> Option<(Event, BString)> {
@@ -406,14 +408,14 @@ impl Parser {
                 },
                 _ => {
                     // check for alt-key otherwise treat as a single escape key
-                    (event, len) = self.parse_char(1).unwrap_or(Some((Key::Escape.into(), 0)))?;
+                    (event, len) = self.parse_char(1, KeyModifiers::ALT).unwrap_or(Some((Key::Escape.into(), 0)))?;
                     len += 1;
                     event
                 },
             },
 
             _ => {
-                (event, len) = self.parse_char(0).unwrap_or(Some((Event::Unknown, len)))?;
+                (event, len) = self.parse_char(0, KeyModifiers::NONE).unwrap_or(Some((Event::Unknown, len)))?;
                 event
             },
         };
