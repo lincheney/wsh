@@ -286,11 +286,11 @@ impl Ui {
 
         // time to execute
         if complete {
-            let lock = self.is_running_process.lock().await;
-
             self.trigger_accept_line_callbacks(()).await;
+
             let mut ui = self.inner.borrow_mut().await;
             let mut shell = self.shell.lock().await;
+            let lock = self.is_running_process.lock().await;
 
             ui.tui.clear_non_persistent();
 
@@ -312,11 +312,15 @@ impl Ui {
                 Clear(ClearType::FromCursorDown),
                 EndSynchronizedUpdate,
             )?;
+            // release ui so that it can be accessed from the command
+            drop(ui);
 
             // acceptline doesn't actually accept the line right now
             // only when we return control to zle using the trampoline
             // shell.acceptline();
             self.trampoline.jump_out(buffer).await?;
+
+            let mut ui = self.inner.borrow_mut().await;
             ui.activate()?;
             ui.events.resume().await;
             ui.reset(&mut shell);
