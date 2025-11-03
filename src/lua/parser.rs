@@ -3,7 +3,7 @@ use anyhow::Result;
 use mlua::prelude::*;
 
 fn tokens_to_lua(tokens: &Vec<crate::shell::Token>, lua: &Lua) -> Result<LuaTable> {
-    let tbl = lua.create_table()?;
+    let tbl = lua.create_table_with_capacity(tokens.len(), 0)?;
     for token in tokens {
         let t = lua.create_table()?;
         t.raw_set("start", token.range.start)?;
