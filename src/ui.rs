@@ -298,6 +298,9 @@ impl Ui {
             ui.events.pause().await;
             ui.deactivate()?;
 
+            let buffer = ui.buffer.get_contents().clone();
+            shell.clear_completion_cache();
+
             // move to last line of buffer
             let y_offset = ui.prompt.height + ui.buffer.height - 1 - ui.buffer.cursor_coord.1 - 1;
             execute!(
@@ -307,16 +310,9 @@ impl Ui {
                 style::Print('\n'),
                 MoveToColumn(0),
                 Clear(ClearType::FromCursorDown),
+                EndSynchronizedUpdate,
             )?;
 
-            let buffer = ui.buffer.get_contents().clone();
-
-            tokio::task::spawn(async {
-                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                execute!(std::io::stdout(), EndSynchronizedUpdate)
-            });
-
-            shell.clear_completion_cache();
             // acceptline doesn't actually accept the line right now
             // only when we return control to zle using the trampoline
             // shell.acceptline();
