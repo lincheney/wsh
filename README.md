@@ -64,16 +64,30 @@ i wish i could have
 * [ ] fork safety
     * zsh will fork e.g. `( echo 123 )` and we have threads and locks, yikes
     * is this safe? what do we need to deal with? do we need some `pthread_atfork`?
-    * [x] is the shell lock safe?
+    * [x] is the shell fork safe?
         * it seems to work? `( wsh lua 'wish.cmd[[ ... ]]' )` seems to have no problems
             due to the extra shell lock permit with `wsh lua` to allow recursion
         * are there other ways hit the shell lock?
             all other threads are dead so really you can run zsh (safe) and `wsh lua` and i think thats it
-    * [ ] is the ui lock safe?
+    * [ ] is the ui fork safe?
         * if someone takes the ui lock right before fork, it will get lost and ui will be inaccessible
         * `( wsh lua 'wish.set_buffer("x"); print(wish.get_buffer())' )`
         * you can still control-c it, but not nice
-    * [ ] is the ui init lock safe?
+    * [ ] is the ui init fork safe?
         * the lock is used on init and `wsh lua ...`
         * same as above, if someone takes the lock before fork, you get a hang
+    * [ ] is lua fork safe?
+        * uhhh not really, see hacks in `./src/externs/fork.rs`
+    * [ ] is `has_foreground_process` fork safe?
+        * i guess we don't care, it needs to remain locked in children anyway
+    * [ ] is crossterm fork safe?
+        * crossterm is not used for input, nor does the child need terminal input access so that's fine
+        * crossterm has a lock around a static term settings variable,
+            this can only be accessed via the `UiInner` so it depends on the fork safety of that
+    * [ ] is the logger fork safe?
+        * there's locks around the output stream
+        * on that note i guess the same holds for std stdin, stdout, stderr locks
+    * [ ] is tokio fork safe?
+        * no idea
+        * seems to use tls for the handler, maybe its ok? dunno
 * [ ]
