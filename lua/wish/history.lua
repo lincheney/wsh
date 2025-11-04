@@ -6,14 +6,14 @@ local HISTORY_SEARCH = {}
 
 local show_history
 function show_history(widget, filter, data)
-    local index, histnums, history = wish.get_history()
+    local current, history = wish.get_history()
     local reverse = not filter
 
     local ix = 0
     local lines = {}
     for i = 1, #history do
-        table.insert(lines, {text = history[i]})
-        if histnums[i] == index then
+        table.insert(lines, {text = history[i].text})
+        if history[i].histnum == index then
             ix = #lines
         end
     end
@@ -41,26 +41,26 @@ function show_history(widget, filter, data)
         }
 
         if filter and result then
-            wish.goto_history(histnums[result])
+            wish.goto_history(history[result].histnum)
             wish.redraw()
         end
     end)
 end
 
 function M.history_up()
-    local index = wish.get_history_index()
-    local newindex, value = wish.get_prev_history(index)
-    if index ~= newindex and newindex then
-        wish.goto_history(newindex)
+    local current = wish.get_history_index()
+    local entry = wish.get_prev_history(current)
+    if entry and current ~= entry.histnum then
+        wish.goto_history(entry.histnum)
     end
     show_history(SELECTION.default, false, HISTORY_MENU)
 end
 
 function M.history_down()
-    local index = wish.get_history_index()
-    local newindex, value = wish.get_next_history(index)
-    if index ~= newindex then
-        wish.goto_history(newindex or index + 1)
+    local current = wish.get_history_index()
+    local entry = wish.get_next_history(current)
+    if not entry or current ~= entry.histnum then
+        wish.goto_history(entry and entry.histnum or current + 1)
     end
     show_history(SELECTION.default, false, HISTORY_MENU)
 end

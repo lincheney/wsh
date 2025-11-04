@@ -158,6 +158,8 @@ mod_export int showinglist;
 int expandhistory();
 
 void set_histno(void* pm, long x);
+int histline;
+
 int selectkeymap(char *name, int fb);
 void initundo(void);
 typedef void* Keymap;

@@ -1,5 +1,5 @@
 use std::ptr::NonNull;
-use std::os::raw::{c_long, c_char};
+use std::os::raw::{c_long, c_char, c_int};
 use std::ffi::{CString, CStr};
 use std::default::Default;
 use std::sync::{Arc, Weak};
@@ -174,41 +174,30 @@ impl<'a> ShellInner<'a> {
         unsafe{ zsh_sys::readhistfile(null_mut(), 0, zsh_sys::HFILE_USE_OPTIONS as _); }
     }
 
-    pub fn get_history(&mut self) -> zsh::history::EntryIter {
-        zsh::history::get_history()
+    pub fn get_history<'b>(&'b mut self) -> zsh::history::History<'b, 'a> {
+        zsh::history::History::get(self)
     }
 
-    pub fn get_curhist(&mut self) -> (c_long, Option<&zsh_sys::histent>) {
-        let curhist = unsafe{ zsh_sys::curhist };
-        self.set_curhist(curhist)
+    pub fn get_histline(&mut self) -> c_int {
+        unsafe{ zsh::histline }
     }
 
-    pub fn set_curhist(&mut self, curhist: c_long) -> (c_long, Option<&zsh_sys::histent>) {
+    pub fn set_histline<'b>(&'b mut self, histline: c_long) -> Option<zsh::history::EntryPtr<'b>> {
         let history = self.get_history();
 
-        let value = history
-            .enumerate()
-            .take_while(|(h, _)| *h >= curhist)
-            .last();
-
-        if let Some((h, e)) = value {
+        if let Some(entry) = history.closest_to(histline, std::cmp::Ordering::Greater) {
             // found a good enough match
-            unsafe{ zsh_sys::curhist = h; }
-            (h, Some(e))
-
-        } else if let Some(h) = history.iter().next().map(|h| h.histnum) {
-            // after all history
-            unsafe{ zsh_sys::curhist = h + 1; }
-            (h + 1, None)
+            unsafe{ zsh::histline = entry.histnum() as _; }
+            Some(entry)
 
         } else {
             // no history
-            unsafe{ zsh_sys::curhist = 0; }
-            (0, None)
+            unsafe{ zsh::histline = 0; }
+            None
         }
     }
 
-    pub fn push_history(&mut self, string: &BStr) -> zsh::history::EntryIter {
+    pub fn push_history<'b>(&'b mut self, string: &BStr) -> zsh::history::EntryPtr<'b> {
         zsh::history::push_history(string)
     }
 

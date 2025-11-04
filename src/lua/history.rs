@@ -3,69 +3,75 @@ use mlua::{prelude::*};
 use crate::ui::{Ui, ThreadsafeUiInner};
 use bstr::*;
 
-async fn get_history(ui: Ui, _lua: Lua, _val: ()) -> Result<(usize, Vec<usize>, Vec<BString>)> {
-    let mut shell = ui.shell.lock().await;
-    let curhist = shell.get_curhist().0;
-    let mut histnums = vec![];
-    let mut text = vec![];
+fn entry_to_lua(entry: crate::shell::history::Entry, lua: &Lua) -> Result<LuaTable> {
+    let t = lua.create_table_with_capacity(0, 4)?;
+    t.raw_set("text", entry.text)?;
+    t.raw_set("start_time", entry.start_time)?;
+    t.raw_set("finish_time", entry.finish_time)?;
+    t.raw_set("histnum", entry.histnum)?;
+    Ok(t)
+}
 
-    for e in shell.get_history().entries() {
-        histnums.push(e.histnum as _);
-        text.push(e.text);
+async fn get_history(ui: Ui, lua: Lua, _val: ()) -> Result<(usize, LuaTable)> {
+    let mut shell = ui.shell.lock().await;
+    let current = shell.get_histline();
+
+    let tbl = lua.create_table()?;
+    for entry in shell.get_history().iter() {
+        let entry = entry.to_entry();
+        tbl.raw_push(entry_to_lua(entry, &lua)?)?;
     }
-    Ok((curhist as _, histnums, text))
+    Ok((current as _, tbl))
 }
 
 async fn get_history_index(ui: Ui, _lua: Lua, _val: ()) -> Result<usize> {
-    Ok(ui.shell.lock().await.get_curhist().0 as _)
+    Ok(ui.shell.lock().await.get_histline() as _)
 }
 
-async fn get_next_history(ui: Ui, _lua: Lua, val: usize) -> Result<(Option<usize>, Option<BString>)> {
+async fn get_next_history(ui: Ui, lua: Lua, val: usize) -> Result<Option<LuaTable>> {
     let mut shell = ui.shell.lock().await;
     // get the next highest one
-    let value = shell
-        .get_history()
-        .entries()
-        .take_while(|e| e.histnum > val as _)
-        .map(|e| (e.histnum as _, e.text))
-        .last()
-    ;
-    Ok(value.unzip())
+    if let Some(entry) = shell.get_history().closest_to((val+1) as _, std::cmp::Ordering::Greater) {
+        Ok(Some(entry_to_lua(entry.to_entry(), &lua)?))
+    } else {
+        Ok(None)
+    }
 }
 
-async fn get_prev_history(ui: Ui, _lua: Lua, val: usize) -> Result<(Option<usize>, Option<BString>)> {
+async fn get_prev_history(ui: Ui, lua: Lua, val: usize) -> Result<Option<LuaTable>> {
     let mut shell = ui.shell.lock().await;
     // get the next lowest one
-    let value = shell
-        .get_history()
-        .entries()
-        .find(|e| e.histnum < val as _)
-        .map(|e| (e.histnum as _, e.text))
-    ;
-    Ok(value.unzip())
+    if let Some(entry) = shell.get_history().closest_to((val.saturating_sub(1)) as _, std::cmp::Ordering::Less) {
+        Ok(Some(entry_to_lua(entry.to_entry(), &lua)?))
+    } else {
+        Ok(None)
+    }
 }
 
-async fn goto_history(mut ui: Ui, _lua: Lua, val: usize) -> Result<(usize, Option<BString>)> {
+async fn goto_history(mut ui: Ui, _lua: Lua, val: usize) -> Result<Option<usize>> {
     let mut shell = ui.shell.lock().await;
 
-    let save = shell.get_curhist().1.is_none();
-    let (curhist, entry) = shell.set_curhist(val as _);
-    let text = entry.map(|e| crate::shell::history::Entry::from(e).text);
+    let current = shell.get_histline();
+    let latest = shell.get_history().first().map(|entry| entry.histnum());
 
     let mut ui = ui.inner.borrow_mut().await;
-    // save the buffer if moving to another history
-    if save {
-        ui.buffer.save();
+    match shell.set_histline(val as _) {
+        Some(entry) => {
+            if Some(entry.histnum()) == latest {
+                // restore history if off history
+                ui.buffer.restore();
+            } else {
+                // save the buffer if moving to another history
+                if Some(current as _) == latest {
+                    ui.buffer.save();
+                }
+                let text = entry.to_entry().text;
+                ui.buffer.set(Some(text.as_bytes()), Some(text.len()));
+            }
+            Ok(Some(entry.histnum() as _))
+        },
+        None => Ok(None),
     }
-
-    if let Some(text) = &text {
-        ui.buffer.set(Some(text), Some(text.len()));
-    } else {
-        // restore history if off history
-        ui.buffer.restore();
-    }
-
-    Ok((curhist as _, text))
 }
 
 pub async fn init_lua(ui: &Ui) -> Result<()> {
