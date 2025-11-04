@@ -1,4 +1,5 @@
 use bstr::{BStr, BString};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use std::future::Future;
 use std::sync::{Arc, Weak as WeakArc};
@@ -133,7 +134,8 @@ crate::strong_weak_wrapper! {
         pub lua: Arc::<Lua> [WeakArc::<Lua>],
         pub shell: Shell [crate::shell::WeakShell],
         pub event_callbacks: ArcMutex::<EventCallbacks> [WeakArc::<std::sync::Mutex<EventCallbacks>>],
-        pub is_running_process: AsyncArcMutex::<()> [WeakArc::<tokio::sync::Mutex<()>>],
+        pub has_foreground_process: AsyncArcMutex::<()> [WeakArc::<tokio::sync::Mutex<()>>],
+        pub forked: Arc::<AtomicBool> [WeakArc::<AtomicBool>],
         trampoline: Arc::<TrampolineOut> [WeakArc::<TrampolineOut>],
     }
 }
@@ -177,12 +179,17 @@ impl Ui {
             lua: Arc::new(lua),
             shell,
             event_callbacks: Default::default(),
-            is_running_process: Default::default(),
+            has_foreground_process: Default::default(),
             trampoline: Arc::new(trampoline.1),
+            forked: Arc::new(false.into()),
         };
         ui.init_lua().await?;
 
         Ok((ui, trampoline.0))
+    }
+
+    pub fn is_forked(&self) -> bool {
+        self.forked.load(Ordering::Relaxed)
     }
 
     pub async fn activate(&self) -> Result<()> {
@@ -204,7 +211,10 @@ impl Ui {
 
     pub async fn draw(&mut self) -> Result<()> {
         // do NOT render ui elements if there is a foreground process
-        let Ok(_lock) = self.is_running_process.try_lock()
+        if self.is_forked() {
+            return Ok(())
+        }
+        let Ok(_lock) = self.has_foreground_process.try_lock()
         else {
             return Ok(())
         };
@@ -278,6 +288,10 @@ impl Ui {
     }
 
     pub async fn accept_line(&mut self) -> Result<bool> {
+        if self.is_forked() {
+            return Ok(false)
+        }
+
         let (complete, _tokens) = {
             let ui = self.inner.borrow().await;
             let buffer = ui.buffer.get_contents().as_ref();
@@ -290,7 +304,7 @@ impl Ui {
 
             let mut ui = self.inner.borrow_mut().await;
             let mut shell = self.shell.lock().await;
-            let lock = self.is_running_process.lock().await;
+            let lock = self.has_foreground_process.lock().await;
 
             ui.tui.clear_non_persistent();
 
@@ -317,7 +331,6 @@ impl Ui {
 
             // acceptline doesn't actually accept the line right now
             // only when we return control to zle using the trampoline
-            // shell.acceptline();
             self.trampoline.jump_out(buffer).await?;
 
             let mut ui = self.inner.borrow_mut().await;
@@ -505,7 +518,8 @@ impl Ui {
             KeybindValue::Widget(widget) => {
                 // execute the widget
                 // a widget may run subprocesses so lock the ui
-                let lock = self.is_running_process.lock().await;
+                // TODO what about if we have forked
+                let lock = self.has_foreground_process.lock().await;
                 let mut ui = self.inner.borrow_mut().await;
                 let buffer = ui.buffer.get_contents();
                 let cursor = ui.buffer.get_cursor();

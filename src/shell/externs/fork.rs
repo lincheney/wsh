@@ -10,9 +10,10 @@ use crate::ui::{Ui, TrampolineIn};
 #[allow(dead_code)]
 pub struct ForkState {
     pid: u32,
-    ui_inner_lock: Option<tokio::sync::RwLockReadGuard<'static, crate::ui::UiInner>>,
-    ui_init_lock: Option<MutexGuard<'static, Option<(Ui, TrampolineIn)>>>,
-    lua_lock: Option<(mlua::AppDataRef<'static, ()>, Arc<mlua::Lua>)>,
+    ui_init: Option<MutexGuard<'static, Option<(Ui, TrampolineIn)>>>,
+    ui_inner: Option<tokio::sync::RwLockReadGuard<'static, crate::ui::UiInner>>,
+    ui_event_callbacks: Option<MutexGuard<'static, crate::lua::EventCallbacks>>,
+    lua: Option<(mlua::AppDataRef<'static, ()>, Arc<mlua::Lua>)>,
 }
 unsafe impl Sync for ForkState {}
 unsafe impl Send for ForkState {}
@@ -35,27 +36,29 @@ impl ForkState {
     }
 
     fn new() -> Option<Self> {
-        let ui_init_lock = super::UI.lock().unwrap();
+        let ui_init = super::UI.lock().unwrap();
 
-        let (ui, _trampoline) = ui_init_lock.as_ref()?;
+        let (ui, _trampoline) = ui_init.as_ref()?;
         if !ui.shell.is_locked() {
             // shell is not locked == we are forking for some unknown reason
             return None
         }
 
         let ui = ui.clone();
-        let ui_inner_lock = Some(unsafe{ transmute(ui.inner.blocking_read()) });
+        let ui_inner = Some(unsafe{ transmute(ui.inner.blocking_read()) });
+        let ui_event_callbacks = Some(unsafe{ transmute(ui.event_callbacks.lock().unwrap()) });
 
         // i can take a lock on lua by acquiring a ref to the app data
         ui.lua.set_app_data(());
-        let lua_lock = Some((unsafe{ transmute(ui.lua.app_data_ref::<()>().unwrap()) }, ui.lua.clone()));
+        let lua = Some((unsafe{ transmute(ui.lua.app_data_ref::<()>().unwrap()) }, ui.lua.clone()));
         ui.lua.gc_stop();
 
         Some(Self {
             pid: std::process::id(),
-            ui_inner_lock,
-            ui_init_lock: Some(ui_init_lock),
-            lua_lock,
+            ui_init: Some(ui_init),
+            ui_inner,
+            ui_event_callbacks,
+            lua,
         })
     }
 
@@ -66,8 +69,13 @@ impl ForkState {
 
 impl Drop for ForkState {
     fn drop(&mut self) {
-        if let Some((lua_lock, lua)) = self.lua_lock.take() {
-            drop(lua_lock);
+
+        if !self.is_parent() && let Some(guard) = self.ui_init.take() && let Some((ui, _)) = &*guard {
+            ui.forked.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+
+        if let Some((lock, lua)) = self.lua.take() {
+            drop(lock);
 
             if !self.is_parent() {
                 // what the heck is going on here

@@ -161,11 +161,11 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     command.stdout(args.stdout);
     command.stderr(args.stderr);
 
-    let lock = if args.foreground {
+    let lock = if args.foreground && !ui.is_forked() {
         // this essentially locks ui
         ui.inner.borrow_mut().await.events.pause().await;
         ui.deactivate().await?;
-        Some(ui.is_running_process.clone().lock_owned().await)
+        Some(ui.has_foreground_process.clone().lock_owned().await)
     } else {
         None
     };
@@ -240,11 +240,11 @@ async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue>
 
     let (sender, receiver) = oneshot::channel();
 
-    let lock = if args.foreground {
+    let lock = if args.foreground && !ui.is_forked() {
         // this essentially locks ui
         ui.inner.borrow_mut().await.events.pause().await;
         ui.deactivate().await?;
-        Some(ui.is_running_process.clone().lock_owned().await)
+        Some(ui.has_foreground_process.clone().lock_owned().await)
     } else {
         None
     };
