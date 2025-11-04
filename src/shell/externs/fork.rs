@@ -14,6 +14,9 @@ pub struct ForkState {
     ui_inner: Option<tokio::sync::RwLockReadGuard<'static, crate::ui::UiInner>>,
     ui_event_callbacks: Option<MutexGuard<'static, crate::lua::EventCallbacks>>,
     lua: Option<(mlua::AppDataRef<'static, ()>, Arc<mlua::Lua>)>,
+    stdin: Option<std::io::StdinLock<'static>>,
+    stdout: Option<std::io::StdoutLock<'static>>,
+    stderr: Option<std::io::StderrLock<'static>>,
 }
 unsafe impl Sync for ForkState {}
 unsafe impl Send for ForkState {}
@@ -59,6 +62,9 @@ impl ForkState {
             ui_inner,
             ui_event_callbacks,
             lua,
+            stdin: Some(std::io::stdin().lock()),
+            stdout: Some(std::io::stdout().lock()),
+            stderr: Some(std::io::stderr().lock()),
         })
     }
 
