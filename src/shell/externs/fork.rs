@@ -20,7 +20,7 @@ unsafe impl Send for ForkState {}
 static FORK_STATE: Mutex<Option<ForkState>> = Mutex::new(None);
 
 extern "C" fn prefork() {
-    *FORK_STATE.lock().unwrap() = Some(ForkState::new());
+    *FORK_STATE.lock().unwrap() = ForkState::new();
 }
 
 extern "C" fn postfork() {
@@ -34,34 +34,29 @@ impl ForkState {
         }
     }
 
-    fn new() -> Self {
-        let pid = std::process::id();
+    fn new() -> Option<Self> {
         let ui_init_lock = super::UI.lock().unwrap();
 
-        if let Some((ui, _trampoline)) = &*ui_init_lock {
-            let ui = ui.clone();
-            let ui_inner_lock = Some(unsafe{ transmute(ui.inner.blocking_read()) });
-
-            // i can take a lock on lua by acquiring a ref to the app data
-            ui.lua.set_app_data(());
-            let lua_lock = Some((unsafe{ transmute(ui.lua.app_data_ref::<()>().unwrap()) }, ui.lua.clone()));
-            ui.lua.gc_stop();
-
-            Self {
-                pid,
-                ui_inner_lock,
-                ui_init_lock: Some(ui_init_lock),
-                lua_lock,
-            }
-
-        } else {
-            Self {
-                pid,
-                ui_inner_lock: None,
-                ui_init_lock: None,
-                lua_lock: None,
-            }
+        let (ui, _trampoline) = ui_init_lock.as_ref()?;
+        if !ui.shell.is_locked() {
+            // shell is not locked == we are forking for some unknown reason
+            return None
         }
+
+        let ui = ui.clone();
+        let ui_inner_lock = Some(unsafe{ transmute(ui.inner.blocking_read()) });
+
+        // i can take a lock on lua by acquiring a ref to the app data
+        ui.lua.set_app_data(());
+        let lua_lock = Some((unsafe{ transmute(ui.lua.app_data_ref::<()>().unwrap()) }, ui.lua.clone()));
+        ui.lua.gc_stop();
+
+        Some(Self {
+            pid: std::process::id(),
+            ui_inner_lock,
+            ui_init_lock: Some(ui_init_lock),
+            lua_lock,
+        })
     }
 
     fn is_parent(&self) -> bool {

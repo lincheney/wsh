@@ -60,6 +60,10 @@ impl Shell {
         }
     }
 
+    pub fn is_locked(&self) -> bool {
+        self.inner.available_permits() == 0
+    }
+
     pub async fn with_tmp_permit<R, T: std::future::Future<Output=R>, F: FnOnce() -> T>(&self, f: F) -> R {
         self.inner.add_permits(1);
         let result = f().await;
