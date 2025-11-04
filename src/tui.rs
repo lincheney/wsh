@@ -5,6 +5,7 @@ use crossterm::{
     cursor,
     queue,
     execute,
+    style,
     terminal::{Clear, ClearType},
 };
 use ratatui::{
@@ -15,10 +16,40 @@ use ratatui::{
     style::*,
     buffer::Buffer,
 };
-use crate::ui::Ui;
 mod backend;
 pub mod status_bar;
 pub mod ansi;
+
+pub struct MoveUp(pub u16);
+impl crossterm::Command for MoveUp {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        if self.0 > 0 {
+            cursor::MoveUp(self.0).write_ansi(f)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+pub struct MoveDown(pub u16);
+impl crossterm::Command for MoveDown {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        if self.0 > 0 {
+            cursor::MoveDown(self.0).write_ansi(f)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+pub fn allocate_height<W: std::io::Write>(stdout: &mut W, height: u16) -> Result<()> {
+    for _ in 0 .. height {
+        // vertical tab, this doesn't change x
+        queue!(stdout, style::Print("\x0b"))?;
+    }
+    queue!(stdout, MoveUp(height))?;
+    Ok(())
+}
 
 fn buffer_nonempty_height(buffer: &Buffer) -> u16 {
     let trailing_empty_lines = buffer.content()
@@ -467,7 +498,7 @@ impl Tui {
         if redraw {
             queue!(stdout, crossterm::terminal::BeginSynchronizedUpdate)?;
 
-            Ui::allocate_height(stdout, self.height.saturating_sub(old_cursor_coord.1 + 1))?;
+            allocate_height(stdout, self.height.saturating_sub(old_cursor_coord.1 + 1))?;
 
             // move back to top of drawing area and redraw
             if self.height < old_height {
@@ -476,9 +507,9 @@ impl Tui {
                     stdout,
                     // clear everything below
                     cursor::MoveToColumn(0),
-                    crate::ui::MoveDown(offset),
+                    MoveDown(offset),
                     Clear(ClearType::FromCursorDown),
-                    crate::ui::MoveUp(offset),
+                    MoveUp(offset),
                 )?;
             }
 
@@ -486,7 +517,7 @@ impl Tui {
                 stdout,
                 // move to top left
                 cursor::MoveToColumn(0),
-                crate::ui::MoveUp(old_cursor_coord.1),
+                MoveUp(old_cursor_coord.1),
                 cursor::SavePosition,
             )?;
 
@@ -499,7 +530,7 @@ impl Tui {
                     stdout,
                     // move to top left
                     cursor::MoveToColumn(0),
-                    crate::ui::MoveUp(prompt.height - 1),
+                    MoveUp(prompt.height - 1),
                 )?;
             }
 
@@ -509,8 +540,8 @@ impl Tui {
                     queue!(
                         stdout,
                         cursor::SavePosition,
-                        crate::ui::MoveDown(height * 10),
-                        crate::ui::MoveUp(bar_height - 1),
+                        MoveDown(height * 10),
+                        MoveUp(bar_height - 1),
                     )?;
 
                     let area = Rect{ y: 0, height: bar_height, ..area };
@@ -544,7 +575,7 @@ impl Tui {
                 // otherwise just position it normally
                 queue!(
                     stdout,
-                    crate::ui::MoveDown(buffer.cursor_coord.1),
+                    MoveDown(buffer.cursor_coord.1),
                     cursor::MoveToColumn(buffer.cursor_coord.0),
                     crossterm::terminal::EndSynchronizedUpdate,
                 )?;

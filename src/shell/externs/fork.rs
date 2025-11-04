@@ -39,6 +39,10 @@ impl ForkState {
     }
 
     fn new() -> Option<Self> {
+        // this adds a lot of overhead
+        // is there some easy way to tell that zsh is just going to exec
+        // straight afterwards and we don't have to worry about this stuff?
+
         let ui_init = super::UI.lock().unwrap();
 
         let (ui, _trampoline) = ui_init.as_ref()?;

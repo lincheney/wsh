@@ -13,11 +13,14 @@ use crate::keybind::parser::{Event, KeyEvent, Key, KeyModifiers};
 
 use crossterm::{
     terminal::{Clear, ClearType, BeginSynchronizedUpdate, EndSynchronizedUpdate},
-    cursor::{self, MoveToColumn},
+    cursor::MoveToColumn,
     event,
     style,
     execute,
     queue,
+};
+use crate::tui::{
+    MoveDown,
 };
 
 use crate::shell::{Shell, ShellInner, UpgradeShell, KeybindValue};
@@ -32,28 +35,6 @@ struct SetScrollRegion(u16, u16);
 impl crossterm::Command for SetScrollRegion {
     fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
         write!(f, "\x1b[{};{}r", self.0, self.1)
-    }
-}
-
-pub struct MoveUp(pub u16);
-impl crossterm::Command for MoveUp {
-    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
-        if self.0 > 0 {
-            cursor::MoveUp(self.0).write_ansi(f)
-        } else {
-            Ok(())
-        }
-    }
-}
-
-pub struct MoveDown(pub u16);
-impl crossterm::Command for MoveDown {
-    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
-        if self.0 > 0 {
-            cursor::MoveDown(self.0).write_ansi(f)
-        } else {
-            Ok(())
-        }
     }
 }
 
@@ -426,15 +407,6 @@ impl Ui {
             log::error!("{}", err);
         }
 
-        Ok(())
-    }
-
-    pub fn allocate_height(stdout: &mut std::io::Stdout, height: u16) -> Result<()> {
-        for _ in 0 .. height {
-            // vertical tab, this doesn't change x
-            queue!(stdout, style::Print("\x0b"))?;
-        }
-        queue!(stdout, MoveUp(height))?;
         Ok(())
     }
 

@@ -387,8 +387,13 @@ async fn set_status_bar(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
     Ok(())
 }
 
+async fn allocate_height(_ui: Ui, _lua: Lua, height: u16) -> Result<()> {
+    crate::tui::allocate_height(&mut std::io::stdout(), height)
+}
+
 pub fn init_lua(ui: &Ui) -> Result<()> {
 
+    ui.set_lua_async_fn("allocate_height", allocate_height)?;
     ui.set_lua_async_fn("set_message", set_message)?;
     ui.set_lua_async_fn("check_message", check_message)?;
     ui.set_lua_async_fn("remove_message", remove_message)?;

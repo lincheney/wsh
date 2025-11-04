@@ -84,10 +84,6 @@ async fn eval(ui: Ui, lua: Lua, (cmd, stderr): (mlua::String, bool)) -> Result<m
     Ok(lua.create_string(data)?)
 }
 
-async fn allocate_height(_ui: Ui, _lua: Lua, height: u16) -> Result<()> {
-    Ui::allocate_height(&mut std::io::stdout(), height)
-}
-
 async fn exit(mut ui: Ui, _lua: Lua, code: Option<i32>) -> Result<()> {
     let mut ui = ui.inner.borrow_mut().await;
     ui.events.exit(code.unwrap_or(0)).await;
@@ -109,7 +105,6 @@ pub async fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_async_fn("accept_line", accept_line)?;
     ui.set_lua_async_fn("redraw",  redraw)?;
     ui.set_lua_async_fn("eval", eval)?;
-    ui.set_lua_async_fn("allocate_height", allocate_height)?;
     ui.set_lua_async_fn("exit", exit)?;
     ui.set_lua_async_fn("get_cwd", get_cwd)?;
 
