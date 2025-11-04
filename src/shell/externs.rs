@@ -1,3 +1,4 @@
+mod fork;
 use bstr::BString;
 use crate::ui::{Ui, TrampolineIn};
 use crate::c_string_array;
@@ -67,6 +68,10 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
                 match UI.lock() {
                     Err(e) => { eprintln!("{:?}", e); return 1; },
                     Ok(value) => if let Some((ui, _)) = &*value {
+                        let ui = ui.clone();
+                        // drop the lock asap
+                        drop(value);
+
                         let result = RUNTIME.block_on(async {
                             ui.shell.with_tmp_permit(|| async {
                                 ui.lua.load(argv.get(1).map(|s| s.as_slice()).unwrap_or(b"")).exec_async().await
@@ -181,6 +186,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
 #[unsafe(no_mangle)]
 pub extern "C" fn setup_() -> c_int {
     unsafe{
+        fork::ForkState::setup();
         ORIGINAL_ZLE_ENTRY_PTR.get_or_init(|| zsh_sys::zle_entry_ptr);
         zsh_sys::zle_entry_ptr = Some(zle_entry_ptr_override);
     }
