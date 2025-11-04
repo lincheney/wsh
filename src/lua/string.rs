@@ -57,7 +57,7 @@ fn from_byte_pos(_lua: &Lua, (string, index): (mlua::String, usize)) -> LuaResul
     Ok(None)
 }
 
-pub async fn init_lua(ui: &Ui) -> Result<()> {
+pub fn init_lua(ui: &Ui) -> Result<()> {
 
     let lua_api = ui.get_lua_api()?;
     let tbl = ui.lua.create_table()?;

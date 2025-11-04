@@ -18,7 +18,7 @@ async fn get_history(ui: Ui, lua: Lua, _val: ()) -> Result<(usize, LuaTable)> {
 
     let tbl = lua.create_table()?;
     for entry in shell.get_history().iter() {
-        let entry = entry.to_entry();
+        let entry = entry.as_entry();
         tbl.raw_push(entry_to_lua(entry, &lua)?)?;
     }
     Ok((current as _, tbl))
@@ -32,7 +32,7 @@ async fn get_next_history(ui: Ui, lua: Lua, val: usize) -> Result<Option<LuaTabl
     let mut shell = ui.shell.lock().await;
     // get the next highest one
     if let Some(entry) = shell.get_history().closest_to((val+1) as _, std::cmp::Ordering::Greater) {
-        Ok(Some(entry_to_lua(entry.to_entry(), &lua)?))
+        Ok(Some(entry_to_lua(entry.as_entry(), &lua)?))
     } else {
         Ok(None)
     }
@@ -42,7 +42,7 @@ async fn get_prev_history(ui: Ui, lua: Lua, val: usize) -> Result<Option<LuaTabl
     let mut shell = ui.shell.lock().await;
     // get the next lowest one
     if let Some(entry) = shell.get_history().closest_to((val.saturating_sub(1)) as _, std::cmp::Ordering::Less) {
-        Ok(Some(entry_to_lua(entry.to_entry(), &lua)?))
+        Ok(Some(entry_to_lua(entry.as_entry(), &lua)?))
     } else {
         Ok(None)
     }
@@ -62,10 +62,10 @@ async fn goto_history(mut ui: Ui, _lua: Lua, val: usize) -> Result<Option<usize>
                 ui.buffer.restore();
             } else {
                 // save the buffer if moving to another history
-                if Some(current as _) == latest {
+                if Some(current.into()) == latest {
                     ui.buffer.save();
                 }
-                let text = entry.to_entry().text;
+                let text = entry.as_entry().text;
                 ui.buffer.set(Some(text.as_bytes()), Some(text.len()));
             }
             Ok(Some(entry.histnum() as _))
@@ -74,7 +74,7 @@ async fn goto_history(mut ui: Ui, _lua: Lua, val: usize) -> Result<Option<usize>
     }
 }
 
-pub async fn init_lua(ui: &Ui) -> Result<()> {
+pub fn init_lua(ui: &Ui) -> Result<()> {
 
     ui.set_lua_async_fn("get_history", get_history)?;
     ui.set_lua_async_fn("get_history_index", get_history_index)?;

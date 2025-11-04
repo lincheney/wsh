@@ -40,9 +40,9 @@ impl CStrArray {
     pub fn from_iter<'a, I: Iterator<Item=&'a BStr> + ExactSizeIterator>(iter: I) -> Self {
         unsafe {
             let len = iter.len();
-            let ptr: *mut *mut c_char = zsh_sys::zalloc(std::mem::size_of::<*mut c_char>() * (len + 1)) as _;
+            let ptr: *mut *mut c_char = zsh_sys::zalloc(std::mem::size_of::<*mut c_char>() * (len + 1)).cast();
             for (i, string) in iter.enumerate() {
-                *ptr.add(i) = zsh_sys::ztrduppfx(string.as_ptr() as _, string.len() as _);
+                *ptr.add(i) = zsh_sys::ztrduppfx(string.as_ptr().cast(), string.len() as _);
             }
             *ptr.add(len) = std::ptr::null_mut();
             ptr.into()
@@ -79,7 +79,7 @@ impl Drop for CStringArray {
                 len += 1;
             }
             if !self.ptr.is_null() {
-                zsh_sys::zfree(self.ptr as _, len);
+                zsh_sys::zfree(self.ptr.cast(), len);
             }
         }
     }

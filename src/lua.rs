@@ -94,7 +94,7 @@ async fn get_cwd(ui: Ui, _lua: Lua, (): ()) -> Result<BString> {
     Ok(ui.shell.lock().await.get_cwd())
 }
 
-pub async fn init_lua(ui: &Ui) -> Result<()> {
+pub fn init_lua(ui: &Ui) -> Result<()> {
 
     ui.set_lua_async_fn("get_cursor", get_cursor)?;
     ui.set_lua_async_fn("get_buffer", get_buffer)?;
@@ -109,16 +109,16 @@ pub async fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_async_fn("get_cwd", get_cwd)?;
 
     keybind::init_lua(ui)?;
-    string::init_lua(ui).await?;
+    string::init_lua(ui)?;
     completion::init_lua(ui)?;
-    history::init_lua(ui).await?;
+    history::init_lua(ui)?;
     events::init_lua(ui)?;
     tui::init_lua(ui)?;
-    log::init_lua(ui).await?;
-    asyncio::init_lua(ui).await?;
+    log::init_lua(ui)?;
+    asyncio::init_lua(ui)?;
     process::init_lua(ui)?;
     parser::init_lua(ui)?;
-    variables::init_lua(ui).await?;
+    variables::init_lua(ui)?;
 
     Ok(())
 }

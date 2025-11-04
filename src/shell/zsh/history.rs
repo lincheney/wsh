@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use std::os::raw::*;
 use std::ptr::NonNull;
 use std::marker::PhantomData;
-use bstr::*;
+use bstr::{BString, BStr};
 
 #[derive(Debug)]
 pub struct Entry {
@@ -15,10 +15,10 @@ pub struct Entry {
 
 impl From<&zsh_sys::histent> for Entry {
     fn from(histent: &zsh_sys::histent) -> Self {
-        let text_ptr = if !histent.zle_text.is_null() {
-            histent.zle_text
-        } else {
+        let text_ptr = if histent.zle_text.is_null() {
             histent.node.nam
+        } else {
+            histent.zle_text
         };
         let mut text = unsafe{ CStr::from_ptr(text_ptr) }.to_bytes_with_nul().to_owned();
         super::unmetafy_owned(&mut text);
@@ -81,32 +81,32 @@ impl EntryPtr<'_> {
         NonNull::new(ptr).map(|ptr| EntryPtr{ ptr, _marker: PhantomData })
     }
 
-    fn down(&self) -> Option<Self> {
+    fn down(self) -> Option<Self> {
         Self::new(unsafe{ zsh_sys::down_histent(self.ptr.as_ptr()) })
     }
 
-    fn up(&self) -> Option<Self> {
+    fn up(self) -> Option<Self> {
         Self::new(unsafe{ zsh_sys::up_histent(self.ptr.as_ptr()) })
     }
 
-    pub fn histnum(&self) -> c_long {
+    pub fn histnum(self) -> c_long {
         unsafe{ self.ptr.as_ref() }.histnum
     }
 
-    pub fn to_entry(&self) -> Entry {
+    pub fn as_entry(self) -> Entry {
         unsafe{ self.ptr.as_ref() }.into()
     }
 
-    pub fn down_iter(&self) -> impl Iterator<Item=Self> {
-        let mut ptr = self.clone();
+    pub fn down_iter(self) -> impl Iterator<Item=Self> {
+        let mut ptr = self;
         std::iter::from_fn(move || {
             ptr = ptr.down()?;
             Some(ptr)
         })
     }
 
-    pub fn up_iter(&self) -> impl Iterator<Item=Self> {
-        let mut ptr = self.clone();
+    pub fn up_iter(self) -> impl Iterator<Item=Self> {
+        let mut ptr = self;
         std::iter::from_fn(move || {
             ptr = ptr.up()?;
             Some(ptr)
@@ -120,14 +120,14 @@ pub fn push_history<'a>(string: &BStr) -> EntryPtr<'a> {
 
     let ptr = unsafe{ zsh_sys::prepnexthistent() };
     let hist = unsafe{ ptr.as_mut().unwrap() };
-    hist.histnum = unsafe{ hist.up.as_ref() }.map(|h| h.histnum).unwrap_or(0) + 1;
+    hist.histnum = unsafe{ hist.up.as_ref() }.map_or(0, |h| h.histnum) + 1;
     hist.node.nam = string.into_raw();
     hist.ftim = 0;
     hist.node.flags = flags;
 
     if flags & zsh_sys::HIST_TMPSTORE as i32 != 0 {
         // uuhhhh what is this for?
-        unsafe{ zsh_sys::addhistnode(zsh_sys::histtab, hist.node.nam, ptr as _); }
+        unsafe{ zsh_sys::addhistnode(zsh_sys::histtab, hist.node.nam, ptr.cast()); }
     }
 
     EntryPtr::new(ptr).unwrap()

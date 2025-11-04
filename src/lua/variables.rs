@@ -26,11 +26,11 @@ async fn set_var(ui: Ui, lua: Lua, (name, val, global): (BString, LuaValue, Opti
             let mut size = 0;
             val.for_each(|_: LuaValue, _: LuaValue| { size += 1; Ok(()) })?;
 
-            if val.raw_len() != size {
-                let val = HashMap::<BString, BString>::from_lua(LuaValue::Table(val), &lua)?;
+            if val.raw_len() == size {
+                let val = Vec::<BString>::from_lua(LuaValue::Table(val), &lua)?;
                 val.into()
             } else {
-                let val = Vec::<BString>::from_lua(LuaValue::Table(val), &lua)?;
+                let val = HashMap::<BString, BString>::from_lua(LuaValue::Table(val), &lua)?;
                 val.into()
             }
         },
@@ -66,7 +66,7 @@ async fn in_zle_param_scope(ui: Ui, _lua: Lua, name: LuaFunction) -> Result<LuaV
     Ok(result?)
 }
 
-pub async fn init_lua(ui: &Ui) -> Result<()> {
+pub fn init_lua(ui: &Ui) -> Result<()> {
 
     ui.set_lua_async_fn("get_var", get_var)?;
     ui.set_lua_async_fn("set_var", set_var)?;

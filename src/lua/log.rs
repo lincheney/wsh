@@ -14,7 +14,7 @@ impl std::fmt::Display for LogValue {
     }
 }
 
-pub async fn init_lua(ui: &Ui) -> Result<()> {
+pub fn init_lua(ui: &Ui) -> Result<()> {
     let lua_api = ui.get_lua_api()?;
     let tbl = ui.lua.create_table()?;
     lua_api.set("log", &tbl)?;

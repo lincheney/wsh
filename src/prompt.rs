@@ -4,8 +4,8 @@ use crate::shell::ShellInner;
 
 #[derive(Default)]
 pub struct Prompt {
-    prompt: CString,
-    default_prompt: CString,
+    inner: CString,
+    default: CString,
     pub width: u16,
     pub height: u16,
 
@@ -16,17 +16,17 @@ impl Prompt {
     const DEFAULT: &str = ">>> ";
 
     pub fn new(default: Option<&BStr>) -> Self {
-        let default_prompt = default
+        let default = default
             .map(|s| CString::new(s.to_vec()))
             .unwrap_or_else(|| CString::new(Prompt::DEFAULT))
             .unwrap();
-        Self{ default_prompt, ..Self::default() }
+        Self{ default, ..Self::default() }
     }
 
     pub fn refresh_prompt(&mut self, shell: &mut ShellInner, width: u16,) {
-        let prompt = shell.get_prompt(None, true).unwrap_or_else(|| self.default_prompt.clone());
+        let prompt = shell.get_prompt(None, true).unwrap_or_else(|| self.default.clone());
         let size = shell.get_prompt_size(&prompt);
-        self.prompt = ShellInner::remove_invisible_chars(&prompt).into();
+        self.inner = ShellInner::remove_invisible_chars(&prompt).into();
         self.width = size.0 as _;
         self.height = size.1 as _;
 
@@ -37,7 +37,7 @@ impl Prompt {
     }
 
     pub fn as_bytes(&self) -> &[u8] {
-        self.prompt.as_bytes()
+        self.inner.as_bytes()
     }
 
 }

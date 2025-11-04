@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ptr::NonNull;
 use std::ffi::{CString, CStr};
-use std::os::raw::{c_int, c_char};
+use std::os::raw::{c_int};
 use anyhow::Result;
 use crate::c_string_array::{CStringArray, CStrArray};
 use super::ZString;
@@ -71,11 +71,11 @@ impl Variable {
     pub fn get<S: AsRef<BStr>>(name: S) -> Option<Self> {
         let bracks = 1;
         let c_name = CString::new(name.as_ref().to_vec()).unwrap();
-        let mut c_varname_ptr = c_name.as_ptr() as *mut c_char;
+        let mut c_varname_ptr = c_name.as_ptr().cast_mut();
         let mut value = unsafe{ std::mem::MaybeUninit::<zsh_sys::value>::zeroed().assume_init() };
         let ptr = unsafe{ zsh_sys::getvalue(
-            &mut value as *mut _,
-            &mut c_varname_ptr as *mut _,
+            &raw mut value,
+            &raw mut c_varname_ptr,
             bracks,
         ) };
         if ptr.is_null() {
@@ -94,7 +94,7 @@ impl Variable {
 
     pub fn set(name: &[u8], value: Value, local: bool) -> Result<()> {
         let c_name = CString::new(name).unwrap();
-        let name = c_name.as_ptr() as *mut _;
+        let name = c_name.as_ptr().cast_mut();
         let param = match value {
             Value::HashMap(value) => {
                 let value: Vec<BString> = value.into_iter().flat_map(|(k, v)| [k, v]).collect();
@@ -137,7 +137,7 @@ impl Variable {
 
     pub fn unset(name: &[u8]) {
         let c_name = CString::new(name).unwrap();
-        unsafe{ zsh_sys::unsetparam(c_name.as_ptr() as *mut _); }
+        unsafe{ zsh_sys::unsetparam(c_name.as_ptr().cast_mut()); }
     }
 
     pub fn export(&self) {
@@ -150,7 +150,7 @@ impl Variable {
 
     pub fn as_bytes(&mut self) -> BString {
         let str = unsafe{
-            let var = zsh_sys::getstrvalue(&mut self.value as *mut _);
+            let var = zsh_sys::getstrvalue(&raw mut self.value);
             if var.is_null() {
                 return BString::new(vec![]);
             }
@@ -162,7 +162,7 @@ impl Variable {
     pub fn try_as_int(&mut self) -> Result<Option<i64>> {
         Ok(
             if self.value.flags & zsh_sys::VALFLAG_INV as c_int != 0 {
-                Some(self.value.start as _)
+                Some(self.value.start.into())
             } else if self.param().node.flags & zsh_sys::PM_INTEGER as c_int != 0 {
                 Some(unsafe{ (*self.param().gsu.i).getfn.ok_or(anyhow::anyhow!("gsu.i.getfn is missing"))?(self.param()) })
             } else {
@@ -173,7 +173,7 @@ impl Variable {
 
     pub fn try_as_array(&mut self) -> Option<Vec<BString>> {
         if self.value.isarr != 0 {
-            let array: CStrArray = unsafe{ zsh_sys::getarrvalue(&mut self.value as *mut _) }.into();
+            let array: CStrArray = unsafe{ zsh_sys::getarrvalue(&raw mut self.value) }.into();
             Some(array.to_vec())
         } else {
             None

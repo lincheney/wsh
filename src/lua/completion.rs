@@ -25,7 +25,7 @@ impl UserData for CompletionStream {
         });
 
         methods.add_async_method("cancel", |_lua, stream, ()| async move {
-            stream.parent.cancel().map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))
+            stream.parent.cancel().map_err(|e| mlua::Error::RuntimeError(format!("{e}")))
         });
     }
 }
@@ -46,8 +46,7 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Compl
         ui.inner.borrow().await.buffer.get_contents().clone()
     };
 
-    let result = ui.shell.lock().await.get_completions(val.as_ref());
-    let (consumer, producer) = result.map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))?;
+    let (consumer, producer) = ui.shell.lock().await.get_completions(val.as_ref());
     let parent = producer.clone();
 
     let shell_clone = ui.shell.clone();

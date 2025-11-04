@@ -60,8 +60,8 @@ impl Clone for cmatch {
                 autoq: ztrdup(self.autoq),
                 rems: ztrdup(self.rems),
                 remf: ztrdup(self.remf),
-                brpl: Box::into_raw(brpl.into_boxed_slice()) as _,
-                brsl: Box::into_raw(brsl.into_boxed_slice()) as _,
+                brpl: Box::into_raw(brpl.into_boxed_slice()).cast(),
+                brsl: Box::into_raw(brsl.into_boxed_slice()).cast(),
 
                 flags: self.flags,
                 qipl: self.qipl,

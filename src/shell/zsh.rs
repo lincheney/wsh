@@ -19,6 +19,7 @@ use variables::{Variable};
 
 // pub type HandlerFunc = unsafe extern "C" fn(name: *mut c_char, argv: *mut *mut c_char, options: *mut zsh_sys::options, func: c_int) -> c_int;
 
+#[derive(Clone, Copy)]
 pub struct ExecstringOpts<'a> {
     dont_change_job: bool,
     exiting: bool,
@@ -33,14 +34,14 @@ impl Default for ExecstringOpts<'_> {
 
 pub fn execstring<S: AsRef<BStr>>(cmd: S, opts: ExecstringOpts) {
     let cmd = cmd.as_ref().to_vec();
-    let context = opts.context.map(|c| CString::new(c).unwrap());
+    let context = opts.context.map(|c| ZString::from(c).into_raw());
     unsafe{
         zsh_sys::execstring(
             metafy(&cmd),
             opts.dont_change_job.into(),
             opts.exiting.into(),
-            context.map(|c| c.as_ptr() as _).unwrap_or(null_mut()),
-        )
+            context.unwrap_or(null_mut()),
+        );
     }
 }
 
@@ -50,13 +51,13 @@ pub fn get_return_code() -> c_long {
 
 pub fn pop_builtin(name: &str) -> Option<zsh_sys::Builtin> {
     let name = CString::new(name).unwrap();
-    let ptr = unsafe { zsh_sys::removehashnode(zsh_sys::builtintab, name.as_ptr() as _) };
-    if ptr.is_null() { None } else { Some(ptr as _) }
+    let ptr = unsafe { zsh_sys::removehashnode(zsh_sys::builtintab, name.as_ptr().cast()) };
+    if ptr.is_null() { None } else { Some(ptr.cast()) }
 }
 
 pub fn add_builtin(cmd: &str, builtin: zsh_sys::Builtin) {
     let cmd: ZString = cmd.into();
-    unsafe { zsh_sys::addhashnode(zsh_sys::builtintab, cmd.into_raw(), builtin as _) };
+    unsafe { zsh_sys::addhashnode(zsh_sys::builtintab, cmd.into_raw(), builtin.cast()) };
 }
 
 pub(crate) fn iter_linked_list(list: zsh_sys::LinkList) -> impl Iterator<Item=*mut c_void> {
@@ -83,9 +84,9 @@ pub fn get_prompt(prompt: Option<&BStr>, escaped: bool) -> Option<CString> {
     let r = null_mut();
     #[allow(non_snake_case)]
     let R = null_mut();
-    let glitch = if escaped { 1 } else { 0 };
+    let glitch = escaped.into();
     unsafe {
-        let ptr = zsh_sys::promptexpand(prompt.as_ptr() as _, glitch, r, R, null_mut());
+        let ptr = zsh_sys::promptexpand(prompt.as_ptr().cast_mut(), glitch, r, R, null_mut());
         Some(CString::from_raw(ptr))
     }
 }
@@ -95,7 +96,7 @@ pub fn get_prompt_size(prompt: &CStr) -> (c_int, c_int) {
     let mut height = 0;
     let overflow = 0;
     unsafe {
-        zsh_sys::countprompt(prompt.as_ptr() as _, &mut width as _, &mut height as _, overflow);
+        zsh_sys::countprompt(prompt.as_ptr().cast_mut(), &raw mut width, &raw mut height, overflow);
     }
     (width, height)
 }
@@ -104,7 +105,7 @@ pub fn metafy(value: &[u8]) -> *mut c_char {
     unsafe {
         if value.is_empty() {
             // make an empty string on the arena
-            let ptr = zsh_sys::zhalloc(1) as *mut c_char;
+            let ptr = zsh_sys::zhalloc(1).cast();
             *ptr = 0;
             ptr
         } else {
@@ -118,7 +119,7 @@ pub fn unmetafy<'a>(ptr: *mut u8) -> &'a [u8] {
     // threadsafe!
     let mut len = 0i32;
     unsafe {
-        zsh_sys::unmetafy(ptr as _, &mut len as _);
+        zsh_sys::unmetafy(ptr.cast(), &raw mut len);
         std::slice::from_raw_parts(ptr, len as _)
     }
 }
@@ -131,7 +132,7 @@ pub fn unmetafy_owned(value: &mut Vec<u8>) {
         value.push(0);
     }
     unsafe {
-        zsh_sys::unmetafy(value.as_mut_ptr() as _, &mut len as _);
+        zsh_sys::unmetafy(value.as_mut_ptr().cast(), &raw mut len);
     }
     value.truncate(len as _);
 }

@@ -198,7 +198,7 @@ impl Widget {
     pub fn replace_tabs(mut text: String) -> String {
         let tab = "    ";
         if text.contains('\t') {
-            text = text.replace('\t', tab)
+            text = text.replace('\t', tab);
         }
         text
     }
@@ -566,7 +566,7 @@ impl Tui {
                 // cursor is at the very very end of line
                 // only way i know of to get back there is to redraw that line
                 let start = (buffer.cursor_coord.1 * width) as usize;
-                for cell in self.old_buffer.content[start .. start + width as usize].iter_mut() {
+                for cell in &mut self.old_buffer.content[start .. start + width as usize] {
                     cell.reset();
                 }
                 let updates = self.old_buffer.diff(&self.new_buffer);

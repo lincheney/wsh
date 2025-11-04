@@ -20,12 +20,12 @@ impl From<&[u8]> for ZString {
         // }
 
         let ptr = unsafe {
-            let ptr = zsh_sys::zalloc(s.len() + 1) as *mut u8;
+            let ptr = zsh_sys::zalloc(s.len() + 1).cast();
             std::ptr::copy_nonoverlapping(s.as_ptr(), ptr, s.len());
             *ptr.add(s.len()) = b'\0' as _;
             ptr
         };
-        Self{ ptr: ptr as *mut _ }
+        Self{ ptr: ptr.cast() }
     }
 }
 

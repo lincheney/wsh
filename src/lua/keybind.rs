@@ -17,7 +17,7 @@ async fn set_keymap(mut ui: Ui, _lua: Lua, (key, callback, layer): (String, Func
 
     let original = &key;
     let mut key = key.as_str();
-    let special = key.starts_with("<") && key.ends_with(">");
+    let special = key.starts_with('<') && key.ends_with('>');
 
     if special {
         key = &key[1..key.len()-1];
@@ -61,7 +61,7 @@ async fn set_keymap(mut ui: Ui, _lua: Lua, (key, callback, layer): (String, Func
 
         "lt" if special => Key::Char('<'),
         key if key.len() == 1 && &key[0..1] != "<" && key.is_ascii() => Key::Char(key.chars().next().unwrap()),
-        key if special && key.starts_with("f") && key[1..].parse::<u8>().is_ok() => {
+        key if special && key.starts_with('f') && key[1..].parse::<u8>().is_ok() => {
             Key::Function(key[1..].parse().unwrap())
         },
 

@@ -22,13 +22,13 @@ impl EventController {
     pub async fn pause(&mut self) {
         let (sender, receiver) = oneshot::channel();
         let _ = self.queue.send(InputMessage::Pause(sender));
-        receiver.await.unwrap()
+        receiver.await.unwrap();
     }
 
     pub async fn resume(&mut self) {
         let (sender, receiver) = oneshot::channel();
         let _ = self.queue.send(InputMessage::Resume(sender));
-        receiver.await.unwrap()
+        receiver.await.unwrap();
     }
 
     pub async fn get_cursor_position(&mut self) -> (usize, usize) {
@@ -40,7 +40,7 @@ impl EventController {
     pub async fn exit(&mut self, code: i32) {
         let (sender, receiver) = oneshot::channel();
         self.queue.send(InputMessage::Exit(code, Some(sender))).unwrap();
-        receiver.await.unwrap()
+        receiver.await.unwrap();
     }
 }
 
@@ -59,14 +59,14 @@ impl EventStream {
 
     pub async fn run<T: Read+AsRawFd+Send+Sync+'static>(mut self, file: T, mut ui: crate::ui::Ui) -> anyhow::Result<i32> {
         let (event_sender, mut event_receiver) = mpsc::unbounded_channel();
-        let (pauser, mut paused) = watch::channel(false);
+        let (pauser, mut is_paused) = watch::channel(false);
         let (position_sender, mut position_receiver) = mpsc::unbounded_channel::<oneshot::Sender<_>>();
 
         // read events
         let _x: tokio::task::JoinHandle<Result<()>> = {
             let mut reader = AsyncFd::new(file)?;
             let mut parser = parser::Parser::new();
-            let mut paused = paused.clone();
+            let mut is_paused = is_paused.clone();
             tokio::task::spawn(async move {
                 let mut buf = [0; 1024];
                 loop {
@@ -97,14 +97,14 @@ impl EventStream {
                             }
                         },
 
-                        mut result = paused.changed() => loop {
+                        mut result = is_paused.changed() => loop {
                             match result {
                                 Err(_) => return Ok(()),
-                                Ok(()) => if !*paused.borrow_and_update() {
+                                Ok(()) => if !*is_paused.borrow_and_update() {
                                     break;
                                 },
                             }
-                            result = paused.changed().await;
+                            result = is_paused.changed().await;
                         },
 
                     );
@@ -123,14 +123,14 @@ impl EventStream {
                         }
                     },
 
-                    mut result = paused.changed() => loop {
+                    mut result = is_paused.changed() => loop {
                         match result {
                             Err(_) => return Ok(()),
-                            Ok(()) => if !*paused.borrow_and_update() {
+                            Ok(()) => if !*is_paused.borrow_and_update() {
                                 break;
                             },
                         }
-                        result = paused.changed().await;
+                        result = is_paused.changed().await;
                     },
                 );
             }

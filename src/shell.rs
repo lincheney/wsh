@@ -88,7 +88,7 @@ pub struct Completer{
 impl Completer {
     pub fn run(&self, _shell: &ShellInner) {
         let lock = self.exclusive_lock.lock().unwrap();
-        zsh::completion::_get_completions(&self.inner);
+        zsh::completion::get_completions(&self.inner);
         drop(lock);
     }
 
@@ -110,7 +110,7 @@ impl<'a> ShellInner<'a> {
 
             // zle_main runs these
             let keymap = CString::new("main").unwrap();
-            zsh::selectkeymap(keymap.as_ptr()as *mut _, 1);
+            zsh::selectkeymap(keymap.as_ptr().cast_mut(), 1);
             zsh::initundo();
         }
     }
@@ -127,17 +127,17 @@ impl<'a> ShellInner<'a> {
         if code > 0 { Err(code) } else { Ok(BString::new(vec![])) }
     }
 
-    pub fn get_completions(&self, string: &BStr) -> anyhow::Result<(Arc<tokio::sync::Mutex<zsh::completion::StreamConsumer>>, Completer)> {
-        let (consumer, producer) = zsh::completion::get_completions(string);
+    pub fn get_completions(&self, string: &BStr) -> (Arc<tokio::sync::Mutex<zsh::completion::StreamConsumer>>, Completer) {
+        let (consumer, producer) = zsh::completion::get_completer(string);
         let completer = Completer{
             inner: producer,
             exclusive_lock: self.parent.exclusive_lock.clone(),
         };
-        Ok((consumer, completer))
+        (consumer, completer)
     }
 
     pub fn clear_completion_cache(&self) {
-        zsh::completion::clear_cache()
+        zsh::completion::clear_cache();
     }
 
     pub fn insert_completion(&self, string: &BStr, completion_word_len: usize, m: &zsh::cmatch) -> (BString, usize) {
@@ -182,7 +182,7 @@ impl<'a> ShellInner<'a> {
         unsafe{ zsh::histline }
     }
 
-    pub fn set_histline<'b>(&'b mut self, histline: c_long) -> Option<zsh::history::EntryPtr<'b>> {
+    pub fn set_histline(&mut self, histline: c_long) -> Option<zsh::history::EntryPtr<'_>> {
         let history = self.get_history();
 
         if let Some(entry) = history.closest_to(histline, std::cmp::Ordering::Greater) {
@@ -197,7 +197,7 @@ impl<'a> ShellInner<'a> {
         }
     }
 
-    pub fn push_history<'b>(&'b mut self, string: &BStr) -> zsh::history::EntryPtr<'b> {
+    pub fn push_history(&mut self, string: &BStr) -> zsh::history::EntryPtr<'_> {
         zsh::history::push_history(string)
     }
 
@@ -242,11 +242,11 @@ impl<'a> ShellInner<'a> {
     }
 
     pub fn start_zle_scope(&mut self) {
-        zsh::start_zle_scope()
+        zsh::start_zle_scope();
     }
 
     pub fn end_zle_scope(&mut self) {
-        zsh::end_zle_scope()
+        zsh::end_zle_scope();
     }
 
     pub fn set_var(&mut self, name: &BStr, value: variables::Value, local: bool) -> anyhow::Result<()> {
@@ -320,7 +320,7 @@ impl<'a> ShellInner<'a> {
             Ok(c) => c.chars().next().unwrap().into(),
             Err(e) => if e.valid_up_to() == 0 {
                 // invalid utf8, use the first byte? or space?
-                *char.first().unwrap_or(&b' ') as _
+                char.first().copied().unwrap_or(b' ').into()
             } else {
                 std::str::from_utf8(&char[..e.valid_up_to()]).unwrap().chars().next().unwrap().into()
             },

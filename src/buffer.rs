@@ -48,10 +48,10 @@ impl Highlight {
 
 struct HighlightStack<'a>(Vec<&'a Highlight>);
 
-impl<'a> HighlightStack<'a> {
+impl HighlightStack<'_> {
     fn merge(&self) -> Style {
         let mut style = Style::new();
-        for h in self.0.iter() {
+        for h in &self.0 {
             style = style.patch(h.style);
         }
         style
@@ -123,7 +123,7 @@ impl<'a> From<BufferContents<'a>> for Text<'a> {
 
                 // invalid
                 for c in contents.inner[start..end].iter() {
-                    write!(&mut buffer, "<u{:04x}>", c).unwrap();
+                    write!(&mut buffer, "<u{c:04x}>").unwrap();
                 }
                 line.spans.push(Span::styled(buffer, style.patch(escape_style)));
                 buffer = String::new();

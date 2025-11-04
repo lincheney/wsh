@@ -38,7 +38,7 @@ struct CommandResult {
 impl CommandResult {
     async fn wait(&mut self) -> LuaResult<Option<i32>> {
         if let Some(waiter) = self.inner.take() {
-            let result = waiter.await.map_err(|e| LuaError::RuntimeError(format!("{}", e)))??;
+            let result = waiter.await.map_err(|e| LuaError::RuntimeError(format!("{e}")))??;
             Ok(Some(result))
         } else {
             Ok(None)
@@ -73,7 +73,7 @@ impl UserData for Process {
         methods.add_method("kill", |lua, proc, signal: LuaValue| {
             let signal: Signal = lua.from_value(signal)?;
             let pid = nix::unistd::Pid::from_raw(proc.pid as _);
-            nix::sys::signal::kill(pid, signal.0).map_err(|e| LuaError::RuntimeError(format!("{}", e)))
+            nix::sys::signal::kill(pid, signal.0).map_err(|e| LuaError::RuntimeError(format!("{e}")))
         });
 
     }
@@ -141,8 +141,8 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         SpawnArgs::Simple(args) => FullSpawnArgs{args, ..std::default::Default::default()},
     };
 
-    let arg0 = args.args.first().ok_or_else(|| LuaError::RuntimeError("no args given".to_owned()))?;
-    let mut command = Command::new(arg0);
+    let first_arg = args.args.first().ok_or_else(|| LuaError::RuntimeError("no args given".to_owned()))?;
+    let mut command = Command::new(first_arg);
     if args.args.len() > 1 {
         command.args(&args.args[1..]);
     }
@@ -150,7 +150,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         command.env_clear();
     }
     if let Some(env) = args.env {
-        for (k, v) in env.iter() {
+        for (k, v) in &env {
             command.env(k,v);
         }
     }
@@ -310,7 +310,7 @@ async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue>
                 drop(lock);
             });
 
-        })
+        });
     });
 
     Ok(lua.pack_multi((

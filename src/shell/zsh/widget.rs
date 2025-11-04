@@ -104,8 +104,8 @@ impl<'a, 'b> ZleWidget<'a, 'b> {
         };
 
         unsafe {
-            bindings::zmod.mult = opts.times as _;
-            bindings::insmode = if opts.insert { 1 } else { 0 };
+            bindings::zmod.mult = opts.times.into();
+            bindings::insmode = opts.insert.into();
             bindings::execzlefunc(self.ptr.as_ptr(), args_ptr, 0, 0)
         }
     }

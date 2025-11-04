@@ -3,7 +3,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use std::future::Future;
 use std::sync::{Arc, Weak as WeakArc};
-use std::ops::DerefMut;
 use std::collections::HashSet;
 use std::default::Default;
 use mlua::prelude::*;
@@ -202,7 +201,7 @@ impl Ui {
 
         let shell = self.shell.clone();
         let mut ui = self.inner.borrow_mut().await;
-        let ui = ui.deref_mut();
+        let ui = &mut *ui;
 
         if !(ui.dirty || ui.buffer.dirty || ui.prompt.dirty || ui.tui.dirty) {
             return Ok(())
@@ -236,7 +235,7 @@ impl Ui {
     pub async fn report_error<T, E: std::fmt::Display>(&mut self, draw: bool, result: std::result::Result<T, E>) {
         if let Err(err) = result {
             log::error!("{}", err);
-            self.show_error_message(format!("ERROR: {}", err)).await;
+            self.show_error_message(format!("ERROR: {err}")).await;
         } else if draw && let Err(err) = self.draw().await {
             log::error!("{:?}", err);
         }
@@ -364,7 +363,7 @@ impl Ui {
         self.lua.create_function(move |lua, value| {
             let ui = weak.try_upgrade()?;
             func(&ui, lua, value)
-                .map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))
+                .map_err(|e| mlua::Error::RuntimeError(format!("{e}")))
         })
     }
 
@@ -393,13 +392,13 @@ impl Ui {
             async move {
                 let ui = weak.try_upgrade()?;
                 func(ui, lua, value).await
-                    .map_err(|e| mlua::Error::RuntimeError(format!("{}", e)))
+                    .map_err(|e| mlua::Error::RuntimeError(format!("{e}")))
             }
         })
     }
 
     async fn init_lua(&self) -> Result<()> {
-        crate::lua::init_lua(self).await?;
+        crate::lua::init_lua(self)?;
 
         let lua = self.lua.clone();
         lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;
@@ -429,9 +428,8 @@ impl Ui {
                             if let Ok(x) = x {
                                 success = success && x;
                                 continue
-                            } else {
-                                return Some(x) // error
                             }
+                            return Some(x) // error
                         },
                         Some(KeybindOutput::String(mut string)) => {
                             mapping.append(&mut string);
@@ -524,7 +522,7 @@ impl Ui {
 
             Event::Key(KeyEvent{ key: Key::Escape, .. }) => {
                 nix::sys::signal::kill(nix::unistd::Pid::from_raw(0), nix::sys::signal::Signal::SIGTERM)?;
-                for pid in self.inner.borrow().await.threads.iter() {
+                for pid in &self.inner.borrow().await.threads {
                     nix::sys::signal::kill(*pid, nix::sys::signal::Signal::SIGINT)?;
                 }
             },
@@ -608,7 +606,7 @@ impl Drop for UiInner {
     fn drop(&mut self) {
         if let Err(err) = self.deactivate() {
             log::error!("{:?}", err);
-        };
+        }
     }
 }
 

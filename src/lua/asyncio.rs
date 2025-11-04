@@ -121,7 +121,7 @@ impl UserData for Receiver {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_async_meta_method_mut(mlua::MetaMethod::Call, |_lua, mut receiver, ()| async move {
             if let Some(receiver) = receiver.0.take() {
-                Ok(Some(receiver.await.map_err(|e| LuaError::RuntimeError(format!("{}", e)))?))
+                Ok(Some(receiver.await.map_err(|e| LuaError::RuntimeError(format!("{e}")))?))
             } else {
                 Ok(None)
             }
@@ -129,7 +129,7 @@ impl UserData for Receiver {
     }
 }
 
-pub async fn init_lua(ui: &Ui) -> Result<()> {
+pub fn init_lua(ui: &Ui) -> Result<()> {
 
     ui.set_lua_fn("schedule", schedule)?;
 

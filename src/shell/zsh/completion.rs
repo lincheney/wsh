@@ -1,7 +1,7 @@
 use std::sync::{OnceLock, Mutex, Arc};
 use std::ffi::{CString};
 use std::os::raw::*;
-use std::ptr::null_mut;
+use std::ptr::{null_mut, NonNull};
 use std::default::Default;
 use std::pin::Pin;
 use std::task::{Context, Poll, Waker};
@@ -77,7 +77,7 @@ impl Streamer {
 
     fn wake(&mut self) {
         for waker in self.wakers.drain(..) {
-            waker.wake()
+            waker.wake();
         }
     }
 
@@ -135,12 +135,7 @@ unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_cha
             let len = streamer.matches.len();
             let iter = super::iter_linked_list(bindings::matches)
                 .filter_map(|ptr| {
-                    let ptr = ptr as *mut bindings::cmatch;
-                    if ptr.is_null() {
-                        None
-                    } else {
-                        Some(Arc::new((*ptr).clone()))
-                    }
+                    Some(Arc::new(NonNull::new(ptr.cast::<bindings::cmatch>())?.as_ref().clone()))
                 }).skip(len);
             streamer.matches.extend(iter);
             streamer.completion_word_len = (zsh_sys::we - zsh_sys::wb).max(0) as usize;
@@ -187,7 +182,7 @@ pub fn restore_compadd() {
 // zsh completion is intimately tied to zle
 // so there's no "low-level" function to hook into
 // the best we can do is emulate completecall()
-pub fn get_completions(line: &BStr) -> (AsyncArcMutex<StreamConsumer>, ArcMutex<Streamer>) {
+pub fn get_completer(line: &BStr) -> (AsyncArcMutex<StreamConsumer>, ArcMutex<Streamer>) {
     // if let Some(streamer) = compadd.streamer.as_ref().filter(|s| s.lock().unwrap().buffer == line) {
         // return Ok(Streamer::make_consumer(&streamer))
     // }
@@ -203,7 +198,7 @@ pub fn get_completions(line: &BStr) -> (AsyncArcMutex<StreamConsumer>, ArcMutex<
     (consumer, producer)
 }
 
-pub fn _get_completions(streamer: &Arc<Mutex<Streamer>>) {
+pub fn get_completions(streamer: &Arc<Mutex<Streamer>>) {
     if let Some(compadd) = COMPADD_STATE.get() {
         compadd.lock().unwrap().streamer = Some(streamer.clone());
     } else {
@@ -218,8 +213,8 @@ pub fn _get_completions(streamer: &Arc<Mutex<Streamer>>) {
 
     unsafe {
         // this is kinda what completecall() does
-        let cfargs: [*mut c_char; 1] = [null_mut()];
-        bindings::cfargs = cfargs.as_ptr() as _;
+        let mut cfargs: [*mut c_char; 1] = [null_mut()];
+        bindings::cfargs = cfargs.as_mut_ptr();
         bindings::compfunc = COMPFUNC.as_ptr() as *mut _;
         // zsh will switch up the pgid if monitor and interactive are set
         super::execstring("set +o monitor", Default::default());

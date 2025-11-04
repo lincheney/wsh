@@ -4,7 +4,6 @@ use crate::ui::{Ui, TrampolineIn};
 use crate::c_string_array;
 use std::os::fd::AsRawFd;
 use std::sync::{Mutex};
-use std::ops::{Deref, DerefMut};
 use std::os::raw::{c_char, c_int};
 use std::ptr::null_mut;
 use std::sync::{LazyLock, OnceLock};
@@ -20,7 +19,7 @@ static UI: Mutex<Option<(Ui, TrampolineIn)>> = Mutex::new(None);
 fn main() -> Result<Option<BString>> {
     RUNTIME.block_on(async {
         let mut lock = UI.lock().unwrap();
-        let store = lock.deref_mut();
+        let store = &mut *lock;
         let new = store.is_none();
 
         let (_ui, trampoline) = if let Some(x) = store {
@@ -66,7 +65,7 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
         Some(b"lua") => {
             return tokio::task::block_in_place(|| {
                 match UI.lock() {
-                    Err(e) => { eprintln!("{:?}", e); return 1; },
+                    Err(e) => { eprintln!("{e:?}"); return 1; },
                     Ok(value) => if let Some((ui, _)) = &*value {
                         let ui = ui.clone();
                         // drop the lock asap
@@ -74,11 +73,11 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
 
                         let result = RUNTIME.block_on(async {
                             ui.shell.with_tmp_permit(|| async {
-                                ui.lua.load(argv.get(1).map(|s| s.as_slice()).unwrap_or(b"")).exec_async().await
+                                ui.lua.load(argv.get(1).map_or(b"" as _, |s| s.as_slice())).exec_async().await
                             }).await
                         });
                         if let Err(e) = result {
-                            eprintln!("{:?}", e);
+                            eprintln!("{e:?}");
                             return 1;
                         }
                     },
@@ -88,7 +87,7 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
         },
 
         Some(_) => {
-            eprintln!("unknown arguments: {:?}", argv);
+            eprintln!("unknown arguments: {argv:?}");
             return 1;
         },
 
@@ -113,7 +112,7 @@ const DEFAULT_BUILTIN: zsh_sys::builtin = zsh_sys::builtin{
     defopts: null_mut(),
 };
 
-static MODULE_FEATURES: LazyLock<Features> = LazyLock::new(|| {
+static mut MODULE_FEATURES: LazyLock<Features> = LazyLock::new(|| {
     let bn_list = Box::new([
         zsh_sys::builtin{
             node: zsh_sys::hashnode{
@@ -150,9 +149,10 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
     // this is the real entrypoint
     unsafe {
         if cmd == zsh_sys::ZLE_CMD_READ as _ && let Ok(_lock) = IS_RUNNING.try_lock() {
+            let mut keymap: [u8; _] = [b'm', b'a', b'i', b'n', 0];
             zsh::done = 0;
             zsh::selectlocalmap(null_mut());
-            zsh::selectkeymap(c"main".as_ptr() as _, 1);
+            zsh::selectkeymap(keymap.as_mut_ptr().cast(), 1);
             zsh::histline = zsh_sys::curhist as _;
 
             let result = main();
@@ -197,16 +197,16 @@ pub extern "C" fn setup_() -> c_int {
 #[unsafe(no_mangle)]
 #[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn features_(module: zsh_sys::Module, features: *mut *mut *mut c_char) -> c_int {
-    let module_features: &zsh_sys::features = &MODULE_FEATURES.deref().0;
-    unsafe{ *features = zsh_sys::featuresarray(module, module_features as *const _ as *mut _); }
+    let module_features: *mut zsh_sys::features = unsafe{ &raw mut MODULE_FEATURES.0 };
+    unsafe{ *features = zsh_sys::featuresarray(module, module_features); }
     0
 }
 
 #[unsafe(no_mangle)]
 #[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn enables_(module: zsh_sys::Module, enables: *mut *mut c_int) -> c_int {
-    let module_features: &zsh_sys::features = &MODULE_FEATURES.deref().0;
-    unsafe{ zsh_sys::handlefeatures(module, module_features as *const _ as *mut _, enables) }
+    let module_features: *mut zsh_sys::features = unsafe{ &raw mut MODULE_FEATURES.0 };
+    unsafe{ zsh_sys::handlefeatures(module, module_features, enables) }
 }
 
 #[unsafe(no_mangle)]
@@ -219,8 +219,8 @@ pub extern "C" fn boot_() -> c_int {
 #[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn cleanup_(module: zsh_sys::Module) -> c_int {
     zsh::completion::restore_compadd();
-    let module_features: &zsh_sys::features = &MODULE_FEATURES.deref().0;
-    unsafe{ zsh_sys::setfeatureenables(module, module_features as *const _ as *mut _, null_mut()) }
+    let module_features: *mut zsh_sys::features = unsafe{ &raw mut MODULE_FEATURES.0 };
+    unsafe{ zsh_sys::setfeatureenables(module, module_features, null_mut()) }
 }
 
 #[unsafe(no_mangle)]

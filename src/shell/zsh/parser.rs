@@ -14,8 +14,8 @@ pub enum TokenKind {
 impl std::fmt::Display for TokenKind {
     fn fmt(&self, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
         match self {
-            TokenKind::Lextok(k) => write!(fmt, "{:?}", k),
-            TokenKind::Token(k) => write!(fmt, "{:?}", k),
+            TokenKind::Lextok(k) => write!(fmt, "{k:?}"),
+            TokenKind::Token(k) => write!(fmt, "{k:?}"),
             TokenKind::Comment => write!(fmt, "comment"),
         }
     }
@@ -50,7 +50,7 @@ pub fn parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
     let mut cmd = cmd.to_owned();
     cmd.extend(dummy);
 
-    let (mut complete, mut tokens) = _parse(cmd.as_ref(), recursive);
+    let (mut complete, mut tokens) = parse_internal(cmd.as_ref(), recursive);
 
     if let Some(last) = tokens.last_mut() {
         debug_assert!(last.range.end == cmd.len());
@@ -76,7 +76,7 @@ pub fn parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
     (complete, tokens)
 }
 
-fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
+fn parse_internal(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
     let ptr = super::metafy(cmd);
     let mut complete = true;
     let mut tokens = vec![];
@@ -172,7 +172,7 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
 
                 if slice_start == 0 {
                     // no inner tokens
-                    push_token(&mut tokens, &tokstr, kind, has_meta)
+                    push_token(&mut tokens, tokstr, kind, has_meta);
 
                 } else {
                     if tokstr.len() > slice_start {
@@ -219,8 +219,8 @@ fn _parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
             ))) {
 
                 let range = &tokens[i].range;
-                let (_, mut subshell) = _parse(&cmd[range.clone()], true);
-                for t in subshell.iter_mut() {
+                let (_, mut subshell) = parse_internal(&cmd[range.clone()], true);
+                for t in &mut subshell {
                     t.range.start += range.start;
                     t.range.end += range.start;
                 }

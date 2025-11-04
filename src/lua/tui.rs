@@ -166,7 +166,7 @@ fn set_widget_text(widget: &mut tui::Widget, text: Option<TextParts>) {
             },
             TextParts::Many(parts) => {
                 let mut lines = vec![Line::default()];
-                for part in parts.into_iter() {
+                for part in parts {
                     let style: tui::StyleOptions = part.style.style.into();
                     let style = style.as_style();
                     let text = tui::Widget::replace_tabs(part.text);
