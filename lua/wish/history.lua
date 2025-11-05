@@ -13,7 +13,7 @@ function show_history(widget, filter, data)
     local lines = {}
     for i = 1, #history do
         table.insert(lines, {text = history[i].text})
-        if history[i].histnum == index then
+        if history[i].histnum == current then
             ix = #lines
         end
     end
