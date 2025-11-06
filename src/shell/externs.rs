@@ -149,11 +149,14 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
     // this is the real entrypoint
     unsafe {
         if cmd == zsh_sys::ZLE_CMD_READ as _ && let Ok(_lock) = IS_RUNNING.try_lock() {
-            let mut keymap: [u8; _] = [b'm', b'a', b'i', b'n', 0];
+            let mut empty = [0];
+            let mut keymap = [b'm', b'a', b'i', b'n', 0];
             zsh::done = 0;
             zsh::selectlocalmap(null_mut());
             zsh::selectkeymap(keymap.as_mut_ptr().cast(), 1);
             zsh::histline = zsh_sys::curhist as _;
+            zsh::lpromptbuf = empty.as_mut_ptr().cast();
+            zsh::rpromptbuf = empty.as_mut_ptr().cast();
 
             let result = main();
 

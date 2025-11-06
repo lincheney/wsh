@@ -215,3 +215,5 @@ struct ttyinfo {
 }
 mod_export struct ttyinfo shttyinfo;
 mod_export void gettyinfo(struct ttyinfo *ti);
+
+char *lpromptbuf, *rpromptbuf;
