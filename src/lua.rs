@@ -80,11 +80,6 @@ async fn redraw(mut ui: Ui, lua: Lua, val: Option<LuaValue>) -> Result<()> {
     ui.draw().await
 }
 
-async fn eval(ui: Ui, lua: Lua, (cmd, stderr): (mlua::String, bool)) -> Result<mlua::String> {
-    let data = ui.shell.lock().await.eval((*cmd.as_bytes()).into(), stderr).unwrap();
-    Ok(lua.create_string(data)?)
-}
-
 async fn exit(ui: Ui, _lua: Lua, code: Option<i32>) -> Result<()> {
     let ui = ui.get();
     let mut ui = ui.inner.borrow_mut().await;
@@ -124,7 +119,6 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_async_fn("redo_buffer", redo_buffer)?;
     ui.set_lua_async_fn("accept_line", accept_line)?;
     ui.set_lua_async_fn("redraw",  redraw)?;
-    ui.set_lua_async_fn("eval", eval)?;
     ui.set_lua_async_fn("exit", exit)?;
     ui.set_lua_async_fn("get_cwd", get_cwd)?;
     ui.set_lua_async_fn("__laggy", __laggy)?;
