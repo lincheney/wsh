@@ -323,17 +323,15 @@ async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue>
         let code = tokio::task::block_in_place(|| {
             shell.exec(bstr::BStr::new(&args.args)).err().unwrap_or(0)
         });
-        drop(shell);
 
         // restore stdio
-        if let Some(stdin) = stdin {
-            ui.report_error(true, restore_fd(stdin, std::io::stdin())).await;
-        }
-        if let Some(stdout) = stdout {
-            ui.report_error(true, restore_fd(stdout, std::io::stdout())).await;
-        }
-        if let Some(stderr) = stderr {
-            ui.report_error(true, restore_fd(stderr, std::io::stderr())).await;
+        let stdin_err = stdin.map(|stdin| restore_fd(stdin, std::io::stdin()));
+        let stdout_err = stdout.map(|stdout| restore_fd(stdout, std::io::stdout()));
+        let stderr_err = stderr.map(|stderr| restore_fd(stderr, std::io::stderr()));
+        drop(shell);
+
+        for err in [stdin_err, stdout_err, stderr_err].into_iter().flatten() {
+            ui.report_error(true, err).await;
         }
 
         if foreground_lock.take().is_some() {
