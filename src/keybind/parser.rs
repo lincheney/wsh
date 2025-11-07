@@ -343,6 +343,7 @@ impl Parser {
 
         let mut len = 1;
         let key = match c {
+            b'\x7f'             => Key::Backspace.into(),
             b'\r' | b'\n'       => Key::Enter,
             b'\t' | b' '..=b'~' => Key::Char((*c).into()),
             // utf8
@@ -381,7 +382,6 @@ impl Parser {
             Some(Some((e, l))) => { len = l; e },
 
             None => match c {
-                b'\x7f'             => Key::Backspace.into(),
                 b'\x00'..=b'\x1a'   => Event::Key(KeyEvent{ key: Key::Char((c + 0x60).into()), modifiers: KeyModifiers::CONTROL }),
                 b'\x1c'..=b'\x1f'   => Event::Key(KeyEvent{ key: Key::Char((c + b'3' - 0x1b).into()), modifiers: KeyModifiers::CONTROL }),
 
