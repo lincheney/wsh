@@ -85,9 +85,10 @@ pub struct TrampolineIn {
 }
 
 impl TrampolineOut {
-    pub async fn jump_out(&self, string: BString) -> Result<()> {
+    pub async fn jump_out(&self, shell: &mut ShellInner<'_>, string: BString) -> Result<()> {
         self.out_sender.send(string)?;
         self.in_notify.notified().await;
+        let _ = shell;
         Ok(())
     }
 }
@@ -277,6 +278,52 @@ impl Ui {
         Ok(true)
     }
 
+    pub async fn pre_accept_line(&self, shell: &mut ShellInner<'_>) -> Result<BString> {
+        let this = &*self.unlocked.read();
+        let mut ui = this.inner.borrow_mut().await;
+        let lock = this.has_foreground_process.lock().await;
+
+        ui.tui.clear_non_persistent();
+
+        // TODO handle errors here properly
+        ui.events.pause().await;
+        ui.deactivate()?;
+
+        let buffer = ui.buffer.get_contents().clone();
+        shell.clear_completion_cache();
+
+        // move to last line of buffer
+        let y_offset = ui.prompt.height + ui.buffer.height - 1 - ui.buffer.cursor_coord.1 - 1;
+        execute!(
+            ui.stdout,
+            BeginSynchronizedUpdate,
+            MoveDown(y_offset),
+            style::Print('\n'),
+            MoveToColumn(0),
+            Clear(ClearType::FromCursorDown),
+            EndSynchronizedUpdate,
+        )?;
+        // release ui so that it can be accessed from the command
+        drop(lock);
+        Ok(buffer)
+    }
+
+    pub async fn post_accept_line(&self, shell: &mut ShellInner<'_>) -> Result<()> {
+        let this = &*self.unlocked.read();
+        let mut ui = this.inner.borrow_mut().await;
+        ui.activate()?;
+        ui.events.resume().await;
+        ui.reset(shell);
+
+        let cursor = ui.events.get_cursor_position().await.unwrap_or((0, 0));
+        // move down one line if not at start of line
+        if cursor.0 != 0 {
+            ui.size = crossterm::terminal::size()?;
+            queue!(ui.stdout, style::Print("\r\n"))?;
+        }
+        Ok(())
+    }
+
     pub async fn accept_line(&mut self) -> Result<bool> {
         if crate::is_forked() {
             return Ok(false)
@@ -292,57 +339,12 @@ impl Ui {
         // time to execute
         if complete {
             self.trigger_accept_line_callbacks(()).await;
-
             let mut shell = self.shell.lock().await;
-
-            let buffer = {
-                let this = &*self.unlocked.read();
-                let mut ui = this.inner.borrow_mut().await;
-                let lock = this.has_foreground_process.lock().await;
-
-                ui.tui.clear_non_persistent();
-
-                // TODO handle errors here properly
-                ui.events.pause().await;
-                ui.deactivate()?;
-
-                let buffer = ui.buffer.get_contents().clone();
-                shell.clear_completion_cache();
-
-                // move to last line of buffer
-                let y_offset = ui.prompt.height + ui.buffer.height - 1 - ui.buffer.cursor_coord.1 - 1;
-                execute!(
-                    ui.stdout,
-                    BeginSynchronizedUpdate,
-                    MoveDown(y_offset),
-                    style::Print('\n'),
-                    MoveToColumn(0),
-                    Clear(ClearType::FromCursorDown),
-                    EndSynchronizedUpdate,
-                )?;
-                // release ui so that it can be accessed from the command
-                drop(lock);
-                buffer
-            };
-
+            let buffer = self.pre_accept_line(&mut shell).await?;
             // acceptline doesn't actually accept the line right now
             // only when we return control to zle using the trampoline
-            self.trampoline.jump_out(buffer).await?;
-
-            {
-                let this = &*self.unlocked.read();
-                let mut ui = this.inner.borrow_mut().await;
-                ui.activate()?;
-                ui.events.resume().await;
-                ui.reset(&mut shell);
-
-                let cursor = ui.events.get_cursor_position().await.unwrap_or((0, 0));
-                // move down one line if not at start of line
-                if cursor.0 != 0 {
-                    ui.size = crossterm::terminal::size()?;
-                    queue!(ui.stdout, style::Print("\r\n"))?;
-                }
-            }
+            self.trampoline.jump_out(&mut shell, buffer).await?;
+            self.post_accept_line(&mut shell).await?;
 
             // prefer the result error over the activate error
             // result.and(ui.activate())?;
