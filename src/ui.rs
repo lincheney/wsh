@@ -1,5 +1,4 @@
 use bstr::{BStr, BString};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use std::future::Future;
 use std::sync::{Arc, Weak as WeakArc};
@@ -120,7 +119,6 @@ crate::strong_weak_wrapper! {
         pub unlocked: Arc::<ForkLock<'static, UnlockedUi>> [WeakArc::<ForkLock<'static, UnlockedUi>>],
         pub shell: Shell [WeakShell],
         pub lua: Arc::<Lua> [WeakArc::<Lua>],
-        pub forked: Arc::<AtomicBool> [WeakArc::<AtomicBool>],
         // trampoline should not be locked
         trampoline: Arc::<TrampolineOut> [WeakArc::<TrampolineOut>],
     }
@@ -165,7 +163,6 @@ impl Ui {
         let ui = Self {
             unlocked: Arc::new(lock.wrap(ui)),
             lua: Arc::new(lua),
-            forked: Arc::new(false.into()),
             shell,
             trampoline: Arc::new(trampoline.1),
         };
@@ -182,10 +179,6 @@ impl Ui {
 
     pub fn get_mut(&mut self) -> ForkLockWriteGuard<'_, UnlockedUi> {
         self.unlocked.write()
-    }
-
-    pub fn is_forked(&self) -> bool {
-        self.forked.load(Ordering::Relaxed)
     }
 
     pub async fn activate(&self) -> Result<()> {
@@ -207,7 +200,7 @@ impl Ui {
 
     pub async fn draw(&mut self) -> Result<()> {
         // do NOT render ui elements if there is a foreground process
-        if self.is_forked() {
+        if crate::is_forked() {
             return Ok(())
         }
 
@@ -289,7 +282,7 @@ impl Ui {
     }
 
     pub async fn accept_line(&mut self) -> Result<bool> {
-        if self.is_forked() {
+        if crate::is_forked() {
             return Ok(false)
         }
 

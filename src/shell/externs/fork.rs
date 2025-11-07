@@ -2,7 +2,7 @@
 * prefork/postfork handlers
 */
 
-use std::sync::{Mutex, Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{Mutex, Arc, atomic::{Ordering}};
 use std::mem::transmute;
 use parking_lot::lock_api::RawMutex;
 
@@ -16,7 +16,6 @@ unsafe impl Sync for ForkState {}
 unsafe impl Send for ForkState {}
 
 static FORK_STATE: Mutex<Option<ForkState>> = Mutex::new(None);
-pub static IS_FORKED: AtomicBool = AtomicBool::new(false);
 
 extern "C" fn prefork() {
     // let guard = FORK_LOCK.write();
@@ -77,7 +76,7 @@ impl ForkState {
 impl Drop for ForkState {
     fn drop(&mut self) {
         if !self.is_parent() {
-            IS_FORKED.store(true, Ordering::Relaxed);
+            crate::IS_FORKED.store(true, Ordering::Relaxed);
 
             if let Some(fork_lock) = self.fork_lock.take() {
                 // reset the lock if in the child

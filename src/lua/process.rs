@@ -169,7 +169,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         let mut foreground_lock = None;
         let proc: Result<_> = (async || {
             let mut this = ui.unlocked.write();
-            foreground_lock = if args.foreground && !ui.is_forked() {
+            foreground_lock = if args.foreground && !crate::is_forked() {
                 // this essentially locks ui
                 {
                     let mut ui = this.inner.borrow_mut().await;
@@ -265,7 +265,7 @@ async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue>
         let mut foreground_lock = None;
         let result: Result<_> = (async || {
             let mut this = ui.unlocked.write();
-            foreground_lock = if args.foreground && !ui.is_forked() {
+            foreground_lock = if args.foreground && !crate::is_forked() {
                 // this essentially locks ui
                 {
                     let mut ui = this.inner.borrow_mut().await;

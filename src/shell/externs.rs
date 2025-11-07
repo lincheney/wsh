@@ -38,7 +38,7 @@ fn get_or_init_ui() -> Result<(bool, ForkLockWriteGuard<'static, Option<GlobalSt
             ui.activate().await?;
             ui.start_cmd().await?;
 
-            if !self::fork::IS_FORKED.load(std::sync::atomic::Ordering::Relaxed) {
+            if !crate::IS_FORKED.load(std::sync::atomic::Ordering::Relaxed) {
                 let ui = ui.clone();
                 tokio::task::spawn(async move {
                     let tty = std::fs::File::open("/dev/tty").unwrap();
