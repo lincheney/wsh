@@ -5,18 +5,19 @@ use crate::c_string_array;
 use std::os::fd::AsRawFd;
 use std::os::raw::{c_char, c_int};
 use std::ptr::null_mut;
-use std::sync::{LazyLock, OnceLock, Mutex};
+use std::sync::{Arc, LazyLock, OnceLock, Mutex};
 use std::ffi::CString;
+use std::cell::RefCell;
 use anyhow::Result;
 use crate::shell::zsh;
 use crate::fork_lock::{RawForkLock, ForkLock};
 
 static FORK_LOCK: RawForkLock = RawForkLock::new();
 
-type GlobalState = (Ui, TrampolineIn, tokio::runtime::Runtime);
-static STATE: ForkLock<'static, Mutex<Option<GlobalState>>> = FORK_LOCK.wrap(Mutex::new(None));
+type GlobalState = (Ui, RefCell<TrampolineIn>, tokio::runtime::Runtime);
+static STATE: ForkLock<'static, Mutex<Option<Arc<GlobalState>>>> = FORK_LOCK.wrap(Mutex::new(None));
 
-fn do_with_ui<F: Fn(bool, &mut GlobalState) -> T, T>(f: F) -> Result<T> {
+fn get_or_init_state() -> Result<(bool, Arc<GlobalState>)> {
 
     let lock = STATE.read();
     let mut store = lock.lock().unwrap();
@@ -57,16 +58,16 @@ fn do_with_ui<F: Fn(bool, &mut GlobalState) -> T, T>(f: F) -> Result<T> {
             Ok((ui, trampoline))
         });
         let (ui, trampoline) = result?;
-        store.get_or_insert((ui, trampoline, runtime))
+        store.get_or_insert(Arc::new((ui, RefCell::new(trampoline), runtime)))
     };
 
-    Ok(f(new, state))
+    Ok((new, state.clone()))
 }
 
 fn main() -> Result<Option<BString>> {
-    do_with_ui(|new, (_, trampoline, runtime)| {
-        runtime.block_on(trampoline.jump_in(!new))
-    })
+    let (new, state) = get_or_init_state()?;
+    let (_, trampoline, runtime) = &*state;
+    Ok(runtime.block_on(trampoline.borrow_mut().jump_in(!new)))
 }
 
 unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _options: zsh_sys::Options, _func: c_int) -> c_int {
@@ -75,13 +76,13 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
     match argv.first().map(|s| s.as_slice()) {
         Some(b"lua") => {
             let result: Result<()> = tokio::task::block_in_place(|| {
-                do_with_ui(|_, (ui, _, runtime)| {
-                    runtime.block_on(async {
-                        ui.shell.with_tmp_permit(|| async {
-                            ui.lua.load(argv.get(1).map_or(b"" as _, |s| s.as_slice())).exec_async().await
-                        }).await
-                    })
-                })??;
+                let (_, state) = get_or_init_state()?;
+                let (ui, _, runtime) = &*state;
+                runtime.block_on(async {
+                    ui.shell.with_tmp_permit(|| async {
+                        ui.lua.load(argv.get(1).map_or(b"" as _, |s| s.as_slice())).exec_async().await
+                    }).await
+                })?;
                 Ok(())
             });
 

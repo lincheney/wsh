@@ -49,7 +49,8 @@ impl ForkState {
 
         let lua = {
             let ui = super::STATE.read_with_lock(&fork_lock);
-            if let Some((ui, _, _)) = ui.lock().unwrap().as_ref() {
+            if let Some(state) = ui.lock().unwrap().as_ref() {
+                let (ui, _, _) = &**state;
                 if !ui.shell.is_locked() {
                     // shell is not locked == we are forking for some unknown reason
                     return None
