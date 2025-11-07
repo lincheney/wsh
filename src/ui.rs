@@ -153,14 +153,7 @@ impl Ui {
         };
         ui.keybinds.push(Default::default());
 
-        let start = std::time::Instant::now();
         let shell = Shell::new();
-        {
-            // let mut shell = shell.lock().await;
-            // shell.readhistfile();
-            // shell.init_interactive();
-        }
-        log::info!("loaded history in {:?}", start.elapsed());
         ui.reset(&mut shell.lock().await);
 
         let trampoline = new_trampoline();
