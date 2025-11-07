@@ -177,7 +177,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
                     ui.events.pause().await;
                     ui.deactivate()?;
                 }
-                Some(this.has_foreground_process.clone().lock_owned().await)
+                Some(ui.has_foreground_process.lock().await)
             } else {
                 None
             };
@@ -208,7 +208,8 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
                 },
             };
 
-            if foreground_lock.take().is_some() {
+            drop(foreground_lock);
+            if args.foreground {
                 ui.report_error(true, ui.activate().await).await;
                 ui.get().inner.borrow_mut().await.events.resume().await;
             }
@@ -265,7 +266,7 @@ async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue>
         let mut result_sender = Some(result_sender);
         let result: Result<_> = (async || {
 
-            let mut foreground_lock = if args.foreground && !crate::is_forked() {
+            let foreground_lock = if args.foreground && !crate::is_forked() {
                 // this essentially locks ui
                 let this = ui.unlocked.read();
                 {
@@ -273,7 +274,7 @@ async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue>
                     ui.events.pause().await;
                     ui.deactivate()?;
                 }
-                Some(this.has_foreground_process.clone().lock_owned().await)
+                Some(ui.has_foreground_process.lock().await)
             } else {
                 None
             };
@@ -320,7 +321,8 @@ async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue>
             let stderr_err = stderr.1.map(|stderr| restore_fd(stderr, std::io::stderr()));
             drop(shell);
 
-            if foreground_lock.take().is_some() {
+            drop(foreground_lock);
+            if args.foreground {
                 ui.report_error(true, ui.activate().await).await;
                 ui.get().inner.borrow_mut().await.events.resume().await;
             }
