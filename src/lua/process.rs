@@ -169,7 +169,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         let mut result_sender = Some(result_sender);
         let result: Result<_> = (async || {
 
-            let mut foreground_lock = if args.foreground && !crate::is_forked() {
+            let foreground_lock = if args.foreground && !crate::is_forked() {
                 // this essentially locks ui
                 let this = ui.unlocked.read();
                 {

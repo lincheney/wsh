@@ -18,17 +18,10 @@ unsafe impl Send for ForkState {}
 static FORK_STATE: Mutex<Option<ForkState>> = Mutex::new(None);
 
 extern "C" fn prefork() {
-    // let guard = FORK_LOCK.write();
-    // unsafe {
-        // FORK_LOCK_GUARD = Some(guard);
-    // }
     *FORK_STATE.lock().unwrap() = ForkState::new();
 }
 
 extern "C" fn postfork() {
-    // unsafe {
-        // FORK_LOCK_GUARD = None;
-    // }
     FORK_STATE.lock().unwrap().take();
 }
 
