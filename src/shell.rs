@@ -1,3 +1,6 @@
+use anyhow::Result;
+use std::io::Write;
+use std::os::fd::{RawFd};
 use std::ptr::NonNull;
 use std::os::raw::{c_long, c_char, c_int};
 use std::ffi::{CString, CStr};
@@ -6,7 +9,7 @@ use std::sync::{Arc, Weak};
 use std::ptr::null_mut;
 use std::sync::Mutex;
 use tokio::sync::{Semaphore, SemaphorePermit};
-use bstr::{BStr, BString};
+use bstr::{BStr, BString, ByteSlice, ByteVec};
 
 mod externs;
 mod zsh;
@@ -115,16 +118,44 @@ impl<'a> ShellInner<'a> {
         }
     }
 
-    pub fn exec(&mut self, string: &BStr) -> Result<(), c_long> {
-        zsh::execstring(string, Default::default());
-        let code = zsh::get_return_code();
-        if code > 0 { Err(code) } else { Ok(()) }
+    pub fn exec(&mut self, string: &BStr) -> c_long {
+        zsh::execstring(string, Default::default())
     }
 
-    pub fn eval(&mut self, string: &BStr, _capture_stderr: bool) -> Result<BString, c_long> {
-        zsh::execstring(string, Default::default());
-        let code = zsh::get_return_code();
-        if code > 0 { Err(code) } else { Ok(BString::new(vec![])) }
+    pub fn exec_subshell<I: Iterator<Item=(RawFd, RawFd)>>(
+        &mut self,
+        string: &BStr,
+        job_control: bool,
+        redirections: I,
+    ) -> Result<c_long> {
+
+        // okkkkkkkk
+        // so ideally, we would just fork() and execstring()
+        // except that zsh will think that its still the group leader
+        // and there's probably some settings buried somewhere to
+        // tell it that it isn't and i can't be stuffed figuring it out,
+        // so i'm going to do this instead
+
+        let mut cmd = BString::new(vec![]);
+        // apply all the redirections
+        for (left, right) in redirections {
+            write!(cmd, "{left}>{right} ").unwrap();
+        }
+        cmd.push_str(" ( eval '");
+        // escape it
+        string.replace_into(b"'", b"'\\''", &mut cmd);
+        cmd.push_str("' ) &");
+        if !job_control {
+            cmd.push_str("!");
+        }
+
+        let code = zsh::execstring(cmd, Default::default());
+        if code > 0 {
+            // somehow failed to spawn subshell?
+            anyhow::bail!("failed to start subshell with error code {code}");
+        }
+
+        Ok(unsafe{ zsh_sys::lastpid })
     }
 
     pub fn get_completions(&self, string: &BStr) -> (Arc<tokio::sync::Mutex<zsh::completion::StreamConsumer>>, Completer) {

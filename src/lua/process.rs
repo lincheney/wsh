@@ -4,12 +4,13 @@ use std::collections::HashMap;
 use std::default::Default;
 use std::os::fd::{RawFd, AsRawFd, IntoRawFd};
 use std::fs::File;
-use anyhow::Result;
+use anyhow::{Result, Context};
 use mlua::{prelude::*, UserData, UserDataMethods};
 use tokio::io::{BufReader, BufWriter};
 use tokio::process::Command;
 use tokio::sync::oneshot;
 use serde::{Deserialize, Deserializer, de};
+use nix::sys::wait::{waitpid, WaitStatus};
 use crate::ui::{Ui, ThreadsafeUiInner};
 use super::asyncio::{ReadableFile, WriteableFile};
 
@@ -106,6 +107,7 @@ struct FullCommandSpawnArgs {
     stdout: Stdio,
     stderr: Stdio,
     foreground: bool,
+    subshell: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -131,14 +133,19 @@ enum CommandSpawnArgs {
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum SpawnArgs {
+    Shell(String),
     Simple(Vec<String>),
     Full(FullSpawnArgs),
 }
 
 async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let args = match lua.from_value(val)? {
+        SpawnArgs::Shell(args) => {
+            let args = FullCommandSpawnArgs{ args, subshell: true, ..Default::default() };
+            return shell_run_with_args(ui, lua, args).await;
+        },
         SpawnArgs::Full(args) => args,
-        SpawnArgs::Simple(args) => FullSpawnArgs{args, ..std::default::Default::default()},
+        SpawnArgs::Simple(args) => FullSpawnArgs{args, ..Default::default()},
     };
     let first_arg = args.args.first().ok_or_else(|| LuaError::RuntimeError("no args given".to_owned()))?;
 
@@ -194,11 +201,13 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
             // zsh runs wait() in a SIGCHLD handler as well
             // so if it gets the status first, we have to fetch it out of the job table
             let result = match proc.wait().await {
-                Ok(e) => Ok(e),
+                Ok(e) => {
+                    Ok(e.code().unwrap_or(128 + e.signal().unwrap_or(0)))
+                },
                 Err(e) => {
                     if e.raw_os_error().is_some_and(|e| e == nix::errno::Errno::ECHILD as _) {
                         if let Some(proc) = ui.shell.lock().await.find_pid(pid as _) {
-                            Ok(std::process::ExitStatus::from_raw(proc.status))
+                            Ok(proc.status)
                         } else {
                             Err(e)
                         }
@@ -214,13 +223,18 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
                 ui.get().inner.borrow_mut().await.events.resume().await;
             }
             // ignore error
-            let _ = sender.send(result.map(|r| r.into_raw()));
+            let _ = sender.send(result);
 
             Ok(())
         })().await;
 
-        if let Some((result_sender, err)) = result_sender.zip(result.err()) {
-            let _ = result_sender.send(Err(err));
+        if let Err(err) = result {
+            if let Some(result_sender) = result_sender {
+                let _ = result_sender.send(Err(err));
+            } else {
+                let err: Result<()> = Err(err);
+                ui.report_error(true, err).await;
+            }
         }
 
     });
@@ -235,28 +249,57 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
 
 }
 
-fn override_fd<A: AsRawFd, B: IntoRawFd>(old: A, new: B) -> Result<RawFd> {
-    let old = old.as_raw_fd();
-    let new = new.into_raw_fd();
-    let backup = nix::unistd::dup(old)?;
-    nix::unistd::dup2(new, old)?;
-    nix::unistd::close(new)?;
-    Ok(backup)
+struct OverridenStream {
+    fd: RawFd,
+    replacement: RawFd,
+    backup: Option<RawFd>,
+    closed: bool,
 }
 
-fn restore_fd<A: AsRawFd>(old: RawFd, new: A) -> Result<()> {
-    let new = new.as_raw_fd();
-    nix::unistd::dup2(old, new)?;
-    nix::unistd::close(old)?;
-    Ok(())
+impl OverridenStream {
+    fn new<A: AsRawFd, B: IntoRawFd>(fd: A, replacement: B) -> Self {
+        Self {
+            fd: fd.as_raw_fd(),
+            replacement: replacement.into_raw_fd(),
+            backup: None,
+            closed: false,
+        }
+    }
+
+    fn close(&mut self) -> Result<()> {
+        nix::unistd::close(self.replacement)?;
+        self.closed = true;
+        Ok(())
+    }
+
+    fn override_fd(&mut self) -> Result<()> {
+        let backup = nix::unistd::dup(self.fd)?;
+        nix::unistd::dup2(self.replacement, self.fd)?;
+        self.backup = Some(backup);
+        self.close()?;
+        Ok(())
+    }
+
+    fn restore(&mut self) -> Result<()> {
+        if let Some(backup) = self.backup {
+            nix::unistd::dup2(backup, self.fd)?;
+            nix::unistd::close(backup)?;
+        } else if !self.closed {
+            self.close()?;
+        }
+        Ok(())
+    }
 }
 
-async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
+async fn shell_run(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let args = match lua.from_value(val)? {
         CommandSpawnArgs::Full(args) => args,
         CommandSpawnArgs::Simple(args) => FullCommandSpawnArgs{args, ..Default::default()},
     };
+    shell_run_with_args(ui, lua, args).await
+}
 
+async fn shell_run_with_args(mut ui: Ui, lua: Lua, args: FullCommandSpawnArgs) -> Result<LuaMultiValue> {
     let (result_sender, result_receiver) = oneshot::channel();
     let (sender, receiver) = oneshot::channel();
 
@@ -284,20 +327,20 @@ async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue>
                     stdio_pipe!($name, File::create("/dev/null"), {
                         let (send, recv) = tokio::net::unix::pipe::pipe()?;
                         let send = WriteableFile(Some(BufWriter::new(send)));
-                        (Some(send), Some(override_fd(std::io::$name(), recv.into_nonblocking_fd()?)?))
+                        (Some(send), Some(OverridenStream::new(std::io::$name(), recv.into_nonblocking_fd()?)))
                     })
                 );
                 ($name:ident, false) => (
                     stdio_pipe!($name, File::open("/dev/null"), {
                         let (send, recv) = tokio::net::unix::pipe::pipe()?;
                         let recv = ReadableFile(Some(BufReader::new(recv)));
-                        (Some(recv), Some(override_fd(std::io::$name(), send.into_nonblocking_fd()?)?))
+                        (Some(recv), Some(OverridenStream::new(std::io::$name(), send.into_nonblocking_fd()?)))
                     })
                 );
                 ($name:ident, $null:expr, $piped:expr) => (
                     match args.$name {
                         Stdio::inherit => (None, None),
-                        Stdio::null => (None, Some(override_fd(std::io::$name(), $null?)?)),
+                        Stdio::null => (None, Some(OverridenStream::new(std::io::$name(), $null?))),
                         Stdio::piped => $piped,
                     }
                 );
@@ -307,27 +350,76 @@ async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue>
             let stdin = stdio_pipe!(stdin, true);
             let stdout = stdio_pipe!(stdout, false);
             let stderr = stdio_pipe!(stderr, false);
+
+            let cmd = bstr::BStr::new(&args.args);
+            let mut streams = [stdin.1, stdout.1, stderr.1];
+            let pid = if args.subshell {
+                // fork it now to get the pid
+                let redirections = streams.iter().flatten().map(|s| (s.fd, s.replacement));
+                shell.exec_subshell(cmd, false, redirections)? as _
+            } else {
+                std::process::id()
+            };
+
             // send streams back to caller
-            let _ = result_sender.take().unwrap().send(Ok((stdin.0, stdout.0, stderr.0)));
+            let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
 
-            // run the scripts
-            let code = tokio::task::block_in_place(|| {
-                shell.exec(bstr::BStr::new(&args.args)).err().unwrap_or(0)
-            });
+            let code = if args.subshell {
 
-            // restore stdio
-            let stdin_err = stdin.1.map(|stdin| restore_fd(stdin, std::io::stdin()));
-            let stdout_err = stdout.1.map(|stdout| restore_fd(stdout, std::io::stdout()));
-            let stderr_err = stderr.1.map(|stderr| restore_fd(stderr, std::io::stderr()));
+                let result: Result<_> = tokio::task::block_in_place(|| {
+                    let pid = nix::unistd::Pid::from_raw(pid as _);
+                    loop {
+                        match waitpid(Some(pid), None) {
+                            Ok(WaitStatus::Exited(_, code)) => return Ok(code as i64),
+                            Ok(WaitStatus::Signaled(_, signal, _)) => return Ok(128 + signal as i64),
+                            Ok(_) => (),
+                            Err(e @ nix::errno::Errno::ECHILD) => {
+                                let mut shell = tokio::runtime::Handle::current().block_on(ui.shell.lock());
+                                if let Some(proc) = shell.find_pid(pid.into()) {
+                                    return Ok(proc.status as _)
+                                } else {
+                                    Err(e)?
+                                }
+                            },
+                            Err(e) => Err(e)?,
+                        }
+                    }
+                });
+                result?
+
+            } else {
+                // no forking, override fds in place
+                let mut result = streams.iter_mut().flatten().try_for_each(|s| s.override_fd());
+                if result.is_err() {
+                    // didnt work, restore any backups
+                    if let Err(e) = streams.iter_mut().flatten().try_for_each(|s| s.restore()) {
+                        result = result.context(e);
+                    }
+                    return result
+                }
+
+                // run the scripts
+                tokio::task::block_in_place(|| shell.exec(cmd))
+            };
+
+            let mut errors = [Ok(()), Ok(()), Ok(())];
+            if !args.subshell {
+                // finished, restore any backups
+                for (s, e) in streams.iter_mut().zip(errors.iter_mut()) {
+                    if let Some(s) = s {
+                        *e = s.restore();
+                    }
+                }
+            }
+
             drop(shell);
-
             drop(foreground_lock);
             if args.foreground {
                 ui.report_error(true, ui.activate().await).await;
                 ui.get().inner.borrow_mut().await.events.resume().await;
             }
 
-            for err in [stdin_err, stdout_err, stderr_err].into_iter().flatten() {
+            for err in errors.into_iter() {
                 ui.report_error(true, err).await;
             }
 
@@ -337,16 +429,21 @@ async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue>
             Ok(())
         })().await;
 
-        if let Some((result_sender, err)) = result_sender.zip(result.err()) {
-            let _ = result_sender.send(Err(err));
+        if let Err(err) = result {
+            if let Some(result_sender) = result_sender {
+                let _ = result_sender.send(Err(err));
+            } else {
+                let err: Result<()> = Err(err);
+                ui.report_error(true, err).await;
+            }
         }
 
     });
 
-    let (stdin, stdout, stderr) = result_receiver.await.unwrap()?;
+    let (pid, stdin, stdout, stderr) = result_receiver.await.unwrap()?;
 
     Ok(lua.pack_multi((
-        CommandResult{ inner: Some(receiver) },
+        Process{pid, result: CommandResult{ inner: Some(receiver) }},
         stdin,
         stdout,
         stderr,

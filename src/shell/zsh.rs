@@ -32,7 +32,7 @@ impl Default for ExecstringOpts<'_> {
     }
 }
 
-pub fn execstring<S: AsRef<BStr>>(cmd: S, opts: ExecstringOpts) {
+pub fn execstring<S: AsRef<BStr>>(cmd: S, opts: ExecstringOpts) -> c_long {
     let cmd = cmd.as_ref().to_vec();
     let context = opts.context.map(|c| ZString::from(c).into_raw());
     unsafe{
@@ -43,6 +43,7 @@ pub fn execstring<S: AsRef<BStr>>(cmd: S, opts: ExecstringOpts) {
             context.unwrap_or(null_mut()),
         );
     }
+    return get_return_code()
 }
 
 pub fn get_return_code() -> c_long {
