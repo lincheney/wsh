@@ -508,7 +508,6 @@ impl Ui {
             KeybindValue::Widget(widget) => {
                 // execute the widget
                 // a widget may run subprocesses so lock the ui
-                // TODO what about if we have forked
                 let lock = this.has_foreground_process.lock().await;
                 let mut ui = this.inner.borrow_mut().await;
                 let buffer = ui.buffer.get_contents();

@@ -262,7 +262,9 @@ async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue>
     // run this in a thread
     tokio::task::spawn(async move {
 
+        let mut shell = ui.shell.lock().await;
         let mut foreground_lock = None;
+
         let result: Result<_> = (async || {
             let this = ui.unlocked.read();
             foreground_lock = if args.foreground && !crate::is_forked() {
@@ -318,13 +320,10 @@ async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue>
             },
         };
 
-        let shell = ui.shell.clone();
-        let code = tokio::task::spawn_blocking(move || {
-            tokio::task::block_in_place(move || {
-                let mut shell = tokio::runtime::Handle::current().block_on(shell.lock());
-                shell.exec(bstr::BStr::new(&args.args)).err().unwrap_or(0)
-            })
-        }).await.unwrap();
+        let code = tokio::task::block_in_place(|| {
+            shell.exec(bstr::BStr::new(&args.args)).err().unwrap_or(0)
+        });
+        drop(shell);
 
         // restore stdio
         if let Some(stdin) = stdin {
