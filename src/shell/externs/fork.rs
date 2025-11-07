@@ -46,16 +46,19 @@ impl ForkState {
 
         let lua = {
             let ui = super::UI.read();
-            let ui = &ui.as_ref()?.0;
-            if !ui.shell.is_locked() {
-                // shell is not locked == we are forking for some unknown reason
-                return None
-            }
+            if let Some((ui, _, _)) = ui.as_ref() {
+                if !ui.shell.is_locked() {
+                    // shell is not locked == we are forking for some unknown reason
+                    return None
+                }
 
-            // i can take a lock on lua by acquiring a ref to the app data
-            ui.lua.set_app_data(());
-            Some((unsafe{ transmute(ui.lua.app_data_ref::<()>().unwrap()) }, ui.lua.clone()))
-            // ui.lua.gc_stop();
+                // i can take a lock on lua by acquiring a ref to the app data
+                ui.lua.set_app_data(());
+                // ui.lua.gc_stop();
+                Some((unsafe{ transmute(ui.lua.app_data_ref::<()>().unwrap()) }, ui.lua.clone()))
+            } else {
+                None
+            }
         };
 
         // this is the big global fork lock
