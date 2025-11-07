@@ -166,11 +166,12 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
 
     tokio::spawn(async move {
 
-        let mut foreground_lock = None;
-        let proc: Result<_> = (async || {
-            let this = ui.unlocked.read();
-            foreground_lock = if args.foreground && !crate::is_forked() {
+        let mut result_sender = Some(result_sender);
+        let result: Result<_> = (async || {
+
+            let mut foreground_lock = if args.foreground && !crate::is_forked() {
                 // this essentially locks ui
+                let this = ui.unlocked.read();
                 {
                     let mut ui = this.inner.borrow_mut().await;
                     ui.events.pause().await;
@@ -180,48 +181,47 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
             } else {
                 None
             };
-            Ok(command.spawn()?)
-        })().await;
 
-        let mut proc = match proc {
-            Ok(proc) => proc,
-            Err(e) => {
-                let _ = result_sender.send(Err(e));
-                return
-            },
-        };
+            let mut proc = command.spawn()?;
+            let pid = proc.id().unwrap();
+            ui.shell.lock().await.add_pid(pid as _);
 
-        let pid = proc.id().unwrap();
-        ui.shell.lock().await.add_pid(pid as _);
+            let stdin  = proc.stdin.take().map(|s| WriteableFile(Some(BufWriter::new(s))));
+            let stdout = proc.stdout.take().map(|s| ReadableFile(Some(BufReader::new(s))));
+            let stderr = proc.stderr.take().map(|s| ReadableFile(Some(BufReader::new(s))));
+            let _ = result_sender.take().unwrap().send(Ok((pid, stdin, stdout, stderr)));
 
-        let stdin  = proc.stdin.take().map(|s| WriteableFile(Some(BufWriter::new(s))));
-        let stdout = proc.stdout.take().map(|s| ReadableFile(Some(BufReader::new(s))));
-        let stderr = proc.stderr.take().map(|s| ReadableFile(Some(BufReader::new(s))));
-        let _ = result_sender.send(Ok((pid, stdin, stdout, stderr)));
-
-        // zsh runs wait() in a SIGCHLD handler as well
-        // so if it gets the status first, we have to fetch it out of the job table
-        let result = match proc.wait().await {
-            Ok(e) => Ok(e),
-            Err(e) => {
-                if e.raw_os_error().is_some_and(|e| e == nix::errno::Errno::ECHILD as _) {
-                    if let Some(proc) = ui.shell.lock().await.find_pid(pid as _) {
-                        Ok(std::process::ExitStatus::from_raw(proc.status))
+            // zsh runs wait() in a SIGCHLD handler as well
+            // so if it gets the status first, we have to fetch it out of the job table
+            let result = match proc.wait().await {
+                Ok(e) => Ok(e),
+                Err(e) => {
+                    if e.raw_os_error().is_some_and(|e| e == nix::errno::Errno::ECHILD as _) {
+                        if let Some(proc) = ui.shell.lock().await.find_pid(pid as _) {
+                            Ok(std::process::ExitStatus::from_raw(proc.status))
+                        } else {
+                            Err(e)
+                        }
                     } else {
                         Err(e)
                     }
-                } else {
-                    Err(e)
-                }
-            },
-        };
+                },
+            };
 
-        if foreground_lock.take().is_some() {
-            ui.report_error(true, ui.activate().await).await;
-            ui.get().inner.borrow_mut().await.events.resume().await;
+            if foreground_lock.take().is_some() {
+                ui.report_error(true, ui.activate().await).await;
+                ui.get().inner.borrow_mut().await.events.resume().await;
+            }
+            // ignore error
+            let _ = sender.send(result.map(|r| r.into_raw()));
+
+            Ok(())
+        })().await;
+
+        if let Some((result_sender, err)) = result_sender.zip(result.err()) {
+            let _ = result_sender.send(Err(err));
         }
-        // ignore error
-        let _ = sender.send(result.map(|r| r.into_raw()));
+
     });
 
     let (pid, stdin, stdout, stderr) = result_receiver.await.unwrap()?;
@@ -262,13 +262,12 @@ async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue>
     // run this in a thread
     tokio::task::spawn(async move {
 
-        let mut shell = ui.shell.lock().await;
-        let mut foreground_lock = None;
-
+        let mut result_sender = Some(result_sender);
         let result: Result<_> = (async || {
-            let this = ui.unlocked.read();
-            foreground_lock = if args.foreground && !crate::is_forked() {
+
+            let mut foreground_lock = if args.foreground && !crate::is_forked() {
                 // this essentially locks ui
+                let this = ui.unlocked.read();
                 {
                     let mut ui = this.inner.borrow_mut().await;
                     ui.events.pause().await;
@@ -303,44 +302,43 @@ async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue>
                 );
             }
 
+            let mut shell = ui.shell.lock().await;
             let stdin = stdio_pipe!(stdin, true);
             let stdout = stdio_pipe!(stdout, false);
             let stderr = stdio_pipe!(stderr, false);
-            Ok((stdin, stdout, stderr))
+            // send streams back to caller
+            let _ = result_sender.take().unwrap().send(Ok((stdin.0, stdout.0, stderr.0)));
+
+            // run the scripts
+            let code = tokio::task::block_in_place(|| {
+                shell.exec(bstr::BStr::new(&args.args)).err().unwrap_or(0)
+            });
+
+            // restore stdio
+            let stdin_err = stdin.1.map(|stdin| restore_fd(stdin, std::io::stdin()));
+            let stdout_err = stdout.1.map(|stdout| restore_fd(stdout, std::io::stdout()));
+            let stderr_err = stderr.1.map(|stderr| restore_fd(stderr, std::io::stderr()));
+            drop(shell);
+
+            if foreground_lock.take().is_some() {
+                ui.report_error(true, ui.activate().await).await;
+                ui.get().inner.borrow_mut().await.events.resume().await;
+            }
+
+            for err in [stdin_err, stdout_err, stderr_err].into_iter().flatten() {
+                ui.report_error(true, err).await;
+            }
+
+            // send the code out
+            let _ = sender.send(Ok(code as _));
+
+            Ok(())
         })().await;
 
-        let (stdin, stdout, stderr) = match result {
-            Ok((stdin, stdout, stderr)) => {
-                let _ = result_sender.send(Ok((stdin.0, stdout.0, stderr.0)));
-                (stdin.1, stdout.1, stderr.1)
-            },
-            Err(e) => {
-                let _ = result_sender.send(Err(e));
-                return
-            },
-        };
-
-        let code = tokio::task::block_in_place(|| {
-            shell.exec(bstr::BStr::new(&args.args)).err().unwrap_or(0)
-        });
-
-        // restore stdio
-        let stdin_err = stdin.map(|stdin| restore_fd(stdin, std::io::stdin()));
-        let stdout_err = stdout.map(|stdout| restore_fd(stdout, std::io::stdout()));
-        let stderr_err = stderr.map(|stderr| restore_fd(stderr, std::io::stderr()));
-        drop(shell);
-
-        for err in [stdin_err, stdout_err, stderr_err].into_iter().flatten() {
-            ui.report_error(true, err).await;
+        if let Some((result_sender, err)) = result_sender.zip(result.err()) {
+            let _ = result_sender.send(Err(err));
         }
 
-        if foreground_lock.take().is_some() {
-            ui.report_error(true, ui.activate().await).await;
-            ui.get().inner.borrow_mut().await.events.resume().await;
-        }
-
-        // ignore error
-        let _ = sender.send(Ok(code as _));
     });
 
     let (stdin, stdout, stderr) = result_receiver.await.unwrap()?;
