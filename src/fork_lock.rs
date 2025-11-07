@@ -1,5 +1,4 @@
-use std::cell::UnsafeCell;
-use std::ops::{Deref, DerefMut};
+use std::ops::{Deref};
 use std::sync::{Mutex, Condvar, MutexGuard, atomic::{AtomicUsize, Ordering}};
 
 pub struct RawForkLock {
@@ -91,13 +90,13 @@ impl RawForkLock {
     }
 
     pub const fn wrap<T>(&self, inner: T) -> ForkLock<'_, T> {
-        ForkLock{ lock: self, cell: UnsafeCell::new(inner) }
+        ForkLock{ lock: self, inner }
     }
 }
 
 pub struct ForkLock<'a, T> {
     lock: &'a RawForkLock,
-    cell: UnsafeCell<T>,
+    inner: T,
 }
 
 unsafe impl<T> Sync for ForkLock<'_, T> {}
@@ -107,29 +106,25 @@ pub struct ForkLockReadGuard<'a, T> {
     _inner: &'a T,
 }
 
-pub struct ForkLockWriteGuard<'a, T> {
-    _guard: RawForkLockReadGuard<'a>,
-    _inner: &'a mut T,
-}
-
-impl<T> ForkLock<'_, T> {
+impl<'a, T> ForkLock<'a, T> {
     pub fn read(&self) -> ForkLockReadGuard<'_, T> {
         let guard = self.lock.read();
-        ForkLockReadGuard{ _guard: guard, _inner: unsafe{ &*self.cell.get() } }
+        ForkLockReadGuard{ _guard: guard, _inner: &self.inner }
     }
 
-    pub fn write(&self) -> ForkLockWriteGuard<'_, T> {
-        let guard = self.lock.read();
-        ForkLockWriteGuard{ _guard: guard, _inner: unsafe{ &mut *self.cell.get() } }
+    pub fn read_with_lock(&self, lock: &'a RawForkLockWriteGuard) -> &T {
+        if !std::ptr::eq(self.lock, lock.parent) {
+            panic!()
+        }
+        &self.inner
     }
 }
 
 impl<'a, T: Clone> Clone for ForkLock<'a, T> {
     fn clone(&self) -> Self {
-        let clone = self.read().clone();
         Self {
             lock: self.lock,
-            cell: UnsafeCell::new(clone),
+            inner: self.inner.clone(),
         }
     }
 }
@@ -137,19 +132,6 @@ impl<'a, T: Clone> Clone for ForkLock<'a, T> {
 impl<T> Deref for ForkLockReadGuard<'_, T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
-        self._inner
-    }
-}
-
-impl<T> Deref for ForkLockWriteGuard<'_, T> {
-    type Target = T;
-    fn deref(&self) -> &Self::Target {
-        self._inner
-    }
-}
-
-impl<T> DerefMut for ForkLockWriteGuard<'_, T> {
-    fn deref_mut(&mut self) -> &mut T {
         self._inner
     }
 }

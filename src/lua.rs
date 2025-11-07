@@ -36,26 +36,26 @@ async fn get_buffer(ui: Ui, lua: Lua, _: ()) -> Result<mlua::String> {
     Ok(lua.create_string(ui.get().inner.borrow().await.buffer.get_contents())?)
 }
 
-async fn set_cursor(mut ui: Ui, _lua: Lua, val: usize) -> Result<()> {
-    ui.get_mut().inner.borrow_mut().await.buffer.set_cursor(val);
+async fn set_cursor(ui: Ui, _lua: Lua, val: usize) -> Result<()> {
+    ui.get().inner.borrow_mut().await.buffer.set_cursor(val);
     Ok(())
 }
 
-async fn set_buffer(mut ui: Ui, _lua: Lua, (val, len): (mlua::String, Option<usize>)) -> Result<()> {
-    ui.get_mut().inner.borrow_mut().await.buffer.splice_at_cursor(&val.as_bytes(), len);
+async fn set_buffer(ui: Ui, _lua: Lua, (val, len): (mlua::String, Option<usize>)) -> Result<()> {
+    ui.get().inner.borrow_mut().await.buffer.splice_at_cursor(&val.as_bytes(), len);
     ui.trigger_buffer_change_callbacks(()).await;
     Ok(())
 }
 
-async fn undo_buffer(mut ui: Ui, _lua: Lua, (): ()) -> Result<()> {
-    if ui.get_mut().inner.borrow_mut().await.buffer.move_in_history(false) {
+async fn undo_buffer(ui: Ui, _lua: Lua, (): ()) -> Result<()> {
+    if ui.get().inner.borrow_mut().await.buffer.move_in_history(false) {
         ui.trigger_buffer_change_callbacks(()).await;
     }
     Ok(())
 }
 
-async fn redo_buffer(mut ui: Ui, _lua: Lua, (): ()) -> Result<()> {
-    if ui.get_mut().inner.borrow_mut().await.buffer.move_in_history(true) {
+async fn redo_buffer(ui: Ui, _lua: Lua, (): ()) -> Result<()> {
+    if ui.get().inner.borrow_mut().await.buffer.move_in_history(true) {
         ui.trigger_buffer_change_callbacks(()).await;
     }
     Ok(())
@@ -67,8 +67,8 @@ async fn accept_line(mut ui: Ui, _lua: Lua, (): ()) -> Result<bool> {
 
 async fn redraw(mut ui: Ui, lua: Lua, val: Option<LuaValue>) -> Result<()> {
     if let Some(val) = val {
-        let mut ui = ui.get_mut();
         let val: RedrawOptions = lua.from_value(val)?;
+        let ui = ui.get();
         let mut ui = ui.inner.borrow_mut().await;
         if val.all { ui.dirty = true; }
         if val.prompt { ui.prompt.dirty = true; }
@@ -85,8 +85,8 @@ async fn eval(ui: Ui, lua: Lua, (cmd, stderr): (mlua::String, bool)) -> Result<m
     Ok(lua.create_string(data)?)
 }
 
-async fn exit(mut ui: Ui, _lua: Lua, code: Option<i32>) -> Result<()> {
-    let mut ui = ui.get_mut();
+async fn exit(ui: Ui, _lua: Lua, code: Option<i32>) -> Result<()> {
+    let ui = ui.get();
     let mut ui = ui.inner.borrow_mut().await;
     ui.events.exit(code.unwrap_or(0)).await;
     Ok(())

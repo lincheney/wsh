@@ -244,10 +244,10 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
 
 }
 
-async fn set_message(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
+async fn set_message(ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
     let options: Option<WidgetOptions> = lua.from_value(val)?;
 
-    let mut ui = ui.get_mut();
+    let ui = ui.get();
     let tui = &mut ui.inner.borrow_mut().await.tui;
     let (id, widget) = match options.as_ref().and_then(|o| o.options.id).map(|id| (id, tui.get_mut(id))) {
         Some((id, Some(widget))) => (id, widget),
@@ -266,8 +266,8 @@ async fn set_message(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
     Ok(id)
 }
 
-async fn clear_messages(mut ui: Ui, _lua: Lua, all: bool) -> Result<()> {
-    let mut ui = ui.get_mut();
+async fn clear_messages(ui: Ui, _lua: Lua, all: bool) -> Result<()> {
+    let ui = ui.get();
     let tui = &mut ui.inner.borrow_mut().await.tui;
     if all {
         tui.clear_all();
@@ -282,8 +282,8 @@ async fn check_message(ui: Ui, _lua: Lua, id: usize) -> Result<bool> {
     Ok(ui.inner.borrow().await.tui.get_index(id).is_some())
 }
 
-async fn remove_message(mut ui: Ui, _lua: Lua, id: usize) -> Result<()> {
-    let mut ui = ui.get_mut();
+async fn remove_message(ui: Ui, _lua: Lua, id: usize) -> Result<()> {
+    let ui = ui.get();
     let tui = &mut ui.inner.borrow_mut().await.tui;
     if tui.remove(id).is_some() {
         tui.dirty = true;
@@ -303,8 +303,8 @@ struct Highlight {
     namespace: Option<usize>,
 }
 
-async fn add_buf_highlight(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
-    let mut ui = ui.get_mut();
+async fn add_buf_highlight(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
+    let ui = ui.get();
     let hl: Highlight = lua.from_value(val)?;
     let style: tui::StyleOptions = hl.style.into();
 
@@ -318,8 +318,8 @@ async fn add_buf_highlight(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
     Ok(())
 }
 
-async fn clear_buf_highlights(mut ui: Ui, _lua: Lua, namespace: Option<usize>) -> Result<()> {
-    let mut ui = ui.get_mut();
+async fn clear_buf_highlights(ui: Ui, _lua: Lua, namespace: Option<usize>) -> Result<()> {
+    let ui = ui.get();
     let mut ui = ui.inner.borrow_mut().await;
     if let Some(namespace) = namespace {
         ui.buffer.highlights.retain(|h| h.namespace != namespace);
@@ -329,15 +329,15 @@ async fn clear_buf_highlights(mut ui: Ui, _lua: Lua, namespace: Option<usize>) -
     Ok(())
 }
 
-async fn add_buf_highlight_namespace(mut ui: Ui, _lua: Lua, _val: ()) -> Result<usize> {
-    let mut ui = ui.get_mut();
+async fn add_buf_highlight_namespace(ui: Ui, _lua: Lua, _val: ()) -> Result<usize> {
+    let ui = ui.get();
     let mut ui = ui.inner.borrow_mut().await;
     ui.buffer.highlight_counter += 1;
     Ok(ui.buffer.highlight_counter)
 }
 
-async fn set_ansi_message(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
-    let mut ui = ui.get_mut();
+async fn set_ansi_message(ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
+    let ui = ui.get();
     let options: Option<AnsiWidgetOptions> = lua.from_value(val)?;
 
     let tui = &mut ui.inner.borrow_mut().await.tui;
@@ -357,8 +357,8 @@ async fn set_ansi_message(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> 
     Ok(id)
 }
 
-async fn feed_ansi_message(mut ui: Ui, _lua: Lua, (id, value): (usize, LuaString)) -> Result<()> {
-    let mut ui = ui.get_mut();
+async fn feed_ansi_message(ui: Ui, _lua: Lua, (id, value): (usize, LuaString)) -> Result<()> {
+    let ui = ui.get();
     let tui = &mut ui.inner.borrow_mut().await.tui;
 
     match tui.get_mut(id) {
@@ -371,8 +371,8 @@ async fn feed_ansi_message(mut ui: Ui, _lua: Lua, (id, value): (usize, LuaString
     }
 }
 
-async fn clear_ansi_message(mut ui: Ui, _lua: Lua, id: usize) -> Result<()> {
-    let mut ui = ui.get_mut();
+async fn clear_ansi_message(ui: Ui, _lua: Lua, id: usize) -> Result<()> {
+    let ui = ui.get();
     let tui = &mut ui.inner.borrow_mut().await.tui;
 
     match tui.get_mut(id) {
@@ -385,8 +385,8 @@ async fn clear_ansi_message(mut ui: Ui, _lua: Lua, id: usize) -> Result<()> {
     }
 }
 
-async fn set_status_bar(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
-    let mut ui = ui.get_mut();
+async fn set_status_bar(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
+    let ui = ui.get();
     let options: Option<WidgetOptions> = lua.from_value(val)?;
     let mut ui = ui.inner.borrow_mut().await;
     let widget = ui.status_bar.inner.get_or_insert_default();

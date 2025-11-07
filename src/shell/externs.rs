@@ -3,26 +3,29 @@ use bstr::BString;
 use crate::ui::{Ui, TrampolineIn};
 use crate::c_string_array;
 use std::os::fd::AsRawFd;
-use std::sync::{Mutex};
 use std::os::raw::{c_char, c_int};
 use std::ptr::null_mut;
-use std::sync::{LazyLock, OnceLock};
+use std::sync::{LazyLock, OnceLock, Mutex};
 use std::ffi::CString;
 use anyhow::Result;
 use crate::shell::zsh;
-use crate::fork_lock::{RawForkLock, ForkLock, ForkLockWriteGuard};
+use crate::fork_lock::{RawForkLock, ForkLock};
 
 static FORK_LOCK: RawForkLock = RawForkLock::new();
 
 type GlobalState = (Ui, TrampolineIn, tokio::runtime::Runtime);
-static UI: ForkLock<'static, Option<GlobalState>> = FORK_LOCK.wrap(None);
+static STATE: ForkLock<'static, Mutex<Option<GlobalState>>> = FORK_LOCK.wrap(Mutex::new(None));
 
-fn get_or_init_ui() -> Result<(bool, ForkLockWriteGuard<'static, Option<GlobalState>>)> {
-    let mut lock = UI.write();
-    let store = &mut *lock;
+fn do_with_ui<F: Fn(bool, &mut GlobalState) -> T, T>(f: F) -> Result<T> {
+
+    let lock = STATE.read();
+    let mut store = lock.lock().unwrap();
+    let store = &mut *store;
     let new = store.is_none();
 
-    if store.is_none() {
+    let state = if let Some(state) = store {
+        state
+    } else {
         let log_file = Box::new(std::fs::File::create("/tmp/wish.log").expect("Can't create log file"));
         env_logger::Builder::from_default_env()
             .target(env_logger::Target::Pipe(log_file))
@@ -54,15 +57,16 @@ fn get_or_init_ui() -> Result<(bool, ForkLockWriteGuard<'static, Option<GlobalSt
             Ok((ui, trampoline))
         });
         let (ui, trampoline) = result?;
-        *store = Some((ui, trampoline, runtime));
-    }
-    Ok((new, lock))
+        store.get_or_insert((ui, trampoline, runtime))
+    };
+
+    Ok(f(new, state))
 }
 
 fn main() -> Result<Option<BString>> {
-    let (new, mut global) = get_or_init_ui()?;
-    let (_, trampoline, runtime) = global.as_mut().unwrap();
-    Ok(runtime.block_on(trampoline.jump_in(!new)))
+    do_with_ui(|new, (_, trampoline, runtime)| {
+        runtime.block_on(trampoline.jump_in(!new))
+    })
 }
 
 unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _options: zsh_sys::Options, _func: c_int) -> c_int {
@@ -71,15 +75,14 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
     match argv.first().map(|s| s.as_slice()) {
         Some(b"lua") => {
             let result: Result<()> = tokio::task::block_in_place(|| {
-                let (_, mut global) = get_or_init_ui()?;
-                let (ui, _, runtime) = global.as_mut().unwrap();
-
-                let result = runtime.block_on(async {
-                    ui.shell.with_tmp_permit(|| async {
-                        ui.lua.load(argv.get(1).map_or(b"" as _, |s| s.as_slice())).exec_async().await
-                    }).await
-                });
-                Ok(result?)
+                do_with_ui(|_, (ui, _, runtime)| {
+                    runtime.block_on(async {
+                        ui.shell.with_tmp_permit(|| async {
+                            ui.lua.load(argv.get(1).map_or(b"" as _, |s| s.as_slice())).exec_async().await
+                        }).await
+                    })
+                })??;
+                Ok(())
             });
 
             if let Err(e) = result {

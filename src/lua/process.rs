@@ -168,7 +168,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
 
         let mut foreground_lock = None;
         let proc: Result<_> = (async || {
-            let mut this = ui.unlocked.write();
+            let this = ui.unlocked.read();
             foreground_lock = if args.foreground && !crate::is_forked() {
                 // this essentially locks ui
                 {
@@ -218,7 +218,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
 
         if foreground_lock.take().is_some() {
             ui.report_error(true, ui.activate().await).await;
-            ui.get_mut().inner.borrow_mut().await.events.resume().await;
+            ui.get().inner.borrow_mut().await.events.resume().await;
         }
         // ignore error
         let _ = sender.send(result.map(|r| r.into_raw()));
@@ -264,7 +264,7 @@ async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue>
 
         let mut foreground_lock = None;
         let result: Result<_> = (async || {
-            let mut this = ui.unlocked.write();
+            let this = ui.unlocked.read();
             foreground_lock = if args.foreground && !crate::is_forked() {
                 // this essentially locks ui
                 {
@@ -339,7 +339,7 @@ async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue>
 
         if foreground_lock.take().is_some() {
             ui.report_error(true, ui.activate().await).await;
-            ui.get_mut().inner.borrow_mut().await.events.resume().await;
+            ui.get().inner.borrow_mut().await.events.resume().await;
         }
 
         // ignore error

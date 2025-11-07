@@ -12,7 +12,7 @@ pub struct KeybindMapping {
 }
 
 
-async fn set_keymap(mut ui: Ui, _lua: Lua, (key, callback, layer): (String, Function, Option<usize>)) -> Result<()> {
+async fn set_keymap(ui: Ui, _lua: Lua, (key, callback, layer): (String, Function, Option<usize>)) -> Result<()> {
     let mut modifiers = KeyModifiers::empty();
 
     let original = &key;
@@ -70,7 +70,7 @@ async fn set_keymap(mut ui: Ui, _lua: Lua, (key, callback, layer): (String, Func
         },
     };
 
-    let mut ui = ui.get_mut();
+    let ui = ui.get();
     let mut ui = ui.inner.borrow_mut().await;
     let layer = if let Some(layer) = layer {
         if let Some(layer) = ui.keybinds.iter_mut().find(|k| k.id == layer) {
@@ -86,8 +86,8 @@ async fn set_keymap(mut ui: Ui, _lua: Lua, (key, callback, layer): (String, Func
     Ok(())
 }
 
-async fn add_keymap_layer(mut ui: Ui, _lua: Lua, _val: ()) -> Result<usize> {
-    let mut ui = ui.get_mut();
+async fn add_keymap_layer(ui: Ui, _lua: Lua, _val: ()) -> Result<usize> {
+    let ui = ui.get();
     let mut ui = ui.inner.borrow_mut().await;
     ui.keybind_layer_counter += 1;
     let id = ui.keybind_layer_counter;
@@ -95,8 +95,8 @@ async fn add_keymap_layer(mut ui: Ui, _lua: Lua, _val: ()) -> Result<usize> {
     Ok(id)
 }
 
-async fn del_keymap_layer(mut ui: Ui, _lua: Lua, layer: usize) -> Result<()> {
-    let mut ui = ui.get_mut();
+async fn del_keymap_layer(ui: Ui, _lua: Lua, layer: usize) -> Result<()> {
+    let ui = ui.get();
     let mut ui = ui.inner.borrow_mut().await;
     ui.keybinds.retain(|k| k.id != layer);
     Ok(())

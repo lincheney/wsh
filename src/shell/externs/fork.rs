@@ -44,9 +44,12 @@ impl ForkState {
         // is there some easy way to tell that zsh is just going to exec
         // straight afterwards and we don't have to worry about this stuff?
 
+        // this is the big global fork lock
+        let fork_lock = super::FORK_LOCK.write();
+
         let lua = {
-            let ui = super::UI.read();
-            if let Some((ui, _, _)) = ui.as_ref() {
+            let ui = super::STATE.read_with_lock(&fork_lock);
+            if let Some((ui, _, _)) = ui.lock().unwrap().as_ref() {
                 if !ui.shell.is_locked() {
                     // shell is not locked == we are forking for some unknown reason
                     return None
@@ -61,12 +64,9 @@ impl ForkState {
             }
         };
 
-        // this is the big global fork lock
-        let fork_lock = Some(super::FORK_LOCK.write());
-
         Some(Self {
             pid: std::process::id(),
-            fork_lock,
+            fork_lock: Some(fork_lock),
             lua,
         })
     }

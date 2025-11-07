@@ -52,7 +52,7 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Compl
     // run this in a thread
     tokio::task::spawn_blocking(move || {
         let tid = nix::unistd::gettid();
-        let mut this = ui.unlocked.write();
+        let this = ui.unlocked.read();
         let shell = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 this.inner.borrow_mut().await.threads.insert(tid);
@@ -76,7 +76,7 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Compl
 
 async fn insert_completion(mut ui: Ui, _lua: Lua, (stream, val): (CompletionStream, CompletionMatch)) -> Result<()> {
     {
-        let mut this = ui.unlocked.write();
+        let this = ui.unlocked.read();
         let buffer = this.inner.borrow().await.buffer.get_contents().clone();
         let completion_word_len = stream.parent.get_completion_word_len();
         let (new_buffer, new_pos) = ui.shell.lock().await.insert_completion(buffer.as_ref(), completion_word_len, &val.inner);

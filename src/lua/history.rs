@@ -54,7 +54,7 @@ async fn goto_history(ui: Ui, _lua: Lua, val: usize) -> Result<Option<usize>> {
     let current = shell.get_histline();
     let latest = shell.get_history().first().map(|entry| entry.histnum());
 
-    let mut ui = ui.unlocked.write();
+    let ui = ui.unlocked.read();
     let mut ui = ui.inner.borrow_mut().await;
     match shell.set_histline(val as _) {
         Some(entry) => {

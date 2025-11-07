@@ -8,7 +8,7 @@ use mlua::prelude::*;
 use tokio::sync::{RwLock, Notify, mpsc};
 use anyhow::Result;
 use crate::keybind::parser::{Event, KeyEvent, Key, KeyModifiers};
-use crate::fork_lock::{ForkLock, RawForkLock, ForkLockReadGuard, ForkLockWriteGuard};
+use crate::fork_lock::{ForkLock, RawForkLock, ForkLockReadGuard};
 
 use crossterm::{
     terminal::{Clear, ClearType, BeginSynchronizedUpdate, EndSynchronizedUpdate},
@@ -61,7 +61,7 @@ pub struct UiInner {
 
 pub trait ThreadsafeUiInner {
     async fn borrow(&self) -> tokio::sync::RwLockReadGuard<'_, UiInner>;
-    async fn borrow_mut(&mut self) -> tokio::sync::RwLockWriteGuard<'_, UiInner>;
+    async fn borrow_mut(&self) -> tokio::sync::RwLockWriteGuard<'_, UiInner>;
 }
 
 impl ThreadsafeUiInner for RwLock<UiInner> {
@@ -69,7 +69,7 @@ impl ThreadsafeUiInner for RwLock<UiInner> {
         self.read().await
     }
 
-    async fn borrow_mut(&mut self) -> tokio::sync::RwLockWriteGuard<'_, UiInner> {
+    async fn borrow_mut(&self) -> tokio::sync::RwLockWriteGuard<'_, UiInner> {
         self.write().await
     }
 }
@@ -177,16 +177,12 @@ impl Ui {
         self.unlocked.read()
     }
 
-    pub fn get_mut(&mut self) -> ForkLockWriteGuard<'_, UnlockedUi> {
-        self.unlocked.write()
-    }
-
     pub async fn activate(&self) -> Result<()> {
         self.get().inner.borrow().await.activate()
     }
 
     pub async fn deactivate(&mut self) -> Result<()> {
-        self.get_mut().inner.borrow_mut().await.deactivate()
+        self.get().inner.borrow_mut().await.deactivate()
     }
 
     pub fn get_lua_api(&self) -> LuaResult<LuaTable> {
@@ -204,7 +200,7 @@ impl Ui {
             return Ok(())
         }
 
-        let this = &mut *self.unlocked.write();
+        let this = &*self.unlocked.read();
         let Ok(_lock) = this.has_foreground_process.try_lock()
         else {
             return Ok(())
@@ -256,7 +252,7 @@ impl Ui {
 
     pub async fn show_error_message(&mut self, msg: String) {
         {
-            let mut this = self.get_mut();
+            let this = self.get();
             let mut ui = this.inner.borrow_mut().await;
             ui.tui.add_error_message(msg);
         }
@@ -300,7 +296,7 @@ impl Ui {
             let mut shell = self.shell.lock().await;
 
             let buffer = {
-                let this = &mut *self.unlocked.write();
+                let this = &*self.unlocked.read();
                 let mut ui = this.inner.borrow_mut().await;
                 let lock = this.has_foreground_process.lock().await;
 
@@ -334,7 +330,7 @@ impl Ui {
             self.trampoline.jump_out(buffer).await?;
 
             {
-                let this = &mut *self.unlocked.write();
+                let this = &*self.unlocked.read();
                 let mut ui = this.inner.borrow_mut().await;
                 ui.activate()?;
                 ui.events.resume().await;
@@ -354,10 +350,7 @@ impl Ui {
             self.start_cmd().await?;
 
         } else {
-            {
-                let mut this = self.get_mut();
-                this.inner.borrow_mut().await.buffer.insert_at_cursor(b"\n");
-            }
+            self.get().inner.borrow_mut().await.buffer.insert_at_cursor(b"\n");
             self.trigger_buffer_change_callbacks(()).await;
             self.draw().await?;
         }
@@ -494,8 +487,8 @@ impl Ui {
             return Some(KeybindOutput::Value(Ok(true)))
         }
 
-        let mut guard = self.unlocked.write();
-        let this = &mut *guard;
+        let guard = self.unlocked.read();
+        let this = &*guard;
         let mut shell = self.shell.lock().await;
         // look for a zle widget
         match shell.get_keybinding(buf)? {
@@ -556,7 +549,7 @@ impl Ui {
             Event::Key(KeyEvent{ key: Key::Char(c), modifiers }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
                 {
                     let mut buf = [0; 4];
-                    let this = &mut *self.get_mut();
+                    let this = &*self.get();
                     let mut ui = this.inner.borrow_mut().await;
                     ui.buffer.insert_at_cursor(c.encode_utf8(&mut buf).as_bytes());
                 }
