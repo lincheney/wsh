@@ -43,22 +43,20 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Compl
     let val = if let Some(val) = val {
         val.into()
     } else {
-        ui.inner.borrow().await.buffer.get_contents().clone()
+        ui.get().inner.borrow().await.buffer.get_contents().clone()
     };
 
     let (consumer, producer) = ui.shell.lock().await.get_completions(val.as_ref());
     let parent = producer.clone();
 
-    let shell_clone = ui.shell.clone();
-    let mut ui_clone = ui.clone();
     // run this in a thread
     tokio::task::spawn_blocking(move || {
         let tid = nix::unistd::gettid();
-        let shell = shell_clone.lock();
+        let mut this = ui.unlocked.write();
         let shell = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
-                ui_clone.inner.borrow_mut().await.threads.insert(tid);
-                shell.await
+                this.inner.borrow_mut().await.threads.insert(tid);
+                ui.shell.lock().await
             })
         });
         // this blocks
@@ -66,7 +64,7 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Compl
         drop(shell);
         tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
-                let mut ui = ui_clone.inner.borrow_mut().await;
+                let mut ui = this.inner.borrow_mut().await;
                 ui.threads.remove(&tid);
                 // ui.activate();
             });
@@ -77,13 +75,14 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Compl
 }
 
 async fn insert_completion(mut ui: Ui, _lua: Lua, (stream, val): (CompletionStream, CompletionMatch)) -> Result<()> {
-    let buffer = ui.inner.borrow().await.buffer.get_contents().clone();
-    let completion_word_len = stream.parent.get_completion_word_len();
-    let (new_buffer, new_pos) = ui.shell.lock().await.insert_completion(buffer.as_ref(), completion_word_len, &val.inner);
-
-    // see if this can be done as an insert
     {
-        let mut ui = ui.inner.borrow_mut().await;
+        let mut this = ui.unlocked.write();
+        let buffer = this.inner.borrow().await.buffer.get_contents().clone();
+        let completion_word_len = stream.parent.get_completion_word_len();
+        let (new_buffer, new_pos) = ui.shell.lock().await.insert_completion(buffer.as_ref(), completion_word_len, &val.inner);
+
+        // see if this can be done as an insert
+        let mut ui = this.inner.borrow_mut().await;
         let cursor = ui.buffer.cursor_byte_pos();
         let contents = ui.buffer.get_contents();
         let (prefix, suffix) = &contents.split_at_checked(cursor).unwrap_or((contents, b""));
@@ -98,8 +97,8 @@ async fn insert_completion(mut ui: Ui, _lua: Lua, (stream, val): (CompletionStre
             ui.buffer.set(Some(&new_buffer), Some(new_pos));
         }
     }
-    ui.trigger_buffer_change_callbacks(()).await;
 
+    ui.trigger_buffer_change_callbacks(()).await;
     ui.draw().await?;
     Ok(())
 }

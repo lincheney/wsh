@@ -9,6 +9,7 @@ use mlua::prelude::*;
 use tokio::sync::{RwLock, Notify, mpsc};
 use anyhow::Result;
 use crate::keybind::parser::{Event, KeyEvent, Key, KeyModifiers};
+use crate::fork_lock::{ForkLock, RawForkLock, ForkLockReadGuard, ForkLockWriteGuard};
 
 use crossterm::{
     terminal::{Clear, ClearType, BeginSynchronizedUpdate, EndSynchronizedUpdate},
@@ -22,8 +23,7 @@ use crate::tui::{
     MoveDown,
 };
 
-use crate::shell::{Shell, ShellInner, UpgradeShell, KeybindValue};
-use crate::utils::*;
+use crate::shell::{Shell, ShellInner, WeakShell, UpgradeShell, KeybindValue};
 use crate::lua::{EventCallbacks, HasEventCallbacks};
 
 fn lua_error<T>(msg: &str) -> Result<T, mlua::Error> {
@@ -65,7 +65,7 @@ pub trait ThreadsafeUiInner {
     async fn borrow_mut(&mut self) -> tokio::sync::RwLockWriteGuard<'_, UiInner>;
 }
 
-impl ThreadsafeUiInner for Arc<RwLock<UiInner>> {
+impl ThreadsafeUiInner for RwLock<UiInner> {
     async fn borrow(&self) -> tokio::sync::RwLockReadGuard<'_, UiInner> {
         self.read().await
     }
@@ -108,21 +108,31 @@ fn new_trampoline() -> (TrampolineIn, TrampolineOut) {
     (TrampolineIn{out_receiver, in_notify: in_notify.clone()}, TrampolineOut{out_sender, in_notify})
 }
 
+pub struct UnlockedUi {
+    pub inner: RwLock<UiInner>,
+    pub event_callbacks: std::sync::Mutex<EventCallbacks> ,
+    pub has_foreground_process: Arc<tokio::sync::Mutex<()>>,
+}
+
+
 crate::strong_weak_wrapper! {
     pub struct Ui {
-        pub inner: Arc::<RwLock<UiInner>> [WeakArc::<RwLock<UiInner>>],
+        pub unlocked: Arc::<ForkLock<'static, UnlockedUi>> [WeakArc::<ForkLock<'static, UnlockedUi>>],
+        pub shell: Shell [WeakShell],
         pub lua: Arc::<Lua> [WeakArc::<Lua>],
-        pub shell: Shell [crate::shell::WeakShell],
-        pub event_callbacks: ArcMutex::<EventCallbacks> [WeakArc::<std::sync::Mutex<EventCallbacks>>],
-        pub has_foreground_process: AsyncArcMutex::<()> [WeakArc::<tokio::sync::Mutex<()>>],
         pub forked: Arc::<AtomicBool> [WeakArc::<AtomicBool>],
+        // trampoline should not be locked
         trampoline: Arc::<TrampolineOut> [WeakArc::<TrampolineOut>],
     }
 }
 
 impl Ui {
 
-    pub async fn new(events: crate::event_stream::EventController) -> Result<(Self, TrampolineIn)> {
+    pub async fn new(
+        lock: &'static RawForkLock,
+        events: crate::event_stream::EventController,
+    ) -> Result<(Self, TrampolineIn)> {
+
         let lua = Lua::new();
         let lua_api = lua.create_table()?;
         lua.globals().set("wish", &lua_api)?;
@@ -154,18 +164,31 @@ impl Ui {
         ui.reset(&mut shell.lock().await);
 
         let trampoline = new_trampoline();
-        let ui = Self{
-            inner: Arc::new(RwLock::new(ui)),
-            lua: Arc::new(lua),
-            shell,
+        let ui = UnlockedUi {
+            inner: RwLock::new(ui),
             event_callbacks: Default::default(),
             has_foreground_process: Default::default(),
-            trampoline: Arc::new(trampoline.1),
-            forked: Arc::new(false.into()),
         };
+        let ui = Self {
+            unlocked: Arc::new(lock.wrap(ui)),
+            lua: Arc::new(lua),
+            forked: Arc::new(false.into()),
+            shell,
+            trampoline: Arc::new(trampoline.1),
+        };
+
         ui.init_lua().await?;
 
         Ok((ui, trampoline.0))
+    }
+
+
+    pub fn get(&self) -> ForkLockReadGuard<'_, UnlockedUi> {
+        self.unlocked.read()
+    }
+
+    pub fn get_mut(&mut self) -> ForkLockWriteGuard<'_, UnlockedUi> {
+        self.unlocked.write()
     }
 
     pub fn is_forked(&self) -> bool {
@@ -173,11 +196,11 @@ impl Ui {
     }
 
     pub async fn activate(&self) -> Result<()> {
-        self.inner.borrow().await.activate()
+        self.get().inner.borrow().await.activate()
     }
 
     pub async fn deactivate(&mut self) -> Result<()> {
-        self.inner.borrow_mut().await.deactivate()
+        self.get_mut().inner.borrow_mut().await.deactivate()
     }
 
     pub fn get_lua_api(&self) -> LuaResult<LuaTable> {
@@ -194,19 +217,21 @@ impl Ui {
         if self.is_forked() {
             return Ok(())
         }
-        let Ok(_lock) = self.has_foreground_process.try_lock()
+
+        let this = &mut *self.unlocked.write();
+        let Ok(_lock) = this.has_foreground_process.try_lock()
         else {
             return Ok(())
         };
 
-        let shell = self.shell.clone();
-        let mut ui = self.inner.borrow_mut().await;
+        let mut ui = this.inner.borrow_mut().await;
         let ui = &mut *ui;
 
         if !(ui.dirty || ui.buffer.dirty || ui.prompt.dirty || ui.tui.dirty) {
             return Ok(())
         }
 
+        let shell = self.shell.clone();
         crossterm::terminal::disable_raw_mode()?;
         ui.size = crossterm::terminal::size()?;
         ui.tui.draw(
@@ -225,11 +250,13 @@ impl Ui {
     }
 
     pub async fn call_lua_fn<T: IntoLuaMulti + mlua::MaybeSend + 'static>(&self, draw: bool, callback: mlua::Function, arg: T) {
+        let lock = self.get();
         let result = callback.call_async::<LuaValue>(arg).await;
         let mut ui = self.clone();
         tokio::task::spawn(async move {
             ui.report_error(draw, result).await;
         });
+        drop(lock);
     }
 
     pub async fn report_error<T, E: std::fmt::Display>(&mut self, draw: bool, result: std::result::Result<T, E>) {
@@ -243,7 +270,8 @@ impl Ui {
 
     pub async fn show_error_message(&mut self, msg: String) {
         {
-            let mut ui = self.inner.borrow_mut().await;
+            let mut this = self.get_mut();
+            let mut ui = this.inner.borrow_mut().await;
             ui.tui.add_error_message(msg);
         }
 
@@ -273,7 +301,8 @@ impl Ui {
         }
 
         let (complete, _tokens) = {
-            let ui = self.inner.borrow().await;
+            let this = self.get();
+            let ui = this.inner.borrow().await;
             let buffer = ui.buffer.get_contents().as_ref();
             self.shell.lock().await.parse(buffer, false)
         };
@@ -282,59 +311,67 @@ impl Ui {
         if complete {
             self.trigger_accept_line_callbacks(()).await;
 
-            let mut ui = self.inner.borrow_mut().await;
             let mut shell = self.shell.lock().await;
-            let lock = self.has_foreground_process.lock().await;
 
-            ui.tui.clear_non_persistent();
+            let buffer = {
+                let this = &mut *self.unlocked.write();
+                let mut ui = this.inner.borrow_mut().await;
+                let lock = this.has_foreground_process.lock().await;
 
-            // TODO handle errors here properly
-            ui.events.pause().await;
-            ui.deactivate()?;
+                ui.tui.clear_non_persistent();
 
-            let buffer = ui.buffer.get_contents().clone();
-            shell.clear_completion_cache();
+                // TODO handle errors here properly
+                ui.events.pause().await;
+                ui.deactivate()?;
 
-            // move to last line of buffer
-            let y_offset = ui.prompt.height + ui.buffer.height - 1 - ui.buffer.cursor_coord.1 - 1;
-            execute!(
-                ui.stdout,
-                BeginSynchronizedUpdate,
-                MoveDown(y_offset),
-                style::Print('\n'),
-                MoveToColumn(0),
-                Clear(ClearType::FromCursorDown),
-                EndSynchronizedUpdate,
-            )?;
-            // release ui so that it can be accessed from the command
-            drop(ui);
+                let buffer = ui.buffer.get_contents().clone();
+                shell.clear_completion_cache();
+
+                // move to last line of buffer
+                let y_offset = ui.prompt.height + ui.buffer.height - 1 - ui.buffer.cursor_coord.1 - 1;
+                execute!(
+                    ui.stdout,
+                    BeginSynchronizedUpdate,
+                    MoveDown(y_offset),
+                    style::Print('\n'),
+                    MoveToColumn(0),
+                    Clear(ClearType::FromCursorDown),
+                    EndSynchronizedUpdate,
+                )?;
+                // release ui so that it can be accessed from the command
+                drop(lock);
+                buffer
+            };
 
             // acceptline doesn't actually accept the line right now
             // only when we return control to zle using the trampoline
             self.trampoline.jump_out(buffer).await?;
 
-            let mut ui = self.inner.borrow_mut().await;
-            ui.activate()?;
-            ui.events.resume().await;
-            ui.reset(&mut shell);
+            {
+                let this = &mut *self.unlocked.write();
+                let mut ui = this.inner.borrow_mut().await;
+                ui.activate()?;
+                ui.events.resume().await;
+                ui.reset(&mut shell);
 
-            let cursor = ui.events.get_cursor_position().await;
-            // move down one line if not at start of line
-            if cursor.0 != 0 {
-                ui.size = crossterm::terminal::size()?;
-                queue!(ui.stdout, style::Print("\r\n"))?;
+                let cursor = ui.events.get_cursor_position().await.unwrap_or((0, 0));
+                // move down one line if not at start of line
+                if cursor.0 != 0 {
+                    ui.size = crossterm::terminal::size()?;
+                    queue!(ui.stdout, style::Print("\r\n"))?;
+                }
             }
 
             // prefer the result error over the activate error
             // result.and(ui.activate())?;
-
-            drop(lock);
-            drop(ui);
             drop(shell);
             self.start_cmd().await?;
 
         } else {
-            self.inner.borrow_mut().await.buffer.insert_at_cursor(b"\n");
+            {
+                let mut this = self.get_mut();
+                this.inner.borrow_mut().await.buffer.insert_at_cursor(b"\n");
+            }
             self.trigger_buffer_change_callbacks(()).await;
             self.draw().await?;
         }
@@ -400,9 +437,8 @@ impl Ui {
     async fn init_lua(&self) -> Result<()> {
         crate::lua::init_lua(self)?;
 
-        let lua = self.lua.clone();
-        lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;
-        if let Err(err) = lua.load("require('wish')").exec() {
+        self.lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;
+        if let Err(err) = self.lua.load("require('wish')").exec() {
             log::error!("{}", err);
         }
 
@@ -462,7 +498,7 @@ impl Ui {
 
     async fn handle_key_simple(&mut self, event: KeyEvent, buf: &BStr) -> Option<KeybindOutput> {
         // look for a lua callback
-        let callback = self.inner.borrow().await.keybinds
+        let callback = self.get().inner.borrow().await.keybinds
             .iter()
             .rev()
             .find_map(|k| k.inner.get(&(event.key, event.modifiers)))
@@ -472,6 +508,8 @@ impl Ui {
             return Some(KeybindOutput::Value(Ok(true)))
         }
 
+        let mut guard = self.unlocked.write();
+        let this = &mut *guard;
         let mut shell = self.shell.lock().await;
         // look for a zle widget
         match shell.get_keybinding(buf)? {
@@ -483,14 +521,15 @@ impl Ui {
             KeybindValue::Widget(widget) if widget.is_self_insert() || widget.is_undefined_key() => None,
             KeybindValue::Widget(widget) if widget.is_accept_line() => {
                 drop(shell);
+                drop(guard);
                 Some(KeybindOutput::Value(self.accept_line().await))
             },
             KeybindValue::Widget(widget) => {
                 // execute the widget
                 // a widget may run subprocesses so lock the ui
                 // TODO what about if we have forked
-                let lock = self.has_foreground_process.lock().await;
-                let mut ui = self.inner.borrow_mut().await;
+                let lock = this.has_foreground_process.lock().await;
+                let mut ui = this.inner.borrow_mut().await;
                 let buffer = ui.buffer.get_contents();
                 let cursor = ui.buffer.get_cursor();
 
@@ -509,6 +548,7 @@ impl Ui {
                 if shell.has_accepted_line() {
                     drop(shell);
                     drop(ui);
+                    drop(guard);
                     Some(KeybindOutput::Value(self.accept_line().await))
                 } else {
                     Some(KeybindOutput::Value(Ok(true)))
@@ -522,15 +562,16 @@ impl Ui {
 
             Event::Key(KeyEvent{ key: Key::Escape, .. }) => {
                 nix::sys::signal::kill(nix::unistd::Pid::from_raw(0), nix::sys::signal::Signal::SIGTERM)?;
-                for pid in &self.inner.borrow().await.threads {
+                for pid in &self.get().inner.borrow().await.threads {
                     nix::sys::signal::kill(*pid, nix::sys::signal::Signal::SIGINT)?;
                 }
             },
 
             Event::Key(KeyEvent{ key: Key::Char(c), modifiers }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
                 {
-                    let mut ui = self.inner.borrow_mut().await;
                     let mut buf = [0; 4];
+                    let this = &mut *self.get_mut();
+                    let mut ui = this.inner.borrow_mut().await;
                     ui.buffer.insert_at_cursor(c.encode_utf8(&mut buf).as_bytes());
                 }
                 self.trigger_buffer_change_callbacks(()).await;
@@ -578,7 +619,7 @@ impl UiInner {
         Ok(())
     }
 
-    fn deactivate(&mut self) -> Result<()> {
+    pub fn deactivate(&mut self) -> Result<()> {
         if self.enhanced_keyboard {
             queue!(self.stdout, event::PopKeyboardEnhancementFlags)?;
         }

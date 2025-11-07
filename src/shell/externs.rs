@@ -10,35 +10,35 @@ use std::sync::{LazyLock, OnceLock};
 use std::ffi::CString;
 use anyhow::Result;
 use crate::shell::zsh;
+use crate::fork_lock::{RawForkLock, ForkLock, ForkLockWriteGuard};
 
-static RUNTIME: LazyLock<tokio::runtime::Runtime> = LazyLock::new(|| {
-    tokio::runtime::Runtime::new().unwrap()
-});
-static UI: Mutex<Option<(Ui, TrampolineIn)>> = Mutex::new(None);
+static FORK_LOCK: RawForkLock = RawForkLock::new();
 
-fn main() -> Result<Option<BString>> {
-    RUNTIME.block_on(async {
-        let mut lock = UI.lock().unwrap();
-        let store = &mut *lock;
-        let new = store.is_none();
+type GlobalState = (Ui, TrampolineIn, tokio::runtime::Runtime);
+static UI: ForkLock<'static, Option<GlobalState>> = FORK_LOCK.wrap(None);
 
-        let (_ui, trampoline) = if let Some(x) = store {
-            x
+fn get_or_init_ui() -> Result<(bool, ForkLockWriteGuard<'static, Option<GlobalState>>)> {
+    let mut lock = UI.write();
+    let store = &mut *lock;
+    let new = store.is_none();
 
-        } else {
-            let log_file = Box::new(std::fs::File::create("/tmp/wish.log").expect("Can't create log file"));
-            env_logger::Builder::from_default_env()
-                .target(env_logger::Target::Pipe(log_file))
-                .format_source_path(true)
-                .format_timestamp_millis()
-                .init();
+    if store.is_none() {
+        let log_file = Box::new(std::fs::File::create("/tmp/wish.log").expect("Can't create log file"));
+        env_logger::Builder::from_default_env()
+            .target(env_logger::Target::Pipe(log_file))
+            .format_source_path(true)
+            .format_timestamp_millis()
+            .init();
 
+        let runtime = tokio::runtime::Runtime::new()?;
+
+        let result: Result<_> = runtime.block_on(async {
             let (events, event_ctrl) = crate::event_stream::EventStream::new();
-            let (mut ui, trampoline) = Ui::new(event_ctrl).await?;
+            let (mut ui, trampoline) = Ui::new(&FORK_LOCK, event_ctrl).await?;
             ui.activate().await?;
             ui.start_cmd().await?;
 
-            {
+            if !self::fork::IS_FORKED.load(std::sync::atomic::Ordering::Relaxed) {
                 let ui = ui.clone();
                 tokio::task::spawn(async move {
                     let tty = std::fs::File::open("/dev/tty").unwrap();
@@ -51,11 +51,18 @@ fn main() -> Result<Option<BString>> {
                 });
             }
 
-            store.get_or_insert((ui, trampoline))
-        };
+            Ok((ui, trampoline))
+        });
+        let (ui, trampoline) = result?;
+        *store = Some((ui, trampoline, runtime));
+    }
+    Ok((new, lock))
+}
 
-        Ok(trampoline.jump_in(!new).await)
-    })
+fn main() -> Result<Option<BString>> {
+    let (new, mut global) = get_or_init_ui()?;
+    let (_, trampoline, runtime) = global.as_mut().unwrap();
+    Ok(runtime.block_on(trampoline.jump_in(!new)))
 }
 
 unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _options: zsh_sys::Options, _func: c_int) -> c_int {
@@ -63,36 +70,33 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
     let argv = c_string_array::CStrArray::from(argv).to_vec();
     match argv.first().map(|s| s.as_slice()) {
         Some(b"lua") => {
-            return tokio::task::block_in_place(|| {
-                match UI.lock() {
-                    Err(e) => { eprintln!("{e:?}"); return 1; },
-                    Ok(value) => if let Some((ui, _)) = &*value {
-                        let ui = ui.clone();
-                        // drop the lock asap
-                        drop(value);
+            let result: Result<()> = tokio::task::block_in_place(|| {
+                let (_, mut global) = get_or_init_ui()?;
+                let (ui, _, runtime) = global.as_mut().unwrap();
 
-                        let result = RUNTIME.block_on(async {
-                            ui.shell.with_tmp_permit(|| async {
-                                ui.lua.load(argv.get(1).map_or(b"" as _, |s| s.as_slice())).exec_async().await
-                            }).await
-                        });
-                        if let Err(e) = result {
-                            eprintln!("{e:?}");
-                            return 1;
-                        }
-                    },
-                }
-                0
+                let result = runtime.block_on(async {
+                    ui.shell.with_tmp_permit(|| async {
+                        ui.lua.load(argv.get(1).map_or(b"" as _, |s| s.as_slice())).exec_async().await
+                    }).await
+                });
+                Ok(result?)
             });
+
+            if let Err(e) = result {
+                eprintln!("{e:?}");
+                1
+            } else {
+                0
+            }
         },
 
         Some(_) => {
             eprintln!("unknown arguments: {argv:?}");
-            return 1;
+            1
         },
 
         None => {
-            return 0;
+            0
         },
     }
 }
@@ -143,20 +147,22 @@ static mut MODULE_FEATURES: LazyLock<Features> = LazyLock::new(|| {
 static ORIGINAL_ZLE_ENTRY_PTR: OnceLock<zsh_sys::ZleEntryPoint> = OnceLock::new();
 static IS_RUNNING: Mutex<()> = Mutex::new(());
 
+static mut EMPTY_STR: [u8; 1] = [0];
+
 #[unsafe(no_mangle)]
 #[allow(clippy::missing_safety_doc)]
 unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_list_tag) -> *mut c_char {
     // this is the real entrypoint
+    #[allow(static_mut_refs)]
     unsafe {
         if cmd == zsh_sys::ZLE_CMD_READ as _ && let Ok(_lock) = IS_RUNNING.try_lock() {
-            let mut empty = [0];
             let mut keymap = [b'm', b'a', b'i', b'n', 0];
             zsh::done = 0;
             zsh::selectlocalmap(null_mut());
             zsh::selectkeymap(keymap.as_mut_ptr().cast(), 1);
             zsh::histline = zsh_sys::curhist as _;
-            zsh::lpromptbuf = empty.as_mut_ptr().cast();
-            zsh::rpromptbuf = empty.as_mut_ptr().cast();
+            zsh::lpromptbuf = EMPTY_STR.as_mut_ptr().cast();
+            zsh::rpromptbuf = EMPTY_STR.as_mut_ptr().cast();
 
             let result = main();
 

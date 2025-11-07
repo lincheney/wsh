@@ -29,33 +29,33 @@ struct RedrawOptions {
 }
 
 async fn get_cursor(ui: Ui, _lua: Lua, _: ()) -> Result<usize> {
-    Ok(ui.inner.borrow().await.buffer.get_cursor())
+    Ok(ui.get().inner.borrow().await.buffer.get_cursor())
 }
 
 async fn get_buffer(ui: Ui, lua: Lua, _: ()) -> Result<mlua::String> {
-    Ok(lua.create_string(ui.inner.borrow().await.buffer.get_contents())?)
+    Ok(lua.create_string(ui.get().inner.borrow().await.buffer.get_contents())?)
 }
 
 async fn set_cursor(mut ui: Ui, _lua: Lua, val: usize) -> Result<()> {
-    ui.inner.borrow_mut().await.buffer.set_cursor(val);
+    ui.get_mut().inner.borrow_mut().await.buffer.set_cursor(val);
     Ok(())
 }
 
 async fn set_buffer(mut ui: Ui, _lua: Lua, (val, len): (mlua::String, Option<usize>)) -> Result<()> {
-    ui.inner.borrow_mut().await.buffer.splice_at_cursor(&val.as_bytes(), len);
+    ui.get_mut().inner.borrow_mut().await.buffer.splice_at_cursor(&val.as_bytes(), len);
     ui.trigger_buffer_change_callbacks(()).await;
     Ok(())
 }
 
 async fn undo_buffer(mut ui: Ui, _lua: Lua, (): ()) -> Result<()> {
-    if ui.inner.borrow_mut().await.buffer.move_in_history(false) {
+    if ui.get_mut().inner.borrow_mut().await.buffer.move_in_history(false) {
         ui.trigger_buffer_change_callbacks(()).await;
     }
     Ok(())
 }
 
 async fn redo_buffer(mut ui: Ui, _lua: Lua, (): ()) -> Result<()> {
-    if ui.inner.borrow_mut().await.buffer.move_in_history(true) {
+    if ui.get_mut().inner.borrow_mut().await.buffer.move_in_history(true) {
         ui.trigger_buffer_change_callbacks(()).await;
     }
     Ok(())
@@ -67,6 +67,7 @@ async fn accept_line(mut ui: Ui, _lua: Lua, (): ()) -> Result<bool> {
 
 async fn redraw(mut ui: Ui, lua: Lua, val: Option<LuaValue>) -> Result<()> {
     if let Some(val) = val {
+        let mut ui = ui.get_mut();
         let val: RedrawOptions = lua.from_value(val)?;
         let mut ui = ui.inner.borrow_mut().await;
         if val.all { ui.dirty = true; }
@@ -85,6 +86,7 @@ async fn eval(ui: Ui, lua: Lua, (cmd, stderr): (mlua::String, bool)) -> Result<m
 }
 
 async fn exit(mut ui: Ui, _lua: Lua, code: Option<i32>) -> Result<()> {
+    let mut ui = ui.get_mut();
     let mut ui = ui.inner.borrow_mut().await;
     ui.events.exit(code.unwrap_or(0)).await;
     Ok(())
@@ -92,6 +94,24 @@ async fn exit(mut ui: Ui, _lua: Lua, code: Option<i32>) -> Result<()> {
 
 async fn get_cwd(ui: Ui, _lua: Lua, (): ()) -> Result<BString> {
     Ok(ui.shell.lock().await.get_cwd())
+}
+
+pub async fn __laggy(_ui: Ui, _lua: Lua, (): ()) -> Result<()> {
+    let _ = tokio::task::spawn_blocking(move || {
+        let _: Result<(), mlua::Error> = unsafe{ _lua.exec_raw((), |_| {
+            // let lock = ui.inner.borrow_mut().await;
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    for i in 0..2 {
+                        eprintln!("DEBUG(likes) \t{}\t= {:?}", stringify!(i), i);
+                        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+                    }
+                });
+            });
+        }) };
+    }).await;
+    // drop(lock);
+    Ok(())
 }
 
 pub fn init_lua(ui: &Ui) -> Result<()> {
@@ -107,6 +127,7 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_async_fn("eval", eval)?;
     ui.set_lua_async_fn("exit", exit)?;
     ui.set_lua_async_fn("get_cwd", get_cwd)?;
+    ui.set_lua_async_fn("__laggy", __laggy)?;
 
     keybind::init_lua(ui)?;
     string::init_lua(ui)?;

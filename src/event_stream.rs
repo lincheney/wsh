@@ -21,26 +21,32 @@ pub struct EventController {
 impl EventController {
     pub async fn pause(&mut self) {
         let (sender, receiver) = oneshot::channel();
-        let _ = self.queue.send(InputMessage::Pause(sender));
-        receiver.await.unwrap();
+        if self.queue.send(InputMessage::Pause(sender)).is_ok() {
+            receiver.await.unwrap();
+        }
     }
 
     pub async fn resume(&mut self) {
         let (sender, receiver) = oneshot::channel();
-        let _ = self.queue.send(InputMessage::Resume(sender));
-        receiver.await.unwrap();
+        if self.queue.send(InputMessage::Resume(sender)).is_ok() {
+            receiver.await.unwrap();
+        }
     }
 
-    pub async fn get_cursor_position(&mut self) -> (usize, usize) {
+    pub async fn get_cursor_position(&mut self) -> Option<(usize, usize)> {
         let (sender, receiver) = oneshot::channel();
-        self.queue.send(InputMessage::CursorPosition(sender)).unwrap();
-        receiver.await.unwrap()
+        if self.queue.send(InputMessage::CursorPosition(sender)).is_ok() {
+            receiver.await.ok()
+        } else {
+            None
+        }
     }
 
     pub async fn exit(&mut self, code: i32) {
         let (sender, receiver) = oneshot::channel();
-        self.queue.send(InputMessage::Exit(code, Some(sender))).unwrap();
-        receiver.await.unwrap();
+        if self.queue.send(InputMessage::Exit(code, Some(sender))).is_ok() {
+            receiver.await.unwrap();
+        }
     }
 }
 

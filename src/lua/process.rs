@@ -140,8 +140,8 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         SpawnArgs::Full(args) => args,
         SpawnArgs::Simple(args) => FullSpawnArgs{args, ..std::default::Default::default()},
     };
-
     let first_arg = args.args.first().ok_or_else(|| LuaError::RuntimeError("no args given".to_owned()))?;
+
     let mut command = Command::new(first_arg);
     if args.args.len() > 1 {
         command.args(&args.args[1..]);
@@ -161,25 +161,43 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     command.stdout(args.stdout);
     command.stderr(args.stderr);
 
-    let lock = if args.foreground && !ui.is_forked() {
-        // this essentially locks ui
-        ui.inner.borrow_mut().await.events.pause().await;
-        ui.deactivate().await?;
-        Some(ui.has_foreground_process.clone().lock_owned().await)
-    } else {
-        None
-    };
-
-    let mut proc = command.spawn()?;
-    let pid = proc.id().unwrap();
-    ui.shell.lock().await.add_pid(pid as _);
-
-    let stdin  = proc.stdin.take().map(|s| WriteableFile(Some(BufWriter::new(s))));
-    let stdout = proc.stdout.take().map(|s| ReadableFile(Some(BufReader::new(s))));
-    let stderr = proc.stderr.take().map(|s| ReadableFile(Some(BufReader::new(s))));
-
+    let (result_sender, result_receiver) = oneshot::channel();
     let (sender, receiver) = oneshot::channel();
+
     tokio::spawn(async move {
+
+        let mut foreground_lock = None;
+        let proc: Result<_> = (async || {
+            let mut this = ui.unlocked.write();
+            foreground_lock = if args.foreground && !ui.is_forked() {
+                // this essentially locks ui
+                {
+                    let mut ui = this.inner.borrow_mut().await;
+                    ui.events.pause().await;
+                    ui.deactivate()?;
+                }
+                Some(this.has_foreground_process.clone().lock_owned().await)
+            } else {
+                None
+            };
+            Ok(command.spawn()?)
+        })().await;
+
+        let mut proc = match proc {
+            Ok(proc) => proc,
+            Err(e) => {
+                let _ = result_sender.send(Err(e));
+                return
+            },
+        };
+
+        let pid = proc.id().unwrap();
+        ui.shell.lock().await.add_pid(pid as _);
+
+        let stdin  = proc.stdin.take().map(|s| WriteableFile(Some(BufWriter::new(s))));
+        let stdout = proc.stdout.take().map(|s| ReadableFile(Some(BufReader::new(s))));
+        let stderr = proc.stderr.take().map(|s| ReadableFile(Some(BufReader::new(s))));
+        let _ = result_sender.send(Ok((pid, stdin, stdout, stderr)));
 
         // zsh runs wait() in a SIGCHLD handler as well
         // so if it gets the status first, we have to fetch it out of the job table
@@ -198,15 +216,15 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
             },
         };
 
-        if args.foreground {
+        if foreground_lock.take().is_some() {
             ui.report_error(true, ui.activate().await).await;
-            ui.inner.borrow_mut().await.events.resume().await;
+            ui.get_mut().inner.borrow_mut().await.events.resume().await;
         }
         // ignore error
         let _ = sender.send(result.map(|r| r.into_raw()));
-        drop(lock);
     });
 
+    let (pid, stdin, stdout, stderr) = result_receiver.await.unwrap()?;
     Ok(lua.pack_multi((
         Process{pid, result: CommandResult{ inner: Some(receiver) }},
         stdin,
@@ -238,86 +256,103 @@ async fn shell_run(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue>
         CommandSpawnArgs::Simple(args) => FullCommandSpawnArgs{args, ..Default::default()},
     };
 
+    let (result_sender, result_receiver) = oneshot::channel();
     let (sender, receiver) = oneshot::channel();
 
-    let lock = if args.foreground && !ui.is_forked() {
-        // this essentially locks ui
-        ui.inner.borrow_mut().await.events.pause().await;
-        ui.deactivate().await?;
-        Some(ui.has_foreground_process.clone().lock_owned().await)
-    } else {
-        None
-    };
-
-    macro_rules! stdio_pipe {
-        ($name:ident, true) => (
-            stdio_pipe!($name, File::create("/dev/null"), {
-                let (send, recv) = tokio::net::unix::pipe::pipe()?;
-                let send = WriteableFile(Some(BufWriter::new(send)));
-                (Some(send), Some(override_fd(std::io::$name(), recv.into_nonblocking_fd()?)?))
-            })
-        );
-        ($name:ident, false) => (
-            stdio_pipe!($name, File::open("/dev/null"), {
-                let (send, recv) = tokio::net::unix::pipe::pipe()?;
-                let recv = ReadableFile(Some(BufReader::new(recv)));
-                (Some(recv), Some(override_fd(std::io::$name(), send.into_nonblocking_fd()?)?))
-            })
-        );
-        ($name:ident, $null:expr, $piped:expr) => (
-            match args.$name {
-                Stdio::inherit => (None, None),
-                Stdio::null => (None, Some(override_fd(std::io::$name(), $null?)?)),
-                Stdio::piped => $piped,
-            }
-        );
-    }
-
-    let stdin = stdio_pipe!(stdin, true);
-    let stdout = stdio_pipe!(stdout, false);
-    let stderr = stdio_pipe!(stderr, false);
-
     // run this in a thread
-    tokio::task::spawn_blocking(move || {
-        tokio::task::block_in_place(|| {
+    tokio::task::spawn(async move {
 
-            let code =  {
-                let mut shell = tokio::runtime::Handle::current().block_on(ui.shell.lock());
-                match shell.exec(bstr::BStr::new(&args.args)) {
-                    Ok(()) => 0,
-                    Err(code) => code,
+        let mut foreground_lock = None;
+        let result: Result<_> = (async || {
+            let mut this = ui.unlocked.write();
+            foreground_lock = if args.foreground && !ui.is_forked() {
+                // this essentially locks ui
+                {
+                    let mut ui = this.inner.borrow_mut().await;
+                    ui.events.pause().await;
+                    ui.deactivate()?;
                 }
+                Some(this.has_foreground_process.clone().lock_owned().await)
+            } else {
+                None
             };
 
-            tokio::runtime::Handle::current().block_on(async {
-                // restore stdio
-                if let Some(stdin) = stdin.1 {
-                    ui.report_error(true, restore_fd(stdin, std::io::stdin())).await;
-                }
-                if let Some(stdout) = stdout.1 {
-                    ui.report_error(true, restore_fd(stdout, std::io::stdout())).await;
-                }
-                if let Some(stderr) = stderr.1 {
-                    ui.report_error(true, restore_fd(stderr, std::io::stderr())).await;
-                }
+            macro_rules! stdio_pipe {
+                ($name:ident, true) => (
+                    stdio_pipe!($name, File::create("/dev/null"), {
+                        let (send, recv) = tokio::net::unix::pipe::pipe()?;
+                        let send = WriteableFile(Some(BufWriter::new(send)));
+                        (Some(send), Some(override_fd(std::io::$name(), recv.into_nonblocking_fd()?)?))
+                    })
+                );
+                ($name:ident, false) => (
+                    stdio_pipe!($name, File::open("/dev/null"), {
+                        let (send, recv) = tokio::net::unix::pipe::pipe()?;
+                        let recv = ReadableFile(Some(BufReader::new(recv)));
+                        (Some(recv), Some(override_fd(std::io::$name(), send.into_nonblocking_fd()?)?))
+                    })
+                );
+                ($name:ident, $null:expr, $piped:expr) => (
+                    match args.$name {
+                        Stdio::inherit => (None, None),
+                        Stdio::null => (None, Some(override_fd(std::io::$name(), $null?)?)),
+                        Stdio::piped => $piped,
+                    }
+                );
+            }
 
-                if args.foreground {
-                    ui.report_error(true, ui.activate().await).await;
-                    ui.inner.borrow_mut().await.events.resume().await;
-                }
-                // ignore error
-                let _ = sender.send(Ok(code as _));
-                drop(lock);
-            });
+            let stdin = stdio_pipe!(stdin, true);
+            let stdout = stdio_pipe!(stdout, false);
+            let stderr = stdio_pipe!(stderr, false);
+            Ok((stdin, stdout, stderr))
+        })().await;
 
-        });
+        let (stdin, stdout, stderr) = match result {
+            Ok((stdin, stdout, stderr)) => {
+                let _ = result_sender.send(Ok((stdin.0, stdout.0, stderr.0)));
+                (stdin.1, stdout.1, stderr.1)
+            },
+            Err(e) => {
+                let _ = result_sender.send(Err(e));
+                return
+            },
+        };
+
+        let shell = ui.shell.clone();
+        let code = tokio::task::spawn_blocking(move || {
+            tokio::task::block_in_place(move || {
+                let mut shell = tokio::runtime::Handle::current().block_on(shell.lock());
+                shell.exec(bstr::BStr::new(&args.args)).err().unwrap_or(0)
+            })
+        }).await.unwrap();
+
+        // restore stdio
+        if let Some(stdin) = stdin {
+            ui.report_error(true, restore_fd(stdin, std::io::stdin())).await;
+        }
+        if let Some(stdout) = stdout {
+            ui.report_error(true, restore_fd(stdout, std::io::stdout())).await;
+        }
+        if let Some(stderr) = stderr {
+            ui.report_error(true, restore_fd(stderr, std::io::stderr())).await;
+        }
+
+        if foreground_lock.take().is_some() {
+            ui.report_error(true, ui.activate().await).await;
+            ui.get_mut().inner.borrow_mut().await.events.resume().await;
+        }
+
+        // ignore error
+        let _ = sender.send(Ok(code as _));
     });
+
+    let (stdin, stdout, stderr) = result_receiver.await.unwrap()?;
 
     Ok(lua.pack_multi((
         CommandResult{ inner: Some(receiver) },
-        stdin.0,
-        stdout.0,
-        stderr.0,
+        stdin,
+        stdout,
+        stderr,
     ))?)
 }
 

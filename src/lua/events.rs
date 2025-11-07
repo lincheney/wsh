@@ -75,8 +75,9 @@ macro_rules! event_types {
         $(
             #[allow(unused_parens)]
             async fn [<trigger_ $name _callbacks>](&self, val: ($($arg),*)) {
+                let this = self.get();
                 let callbacks = {
-                    let callbacks = &self.event_callbacks.lock().unwrap().[<callbacks_ $name>];
+                    let callbacks = &this.event_callbacks.lock().unwrap().[<callbacks_ $name>];
                     if callbacks.is_empty() {
                         return;
                     }
@@ -126,11 +127,11 @@ event_types!(
 
 fn add_event_callback(ui: &Ui, lua: &Lua, (typ, callback): (LuaValue, Function)) -> Result<usize> {
     let typ: EventType = lua.from_value(typ)?;
-    Ok(ui.event_callbacks.lock().unwrap().add_event_callback(typ, callback))
+    Ok(ui.get().event_callbacks.lock().unwrap().add_event_callback(typ, callback))
 }
 
 fn remove_event_callback(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
-    ui.event_callbacks.lock().unwrap().remove_event_callback(id);
+    ui.get().event_callbacks.lock().unwrap().remove_event_callback(id);
     Ok(())
 }
 

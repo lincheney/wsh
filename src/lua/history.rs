@@ -48,12 +48,13 @@ async fn get_prev_history(ui: Ui, lua: Lua, val: usize) -> Result<Option<LuaTabl
     }
 }
 
-async fn goto_history(mut ui: Ui, _lua: Lua, val: usize) -> Result<Option<usize>> {
+async fn goto_history(ui: Ui, _lua: Lua, val: usize) -> Result<Option<usize>> {
     let mut shell = ui.shell.lock().await;
 
     let current = shell.get_histline();
     let latest = shell.get_history().first().map(|entry| entry.histnum());
 
+    let mut ui = ui.unlocked.write();
     let mut ui = ui.inner.borrow_mut().await;
     match shell.set_histline(val as _) {
         Some(entry) => {
