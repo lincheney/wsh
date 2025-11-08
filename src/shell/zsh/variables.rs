@@ -156,7 +156,9 @@ impl Variable {
             }
             CStr::from_ptr(var)
         };
-        str.to_bytes().into()
+        let mut str = str.to_bytes().into();
+        super::unmetafy_owned(&mut str);
+        str.into()
     }
 
     pub fn try_as_int(&mut self) -> Result<Option<i64>> {
