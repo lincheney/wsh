@@ -35,10 +35,10 @@ impl Token {
 }
 
 fn find_str(needle: &BStr, haystack: &BStr, start: usize) -> Option<Range<usize>> {
-    let start = start + if needle == b";" {
-        haystack[start..].iter().position(|&c| c == b';' || c == b'\n')
-    } else {
-        haystack[start..].find(needle)
+    let start = start + match needle.as_bytes() {
+        b";" => haystack[start..].iter().position(|&c| c == b';' || c == b'\n'),
+        // b"&|" | b"&!"
+        _ => haystack[start..].find(needle),
     }?;
 
     Some(start .. start + needle.len())
@@ -78,6 +78,8 @@ pub fn parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
 
 fn parse_internal(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
     let ptr = super::metafy(cmd);
+    let metafied = unsafe{ CStr::from_ptr(ptr) };
+    let metalen = metafied.count_bytes();
     let mut complete = true;
     let mut tokens = vec![];
     let mut start = 0;
@@ -106,7 +108,7 @@ fn parse_internal(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
         zsh_sys::noaliases = 1;
 
         let lexflags = zsh_sys::lexflags;
-        zsh_sys::lexflags = (zsh_sys::LEXFLAGS_ACTIVE | zsh_sys::LEXFLAGS_COMMENTS_KEEP) as _;
+        zsh_sys::lexflags = (zsh_sys::LEXFLAGS_ACTIVE | zsh_sys::LEXFLAGS_COMMENTS_KEEP | zsh_sys::LEXFLAGS_ZLE) as _;
 
         // ztokens has the wrong length, so use pointer arithmetic instead
         #[allow(static_mut_refs)]
@@ -122,16 +124,10 @@ fn parse_internal(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
             let kind: Option<TokenKind> = num::FromPrimitive::from_u32(zsh_sys::tok).map(TokenKind::Lextok);
 
             if zsh_sys::tokstr.is_null() {
-                // no tokstr, so get string from tokstring table
-
-                #[allow(static_mut_refs)]
-                if let Some(tokstr) = zsh_sys::tokstrings.get(zsh_sys::tok as usize).filter(|t| !t.is_null()) {
-                    let tokstr = CStr::from_ptr(*tokstr).to_bytes();
-                    push_token(&mut tokens, tokstr, kind, false);
-
-                } else {
-                    // TODO what am i meant to do here?
-                }
+                let range = metalen - 1 - zsh_sys::wordbeg as usize .. metalen - zsh_sys::inbufct as usize;
+                let bytes = &metafied.to_bytes()[range];
+                let has_meta = bytes.contains(&bindings::Meta);
+                push_token(&mut tokens, bytes, kind, has_meta);
 
             } else {
                 // tokstr metafied and tokenized
