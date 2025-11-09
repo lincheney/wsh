@@ -59,6 +59,7 @@ i wish i could have
 * [ ] calling exit within widget causes hang
 * [ ] magic space for completion
 * [ ] snippets?
+* [ ] job status reporting
 * [x] recursive keymaps
 * [ ] recursive keymaps in lua
 * [ ] fork safety

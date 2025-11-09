@@ -8,6 +8,7 @@ mod event_stream;
 mod prompt;
 mod lua;
 mod keybind;
+mod signals;
 #[macro_use]
 mod utils;
 

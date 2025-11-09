@@ -372,4 +372,17 @@ impl<'a> ShellInner<'a> {
         unsafe{ zsh::done != 0 }
     }
 
+    pub fn call_signal_handler(&mut self, signal: c_int, unqueue: bool) {
+        unsafe {
+            let old_value = zsh_sys::queueing_enabled;
+            if unqueue {
+                zsh_sys::queueing_enabled = 0;
+            }
+            zsh_sys::zhandler(signal);
+            if unqueue {
+                zsh_sys::queueing_enabled = old_value;
+            }
+        }
+    }
+
 }
