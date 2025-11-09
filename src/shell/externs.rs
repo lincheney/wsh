@@ -17,6 +17,12 @@ static FORK_LOCK: RawForkLock = RawForkLock::new();
 type GlobalState = (Ui, RefCell<TrampolineIn>, tokio::runtime::Runtime);
 static STATE: ForkLock<'static, Mutex<Option<Arc<GlobalState>>>> = FORK_LOCK.wrap(Mutex::new(None));
 
+fn try_get_state() -> Option<Arc<GlobalState>> {
+    let lock = STATE.read();
+    let store = lock.lock().unwrap();
+    store.clone()
+}
+
 fn get_or_init_state() -> Result<(bool, Arc<GlobalState>)> {
 
     let lock = STATE.read();
@@ -43,16 +49,22 @@ fn get_or_init_state() -> Result<(bool, Arc<GlobalState>)> {
             ui.start_cmd().await?;
 
             if !crate::IS_FORKED.load(std::sync::atomic::Ordering::Relaxed) {
-                let ui = ui.clone();
-                tokio::task::spawn(async move {
-                    let tty = std::fs::File::open("/dev/tty").unwrap();
-                    let raw_fd = tty.as_raw_fd();
-                    // 3. Set non-blocking mode
-                    let flags = nix::fcntl::fcntl(raw_fd, nix::fcntl::FcntlArg::F_GETFL).unwrap();
-                    let new_flags = nix::fcntl::OFlag::from_bits_truncate(flags) | nix::fcntl::OFlag::O_NONBLOCK;
-                    nix::fcntl::fcntl(raw_fd, nix::fcntl::FcntlArg::F_SETFL(new_flags)).unwrap();
-                    events.run(tty, ui).await.unwrap();
-                });
+                // spawn a task to take care of keyboard input
+                {
+                    let ui = ui.clone();
+                    tokio::task::spawn(async move {
+                        let tty = std::fs::File::open("/dev/tty").unwrap();
+                        let raw_fd = tty.as_raw_fd();
+                        // 3. Set non-blocking mode
+                        let flags = nix::fcntl::fcntl(raw_fd, nix::fcntl::FcntlArg::F_GETFL).unwrap();
+                        let new_flags = nix::fcntl::OFlag::from_bits_truncate(flags) | nix::fcntl::OFlag::O_NONBLOCK;
+                        nix::fcntl::fcntl(raw_fd, nix::fcntl::FcntlArg::F_SETFL(new_flags)).unwrap();
+                        events.run(tty, ui).await.unwrap();
+                    });
+                }
+
+                // spawn a task to take care of signals
+                crate::signals::setup(ui.clone())?;
             }
 
             Ok((ui, trampoline))
@@ -162,6 +174,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
         if cmd == zsh_sys::ZLE_CMD_READ as _ && let Ok(_lock) = IS_RUNNING.try_lock() {
             let mut keymap = [b'm', b'a', b'i', b'n', 0];
             zsh::done = 0;
+            zsh_sys::zleactive = 1;
             zsh::selectlocalmap(null_mut());
             zsh::selectkeymap(keymap.as_mut_ptr().cast(), 1);
             zsh::histline = zsh_sys::curhist as _;
@@ -191,6 +204,34 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                     null_mut()
                 },
             }
+
+        } else if cmd == zsh_sys::ZLE_CMD_TRASH as _ && let Some(state) = try_get_state() {
+            // something is probably going to print (error msgs etc) to the terminal
+            let (ui, _, _) = &*state;
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    let ui = ui.get();
+                    let mut ui = ui.inner.write().await;
+                    ui.prepare_for_unhandled_output().unwrap();
+                });
+            });
+            null_mut()
+
+        } else if cmd == zsh_sys::ZLE_CMD_REFRESH as _ && let Some(state) = try_get_state() {
+            // redraw the ui
+            let (ui, _, _) = &*state;
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    let result: Result<(), String> = Ok(());
+                    ui.shell.with_tmp_permit(|| async {
+                        let mut ui = ui.clone();
+                        ui.get().inner.write().await.recover_from_unhandled_output().await.unwrap();
+                        ui.report_error(true, result).await;
+                    }).await;
+                });
+            });
+            null_mut()
+
         } else {
             ORIGINAL_ZLE_ENTRY_PTR.get().unwrap().unwrap()(cmd, ap)
         }

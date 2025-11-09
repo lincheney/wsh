@@ -214,13 +214,12 @@ impl Ui {
             return Ok(())
         }
 
-        let shell = self.shell.clone();
         crossterm::terminal::disable_raw_mode()?;
         ui.size = crossterm::terminal::size()?;
         ui.tui.draw(
             &mut ui.stdout,
             ui.size,
-            &shell,
+            &self.shell,
             &mut ui.prompt,
             &mut ui.buffer,
             &mut ui.status_bar,
@@ -284,37 +283,17 @@ impl Ui {
 
         // TODO handle errors here properly
         ui.events.pause().await;
-        ui.deactivate()?;
-
         shell.clear_completion_cache();
-
-        // move to last line of buffer
-        let y_offset = ui.prompt.height + ui.buffer.height - 1 - ui.buffer.cursor_coord.1 - 1;
-        execute!(
-            ui.stdout,
-            BeginSynchronizedUpdate,
-            MoveDown(y_offset),
-            style::Print('\n'),
-            MoveToColumn(0),
-            Clear(ClearType::FromCursorDown),
-            EndSynchronizedUpdate,
-        )?;
+        ui.prepare_for_unhandled_output()?;
         Ok(())
     }
 
     pub async fn post_accept_line(&self, shell: &mut ShellInner<'_>) -> Result<()> {
         let this = &*self.unlocked.read();
         let mut ui = this.inner.borrow_mut().await;
-        ui.activate()?;
         ui.events.resume().await;
         ui.reset(shell);
-
-        let cursor = ui.events.get_cursor_position().await.unwrap_or((0, 0));
-        // move down one line if not at start of line
-        if cursor.0 != 0 {
-            ui.size = crossterm::terminal::size()?;
-            queue!(ui.stdout, style::Print("\r\n"))?;
-        }
+        ui.recover_from_unhandled_output().await?;
         Ok(())
     }
 
@@ -618,6 +597,34 @@ impl UiInner {
         self.buffer.reset();
         self.dirty = true;
         // shell.set_curhist(i64::MAX);
+    }
+
+    pub fn prepare_for_unhandled_output(&mut self) -> Result<()> {
+        self.deactivate()?;
+        self.dirty = true;
+        // move to last line of buffer
+        let y_offset = self.prompt.height + self.buffer.height - 1 - self.buffer.cursor_coord.1 - 1;
+        execute!(
+            self.stdout,
+            BeginSynchronizedUpdate,
+            MoveDown(y_offset),
+            style::Print('\n'),
+            MoveToColumn(0),
+            Clear(ClearType::FromCursorDown),
+            EndSynchronizedUpdate,
+        )?;
+        Ok(())
+    }
+
+    pub async fn recover_from_unhandled_output(&mut self) -> Result<()> {
+        self.activate()?;
+        // move down one line if not at start of line
+        let cursor = self.events.get_cursor_position().await.unwrap_or((0, 0));
+        if cursor.0 != 0 {
+            self.size = crossterm::terminal::size()?;
+            queue!(self.stdout, style::Print("\r\n"))?;
+        }
+        Ok(())
     }
 
 }
