@@ -2,12 +2,13 @@ use std::ops::Range;
 use std::ffi::CStr;
 use std::ptr::null_mut;
 use bstr::{BStr, ByteSlice};
-use super::bindings;
+use super::bindings::{Meta, token, lextok};
 
 #[derive(Debug, Clone)]
 pub enum TokenKind {
-    Lextok(bindings::lextok),
-    Token(bindings::token),
+    Lextok(lextok),
+    Token(token),
+    Substitution,
     Comment,
 }
 
@@ -17,6 +18,7 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Lextok(k) => write!(fmt, "{k:?}"),
             TokenKind::Token(k) => write!(fmt, "{k:?}"),
             TokenKind::Comment => write!(fmt, "comment"),
+            TokenKind::Substitution => write!(fmt, "substitution"),
         }
     }
 }
@@ -31,6 +33,18 @@ pub struct Token {
 impl Token {
     pub fn as_str<'a>(&self, cmd: &'a BStr) -> &'a BStr {
         &cmd[self.range.clone()]
+    }
+
+    pub fn remove_dummy_from_nested(&mut self, len: usize) {
+        let mut tok = self;
+        while let Some(nested) = tok.nested.as_mut() && let Some(last) = nested.last_mut() {
+            last.range.end -= len;
+            if last.range.is_empty() {
+                nested.pop();
+                break
+            }
+            tok = nested.last_mut().unwrap();
+        }
     }
 }
 
@@ -50,7 +64,7 @@ pub fn parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
     let mut cmd = cmd.to_owned();
     cmd.extend(dummy);
 
-    let (mut complete, mut tokens) = parse_internal(cmd.as_ref(), recursive);
+    let (mut complete, mut tokens) = parse_internal(cmd.as_ref(), recursive, 0);
 
     if let Some(last) = tokens.last_mut() {
         debug_assert!(last.range.end == cmd.len());
@@ -66,6 +80,8 @@ pub fn parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
             last.range.end -= dummy.len();
             if last.range.is_empty() {
                 tokens.pop();
+            } else {
+                last.remove_dummy_from_nested(dummy.len());
             }
         }
     } else {
@@ -76,7 +92,7 @@ pub fn parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
     (complete, tokens)
 }
 
-fn parse_internal(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
+fn parse_internal(cmd: &BStr, recursive: bool, range_offset: usize) -> (bool, Vec<Token>) {
     let ptr = super::metafy(cmd);
     let metafied = unsafe{ CStr::from_ptr(ptr) };
     let metalen = metafied.count_bytes();
@@ -93,7 +109,7 @@ fn parse_internal(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
             find_str(BStr::new(tokstr), cmd, start).unwrap()
         };
         start = range.end;
-        tokens.push(Token{range, kind, nested: None});
+        tokens.push(Token{range: range.start + range_offset .. range.end + range_offset, kind, nested: None});
     };
 
     // do similar to bufferwords
@@ -126,7 +142,7 @@ fn parse_internal(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
             if zsh_sys::tokstr.is_null() {
                 let range = metalen - 1 - zsh_sys::wordbeg as usize .. metalen - zsh_sys::inbufct as usize;
                 let bytes = &metafied.to_bytes()[range];
-                let has_meta = bytes.contains(&bindings::Meta);
+                let has_meta = bytes.contains(&Meta);
                 push_token(&mut tokens, bytes, kind, has_meta);
 
             } else {
@@ -143,10 +159,10 @@ fn parse_internal(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
                 for (i, c) in tokstr.iter().enumerate() {
                     if meta {
                         meta = false;
-                    } else if *c == bindings::Meta {
+                    } else if *c == Meta {
                         meta = true;
                         has_meta = true;
-                    } else if *c >= bindings::token::Pound as _ && *c < bindings::token::Nularg as _ { // token
+                    } else if *c >= token::Pound as _ && *c < token::Nularg as _ { // token
 
                         if i > slice_start {
                             push_token(&mut nested, &tokstr[slice_start..i], None, has_meta);
@@ -155,12 +171,12 @@ fn parse_internal(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
                         slice_start = i + 1;
 
                         let kind: Option<TokenKind> = num::FromPrimitive::from_u8(*c).map(TokenKind::Token);
-                        let c = [*ztokens.add((*c - bindings::token::Pound as u8) as usize) as u8];
+                        let c = [*ztokens.add((*c - token::Pound as u8) as usize) as u8];
                         push_token(&mut nested, &c[..], kind, false);
                     }
                 }
 
-                let kind = if matches!(kind, Some(TokenKind::Lextok(bindings::lextok::STRING))) && tokstr.starts_with(b"#") {
+                let kind = if matches!(kind, Some(TokenKind::Lextok(lextok::STRING))) && tokstr.starts_with(b"#") {
                     Some(TokenKind::Comment)
                 } else {
                     kind
@@ -173,6 +189,9 @@ fn parse_internal(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
                 } else {
                     if tokstr.len() > slice_start {
                         push_token(&mut nested, &tokstr[slice_start..], None, has_meta);
+                    }
+                    if recursive {
+                        recurse_into_subshells(cmd, &mut nested, range_offset);
                     }
                     let range = nested[0].range.start .. nested.last().unwrap().range.end;
                     tokens.push(Token{range, kind, nested: Some(nested)});
@@ -196,38 +215,55 @@ fn parse_internal(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
         zsh_sys::zcontext_restore();
     }
 
-    // detect subshells
-    // this is inefficient but whatever
     if recursive {
-        let mut i = 2;
-        while i < tokens.len() {
-            let kinds = tokens[i-2].kind.as_ref().zip(tokens[i-1].kind.as_ref()).zip(tokens[i].kind.as_ref());
-            if matches!(kinds, Some(((
-                TokenKind::Token(
-                    bindings::token::String // $(
-                    | bindings::token::OutangProc // >(
-                    | bindings::token::Inang // <(
-                    | bindings::token::Equals // =(
-                ),
-                TokenKind::Token(bindings::token::Inpar),
-            ),
-                TokenKind::Lextok(bindings::lextok::STRING | bindings::lextok::LEXERR),
-            ))) {
-
-                let range = &tokens[i].range;
-                let (_, mut subshell) = parse_internal(&cmd[range.clone()], true);
-                for t in &mut subshell {
-                    t.range.start += range.start;
-                    t.range.end += range.start;
-                }
-                let replace = i ..= i;
-                i += subshell.len() - 1;
-                tokens.splice(replace, subshell);
-            }
-
-            i += 1;
-        }
+        recurse_into_subshells(cmd, &mut tokens, range_offset);
     }
 
     (complete, tokens)
+}
+
+fn recurse_into_subshells(cmd: &BStr, tokens: &mut Vec<Token>, range_offset: usize) {
+    // detect subshells
+    // this is inefficient but whatever
+
+    let mut i = 0;
+    while i < tokens.len() {
+
+        let slice = &mut tokens[i..];
+        let tok = match slice {
+
+            // [$><=](...)
+            &mut [
+                Token{kind: Some(TokenKind::Token(token::String | token::Qstring | token::OutangProc | token::Inang | token::Equals)), ..},
+                Token{kind: Some(TokenKind::Token(token::Inpar)), ..},
+  ref mut tok @ Token{kind: None | Some(TokenKind::Lextok(lextok::STRING | lextok::LEXERR)), ..},
+                Token{kind: Some(TokenKind::Token(token::Outpar)), ..},
+            ..] => Some((tok, 4)),
+
+            // [$><=](...
+            &mut [
+                Token{kind: Some(TokenKind::Token(token::String | token::Qstring | token::OutangProc | token::Inang | token::Equals)), ..},
+                Token{kind: Some(TokenKind::Token(token::Inpar)), ..},
+  ref mut tok @ Token{kind: None | Some(TokenKind::Lextok(lextok::STRING | lextok::LEXERR)), ..},
+            ..] => Some((tok, 3)),
+
+            _ => None,
+        };
+
+        if let Some((tok, len)) = tok {
+            let cmd = &cmd[tok.range.start - range_offset .. tok.range.end - range_offset];
+            let (_, subshell) = parse_internal(cmd, true, tok.range.start);
+            tok.nested = Some(subshell);
+            let super_token = Token{
+                kind: Some(TokenKind::Substitution),
+                range: tokens[i].range.start .. tokens[i+len-1].range.end,
+                nested: None,
+            };
+            let nested = tokens.splice(i..i+len, [super_token]).collect();
+            tokens[i].nested = Some(nested);
+        }
+
+        i += 1;
+    }
+
 }
