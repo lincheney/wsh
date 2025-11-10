@@ -2,7 +2,6 @@ mod fork;
 use bstr::BString;
 use crate::ui::{Ui, TrampolineIn};
 use crate::c_string_array;
-use std::os::fd::AsRawFd;
 use std::os::raw::{c_char, c_int};
 use std::ptr::null_mut;
 use std::sync::{Arc, LazyLock, OnceLock, Mutex};
@@ -54,11 +53,7 @@ fn get_or_init_state() -> Result<(bool, Arc<GlobalState>)> {
                     let ui = ui.clone();
                     tokio::task::spawn(async move {
                         let tty = std::fs::File::open("/dev/tty").unwrap();
-                        let raw_fd = tty.as_raw_fd();
-                        // 3. Set non-blocking mode
-                        let flags = nix::fcntl::fcntl(raw_fd, nix::fcntl::FcntlArg::F_GETFL).unwrap();
-                        let new_flags = nix::fcntl::OFlag::from_bits_truncate(flags) | nix::fcntl::OFlag::O_NONBLOCK;
-                        nix::fcntl::fcntl(raw_fd, nix::fcntl::FcntlArg::F_SETFL(new_flags)).unwrap();
+                        crate::utils::set_nonblocking_fd(&tty).unwrap();
                         events.run(tty, ui).await.unwrap();
                     });
                 }

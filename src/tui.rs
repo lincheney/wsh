@@ -321,6 +321,14 @@ impl Tui {
         (id, self.widgets.last_mut().unwrap())
     }
 
+    pub fn add_message(&mut self, message: String) -> (usize, &mut WidgetWrapper) {
+        let mut widget = Widget::default();
+        let message = Widget::replace_tabs(message);
+        let message: Vec<_> = message.split('\n').map(|l| Line::from(l.to_owned())).collect();
+        widget.inner.lines = message;
+        self.add(widget.into())
+    }
+
     pub fn add_error_message(&mut self, message: String) -> (usize, &mut WidgetWrapper) {
         let mut widget = Widget::default();
         let message = Widget::replace_tabs(message);

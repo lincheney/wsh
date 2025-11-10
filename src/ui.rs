@@ -1,4 +1,4 @@
-use bstr::{BStr, BString};
+use bstr::{BStr, BString, ByteSlice};
 use std::time::Duration;
 use std::future::Future;
 use std::sync::{Arc, Weak as WeakArc};
@@ -22,7 +22,7 @@ use crate::tui::{
     MoveDown,
 };
 
-use crate::shell::{Shell, ShellInner, WeakShell, UpgradeShell, KeybindValue};
+use crate::shell::{Shell, ShellInner, WeakShell, UpgradeShell, KeybindValue, DowngradeShell};
 use crate::lua::{EventCallbacks, HasEventCallbacks};
 
 fn lua_error<T>(msg: &str) -> Result<T, mlua::Error> {
@@ -485,7 +485,7 @@ impl Ui {
                 drop(guard);
                 Some(KeybindOutput::Value(self.accept_line().await))
             },
-            KeybindValue::Widget(widget) => {
+            KeybindValue::Widget(mut widget) => {
                 // execute the widget
                 // a widget may run subprocesses so lock the ui
                 let lock = self.has_foreground_process.lock().await;
@@ -496,12 +496,15 @@ impl Ui {
                 widget.shell.set_zle_buffer(buffer.clone(), cursor as _);
                 widget.shell.set_lastchar(buf);
                 // executing a widget may block
-                tokio::task::block_in_place(|| {
-                    widget.exec(None, [].into_iter());
-                });
+                let (output, _) = tokio::task::block_in_place(|| widget.exec_and_get_output(None, [].into_iter())).unwrap();
                 let (buffer, cursor) = shell.get_zle_buffer();
 
                 ui.buffer.set(Some(buffer.as_ref()), Some(cursor.unwrap_or(buffer.len() as _) as _));
+                // check for any output e.g. zle -m
+                let output = output.trim();
+                if !output.is_empty() {
+                    ui.tui.add_message(BStr::new(output).to_string());
+                }
                 drop(lock);
 
                 // this widget may have called accept-line somewhere inside

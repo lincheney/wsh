@@ -1,5 +1,6 @@
+use std::os::fd::AsRawFd;
 use anyhow::Result;
-use std::io::Write;
+use std::io::{Write, Read};
 use std::os::fd::{RawFd};
 use std::ptr::NonNull;
 use std::os::raw::{c_long, c_char, c_int};
@@ -36,6 +37,14 @@ pub struct ShellInner<'a> {
     _private: Private,
 }
 
+struct Shout {
+    reader: std::io::PipeReader,
+    #[allow(dead_code)]
+    writer: std::io::PipeWriter,
+    writer_ptr: NonNull<nix::libc::FILE>,
+}
+unsafe impl Send for Shout {}
+
 crate::strong_weak_wrapper! {
     pub struct Shell{
         // this needs to be a semaphore so i can add more permits
@@ -43,6 +52,8 @@ crate::strong_weak_wrapper! {
         // many functions are ok to call and are re-entrant
         // but some are not e.g. completion
         exclusive_lock: Arc::<Mutex<()>> [Weak::<Mutex<()>>],
+        // shout
+        shout: Arc::<Mutex<Option<Shout>>> [Weak::<Mutex<Option<Shout>>>],
     }
 }
 
@@ -52,6 +63,7 @@ impl Shell {
         Self{
             inner: Arc::new(Semaphore::new(1)),
             exclusive_lock: Arc::new(Mutex::new(())),
+            shout: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -74,12 +86,6 @@ impl Shell {
         result
     }
 
-    pub fn downgrade(&self) -> WeakShell {
-        WeakShell{
-            inner: Arc::downgrade(&self.inner),
-            exclusive_lock: Arc::downgrade(&self.exclusive_lock),
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -383,6 +389,55 @@ impl<'a> ShellInner<'a> {
                 zsh_sys::queueing_enabled = old_value;
             }
         }
+    }
+
+    pub fn capture_shout<T, F: FnOnce(&mut Self) -> T>(&mut self, f: F) -> Result<(BString, T)> {
+        let mut shout = self.parent.shout.lock().unwrap();
+
+        let shout = if let Some(shout) = &mut *shout {
+            shout
+        } else {
+            let (reader, writer) = std::io::pipe()?;
+            let writer_ptr = unsafe{ nix::libc::fdopen(writer.as_raw_fd(), c"w".as_ptr()) };
+            let Some(writer_ptr) = NonNull::new(writer_ptr)
+            else {
+                return Err(std::io::Error::last_os_error())?;
+            };
+
+            crate::utils::set_nonblocking_fd(&reader)?;
+            shout.get_or_insert(
+                Shout {
+                    reader,
+                    writer,
+                    writer_ptr,
+                }
+            )
+        };
+
+        let result;
+        unsafe {
+            let old_shout = zsh_sys::shout;
+            let old_trashedzle = zsh::trashedzle;
+            zsh_sys::shout = shout.writer_ptr.as_ptr().cast();
+            zsh::trashedzle = 1;
+            result = f(self);
+            nix::libc::fflush(zsh_sys::shout as _);
+            zsh::trashedzle = old_trashedzle;
+            zsh_sys::shout = old_shout;
+        }
+
+        let mut buffer = BString::new(vec![]);
+        let mut buf = [0; 1024];
+        while let Ok(n) = shout.reader.read(&mut buf) {
+            let buf = &buf[..n];
+            buffer.extend(if n < buf.len() {
+                // probably the end so trim it
+                buf.trim_end()
+            } else {
+                buf
+            });
+        }
+        Ok((buffer, result))
     }
 
 }
