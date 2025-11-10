@@ -86,28 +86,37 @@ impl ModifierDiff {
     }
 }
 
-pub fn draw<'a, W: std::io::Write, I>(mut writer: &mut W, content: I) -> std::io::Result<()>
+pub fn draw<'a, W: std::io::Write, I>(
+    mut writer: &mut W,
+    width: u16,
+    content: I,
+) -> std::io::Result<()>
 where
     I: Iterator<Item = (u16, u16, &'a Cell)>,
 {
+
     let mut fg = Color::Reset;
     let mut bg = Color::Reset;
     let mut underline_color = Color::Reset;
     let mut modifier = Modifier::empty();
-    let mut last_pos = Position{ x: 0, y: 0 };
+    let mut next_pos = Position{ x: 0, y: 0 };
 
     for (x, y, cell) in content {
 
         // this is the bit thats different
         // Move the cursor if the previous location was not (x - 1, y)
-        if y != last_pos.y {
-            queue!(writer, MoveDown(y - last_pos.y))?;
+        if y != next_pos.y {
+            queue!(writer, MoveDown(y - next_pos.y))?;
         }
-        if x != last_pos.x {
+        if x != next_pos.x {
             queue!(writer, MoveToColumn(x))?;
         }
 
-        last_pos = Position { x: x+1, y };
+        next_pos = Position { x: x+1, y };
+        if next_pos.x >= width {
+            next_pos = Position { x: 0, y: y + 1 };
+        }
+
         if cell.modifier != modifier {
             let diff = ModifierDiff {
                 from: modifier,

@@ -529,7 +529,7 @@ impl Tui {
                 cursor::SavePosition,
             )?;
 
-            backend::draw(stdout, updates.into_iter())?;
+            backend::draw(stdout, width, updates.into_iter())?;
             queue!(stdout, cursor::RestorePosition)?;
 
             if clear || prompt.dirty {
@@ -560,7 +560,7 @@ impl Tui {
                     widget.render(area, &mut self.new_status_bar_buffer);
 
                     let updates = self.old_status_bar_buffer.diff(&self.new_status_bar_buffer);
-                    backend::draw(stdout, updates.into_iter())?;
+                    backend::draw(stdout, width, updates.into_iter())?;
 
                     queue!(stdout, cursor::RestorePosition)?;
                 }
@@ -578,7 +578,7 @@ impl Tui {
                     cell.reset();
                 }
                 let updates = self.old_buffer.diff(&self.new_buffer);
-                backend::draw(stdout, updates.into_iter().filter(|(_, y, _)| *y == buffer.cursor_coord.1))?;
+                backend::draw(stdout, width, updates.into_iter().filter(|(_, y, _)| *y == buffer.cursor_coord.1))?;
             } else {
                 // otherwise just position it normally
                 queue!(
