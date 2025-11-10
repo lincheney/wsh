@@ -188,8 +188,9 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
             // e.g. when we were running a foreground process
             // so save it again now while we're good
             zsh::gettyinfo(&raw mut zsh::shttyinfo);
+            zsh_sys::zleactive = 0;
 
-            match result {
+            return match result {
                 Ok(Some(mut string)) => {
                     // MUST have a newline here
                     string.push(b'\n');
@@ -208,14 +209,16 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
         } else if cmd == zsh_sys::ZLE_CMD_TRASH as _ && let Some(state) = try_get_state() {
             // something is probably going to print (error msgs etc) to the terminal
             let (ui, _, _) = &*state;
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    let ui = ui.get();
-                    let mut ui = ui.inner.write().await;
-                    ui.prepare_for_unhandled_output().unwrap();
+            if let Ok(_lock) = ui.has_foreground_process.try_lock() {
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async {
+                        let ui = ui.get();
+                        let mut ui = ui.inner.write().await;
+                        ui.prepare_for_unhandled_output().unwrap();
+                    });
                 });
-            });
-            null_mut()
+                return null_mut()
+            }
 
         } else if cmd == zsh_sys::ZLE_CMD_REFRESH as _ && let Some(state) = try_get_state() {
             // redraw the ui
@@ -230,11 +233,11 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                     }).await;
                 });
             });
-            null_mut()
+            return null_mut()
 
-        } else {
-            ORIGINAL_ZLE_ENTRY_PTR.get().unwrap().unwrap()(cmd, ap)
         }
+
+        ORIGINAL_ZLE_ENTRY_PTR.get().unwrap().unwrap()(cmd, ap)
     }
 }
 

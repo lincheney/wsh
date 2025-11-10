@@ -317,6 +317,7 @@ impl Ui {
         // time to execute
         if let Some(buffer) = buffer {
             self.trigger_accept_line_callbacks(()).await;
+            let lock = self.has_foreground_process.lock().await;
             let mut shell = self.shell.lock().await;
             self.pre_accept_line(&mut shell).await?;
             // acceptline doesn't actually accept the line right now
@@ -327,6 +328,7 @@ impl Ui {
             // prefer the result error over the activate error
             // result.and(ui.activate())?;
             drop(shell);
+            drop(lock);
             self.start_cmd().await?;
 
         } else {
