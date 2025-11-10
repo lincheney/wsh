@@ -608,7 +608,7 @@ impl UiInner {
         self.deactivate()?;
         self.dirty = true;
         // move to last line of buffer
-        let y_offset = self.prompt.height + self.buffer.height - 1 - self.buffer.cursor_coord.1 - 1;
+        let y_offset = self.buffer.draw_end_pos.1 - self.buffer.cursor_coord.1;
         execute!(
             self.stdout,
             BeginSynchronizedUpdate,

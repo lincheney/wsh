@@ -17,6 +17,7 @@ use ratatui::{
     buffer::Buffer,
 };
 mod backend;
+pub use backend::{DrawInstruction, Drawer};
 pub mod status_bar;
 pub mod ansi;
 
@@ -42,7 +43,7 @@ impl crossterm::Command for MoveDown {
     }
 }
 
-pub fn allocate_height<W: std::io::Write>(stdout: &mut W, height: u16) -> Result<()> {
+pub fn allocate_height<W: Write>(stdout: &mut W, height: u16) -> Result<()> {
     for _ in 0 .. height {
         // vertical tab, this doesn't change x
         queue!(stdout, style::Print("\x0b"))?;
@@ -293,21 +294,64 @@ impl From<ansi::Parser> for WidgetWrapper {
 }
 
 #[derive(Default)]
+struct Widgets {
+    inner: Vec<WidgetWrapper>,
+    width: u16,
+    pub height: u16,
+    max_height: u16,
+    buffer: Buffer,
+    line_count_buffer: Buffer,
+}
+
+impl Widgets {
+    fn refresh(&mut self, area: Rect, max_height: u16) -> bool {
+        self.width = area.width;
+        self.max_height = max_height;
+
+        if self.inner.is_empty() {
+            return false
+        }
+
+        let mut max_height = 0;
+        let mut last_widget = 0;
+        for (i, w) in self.inner.iter_mut().enumerate() {
+            let w = w.as_mut();
+            if !w.hidden {
+                w.line_count = w.line_count(area, &mut self.line_count_buffer);
+                max_height += w.line_count;
+                last_widget = i;
+                if max_height >= area.height as _ {
+                    break
+                }
+            }
+        }
+
+        let area = Rect{ height: area.height.min(max_height as _), ..area };
+
+        let widgets = &self.inner[..=last_widget];
+        let widgets = widgets.iter().map(|w| w.as_ref()).filter(|w| !w.hidden && w.line_count > 0);
+
+        let layout = Layout::vertical(widgets.clone().map(|w| w.constraint.unwrap_or(Constraint::Max(w.line_count))));
+        let layouts = layout.split(area);
+
+        let mut found = false;
+        for (widget, layout) in widgets.zip(layouts.iter()) {
+            widget.render(*layout, &mut self.buffer);
+            found = true;
+        }
+        found
+    }
+}
+
+#[derive(Default)]
 pub struct Tui {
     counter: usize,
-    widgets: Vec<WidgetWrapper>,
-
+    widgets: Widgets,
+    buffer: Buffer,
     pub dirty: bool,
-    width: u16,
-    max_height: u16,
-    pub height: u16,
 
-    old_buffer: Buffer,
-    new_buffer: Buffer,
     old_cursor_coord: (u16, u16),
-    line_count_buffer: Buffer,
-    old_status_bar_buffer: Buffer,
-    new_status_bar_buffer: Buffer,
+    status_bar_buffer: Buffer,
 }
 
 impl Tui {
@@ -317,8 +361,8 @@ impl Tui {
         widget.as_mut().id = id;
         self.counter += 1;
         self.dirty = true;
-        self.widgets.push(widget);
-        (id, self.widgets.last_mut().unwrap())
+        self.widgets.inner.push(widget);
+        (id, self.widgets.inner.last_mut().unwrap())
     }
 
     pub fn add_message(&mut self, message: String) -> (usize, &mut WidgetWrapper) {
@@ -339,7 +383,7 @@ impl Tui {
     }
 
     pub fn get_index(&self, id: usize) -> Option<usize> {
-        for (i, w) in self.widgets.iter().enumerate() {
+        for (i, w) in self.widgets.inner.iter().enumerate() {
             match w.as_ref().id.cmp(&id) {
                 std::cmp::Ordering::Equal => return Some(i),
                 std::cmp::Ordering::Greater => break,
@@ -352,69 +396,30 @@ impl Tui {
     pub fn get_mut(&mut self, id: usize) -> Option<&mut WidgetWrapper> {
         self.get_index(id).map(|i| {
             self.dirty = true;
-            &mut self.widgets[i]
+            &mut self.widgets.inner[i]
         })
     }
 
     pub fn remove(&mut self, id: usize) -> Option<WidgetWrapper> {
         self.get_index(id).map(|i| {
             self.dirty = true;
-            self.widgets.remove(i)
+            self.widgets.inner.remove(i)
         })
     }
 
     pub fn clear_all(&mut self) {
-        self.widgets.clear();
+        self.widgets.inner.clear();
         self.dirty = true;
     }
 
     pub fn clear_non_persistent(&mut self) {
-        self.widgets.retain(|w| w.as_ref().persist);
+        self.widgets.inner.retain(|w| w.as_ref().persist);
         self.dirty = true;
     }
 
-    fn refresh(&mut self, area: Rect, max_height: u16) {
-        self.width = area.width;
-        self.max_height = max_height;
-
-        if self.widgets.is_empty() {
-            return
-        }
-
-        let mut max_height = 0;
-        let mut last_widget = 0;
-        for (i, w) in self.widgets.iter_mut().enumerate() {
-            let w = w.as_mut();
-            if !w.hidden {
-                w.line_count = w.line_count(area, &mut self.line_count_buffer);
-                max_height += w.line_count;
-                last_widget = i;
-                if max_height >= area.height as _ {
-                    break
-                }
-            }
-        }
-
-        let area = Rect{ height: area.height.min(max_height as _), ..area };
-
-        let widgets = &self.widgets[..=last_widget];
-        let widgets = widgets.iter().map(|w| w.as_ref()).filter(|w| !w.hidden && w.line_count > 0);
-
-        let layout = Layout::vertical(widgets.clone().map(|w| w.constraint.unwrap_or(Constraint::Max(w.line_count))));
-        let layouts = layout.split(area);
-
-        for (widget, layout) in widgets.zip(layouts.iter()) {
-            widget.render(*layout, &mut self.new_buffer);
-        }
-    }
-
-    fn swap_buffers(&mut self) {
-        std::mem::swap(&mut self.new_buffer, &mut self.old_buffer);
-    }
-
-    pub async fn draw(
+    pub async fn draw<W: Write>(
         &mut self,
-        stdout: &mut std::io::Stdout,
+        writer: &mut W,
         (width, height): (u16, u16),
         shell: &crate::shell::Shell,
         prompt: &mut crate::prompt::Prompt,
@@ -424,172 +429,101 @@ impl Tui {
     ) -> Result<()> {
 
         if clear {
-            self.new_buffer.reset();
-            self.old_buffer.reset();
-            queue!(stdout, Clear(ClearType::FromCursorDown))?;
+            self.buffer.reset();
+            queue!(writer, Clear(ClearType::FromCursorDown))?;
             self.dirty = true;
-            self.height = 0;
+            self.widgets.height = 0;
         }
-        let old_height = self.height;
-        let old_cursor_coord = buffer.cursor_coord;
 
         let max_height = (height * 2 / 3).max(1);
-        if max_height != self.max_height || width != self.width {
+        if max_height != self.widgets.max_height || width != self.widgets.width {
             clear = true;
         }
 
-        let new_buffer = clear || self.dirty || prompt.dirty || buffer.dirty || status_bar.dirty;
-        if new_buffer {
-            self.swap_buffers();
-            self.new_buffer.reset();
-            self.new_status_bar_buffer.reset();
-        }
-
         let area = Rect{x: 0, y: 0, width, height: max_height};
-        self.old_buffer.resize(area);
-        self.new_buffer.resize(area);
+        self.buffer.resize(area);
+        self.widgets.buffer.resize(area);
+        self.status_bar_buffer.resize(area);
+
+        let mut drawer = backend::Drawer::new(&mut self.buffer, writer, buffer.cursor_coord);
+        queue!(drawer.writer, crossterm::terminal::BeginSynchronizedUpdate)?;
 
         if clear || prompt.dirty {
             // refresh the prompt
-            prompt.dirty = true;
             prompt.refresh_prompt(&mut shell.lock().await, area.width);
-            // reset here
-            self.new_buffer.content.iter_mut()
-                .take((prompt.height * area.width + prompt.width) as usize)
-                .for_each(|cell| {
-                    cell.reset();
-                });
-            buffer.dirty = true;
+            // redraw the prompt
+            // move back to top of drawing area and redraw
+            queue!(
+                drawer.writer,
+                cursor::MoveToColumn(0),
+                MoveUp(buffer.cursor_coord.1),
+            )?;
+            drawer.writer.write_all(prompt.as_bytes())?;
+            drawer.set_pos((prompt.width, prompt.height - 1));
+        } else {
+            drawer.cur_pos = (prompt.width, prompt.height - 1);
         }
 
         if clear || buffer.dirty {
-            // refresh the buffer
-            buffer.render(area, &mut self.new_buffer, prompt);
-            self.dirty = true;
-        } else if new_buffer {
-            // copy over from old buffer
-            self.old_buffer.content.iter()
-                .zip(self.new_buffer.content.iter_mut())
-                .skip((prompt.height.saturating_sub(1) * area.width + prompt.width) as usize)
-                .take((buffer.height.saturating_sub(1) * area.width + buffer.width) as usize)
-                .for_each(|(old, new)| {
-                    new.set_symbol(old.symbol());
-                    new.set_style(old.style());
-                });
+            // redraw the buffer
+            buffer.render(&mut drawer, false)?;
+        } else {
+            buffer.render(&mut drawer, true)?;
+            drawer.cur_pos = buffer.draw_end_pos;
         }
 
-        let offset = prompt.height + buffer.height - 1;
+        let offset = drawer.cur_pos.1;
         let area = Rect{ y: area.y + offset, height: area.height - offset, ..area };
 
-        if clear || self.dirty || status_bar.dirty {
-
-            let mut area = area;
-            if let Some(ref mut widget) = status_bar.inner {
-                widget.line_count = widget.line_count(area, &mut self.line_count_buffer);
-                area.height = area.height.saturating_sub(widget.line_count);
+        // refresh status bar
+        // need to refresh this FIRST
+        // to get the bar height
+        let status_bar_height = if let Some(ref mut widget) = status_bar.inner {
+            if status_bar.dirty {
+                widget.line_count = widget.line_count(area, &mut self.widgets.line_count_buffer);
             }
+            widget.line_count
+        } else {
+            0
+        };
 
-            self.refresh(area, max_height);
-            self.height = buffer_nonempty_height(&self.new_buffer).max(offset);
-
-            if let Some(ref widget) = status_bar.inner {
-                let bar_height = widget.line_count.min(max_height - self.height);
-                self.height += bar_height;
-            }
-        }
-
-        self.height = self.height.max(offset);
-
-        let updates = self.old_buffer.diff(&self.new_buffer);
-        let redraw = !updates.is_empty() || prompt.dirty;
-
-        if redraw {
-            queue!(stdout, crossterm::terminal::BeginSynchronizedUpdate)?;
-
-            allocate_height(stdout, self.height.saturating_sub(old_cursor_coord.1 + 1))?;
-
-            // move back to top of drawing area and redraw
-            if self.height < old_height {
-                let offset = self.height.saturating_sub(old_cursor_coord.1);
-                queue!(
-                    stdout,
-                    // clear everything below
-                    cursor::MoveToColumn(0),
-                    MoveDown(offset),
-                    Clear(ClearType::FromCursorDown),
-                    MoveUp(offset),
-                )?;
-            }
-
-            queue!(
-                stdout,
-                // move to top left
-                cursor::MoveToColumn(0),
-                MoveUp(old_cursor_coord.1),
-                cursor::SavePosition,
-            )?;
-
-            backend::draw(stdout, width, updates.into_iter())?;
-            queue!(stdout, cursor::RestorePosition)?;
-
-            if clear || prompt.dirty {
-                stdout.write_all(prompt.as_bytes())?;
-                queue!(
-                    stdout,
-                    // move to top left
-                    cursor::MoveToColumn(0),
-                    MoveUp(prompt.height - 1),
-                )?;
-            }
-
-            if (clear || status_bar.dirty) && let Some(ref widget) = status_bar.inner {
-                let bar_height = widget.line_count.min(max_height - self.height);
-                if bar_height > 0 {
-                    queue!(
-                        stdout,
-                        cursor::SavePosition,
-                        MoveDown(height * 10),
-                        MoveUp(bar_height - 1),
-                    )?;
-
-                    let area = Rect{ y: 0, height: bar_height, ..area };
-                    self.new_status_bar_buffer.resize(area);
-                    self.old_status_bar_buffer.resize(area);
-
-                    std::mem::swap(&mut self.new_status_bar_buffer, &mut self.old_status_bar_buffer);
-                    widget.render(area, &mut self.new_status_bar_buffer);
-
-                    let updates = self.old_status_bar_buffer.diff(&self.new_status_bar_buffer);
-                    backend::draw(stdout, width, updates.into_iter())?;
-
-                    queue!(stdout, cursor::RestorePosition)?;
+        if clear || self.dirty {
+            // refresh widgets
+            let area = Rect{ height: area.height - status_bar_height, ..area };
+            self.widgets.buffer.reset();
+            self.widgets.refresh(area, max_height);
+            self.widgets.height = buffer_nonempty_height(&self.widgets.buffer).max(offset);
+            // redraw widgets
+            for line in self.widgets.buffer.content.chunks(area.width as _).take(self.widgets.height as _).skip(1 + drawer.cur_pos.1 as usize) {
+                drawer.draw(DrawInstruction::Newline)?;
+                for cell in line {
+                    drawer.draw_cell(cell, false)?;
                 }
+                drawer.draw(DrawInstruction::ClearRestOfLine)?;
             }
         }
 
-        if redraw || buffer.cursor_coord != self.old_cursor_coord {
-            let cursor_is_at_end = buffer.cursor_coord.1 == width && buffer.cursor_is_at_end();
-            // position the cursor
-            if cursor_is_at_end {
-                // cursor is at the very very end of line
-                // only way i know of to get back there is to redraw that line
-                let start = (buffer.cursor_coord.1 * width) as usize;
-                for cell in &mut self.old_buffer.content[start .. start + width as usize] {
-                    cell.reset();
+        if (clear || status_bar.dirty) && status_bar_height > 0 && let Some(ref widget) = status_bar.inner {
+            log::debug!("DEBUG(doors) \t{}\t= {:?}", stringify!(widget), widget);
+            log::debug!("DEBUG(tans)  \t{}\t= {:?}", stringify!(area), area);
+            // redraw status bar
+            self.status_bar_buffer.reset();
+            widget.render(area, &mut self.status_bar_buffer);
+            for line in self.status_bar_buffer.content.chunks(area.width as _).take(status_bar_height as _) {
+                drawer.draw(DrawInstruction::Newline)?;
+                for cell in line {
+                    drawer.draw_cell(cell, false)?;
                 }
-                let updates = self.old_buffer.diff(&self.new_buffer);
-                backend::draw(stdout, width, updates.into_iter().filter(|(_, y, _)| *y == buffer.cursor_coord.1))?;
-            } else {
-                // otherwise just position it normally
-                queue!(
-                    stdout,
-                    MoveDown(buffer.cursor_coord.1),
-                    cursor::MoveToColumn(buffer.cursor_coord.0),
-                    crossterm::terminal::EndSynchronizedUpdate,
-                )?;
+                drawer.draw(DrawInstruction::ClearRestOfLine)?;
             }
-            execute!(stdout, crossterm::terminal::EndSynchronizedUpdate)?;
         }
+
+        queue!(
+            drawer.writer,
+            Clear(ClearType::FromCursorDown),
+            cursor::RestorePosition,
+        )?;
+        execute!(writer, crossterm::terminal::EndSynchronizedUpdate)?;
 
         self.dirty = false;
         prompt.dirty = false;

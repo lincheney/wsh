@@ -1,13 +1,8 @@
 use std::ops::Range;
-use std::fmt::Write;
-use bstr::{BString, ByteSlice, BStr};
+use bstr::{BString, ByteSlice};
 use unicode_width::UnicodeWidthStr;
-use ratatui::{
-    layout::*,
-    text::*,
-    style::*,
-};
-use crate::prompt::Prompt;
+use ratatui::style::{Style, Color};
+use crate::tui::{DrawInstruction, Drawer};
 
 #[derive(Debug)]
 pub struct Edit {
@@ -73,77 +68,11 @@ pub struct Buffer {
 
     pub dirty: bool,
 
-    pub height: u16,
-    pub width: u16,
+    pub draw_end_pos: (u16, u16),
     pub cursor_coord: (u16, u16),
 
     pub highlights: Vec<Highlight>,
     pub highlight_counter: usize,
-}
-
-struct BufferContents<'a> {
-    inner: &'a BStr,
-    highlights: &'a Vec<Highlight>,
-    offset: usize,
-}
-
-impl<'a> From<BufferContents<'a>> for Text<'a> {
-    fn from(contents: BufferContents<'a>) -> Self {
-        let mut text = Text::default();
-        text.lines.push(Line::default());
-        let mut line = text.lines.last_mut().unwrap();
-
-        let escape_style = Style::default().fg(Color::Gray);
-
-        let mut stack = HighlightStack(vec![]);
-        let mut buffer = String::new();
-
-        for (i, (start, end, c)) in contents.inner.grapheme_indices().enumerate() {
-            if contents.highlights.iter().any(|h| h.start == i + contents.offset) {
-                // flush buffer bc highlights have changed
-                if !buffer.is_empty() {
-                    line.spans.push(Span::styled(buffer, stack.merge()));
-                    buffer = String::new();
-                }
-                stack.0.extend(contents.highlights.iter().filter(|h| h.start == i + contents.offset));
-            }
-
-            if c == "\n" {
-                text.lines.push(Line::default());
-                line = text.lines.last_mut().unwrap();
-            } else if c.width() > 0 && (start + 1 != end || c != "\u{FFFD}") {
-                buffer.push_str(c);
-            } else {
-                let style = stack.merge();
-                // flush buffer
-                if !buffer.is_empty() {
-                    line.spans.push(Span::styled(buffer, style));
-                    buffer = String::new();
-                }
-
-                // invalid
-                for c in contents.inner[start..end].iter() {
-                    write!(&mut buffer, "<u{c:04x}>").unwrap();
-                }
-                line.spans.push(Span::styled(buffer, style.patch(escape_style)));
-                buffer = String::new();
-            }
-
-            if !stack.0.iter().all(|h| h.end > i + contents.offset + 1) {
-                if !buffer.is_empty() {
-                    line.spans.push(Span::styled(buffer, stack.merge()));
-                    buffer = String::new();
-                }
-                stack.0.retain(|h| h.end > i + contents.offset + 1 );
-            }
-        }
-
-        if !buffer.is_empty() {
-            line.spans.push(Span::styled(buffer, stack.merge()));
-        }
-
-        text
-    }
 }
 
 impl Buffer {
@@ -276,11 +205,10 @@ impl Buffer {
         self.history_index = 0;
         self.cursor = 0;
         self.cursor_coord = (0, 0);
+        self.draw_end_pos = (0, 0);
         self.saved_contents.clear();
         self.saved_cursor = 0;
         self.dirty = true;
-        self.height = 0;
-        self.width = 0;
     }
 
     fn byte_pos(&self, pos: usize) -> usize {
@@ -295,45 +223,70 @@ impl Buffer {
         self.byte_pos(self.cursor)
     }
 
-    fn render_content(
-        &self,
-        content: &BStr,
-        area: Rect,
-        buf: &mut ratatui::buffer::Buffer,
-        offset: (u16, u16),
-    ) -> (u16, u16) {
+    pub fn render<W :std::io::Write>(&mut self, drawer: &mut Drawer<W>, only_up_to_cursor: bool) -> std::io::Result<()> {
 
-        if content.is_empty() {
-            return offset
+        if self.contents.is_empty() {
+            drawer.draw(DrawInstruction::SaveCursor)?;
+            drawer.draw(DrawInstruction::ClearRestOfLine)?;
+            self.cursor_coord = drawer.cur_pos;
+            self.draw_end_pos = drawer.cur_pos;
+            return Ok(())
         }
 
-        // turn this into Text
-        let text: Text = BufferContents{
-            inner: content,
-            highlights: &self.highlights,
-            offset: 0,
-        }.into();
-        crate::tui::render_text(area, buf, offset, &text, true, None)
-    }
+        let cursor = self.cursor_byte_pos();
+        if cursor == 0 {
+            drawer.draw(DrawInstruction::SaveCursor)?;
+            self.cursor_coord = drawer.cur_pos;
+            if only_up_to_cursor {
+                return Ok(())
+            }
+        }
 
-    pub fn render(&mut self, area: Rect, buf: &mut ratatui::buffer::Buffer, prompt: &Prompt) {
-        let byte_pos = self.cursor_byte_pos();
-        let prefix = self.contents[..byte_pos].into();
-        let suffix = self.contents[byte_pos..].into();
+        let escape_style = Style::default().fg(Color::Gray);
+        let mut stack = HighlightStack(vec![]);
+        let mut cell = ratatui::buffer::Cell::EMPTY;
 
-        let offset = (prompt.width, prompt.height - 1);
-        let offset = self.render_content(prefix, area, buf, offset);
-        self.cursor_coord = offset;
+        for (i, (start, end, c)) in self.contents.grapheme_indices().enumerate() {
+            if self.highlights.iter().any(|h| h.start == i) {
+                stack.0.extend(self.highlights.iter().filter(|h| h.start == i));
+                cell.set_style(stack.merge());
+            }
 
-        let offset = self.render_content(suffix, area, buf, offset);
-        self.height = 1 + offset.1 - (prompt.height - 1);
-        self.width = offset.0;
+            if c == "\n" {
+                drawer.draw(DrawInstruction::Newline)?;
+            } else if c.width() > 0 && (start + 1 != end || c != "\u{FFFD}") {
+                let mut cell = cell.clone();
+                cell.set_symbol(c);
+                drawer.draw(DrawInstruction::Cell(&cell))?;
+            } else {
+                // invalid
+                // let cell = cell.clone();
+                // cell.set_symbol(c);
+                // let style = stack.merge().patch(escape_style);
+                // for c in self.contents[start..end].iter() {
+                    // write!(&mut buffer, "<u{c:04x}>").unwrap();
+                // }
+                unimplemented!()
+            }
 
-        // // add an extra space for the cursor
-        // if !suffix.is_empty() {
-            // prefix += " ";
-        // }
+            if end == cursor {
+                drawer.draw(DrawInstruction::SaveCursor)?;
+                self.cursor_coord = drawer.cur_pos;
+                if only_up_to_cursor {
+                    return Ok(())
+                }
+            }
 
+            if !stack.0.iter().all(|h| h.end > i + 1) {
+                stack.0.retain(|h| h.end > i + 1 );
+                cell.set_style(stack.merge());
+            }
+        }
+
+        drawer.draw(DrawInstruction::ClearRestOfLine)?;
+        self.draw_end_pos = drawer.cur_pos;
+
+        Ok(())
     }
 
 }
