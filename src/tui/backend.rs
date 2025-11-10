@@ -21,12 +21,10 @@ use ratatui::{
     buffer::{Cell, Buffer},
 };
 
-pub enum DrawInstruction<'a> {
-    Cell(&'a Cell),
+pub enum DrawInstruction {
     ClearRestOfLine,
     Newline,
     SaveCursor,
-    RestoreCursor,
 }
 
 pub struct Drawer<'a, 'b, W: Write> {
@@ -121,16 +119,12 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
             },
             DrawInstruction::Newline => {
                 self.draw(DrawInstruction::ClearRestOfLine)?;
-                queue!(self.writer, Print("\r\n"))?;
                 self.cur_pos = (0, self.cur_pos.1 + 1);
-                self.last_pos = self.cur_pos;
             },
             DrawInstruction::SaveCursor => {
                 self.move_to_cur_pos()?;
                 queue!(self.writer, SavePosition)?
             },
-            DrawInstruction::RestoreCursor => queue!(self.writer, RestorePosition)?,
-            DrawInstruction::Cell(cell) => self.draw_cell(cell, false)?,
         }
         return Ok(())
     }

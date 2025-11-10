@@ -445,13 +445,17 @@ impl Tui {
         self.widgets.buffer.resize(area);
         self.status_bar_buffer.resize(area);
 
-        let mut drawer = backend::Drawer::new(&mut self.buffer, writer, buffer.cursor_coord);
-        queue!(drawer.writer, crossterm::terminal::BeginSynchronizedUpdate)?;
+        if !clear && !prompt.dirty && !buffer.dirty && !self.dirty && !status_bar.dirty {
+            return Ok(())
+        }
 
+        queue!(writer, crossterm::terminal::BeginSynchronizedUpdate)?;
+        let mut drawer = backend::Drawer::new(&mut self.buffer, writer, buffer.cursor_coord);
+        drawer.reset()?;
+
+        // redraw the prompt
         if clear || prompt.dirty {
-            // refresh the prompt
             prompt.refresh_prompt(&mut shell.lock().await, area.width);
-            // redraw the prompt
             // move back to top of drawing area and redraw
             queue!(
                 drawer.writer,
@@ -461,13 +465,15 @@ impl Tui {
             drawer.writer.write_all(prompt.as_bytes())?;
             drawer.set_pos((prompt.width, prompt.height - 1));
         } else {
+            // if not redrawn, just move to where it should end
             drawer.cur_pos = (prompt.width, prompt.height - 1);
         }
 
+        // redraw the buffer
         if clear || buffer.dirty {
-            // redraw the buffer
             buffer.render(&mut drawer, false)?;
         } else {
+            // if not dirty, must at least figure out where the cursor position is
             buffer.render(&mut drawer, true)?;
             drawer.cur_pos = buffer.draw_end_pos;
         }
@@ -487,42 +493,81 @@ impl Tui {
             0
         };
 
+        let old_height = self.widgets.height;
         if clear || self.dirty {
             // refresh widgets
             let area = Rect{ height: area.height - status_bar_height, ..area };
             self.widgets.buffer.reset();
             self.widgets.refresh(area, max_height);
             self.widgets.height = buffer_nonempty_height(&self.widgets.buffer).max(offset);
-            // redraw widgets
-            for line in self.widgets.buffer.content.chunks(area.width as _).take(self.widgets.height as _).skip(1 + drawer.cur_pos.1 as usize) {
-                drawer.draw(DrawInstruction::Newline)?;
-                for cell in line {
-                    drawer.draw_cell(cell, false)?;
-                }
-                drawer.draw(DrawInstruction::ClearRestOfLine)?;
-            }
         }
 
         if (clear || status_bar.dirty) && status_bar_height > 0 && let Some(ref widget) = status_bar.inner {
-            log::debug!("DEBUG(doors) \t{}\t= {:?}", stringify!(widget), widget);
-            log::debug!("DEBUG(tans)  \t{}\t= {:?}", stringify!(area), area);
             // redraw status bar
             self.status_bar_buffer.reset();
             widget.render(area, &mut self.status_bar_buffer);
-            for line in self.status_bar_buffer.content.chunks(area.width as _).take(status_bar_height as _) {
+        }
+
+        // allocate enough height for the widgets
+        let height = self.widgets.height + status_bar_height;
+        if height > 0 && (clear || self.dirty || status_bar.dirty) {
+            // go back to the cursor, this is important since adding more screen lines can change where the cursor is
+            queue!(drawer.writer, cursor::RestorePosition)?;
+            // allocate height
+            allocate_height(drawer.writer, height + buffer.draw_end_pos.1 - buffer.cursor_coord.1)?;
+            // save the new position
+            queue!(drawer.writer, cursor::SavePosition)?;
+        }
+
+        if clear || self.dirty {
+            // redraw widgets
+            for line in self.widgets.buffer.content.chunks(area.width as _).take(self.widgets.height as _).skip(drawer.cur_pos.1 as usize) {
                 drawer.draw(DrawInstruction::Newline)?;
                 for cell in line {
                     drawer.draw_cell(cell, false)?;
                 }
                 drawer.draw(DrawInstruction::ClearRestOfLine)?;
             }
+        } else {
+            // if not redrawn, just move to where it should end
+            drawer.cur_pos = (area.width, self.widgets.height);
         }
 
-        queue!(
-            drawer.writer,
-            Clear(ClearType::FromCursorDown),
-            cursor::RestorePosition,
-        )?;
+        if status_bar_height > 0 {
+            if clear || status_bar.dirty || old_height != self.widgets.height {
+                // redraw status bar
+                // go to the bottom of the screen
+                queue!(
+                    drawer.writer,
+                    Clear(ClearType::FromCursorDown),
+                    MoveDown(area.height * 10),
+                    MoveUp(status_bar_height - 1),
+                    cursor::MoveToColumn(0),
+                )?;
+                drawer.set_pos((0, area.height - status_bar_height));
+
+                for (i, line) in self.status_bar_buffer.content.chunks(area.width as _).take(status_bar_height as _).enumerate() {
+                    if i > 0 {
+                        drawer.draw(DrawInstruction::Newline)?;
+                    }
+                    for cell in line {
+                        // always redraw in case we've scrolled
+                        drawer.draw_cell(cell, true)?;
+                    }
+                    drawer.draw(DrawInstruction::ClearRestOfLine)?;
+                }
+            } else {
+                // if not redrawn, just move to where it should end
+                drawer.cur_pos = (area.width, area.height - 1);
+            }
+        }
+
+        if drawer.cur_pos != (area.width, area.height - 1) {
+            queue!(drawer.writer, Clear(ClearType::FromCursorDown))?;
+        }
+
+        drawer.reset()?;
+        queue!(writer, cursor::RestorePosition)?;
         execute!(writer, crossterm::terminal::EndSynchronizedUpdate)?;
 
         self.dirty = false;

@@ -257,7 +257,7 @@ impl Buffer {
             } else if c.width() > 0 && (start + 1 != end || c != "\u{FFFD}") {
                 let mut cell = cell.clone();
                 cell.set_symbol(c);
-                drawer.draw(DrawInstruction::Cell(&cell))?;
+                drawer.draw_cell(&cell, false)?;
             } else {
                 // invalid
                 // let cell = cell.clone();
