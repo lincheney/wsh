@@ -467,7 +467,7 @@ impl Tui {
         if clear || prompt.dirty {
             prompt.refresh_prompt(&mut shell.lock().await, area.width);
             // move back to top of drawing area and redraw
-            drawer.cur_pos = (0, 0);
+            drawer.move_to_pos((0, 0))?;
             drawer.writer.write_all(prompt.as_bytes())?;
             drawer.set_pos((prompt.width, prompt.height - 1));
         }
