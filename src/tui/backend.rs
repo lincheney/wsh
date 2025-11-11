@@ -157,8 +157,14 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
             if i > 0 {
                 self.goto_newline()?;
             }
+            let mut skip = 0;
             for cell in line {
-                self.draw_cell(cell, false)?;
+                if skip == 0 {
+                    skip = cell.symbol().width() - 1;
+                    self.draw_cell(cell, false)?;
+                } else {
+                    skip -= 1;
+                }
             }
         }
         self.clear_to_end_of_line()?;
