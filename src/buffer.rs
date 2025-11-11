@@ -1,4 +1,5 @@
 use std::ops::Range;
+use std::io::Write;
 use bstr::{BString, ByteSlice};
 use unicode_width::UnicodeWidthStr;
 use ratatui::style::{Style, Color};
@@ -223,7 +224,7 @@ impl Buffer {
         self.byte_pos(self.cursor)
     }
 
-    pub fn render<W :std::io::Write>(&mut self, drawer: &mut Drawer<W>, only_up_to_cursor: bool) -> std::io::Result<()> {
+    pub fn render<W :Write>(&mut self, drawer: &mut Drawer<W>, only_up_to_cursor: bool) -> std::io::Result<()> {
 
         if self.contents.is_empty() {
             drawer.draw(DrawInstruction::SaveCursor)?;
@@ -260,13 +261,15 @@ impl Buffer {
                 drawer.draw_cell(&cell, false)?;
             } else {
                 // invalid
-                // let cell = cell.clone();
-                // cell.set_symbol(c);
-                // let style = stack.merge().patch(escape_style);
-                // for c in self.contents[start..end].iter() {
-                    // write!(&mut buffer, "<u{c:04x}>").unwrap();
-                // }
-                unimplemented!()
+                let mut cell = cell.clone();
+                cell.set_style(cell.style().patch(escape_style));
+                for c in self.contents[start..end].iter() {
+                    let mut cursor = std::io::Cursor::new([0; 64]);
+                    write!(cursor, "<u{c:04x}>").unwrap();
+                    let buf = &cursor.get_ref()[..cursor.position() as usize];
+                    cell.set_symbol(std::str::from_utf8(buf).unwrap());
+                    drawer.draw_cell(&cell, false)?;
+                }
             }
 
             if end == cursor {
