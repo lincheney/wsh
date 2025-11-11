@@ -479,8 +479,9 @@ impl Tui {
         if clear || buffer.dirty {
             buffer.render(&mut drawer, false)?;
         } else {
-            // if not dirty, must at least figure out where the cursor position is
-            buffer.render(&mut drawer, true)?;
+            // go to the cursor pos and save it
+            drawer.cur_pos = buffer.cursor_coord;
+            drawer.draw(DrawInstruction::SaveCursor)?;
         }
         // move to end of buffer
         drawer.cur_pos = buffer.draw_end_pos;
