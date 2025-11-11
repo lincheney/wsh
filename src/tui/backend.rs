@@ -61,7 +61,7 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
         self.last_pos = pos;
     }
 
-    fn move_to_pos(&mut self, pos: (u16, u16)) -> std::io::Result<()> {
+    pub fn move_to_pos(&mut self, pos: (u16, u16)) -> std::io::Result<()> {
         if pos.0 != self.last_pos.0 {
             queue!(self.writer, MoveToColumn(pos.0))?;
         }
@@ -81,11 +81,13 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
                 self.move_to_pos(self.cur_pos)?;
             } else {
                 // oh tricky
+                // in order to get back to the very very edge of the screen, we have to reprint the
+                // char just before
+                // TODO what about when it is a multi width char
                 let pos = (self.term_width() - 1, self.cur_pos.1);
                 self.move_to_pos(pos)?;
                 let cell = self.buffer[pos].clone();
                 self.draw_cell(&cell, true)?;
-                log::debug!("DEBUG(tends) \t{}\t= {:?}", stringify!(self.cur_pos), self.cur_pos);
             }
         }
         Ok(())

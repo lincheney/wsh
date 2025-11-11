@@ -349,8 +349,7 @@ pub struct Tui {
     widgets: Widgets,
     buffer: Buffer,
     pub dirty: bool,
-
-    old_cursor_coord: (u16, u16),
+    // TODO move this into status bar struct
     status_bar_buffer: Buffer,
 }
 
@@ -493,6 +492,7 @@ impl Tui {
         // refresh status bar
         // need to refresh this FIRST
         // to get the bar height
+        // as it in turn restricts the height available for other widgets
         let status_bar_height = if let Some(ref mut widget) = status_bar.inner {
             if status_bar.dirty {
                 widget.line_count = widget.line_count(area, &mut self.widgets.line_count_buffer);
@@ -512,25 +512,30 @@ impl Tui {
             self.widgets.height = buffer_nonempty_height(&self.widgets.buffer).saturating_sub(drawer.cur_pos.1);
         }
         let new_height = (self.widgets.height, status_bar.inner.as_ref().map_or(0, |w| w.line_count));
-        log::debug!("DEBUG(loamy) \t{}\t= {:?}", stringify!((old_height,new_height)), (old_height,new_height));
 
 
         // allocate enough height for the widgets
-        if new_height.0 + new_height.1 > old_height.0 + old_height.1 {
+        let resize = new_height.0 + new_height.1 > old_height.0 + old_height.1;
+        if resize {
             // go back to the cursor, this is important since adding more screen lines can change where the cursor is
             queue!(drawer.writer, cursor::RestorePosition)?;
             // allocate height
             allocate_height(drawer.writer, new_height.0 + new_height.1 + buffer.draw_end_pos.1 - buffer.cursor_coord.1)?;
             // save the new position
             queue!(drawer.writer, cursor::SavePosition)?;
-            // clear the extra lines
-            for y in old_height.0 + old_height.1 .. new_height.1 + new_height.1 {
-                drawer.clear_cells((0, buffer.draw_end_pos.1 + y), area.width);
+            // clear the old status bar
+            if old_height.1 > 0 {
+                drawer.move_to_pos((0, buffer.draw_end_pos.1 + old_height.0 + 1))?;
+                queue!(drawer.writer, Clear(ClearType::FromCursorDown))?;
             }
-            status_bar.dirty = true;
+            // clear the extra lines
+            for y in buffer.draw_end_pos.1 + old_height.0 .. area.height {
+                drawer.clear_cells((0, y), area.width);
+            }
         }
 
         if clear || self.dirty {
+            drawer.cur_pos = buffer.draw_end_pos;
             // redraw widgets
             for line in self.widgets.buffer.content.chunks(area.width as _).take(self.widgets.height as _).skip(drawer.cur_pos.1 as usize) {
                 drawer.draw(DrawInstruction::Newline)?;
@@ -539,18 +544,13 @@ impl Tui {
                 }
                 drawer.draw(DrawInstruction::ClearRestOfLine)?;
             }
-            if self.widgets.height < old_height.0 {
-                for _ in self.widgets.height .. old_height.0 {
-                    drawer.draw(DrawInstruction::Newline)?;
-                }
-            }
         } else {
             // if not redrawn, just move to where it should end
             drawer.cur_pos = (area.width, self.widgets.height);
         }
 
         if status_bar_height > 0 {
-            if clear || status_bar.dirty {
+            if clear || status_bar.dirty || resize {
                 // redraw status bar
                 // go to the bottom of the screen
                 queue!(
