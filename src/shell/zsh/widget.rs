@@ -113,7 +113,7 @@ impl<'a, 'b> ZleWidget<'a, 'b> {
         unsafe {
             bindings::zmod.mult = opts.times.into();
             bindings::insmode = opts.insert.into();
-            return bindings::execzlefunc(ptr.as_ptr(), args_ptr, 0, 0);
+            bindings::execzlefunc(ptr.as_ptr(), args_ptr, 0, 0)
         }
     }
 

@@ -128,7 +128,7 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
                 queue!(self.writer, SavePosition)?
             },
         }
-        return Ok(())
+        Ok(())
     }
 
     pub fn draw_cell(&mut self, cell: &Cell, force: bool) -> std::io::Result<()> {

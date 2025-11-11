@@ -230,10 +230,10 @@ fn recurse_into_subshells(cmd: &BStr, tokens: &mut Vec<Token>, range_offset: usi
     while i < tokens.len() {
 
         let slice = &mut tokens[i..];
-        let tok = match slice {
+        let tok = match *slice {
 
             // [$><=](...)
-            &mut [
+            [
                 Token{kind: Some(TokenKind::Token(token::String | token::Qstring | token::OutangProc | token::Inang | token::Equals)), ..},
                 Token{kind: Some(TokenKind::Token(token::Inpar)), ..},
   ref mut tok @ Token{kind: None | Some(TokenKind::Lextok(lextok::STRING | lextok::LEXERR)), ..},
@@ -241,21 +241,21 @@ fn recurse_into_subshells(cmd: &BStr, tokens: &mut Vec<Token>, range_offset: usi
             ..] => Some((tok, 4)),
 
             // [$><=](...
-            &mut [
+            [
                 Token{kind: Some(TokenKind::Token(token::String | token::Qstring | token::OutangProc | token::Inang | token::Equals)), ..},
                 Token{kind: Some(TokenKind::Token(token::Inpar)), ..},
   ref mut tok @ Token{kind: None | Some(TokenKind::Lextok(lextok::STRING | lextok::LEXERR)), ..},
             ] => Some((tok, 3)),
 
             // `...`
-            &mut [
+            [
                 Token{kind: Some(TokenKind::Token(token::Tick | token::Qtick)), ..},
   ref mut tok @ Token{kind: None | Some(TokenKind::Lextok(lextok::STRING | lextok::LEXERR)), ..},
                 Token{kind: Some(TokenKind::Token(token::Tick | token::Qtick)), ..},
             ..] => Some((tok, 3)),
 
             // `...
-            &mut [
+            [
                 Token{kind: Some(TokenKind::Token(token::Tick | token::Qtick)), ..},
   ref mut tok @ Token{kind: None | Some(TokenKind::Lextok(lextok::STRING | lextok::LEXERR)), ..},
             ] => Some((tok, 2)),

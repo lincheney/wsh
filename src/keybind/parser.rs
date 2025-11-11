@@ -343,7 +343,7 @@ impl Parser {
 
         let mut len = 1;
         let key = match c {
-            b'\x7f'             => Key::Backspace.into(),
+            b'\x7f'             => Key::Backspace,
             b'\r' | b'\n'       => Key::Enter,
             b'\t' | b' '..=b'~' => Key::Char((*c).into()),
             // utf8

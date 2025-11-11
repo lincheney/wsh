@@ -6,14 +6,13 @@ use std::os::raw::{c_char, c_int};
 use std::ptr::null_mut;
 use std::sync::{Arc, LazyLock, OnceLock, Mutex};
 use std::ffi::CString;
-use std::cell::RefCell;
 use anyhow::Result;
 use crate::shell::zsh;
 use crate::fork_lock::{RawForkLock, ForkLock};
 
 static FORK_LOCK: RawForkLock = RawForkLock::new();
 
-type GlobalState = (Ui, RefCell<TrampolineIn>, tokio::runtime::Runtime);
+type GlobalState = (Ui, Mutex<TrampolineIn>, tokio::runtime::Runtime);
 static STATE: ForkLock<'static, Mutex<Option<Arc<GlobalState>>>> = FORK_LOCK.wrap(Mutex::new(None));
 
 fn try_get_state() -> Option<Arc<GlobalState>> {
@@ -65,7 +64,7 @@ fn get_or_init_state() -> Result<(bool, Arc<GlobalState>)> {
             Ok((ui, trampoline))
         });
         let (ui, trampoline) = result?;
-        store.get_or_insert(Arc::new((ui, RefCell::new(trampoline), runtime)))
+        store.get_or_insert(Arc::new((ui, Mutex::new(trampoline), runtime)))
     };
 
     Ok((new, state.clone()))
@@ -74,7 +73,7 @@ fn get_or_init_state() -> Result<(bool, Arc<GlobalState>)> {
 fn main() -> Result<Option<BString>> {
     let (new, state) = get_or_init_state()?;
     let (_, trampoline, runtime) = &*state;
-    Ok(runtime.block_on(trampoline.borrow_mut().jump_in(!new)))
+    Ok(runtime.block_on(trampoline.lock().unwrap().jump_in(!new)))
 }
 
 unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _options: zsh_sys::Options, _func: c_int) -> c_int {

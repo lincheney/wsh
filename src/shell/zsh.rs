@@ -43,7 +43,7 @@ pub fn execstring<S: AsRef<BStr>>(cmd: S, opts: ExecstringOpts) -> c_long {
             context.unwrap_or(null_mut()),
         );
     }
-    return get_return_code()
+    get_return_code()
 }
 
 pub fn get_return_code() -> c_long {
