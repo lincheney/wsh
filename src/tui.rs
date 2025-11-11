@@ -351,8 +351,6 @@ pub struct Tui {
     widgets: Widgets,
     buffer: Buffer,
     pub dirty: bool,
-    // TODO move this into status bar struct
-    status_bar_buffer: Buffer,
 }
 
 impl Tui {
@@ -454,7 +452,7 @@ impl Tui {
         let area = Rect{x: 0, y: 0, width, height: max_height};
         self.buffer.resize(area);
         self.widgets.buffer.resize(area);
-        self.status_bar_buffer.resize(area);
+        status_bar.buffer.resize(area);
 
         // quit early if nothing is dirty
         if !clear && !prompt.dirty && !buffer.dirty && !self.dirty && !status_bar.dirty {
@@ -493,8 +491,8 @@ impl Tui {
         let status_bar_height = if let Some(ref mut widget) = status_bar.inner {
             if status_bar.dirty {
                 widget.line_count = widget.line_count(area, &mut self.widgets.line_count_buffer);
-                self.status_bar_buffer.reset();
-                widget.render(area, &mut self.status_bar_buffer);
+                status_bar.buffer.reset();
+                widget.render(area, &mut status_bar.buffer);
             }
             widget.line_count
         } else {
@@ -543,13 +541,14 @@ impl Tui {
                 // go to the bottom of the screen
                 queue!(
                     drawer.writer,
-                    // Clear(ClearType::FromCursorDown),
+                    // i dont actually know how far down the bottom of the screen is
+                    // so just go down by a bigger than amount than it could possibly be
                     MoveDown(area.height * 10),
                     MoveUp(status_bar_height - 1),
                     cursor::MoveToColumn(0),
                 )?;
                 drawer.set_pos((0, area.height - status_bar_height));
-                let lines = self.status_bar_buffer.content.chunks(area.width as _).take(status_bar_height as _);
+                let lines = status_bar.buffer.content.chunks(area.width as _).take(status_bar_height as _);
                 drawer.draw_lines(lines)?;
                 // clear everything else below
                 drawer.clear_to_end_of_screen()?;

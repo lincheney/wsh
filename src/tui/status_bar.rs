@@ -2,6 +2,7 @@
 pub struct StatusBar {
     pub inner: Option<super::Widget>,
     pub dirty: bool,
+    pub buffer: ratatui::buffer::Buffer,
 }
 
 impl StatusBar {
