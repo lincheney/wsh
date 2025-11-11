@@ -210,7 +210,7 @@ impl Ui {
         let mut ui = this.inner.borrow_mut().await;
         let ui = &mut *ui;
 
-        if !(ui.dirty || ui.buffer.dirty || ui.prompt.dirty || ui.tui.dirty) {
+        if !(ui.dirty || ui.buffer.dirty || ui.prompt.dirty || ui.tui.dirty || ui.status_bar.dirty) {
             return Ok(())
         }
 
