@@ -516,6 +516,7 @@ impl Tui {
             allocate_height(drawer.writer, new_height.0 + new_height.1 + buffer.draw_end_pos.1 - buffer.cursor_coord.1)?;
             // clear the old status bar
             if old_height.1 > 0 {
+                drawer.cur_pos = (0, buffer.draw_end_pos.1 + old_height.0 + 1);
                 drawer.clear_to_end_of_screen()?;
             }
         }
