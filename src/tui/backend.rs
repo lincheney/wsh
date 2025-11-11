@@ -2,7 +2,7 @@ use unicode_width::UnicodeWidthStr;
 use std::io::Write;
 use crossterm::{
     queue,
-    cursor::{MoveUp, MoveDown, MoveToColumn, SavePosition, RestorePosition},
+    cursor::{MoveUp, MoveDown, MoveToColumn, SavePosition},
     terminal::{Clear, ClearType},
     style::{
         Print,
@@ -91,13 +91,13 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
         Ok(())
     }
 
-    fn clear_cells(&mut self, (x, y): (u16, u16), n: u16) {
+    pub fn clear_cells(&mut self, (x, y): (u16, u16), n: u16) {
         for i in 0..n {
             self.buffer[(x + i, y)].reset();
         }
     }
 
-    pub fn reset(&mut self) -> std::io::Result<()> {
+    pub fn reset_colours(&mut self) -> std::io::Result<()> {
         queue!(
             self.writer,
             SetForegroundColor(CColor::Reset),

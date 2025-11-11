@@ -283,8 +283,17 @@ impl Buffer {
             }
         }
 
-        drawer.draw(DrawInstruction::ClearRestOfLine)?;
+        let old_end_pos = self.draw_end_pos;
         self.draw_end_pos = drawer.cur_pos;
+
+        // clear any old lines below
+        if self.draw_end_pos.1 < old_end_pos.1 {
+            for _ in self.draw_end_pos.1 .. old_end_pos.1 {
+                drawer.draw(DrawInstruction::Newline)?;
+            }
+        }
+        // clear the last/current line
+        drawer.draw(DrawInstruction::ClearRestOfLine)?;
 
         Ok(())
     }

@@ -417,6 +417,13 @@ impl Tui {
         self.dirty = true;
     }
 
+    pub fn reset(&mut self) {
+        self.buffer.reset();
+        self.widgets.buffer.reset();
+        self.widgets.height = 0;
+        self.dirty = true;
+    }
+
     pub async fn draw<W: Write>(
         &mut self,
         writer: &mut W,
@@ -435,33 +442,33 @@ impl Tui {
             self.widgets.height = 0;
         }
 
+        // take up at most 2/3 of the screen
         let max_height = (height * 2 / 3).max(1);
+        // reset all if dimensions have changed
         if max_height != self.widgets.max_height || width != self.widgets.width {
             clear = true;
         }
 
+        // resize buffers
         let area = Rect{x: 0, y: 0, width, height: max_height};
         self.buffer.resize(area);
         self.widgets.buffer.resize(area);
         self.status_bar_buffer.resize(area);
 
+        // quit early if nothing is dirty
         if !clear && !prompt.dirty && !buffer.dirty && !self.dirty && !status_bar.dirty {
             return Ok(())
         }
 
         queue!(writer, crossterm::terminal::BeginSynchronizedUpdate)?;
         let mut drawer = backend::Drawer::new(&mut self.buffer, writer, buffer.cursor_coord);
-        drawer.reset()?;
+        drawer.reset_colours()?;
 
         // redraw the prompt
         if clear || prompt.dirty {
             prompt.refresh_prompt(&mut shell.lock().await, area.width);
             // move back to top of drawing area and redraw
-            queue!(
-                drawer.writer,
-                cursor::MoveToColumn(0),
-                MoveUp(buffer.cursor_coord.1),
-            )?;
+            drawer.cur_pos = (0, 0);
             drawer.writer.write_all(prompt.as_bytes())?;
             drawer.set_pos((prompt.width, prompt.height - 1));
         } else {
@@ -475,11 +482,13 @@ impl Tui {
         } else {
             // if not dirty, must at least figure out where the cursor position is
             buffer.render(&mut drawer, true)?;
-            drawer.cur_pos = buffer.draw_end_pos;
         }
+        // move to end of buffer
+        drawer.cur_pos = buffer.draw_end_pos;
 
-        let offset = drawer.cur_pos.1;
-        let area = Rect{ y: area.y + offset, height: area.height - offset, ..area };
+        // restrict widgets to after the buffer
+        let area = Rect{ y: drawer.cur_pos.1, height: area.height - drawer.cur_pos.1, ..area };
+        let old_height = (self.widgets.height, status_bar.inner.as_ref().map_or(0, |w| w.line_count));
 
         // refresh status bar
         // need to refresh this FIRST
@@ -487,36 +496,38 @@ impl Tui {
         let status_bar_height = if let Some(ref mut widget) = status_bar.inner {
             if status_bar.dirty {
                 widget.line_count = widget.line_count(area, &mut self.widgets.line_count_buffer);
+                self.status_bar_buffer.reset();
+                widget.render(area, &mut self.status_bar_buffer);
             }
             widget.line_count
         } else {
             0
         };
 
-        let old_height = self.widgets.height;
+        // refresh widgets
         if clear || self.dirty {
-            // refresh widgets
             let area = Rect{ height: area.height - status_bar_height, ..area };
             self.widgets.buffer.reset();
             self.widgets.refresh(area, max_height);
-            self.widgets.height = buffer_nonempty_height(&self.widgets.buffer).max(offset);
+            self.widgets.height = buffer_nonempty_height(&self.widgets.buffer).saturating_sub(drawer.cur_pos.1);
         }
+        let new_height = (self.widgets.height, status_bar.inner.as_ref().map_or(0, |w| w.line_count));
+        log::debug!("DEBUG(loamy) \t{}\t= {:?}", stringify!((old_height,new_height)), (old_height,new_height));
 
-        if (clear || status_bar.dirty) && status_bar_height > 0 && let Some(ref widget) = status_bar.inner {
-            // redraw status bar
-            self.status_bar_buffer.reset();
-            widget.render(area, &mut self.status_bar_buffer);
-        }
 
         // allocate enough height for the widgets
-        let height = self.widgets.height + status_bar_height;
-        if height > 0 && (clear || self.dirty || status_bar.dirty) {
+        if new_height.0 + new_height.1 > old_height.0 + old_height.1 {
             // go back to the cursor, this is important since adding more screen lines can change where the cursor is
             queue!(drawer.writer, cursor::RestorePosition)?;
             // allocate height
-            allocate_height(drawer.writer, height + buffer.draw_end_pos.1 - buffer.cursor_coord.1)?;
+            allocate_height(drawer.writer, new_height.0 + new_height.1 + buffer.draw_end_pos.1 - buffer.cursor_coord.1)?;
             // save the new position
             queue!(drawer.writer, cursor::SavePosition)?;
+            // clear the extra lines
+            for y in old_height.0 + old_height.1 .. new_height.1 + new_height.1 {
+                drawer.clear_cells((0, buffer.draw_end_pos.1 + y), area.width);
+            }
+            status_bar.dirty = true;
         }
 
         if clear || self.dirty {
@@ -528,13 +539,18 @@ impl Tui {
                 }
                 drawer.draw(DrawInstruction::ClearRestOfLine)?;
             }
+            if self.widgets.height < old_height.0 {
+                for _ in self.widgets.height .. old_height.0 {
+                    drawer.draw(DrawInstruction::Newline)?;
+                }
+            }
         } else {
             // if not redrawn, just move to where it should end
             drawer.cur_pos = (area.width, self.widgets.height);
         }
 
         if status_bar_height > 0 {
-            if clear || status_bar.dirty || old_height != self.widgets.height {
+            if clear || status_bar.dirty {
                 // redraw status bar
                 // go to the bottom of the screen
                 queue!(
@@ -556,17 +572,23 @@ impl Tui {
                     }
                     drawer.draw(DrawInstruction::ClearRestOfLine)?;
                 }
+                if status_bar_height < old_height.1 {
+                    for _ in status_bar_height .. old_height.1 {
+                        drawer.draw(DrawInstruction::Newline)?;
+                    }
+                }
             } else {
                 // if not redrawn, just move to where it should end
                 drawer.cur_pos = (area.width, area.height - 1);
             }
         }
 
+        // clear everything else below unless we are already at the end
         if drawer.cur_pos != (area.width, area.height - 1) {
             queue!(drawer.writer, Clear(ClearType::FromCursorDown))?;
         }
 
-        drawer.reset()?;
+        drawer.reset_colours()?;
         queue!(writer, cursor::RestorePosition)?;
         execute!(writer, crossterm::terminal::EndSynchronizedUpdate)?;
 

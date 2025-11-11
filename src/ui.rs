@@ -600,6 +600,8 @@ impl UiInner {
 
     fn reset(&mut self, _shell: &mut ShellInner) {
         self.buffer.reset();
+        self.tui.reset();
+        self.status_bar.reset();
         self.dirty = true;
         // shell.set_curhist(i64::MAX);
     }
