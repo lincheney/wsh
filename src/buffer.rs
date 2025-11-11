@@ -3,7 +3,7 @@ use std::io::Write;
 use bstr::{BString, ByteSlice};
 use unicode_width::UnicodeWidthStr;
 use ratatui::style::{Style, Color};
-use crate::tui::{DrawInstruction, Drawer};
+use crate::tui::{Drawer};
 
 #[derive(Debug)]
 pub struct Edit {
@@ -224,23 +224,19 @@ impl Buffer {
         self.byte_pos(self.cursor)
     }
 
-    pub fn render<W :Write>(&mut self, drawer: &mut Drawer<W>, only_up_to_cursor: bool) -> std::io::Result<()> {
+    pub fn render<W :Write>(&mut self, drawer: &mut Drawer<W>) -> std::io::Result<()> {
+
+        let cursor = self.cursor_byte_pos();
 
         if self.contents.is_empty() {
-            drawer.draw(DrawInstruction::SaveCursor)?;
-            drawer.draw(DrawInstruction::ClearRestOfLine)?;
+            drawer.clear_to_end_of_line()?;
             self.cursor_coord = drawer.cur_pos;
             self.draw_end_pos = drawer.cur_pos;
             return Ok(())
         }
 
-        let cursor = self.cursor_byte_pos();
         if cursor == 0 {
-            drawer.draw(DrawInstruction::SaveCursor)?;
             self.cursor_coord = drawer.cur_pos;
-            if only_up_to_cursor {
-                return Ok(())
-            }
         }
 
         let escape_style = Style::default().fg(Color::Gray);
@@ -254,7 +250,7 @@ impl Buffer {
             }
 
             if c == "\n" {
-                drawer.draw(DrawInstruction::Newline)?;
+                drawer.goto_newline()?;
             } else if c.width() > 0 && (start + 1 != end || c != "\u{FFFD}") {
                 let mut cell = cell.clone();
                 cell.set_symbol(c);
@@ -273,11 +269,7 @@ impl Buffer {
             }
 
             if end == cursor {
-                drawer.draw(DrawInstruction::SaveCursor)?;
                 self.cursor_coord = drawer.cur_pos;
-                if only_up_to_cursor {
-                    return Ok(())
-                }
             }
 
             if !stack.0.iter().all(|h| h.end > i + 1) {
@@ -292,11 +284,11 @@ impl Buffer {
         // clear any old lines below
         if self.draw_end_pos.1 < old_end_pos.1 {
             for _ in self.draw_end_pos.1 .. old_end_pos.1 {
-                drawer.draw(DrawInstruction::Newline)?;
+                drawer.goto_newline()?;
             }
         }
         // clear the last/current line
-        drawer.draw(DrawInstruction::ClearRestOfLine)?;
+        drawer.clear_to_end_of_line()?;
 
         Ok(())
     }

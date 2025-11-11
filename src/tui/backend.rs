@@ -1,8 +1,8 @@
 use unicode_width::UnicodeWidthStr;
-use std::io::Write;
+use std::io::{Result, Write};
 use crossterm::{
     queue,
-    cursor::{MoveUp, MoveDown, MoveToColumn, SavePosition},
+    cursor::{MoveUp, MoveDown, MoveToColumn},
     terminal::{Clear, ClearType},
     style::{
         Print,
@@ -20,12 +20,6 @@ use ratatui::{
     style::{Color, Modifier},
     buffer::{Cell, Buffer},
 };
-
-pub enum DrawInstruction {
-    ClearRestOfLine,
-    Newline,
-    SaveCursor,
-}
 
 pub struct Drawer<'a, 'b, W: Write> {
     buffer: &'a mut Buffer,
@@ -61,7 +55,7 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
         self.last_pos = pos;
     }
 
-    pub fn move_to_pos(&mut self, pos: (u16, u16)) -> std::io::Result<()> {
+    pub fn move_to_pos(&mut self, pos: (u16, u16)) -> Result<()> {
         if pos.0 != self.last_pos.0 {
             queue!(self.writer, MoveToColumn(pos.0))?;
         }
@@ -75,7 +69,7 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
         Ok(())
     }
 
-    fn move_to_cur_pos(&mut self) -> std::io::Result<()> {
+    pub fn move_to_cur_pos(&mut self) -> Result<()> {
         if self.cur_pos != self.last_pos {
             if self.cur_pos.0 < self.term_width() {
                 self.move_to_pos(self.cur_pos)?;
@@ -99,7 +93,7 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
         }
     }
 
-    pub fn reset_colours(&mut self) -> std::io::Result<()> {
+    pub fn reset_colours(&mut self) -> Result<()> {
         queue!(
             self.writer,
             SetForegroundColor(CColor::Reset),
@@ -109,29 +103,69 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
         )
     }
 
-    pub fn draw(&mut self, inst: DrawInstruction) -> std::io::Result<()> {
-        match inst {
-            DrawInstruction::ClearRestOfLine => {
-                // clear the rest of this line
-                if self.cur_pos.0 < self.term_width() {
-                    self.move_to_cur_pos()?;
-                    self.clear_cells(self.cur_pos, self.term_width() - self.cur_pos.0);
-                    queue!(self.writer, Clear(ClearType::UntilNewLine))?;
+    pub fn goto_newline(&mut self) -> Result<()> {
+        self.clear_to_end_of_line()?;
+        self.cur_pos = (0, self.cur_pos.1 + 1);
+        Ok(())
+    }
+
+    pub fn clear_to_end_of_line(&mut self) -> Result<()> {
+        // clear the rest of this line
+        let width = self.term_width();
+        if self.cur_pos.0 < width {
+
+            let i = self.buffer.index_of(self.cur_pos.0, self.cur_pos.1);
+            let cells = &mut self.buffer.content[i..i + (width - self.cur_pos.1) as usize];
+
+            if !cells.iter().all(super::cell_is_empty) {
+                for c in cells {
+                    c.reset();
                 }
-            },
-            DrawInstruction::Newline => {
-                self.draw(DrawInstruction::ClearRestOfLine)?;
-                self.cur_pos = (0, self.cur_pos.1 + 1);
-            },
-            DrawInstruction::SaveCursor => {
                 self.move_to_cur_pos()?;
-                queue!(self.writer, SavePosition)?
-            },
+                queue!(self.writer, Clear(ClearType::UntilNewLine))?;
+            }
+
         }
         Ok(())
     }
 
-    pub fn draw_cell(&mut self, cell: &Cell, force: bool) -> std::io::Result<()> {
+    pub fn clear_to_end_of_screen(&mut self) -> Result<()> {
+        // clear everything from cursor onwards
+        let width = self.term_width();
+        let i = if self.cur_pos.0 < width {
+            self.buffer.index_of(self.cur_pos.0, self.cur_pos.1)
+        } else if self.cur_pos.1 + 1 < self.buffer.area.height {
+            self.buffer.index_of(0, self.cur_pos.1 + 1)
+        } else {
+            // we already at bottom of screen
+            return Ok(())
+        };
+        let cells = &mut self.buffer.content[i..];
+
+        if !cells.iter().all(super::cell_is_empty) {
+            for c in cells {
+                c.reset();
+            }
+            self.move_to_cur_pos()?;
+            queue!(self.writer, Clear(ClearType::FromCursorDown))?;
+        }
+        Ok(())
+    }
+
+    pub fn draw_lines<'c, I: Iterator<Item=&'c [Cell]>>(&mut self, lines: I) -> Result<()> {
+        for (i, line) in lines.enumerate() {
+            if i > 0 {
+                self.goto_newline()?;
+            }
+            for cell in line {
+                self.draw_cell(cell, false)?;
+            }
+        }
+        self.clear_to_end_of_line()?;
+        Ok(())
+    }
+
+    pub fn draw_cell(&mut self, cell: &Cell, force: bool) -> Result<()> {
         let cell_width = cell.symbol().width() as u16;
         let will_wrap = self.cur_pos.0 + cell_width > self.term_width();
 
@@ -179,7 +213,7 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
         Ok(())
     }
 
-    fn draw_modifier(&mut self, new: Modifier) -> std::io::Result<()> {
+    fn draw_modifier(&mut self, new: Modifier) -> Result<()> {
         //use crossterm::Attribute;
         let removed = self.modifier - new;
         if removed.contains(Modifier::REVERSED) {

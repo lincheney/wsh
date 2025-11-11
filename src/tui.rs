@@ -17,7 +17,7 @@ use ratatui::{
     buffer::Buffer,
 };
 mod backend;
-pub use backend::{DrawInstruction, Drawer};
+pub use backend::{Drawer};
 pub mod status_bar;
 pub mod ansi;
 
@@ -52,13 +52,15 @@ pub fn allocate_height<W: Write>(stdout: &mut W, height: u16) -> Result<()> {
     Ok(())
 }
 
+fn cell_is_empty(cell: &ratatui::buffer::Cell) -> bool {
+    cell.symbol() == " " && cell.bg == Color::Reset && !cell.modifier.intersects(Modifier::UNDERLINED | Modifier::REVERSED)
+}
+
 fn buffer_nonempty_height(buffer: &Buffer) -> u16 {
     let trailing_empty_lines = buffer.content()
         .chunks(buffer.area.width as _)
         .rev()
-        .take_while(|line| line.iter().all(|c| {
-            c.symbol() == " " && c.bg == Color::Reset && !c.modifier.intersects(Modifier::UNDERLINED | Modifier::REVERSED)
-        }))
+        .take_while(|line| line.iter().all(cell_is_empty))
         .count();
     buffer.area.height - trailing_empty_lines as u16
 }
@@ -459,8 +461,8 @@ impl Tui {
             return Ok(())
         }
 
-        queue!(writer, crossterm::terminal::BeginSynchronizedUpdate)?;
         let mut drawer = backend::Drawer::new(&mut self.buffer, writer, buffer.cursor_coord);
+        queue!(drawer.writer, crossterm::terminal::BeginSynchronizedUpdate)?;
         drawer.reset_colours()?;
 
         // redraw the prompt
@@ -470,24 +472,18 @@ impl Tui {
             drawer.cur_pos = (0, 0);
             drawer.writer.write_all(prompt.as_bytes())?;
             drawer.set_pos((prompt.width, prompt.height - 1));
-        } else {
-            // if not redrawn, just move to where it should end
-            drawer.cur_pos = (prompt.width, prompt.height - 1);
         }
 
         // redraw the buffer
         if clear || buffer.dirty {
-            buffer.render(&mut drawer, false)?;
-        } else {
-            // go to the cursor pos and save it
-            drawer.cur_pos = buffer.cursor_coord;
-            drawer.draw(DrawInstruction::SaveCursor)?;
+            drawer.cur_pos = (prompt.width, prompt.height - 1);
+            buffer.render(&mut drawer)?;
         }
         // move to end of buffer
         drawer.cur_pos = buffer.draw_end_pos;
 
         // restrict widgets to after the buffer
-        let area = Rect{ y: drawer.cur_pos.1, height: area.height - drawer.cur_pos.1, ..area };
+        let area = Rect{ y: buffer.draw_end_pos.1, height: area.height - buffer.draw_end_pos.1, ..area };
         let old_height = (self.widgets.height, status_bar.inner.as_ref().map_or(0, |w| w.line_count));
 
         // refresh status bar
@@ -518,37 +514,28 @@ impl Tui {
         // allocate enough height for the widgets
         let resize = new_height.0 + new_height.1 > old_height.0 + old_height.1;
         if resize {
-            // go back to the cursor, this is important since adding more screen lines can change where the cursor is
-            queue!(drawer.writer, cursor::RestorePosition)?;
             // allocate height
             allocate_height(drawer.writer, new_height.0 + new_height.1 + buffer.draw_end_pos.1 - buffer.cursor_coord.1)?;
-            // save the new position
-            queue!(drawer.writer, cursor::SavePosition)?;
             // clear the old status bar
             if old_height.1 > 0 {
-                drawer.move_to_pos((0, buffer.draw_end_pos.1 + old_height.0 + 1))?;
-                queue!(drawer.writer, Clear(ClearType::FromCursorDown))?;
-            }
-            // clear the extra lines
-            for y in buffer.draw_end_pos.1 + old_height.0 .. area.height {
-                drawer.clear_cells((0, y), area.width);
+                drawer.clear_to_end_of_screen()?;
             }
         }
 
-        if clear || self.dirty {
+        if (clear || self.dirty) && self.widgets.height > 0 {
             drawer.cur_pos = buffer.draw_end_pos;
             // redraw widgets
-            for line in self.widgets.buffer.content.chunks(area.width as _).take(self.widgets.height as _).skip(drawer.cur_pos.1 as usize) {
-                drawer.draw(DrawInstruction::Newline)?;
-                for cell in line {
-                    drawer.draw_cell(cell, false)?;
-                }
-                drawer.draw(DrawInstruction::ClearRestOfLine)?;
-            }
-        } else {
-            // if not redrawn, just move to where it should end
-            drawer.cur_pos = (area.width, self.widgets.height);
+            let lines = self.widgets.buffer.content
+                .chunks(area.width as _)
+                .take(self.widgets.height as _)
+                .skip(buffer.draw_end_pos.1 as usize);
+            drawer.goto_newline()?;
+            drawer.draw_lines(lines)?;
         }
+
+        // save cursor position so we can go back to it
+        drawer.move_to_pos(buffer.cursor_coord)?;
+        queue!(drawer.writer, cursor::SavePosition)?;
 
         if status_bar_height > 0 {
             if clear || status_bar.dirty || resize {
@@ -556,41 +543,22 @@ impl Tui {
                 // go to the bottom of the screen
                 queue!(
                     drawer.writer,
-                    Clear(ClearType::FromCursorDown),
+                    // Clear(ClearType::FromCursorDown),
                     MoveDown(area.height * 10),
                     MoveUp(status_bar_height - 1),
                     cursor::MoveToColumn(0),
                 )?;
                 drawer.set_pos((0, area.height - status_bar_height));
-
-                for (i, line) in self.status_bar_buffer.content.chunks(area.width as _).take(status_bar_height as _).enumerate() {
-                    if i > 0 {
-                        drawer.draw(DrawInstruction::Newline)?;
-                    }
-                    for cell in line {
-                        // always redraw in case we've scrolled
-                        drawer.draw_cell(cell, true)?;
-                    }
-                    drawer.draw(DrawInstruction::ClearRestOfLine)?;
-                }
-                if status_bar_height < old_height.1 {
-                    for _ in status_bar_height .. old_height.1 {
-                        drawer.draw(DrawInstruction::Newline)?;
-                    }
-                }
-            } else {
-                // if not redrawn, just move to where it should end
-                drawer.cur_pos = (area.width, area.height - 1);
+                let lines = self.status_bar_buffer.content.chunks(area.width as _).take(status_bar_height as _);
+                drawer.draw_lines(lines)?;
+                // clear everything else below
+                drawer.clear_to_end_of_screen()?;
             }
         }
 
-        // clear everything else below unless we are already at the end
-        if drawer.cur_pos != (area.width, area.height - 1) {
-            queue!(drawer.writer, Clear(ClearType::FromCursorDown))?;
-        }
-
         drawer.reset_colours()?;
-        queue!(writer, cursor::RestorePosition)?;
+        // go back to cursor
+        queue!(drawer.writer, cursor::RestorePosition)?;
         execute!(writer, crossterm::terminal::EndSynchronizedUpdate)?;
 
         self.dirty = false;
