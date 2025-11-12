@@ -48,7 +48,7 @@ impl RawForkLock {
     }
 
     fn remove_reader(&self) {
-        if self.counter.fetch_sub(2, Ordering::AcqRel) == 1 {
+        if self.counter.fetch_sub(2, Ordering::AcqRel) == 3 {
             self.condvar.notify_all();
         }
     }

@@ -75,8 +75,8 @@ macro_rules! event_types {
         $(
             #[allow(unused_parens)]
             async fn [<trigger_ $name _callbacks>](&self, val: ($($arg),*)) {
-                let this = self.get();
                 let callbacks = {
+                    let this = self.get();
                     let callbacks = &this.event_callbacks.lock().unwrap().[<callbacks_ $name>];
                     if callbacks.is_empty() {
                         return;
