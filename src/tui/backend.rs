@@ -115,7 +115,7 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
         if self.cur_pos.0 < width {
 
             let i = self.buffer.index_of(self.cur_pos.0, self.cur_pos.1);
-            let cells = &mut self.buffer.content[i..i + (width - self.cur_pos.1) as usize];
+            let cells = &mut self.buffer.content[i..i + (width - self.cur_pos.0) as usize];
 
             if !cells.iter().all(super::cell_is_empty) {
                 for c in cells {
