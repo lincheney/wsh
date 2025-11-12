@@ -412,6 +412,8 @@ impl Parser {
                             _ => { len = 3; Event::Unknown },
                         }
                     },
+                    // no more data, probably just a single escape key
+                    None => Key::Escape.into(),
                     _ => {
                         // check for alt-key otherwise treat as a single escape key
                         (event, len) = self.parse_char(1, KeyModifiers::ALT).unwrap_or(Some((Key::Escape.into(), 0)))?;
