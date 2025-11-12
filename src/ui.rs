@@ -466,8 +466,6 @@ impl Ui {
             return Some(KeybindOutput::Value(Ok(true)))
         }
 
-        let guard = self.unlocked.read();
-        let this = &*guard;
         let mut shell = self.shell.lock().await;
         // look for a zle widget
         match shell.get_keybinding(buf)? {
@@ -479,13 +477,13 @@ impl Ui {
             KeybindValue::Widget(widget) if widget.is_self_insert() || widget.is_undefined_key() => None,
             KeybindValue::Widget(widget) if widget.is_accept_line() => {
                 drop(shell);
-                drop(guard);
                 Some(KeybindOutput::Value(self.accept_line().await))
             },
             KeybindValue::Widget(mut widget) => {
                 // execute the widget
                 // a widget may run subprocesses so lock the ui
                 let lock = self.has_foreground_process.lock().await;
+                let this = self.get();
                 let mut ui = this.inner.borrow_mut().await;
                 let buffer = ui.buffer.get_contents();
                 let cursor = ui.buffer.get_cursor();
@@ -496,24 +494,32 @@ impl Ui {
                 let (output, _) = tokio::task::block_in_place(|| widget.exec_and_get_output(None, [].into_iter())).unwrap();
                 let (new_buffer, new_cursor) = shell.get_zle_buffer();
                 let new_cursor = new_cursor.unwrap_or(new_buffer.len() as _) as _;
-
-                if new_buffer != *buffer {
-                    ui.buffer.set(Some(new_buffer.as_ref()), Some(new_cursor));
-                } else if new_cursor != cursor {
-                    ui.buffer.set_cursor(new_cursor);
-                }
+                let new_buffer = (new_buffer != *buffer).then_some(new_buffer);
+                let new_cursor = (new_cursor != cursor).then_some(new_cursor);
+                let accepted_line = shell.has_accepted_line();
 
                 // check for any output e.g. zle -M
                 if !output.is_empty() {
                     ui.tui.add_zle_message(output.as_ref());
                 }
+                ui.buffer.set(new_buffer.as_ref().map(|x| x.as_ref()), new_cursor);
+
                 drop(lock);
+                drop(shell);
+                drop(ui);
+                drop(this);
+
+                if new_buffer.is_some() || new_cursor.is_some() || !output.is_empty() {
+                    if new_buffer.is_some() {
+                        self.trigger_buffer_change_callbacks(()).await;
+                    }
+                    if let Err(e) = self.draw().await {
+                        return Some(KeybindOutput::Value(Err(e)))
+                    }
+                }
 
                 // this widget may have called accept-line somewhere inside
-                if shell.has_accepted_line() {
-                    drop(shell);
-                    drop(ui);
-                    drop(guard);
+                if accepted_line {
                     Some(KeybindOutput::Value(self.accept_line().await))
                 } else {
                     Some(KeybindOutput::Value(Ok(true)))
