@@ -1,5 +1,6 @@
 use std::default::Default;
 use std::io::Write;
+use unicode_width::UnicodeWidthStr;
 use anyhow::Result;
 use crossterm::{
     cursor,
@@ -144,29 +145,57 @@ pub struct Widget{
     text_overrides_style: bool,
 }
 
-pub fn render_text(
+fn render_indent(area: Rect, buffer: &mut Buffer, y: u16, line_width: u16, alignment: Alignment, style: Option<Style>) -> u16 {
+    let indent = match alignment {
+        Alignment::Left => return 0,
+        Alignment::Right => area.width.saturating_sub(line_width),
+        Alignment::Center => area.width.saturating_sub(line_width) / 2,
+    };
+
+    let index = buffer.index_of(0, y);
+    for cell in &mut buffer.content[index .. index + indent as usize] {
+        cell.reset();
+        if let Some(style) = style {
+            cell.set_style(style);
+        }
+    }
+    indent
+}
+
+fn render_text(
     area: Rect,
     buffer: &mut Buffer,
-    mut offset: (u16, u16),
     text: &Text,
     style: bool,
     override_style: Option<Style>,
-) -> (u16, u16) {
+) {
 
-    let mut new_offset = offset;
+    let mut offset = (0, 0);
     for line in text.iter() {
-        offset = new_offset;
         if offset.1 >= area.height {
             break
         }
 
+        let alignment = line.alignment.or(text.alignment).unwrap_or_default();
+        let indent_style = if style {
+            if let Some(style) = override_style {
+                Some(text.style.patch(line.style).patch(style))
+            } else {
+                Some(text.style.patch(line.style))
+            }
+        } else {
+            None
+        };
+        let mut line_width = line.width();
+        offset.0 = render_indent(area, buffer, offset.1, line_width as u16, alignment, indent_style);
+
         for graph in line.styled_graphemes(text.style) {
 
-            use unicode_width::UnicodeWidthStr;
             let width = graph.symbol.width();
             if width == 0 {
                 continue
             }
+            line_width -= width;
 
             let symbol = if graph.symbol.is_empty() { " " } else { graph.symbol };
             let cell = &mut buffer[(area.x + offset.0, area.y + offset.1)];
@@ -182,18 +211,16 @@ pub fn render_text(
 
             offset.0 += width as u16;
             if offset.0 >= area.width {
-                new_offset = (0, offset.1 + 1);
-                if new_offset.1 >= area.height {
-                    break
+                if offset.1 + 1 >= area.height {
+                    return
                 }
-                offset = new_offset;
+                offset = (0, offset.1 + 1);
+                offset.0 = render_indent(area, buffer, offset.1, line_width as u16, alignment, indent_style);
             }
         }
 
-        new_offset = (0, offset.1 + 1);
+        offset = (0, offset.1 + 1);
     }
-
-    offset
 }
 
 impl Widget {
@@ -217,7 +244,6 @@ impl Widget {
         render_text(
             area,
             buffer,
-            (0, 0),
             &self.inner,
             true,
             if self.text_overrides_style { Some(self.inner.style) } else { None },
@@ -236,7 +262,6 @@ impl Widget {
         render_text(
             area,
             buffer,
-            (0, 0),
             &self.inner,
             false,
             None,
