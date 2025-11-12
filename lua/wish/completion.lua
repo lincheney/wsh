@@ -68,4 +68,8 @@ function M.complete()
 
 end
 
+wish.add_event_callback('accept_line', function()
+    wish.set_message{id = msg, hidden = true}
+end)
+
 return M
