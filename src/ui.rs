@@ -264,10 +264,7 @@ impl Ui {
         if let Event::Key(event) = event {
             self.trigger_key_callbacks(event.into()).await;
             if let Some(result) = self.handle_key(event, event_buffer.as_ref()).await {
-                let result = result?;
-                self.trigger_buffer_change_callbacks(()).await;
-                self.draw().await?;
-                return Ok(result)
+                return result
             }
 
         }
