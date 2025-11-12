@@ -158,12 +158,15 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
                 self.goto_newline()?;
             }
             let mut skip = 0;
-            for cell in line {
-                if skip == 0 {
+            for (i, cell) in line.iter().enumerate() {
+                if skip > 0 {
+                    skip -= 1;
+                } else if super::cell_is_empty(cell) && line[i..].iter().all(super::cell_is_empty) {
+                    self.clear_to_end_of_line()?;
+                    break
+                } else {
                     skip = cell.symbol().width() - 1;
                     self.draw_cell(cell, false)?;
-                } else {
-                    skip -= 1;
                 }
             }
         }
