@@ -292,7 +292,7 @@ impl<'a> ShellInner<'a> {
     }
 
     pub fn unset_var(&mut self, name: &BStr) {
-        Variable::unset(name)
+        Variable::unset(name);
     }
 
     pub fn export_var(&mut self, name: &BStr) -> bool {

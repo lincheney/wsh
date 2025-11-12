@@ -19,7 +19,7 @@ impl Drop for RawForkLockReadGuard<'_> {
 
 pub struct RawForkLockWriteGuard<'a, 'b> {
     parent: &'a RawForkLock,
-    _lock: MutexGuard<'b, ()>,
+    lock: MutexGuard<'b, ()>,
 }
 
 impl RawForkLockWriteGuard<'_, '_> {
@@ -86,7 +86,7 @@ impl RawForkLock {
             lock = self.condvar.wait_while(lock, |()| self.counter.load(Ordering::Acquire) > 1).unwrap();
         }
 
-        RawForkLockWriteGuard{ parent: self, _lock: lock }
+        RawForkLockWriteGuard{ parent: self, lock }
     }
 
     pub const fn wrap<T>(&self, inner: T) -> ForkLock<'_, T> {
@@ -102,25 +102,23 @@ pub struct ForkLock<'a, T> {
 unsafe impl<T> Sync for ForkLock<'_, T> {}
 
 pub struct ForkLockReadGuard<'a, T> {
-    _guard: RawForkLockReadGuard<'a>,
-    _inner: &'a T,
+    guard: RawForkLockReadGuard<'a>,
+    inner: &'a T,
 }
 
 impl<'a, T> ForkLock<'a, T> {
     pub fn read(&self) -> ForkLockReadGuard<'_, T> {
         let guard = self.lock.read();
-        ForkLockReadGuard{ _guard: guard, _inner: &self.inner }
+        ForkLockReadGuard{ guard, inner: &self.inner }
     }
 
     pub fn read_with_lock(&self, lock: &'a RawForkLockWriteGuard) -> &T {
-        if !std::ptr::eq(self.lock, lock.parent) {
-            panic!()
-        }
+        assert!(std::ptr::eq(self.lock, lock.parent));
         &self.inner
     }
 }
 
-impl<'a, T: Clone> Clone for ForkLock<'a, T> {
+impl<T: Clone> Clone for ForkLock<'_, T> {
     fn clone(&self) -> Self {
         Self {
             lock: self.lock,
@@ -132,6 +130,6 @@ impl<'a, T: Clone> Clone for ForkLock<'a, T> {
 impl<T> Deref for ForkLockReadGuard<'_, T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
-        self._inner
+        self.inner
     }
 }

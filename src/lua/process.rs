@@ -257,7 +257,7 @@ struct OverridenStream {
 }
 
 impl OverridenStream {
-    fn new<A: AsRawFd, B: IntoRawFd>(fd: A, replacement: B) -> Self {
+    fn new<A: AsRawFd, B: IntoRawFd>(fd: &A, replacement: B) -> Self {
         Self {
             fd: fd.as_raw_fd(),
             replacement: replacement.into_raw_fd(),
@@ -327,20 +327,20 @@ async fn shell_run_with_args(mut ui: Ui, lua: Lua, args: FullCommandSpawnArgs) -
                     stdio_pipe!($name, File::create("/dev/null"), {
                         let (send, recv) = tokio::net::unix::pipe::pipe()?;
                         let send = WriteableFile(Some(BufWriter::new(send)));
-                        (Some(send), Some(OverridenStream::new(std::io::$name(), recv.into_nonblocking_fd()?)))
+                        (Some(send), Some(OverridenStream::new(&std::io::$name(), recv.into_nonblocking_fd()?)))
                     })
                 );
                 ($name:ident, false) => (
                     stdio_pipe!($name, File::open("/dev/null"), {
                         let (send, recv) = tokio::net::unix::pipe::pipe()?;
                         let recv = ReadableFile(Some(BufReader::new(recv)));
-                        (Some(recv), Some(OverridenStream::new(std::io::$name(), send.into_nonblocking_fd()?)))
+                        (Some(recv), Some(OverridenStream::new(&std::io::$name(), send.into_nonblocking_fd()?)))
                     })
                 );
                 ($name:ident, $null:expr, $piped:expr) => (
                     match args.$name {
                         Stdio::inherit => (None, None),
-                        Stdio::null => (None, Some(OverridenStream::new(std::io::$name(), $null?))),
+                        Stdio::null => (None, Some(OverridenStream::new(&std::io::$name(), $null?))),
                         Stdio::piped => $piped,
                     }
                 );
@@ -377,9 +377,8 @@ async fn shell_run_with_args(mut ui: Ui, lua: Lua, args: FullCommandSpawnArgs) -
                                 let mut shell = tokio::runtime::Handle::current().block_on(ui.shell.lock());
                                 if let Some(proc) = shell.find_pid(pid.into()) {
                                     return Ok(proc.status as _)
-                                } else {
-                                    Err(e)?
                                 }
+                                Err(e)?;
                             },
                             Err(e) => Err(e)?,
                         }
@@ -419,7 +418,7 @@ async fn shell_run_with_args(mut ui: Ui, lua: Lua, args: FullCommandSpawnArgs) -
                 ui.get().inner.borrow_mut().await.events.resume().await;
             }
 
-            for err in errors.into_iter() {
+            for err in errors {
                 ui.report_error(true, err).await;
             }
 

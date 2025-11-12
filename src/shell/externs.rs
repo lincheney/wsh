@@ -58,7 +58,7 @@ fn get_or_init_state() -> Result<(bool, Arc<GlobalState>)> {
                 }
 
                 // spawn a task to take care of signals
-                crate::signals::setup(ui.clone())?;
+                crate::signals::setup(&ui)?;
             }
 
             Ok((ui, trampoline))

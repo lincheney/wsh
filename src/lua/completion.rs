@@ -64,7 +64,7 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Compl
                 drop(shell);
                 tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current().block_on(async {
-                        ui.remove_thread(&tid);
+                        ui.remove_thread(tid);
                         // ui.activate();
                         if !msg.is_empty() {
                             let this = ui.unlocked.read();
@@ -77,7 +77,7 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Compl
             err => {
                 let mut ui = ui.clone();
                 tokio::task::spawn(async move {
-                    ui.report_error(false, err).await
+                    ui.report_error(false, err).await;
                 });
             },
         }

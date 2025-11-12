@@ -91,9 +91,9 @@ async fn get_cwd(ui: Ui, _lua: Lua, (): ()) -> Result<BString> {
     Ok(ui.shell.lock().await.get_cwd())
 }
 
-pub async fn __laggy(_ui: Ui, _lua: Lua, (): ()) -> Result<()> {
+pub async fn __laggy(_ui: Ui, lua: Lua, (): ()) -> Result<()> {
     let _ = tokio::task::spawn_blocking(move || {
-        let _: Result<(), mlua::Error> = unsafe{ _lua.exec_raw((), |_| {
+        let _: Result<(), mlua::Error> = unsafe{ lua.exec_raw((), |_| {
             // let lock = ui.inner.borrow_mut().await;
             tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current().block_on(async {

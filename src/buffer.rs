@@ -259,7 +259,7 @@ impl Buffer {
                 // invalid
                 let mut cell = cell.clone();
                 cell.set_style(cell.style().patch(escape_style));
-                for c in self.contents[start..end].iter() {
+                for c in &self.contents[start..end] {
                     let mut cursor = std::io::Cursor::new([0; 64]);
                     write!(cursor, "<u{c:04x}>").unwrap();
                     let buf = &cursor.get_ref()[..cursor.position() as usize];

@@ -168,7 +168,7 @@ impl Ui {
             threads: Arc::new(lock.wrap(std::sync::Mutex::new(HashSet::new()))),
         };
 
-        ui.init_lua().await?;
+        ui.init_lua()?;
 
         Ok((ui, trampoline.0))
     }
@@ -392,7 +392,7 @@ impl Ui {
         })
     }
 
-    async fn init_lua(&self) -> Result<()> {
+    fn init_lua(&self) -> Result<()> {
         crate::lua::init_lua(self)?;
 
         self.lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;
@@ -564,8 +564,8 @@ impl Ui {
         self.threads.read().lock().unwrap().insert(id);
     }
 
-    pub fn remove_thread(&self, id: &nix::unistd::Pid) {
-        self.threads.read().lock().unwrap().remove(id);
+    pub fn remove_thread(&self, id: nix::unistd::Pid) {
+        self.threads.read().lock().unwrap().remove(&id);
     }
 
     fn cancel(&self) -> Result<()> {

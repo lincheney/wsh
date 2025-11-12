@@ -2,7 +2,7 @@ use anyhow::Result;
 use tokio::signal::unix::{signal, SignalKind};
 use crate::ui::Ui;
 
-pub fn setup(ui: Ui) -> Result<()> {
+pub fn setup(ui: &Ui) -> Result<()> {
     let signals = [
         SignalKind::hangup(),
         SignalKind::child(),

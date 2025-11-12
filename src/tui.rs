@@ -566,24 +566,22 @@ impl Tui {
         drawer.move_to_pos(buffer.cursor_coord)?;
         queue!(drawer.writer, cursor::SavePosition)?;
 
-        if status_bar_height > 0 {
-            if clear || status_bar.dirty || resize {
-                // redraw status bar
-                // go to the bottom of the screen
-                queue!(
-                    drawer.writer,
-                    // i dont actually know how far down the bottom of the screen is
-                    // so just go down by a bigger than amount than it could possibly be
-                    MoveDown(area.height * 10),
-                    MoveUp(status_bar_height - 1),
-                    cursor::MoveToColumn(0),
-                )?;
-                drawer.set_pos((0, area.height - status_bar_height));
-                let lines = status_bar.buffer.content.chunks(area.width as _).take(status_bar_height as _);
-                drawer.draw_lines(lines)?;
-                // clear everything else below
-                drawer.clear_to_end_of_screen()?;
-            }
+        if status_bar_height > 0 && (clear || status_bar.dirty || resize) {
+            // redraw status bar
+            // go to the bottom of the screen
+            queue!(
+                drawer.writer,
+                // i dont actually know how far down the bottom of the screen is
+                // so just go down by a bigger than amount than it could possibly be
+                MoveDown(area.height * 10),
+                MoveUp(status_bar_height - 1),
+                cursor::MoveToColumn(0),
+            )?;
+            drawer.set_pos((0, area.height - status_bar_height));
+            let lines = status_bar.buffer.content.chunks(area.width as _).take(status_bar_height as _);
+            drawer.draw_lines(lines)?;
+            // clear everything else below
+            drawer.clear_to_end_of_screen()?;
         }
 
         drawer.reset_colours()?;
