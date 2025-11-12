@@ -214,7 +214,7 @@ wish.add_event_callback('paste', function(data)
         local buflen = wish.str.len(buffer)
 
         local _, prefix = wish.str.to_byte_pos(buffer, cursor)
-        prefix = prefix or 0
+        prefix = prefix or #buffer
         wish.set_buffer(data, 0)
 
         -- flash blue for a bit
