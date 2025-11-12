@@ -53,7 +53,6 @@ pub struct UiInner {
     pub prompt: crate::prompt::Prompt,
     pub status_bar: crate::tui::status_bar::StatusBar,
 
-    pub threads: HashSet<nix::unistd::Pid>,
     stdout: std::io::Stdout,
     enhanced_keyboard: bool,
     size: (u16, u16),
@@ -122,6 +121,7 @@ crate::strong_weak_wrapper! {
         pub has_foreground_process: Arc::<tokio::sync::Mutex<()>> [WeakArc::<tokio::sync::Mutex<()>>],
         // trampoline should not be locked
         trampoline: Arc::<TrampolineOut> [WeakArc::<TrampolineOut>],
+        threads: Arc::<ForkLock<'static, std::sync::Mutex<HashSet<nix::unistd::Pid>>>> [WeakArc::<ForkLock<'static, std::sync::Mutex<HashSet<nix::unistd::Pid>>>>],
     }
 }
 
@@ -140,7 +140,6 @@ impl Ui {
             events,
             dirty: true,
             tui: Default::default(),
-            threads: HashSet::new(),
             buffer: Default::default(),
             prompt: crate::prompt::Prompt::new(None),
             status_bar: Default::default(),
@@ -166,6 +165,7 @@ impl Ui {
             shell,
             has_foreground_process: Default::default(),
             trampoline: Arc::new(trampoline.1),
+            threads: Arc::new(lock.wrap(std::sync::Mutex::new(HashSet::new()))),
         };
 
         ui.init_lua().await?;
@@ -532,10 +532,7 @@ impl Ui {
         match event {
 
             Event::Key(KeyEvent{ key: Key::Escape, .. }) => {
-                nix::sys::signal::kill(nix::unistd::Pid::from_raw(0), nix::sys::signal::Signal::SIGTERM)?;
-                for pid in &self.get().inner.borrow().await.threads {
-                    nix::sys::signal::kill(*pid, nix::sys::signal::Signal::SIGINT)?;
-                }
+                self.cancel()?;
             },
 
             Event::Key(KeyEvent{ key: Key::Char(c), modifiers }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
@@ -561,6 +558,22 @@ impl Ui {
             _ => (),
         }
         Ok(true)
+    }
+
+    pub fn add_thread(&self, id: nix::unistd::Pid) {
+        self.threads.read().lock().unwrap().insert(id);
+    }
+
+    pub fn remove_thread(&self, id: &nix::unistd::Pid) {
+        self.threads.read().lock().unwrap().remove(id);
+    }
+
+    fn cancel(&self) -> Result<()> {
+        nix::sys::signal::kill(nix::unistd::Pid::from_raw(0), nix::sys::signal::Signal::SIGTERM)?;
+        for pid in self.threads.read().lock().unwrap().iter() {
+            nix::sys::signal::kill(*pid, nix::sys::signal::Signal::SIGINT)?;
+        }
+        Ok(())
     }
 
 }

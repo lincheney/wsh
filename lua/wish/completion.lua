@@ -6,6 +6,9 @@ function M.complete()
     local matches = nil
     local comp = wish.get_completions()
     local loaded = false
+    local keymap_layer = wish.add_keymap_layer()
+
+    wish.set_keymap('<esc>', function() comp:cancel() end, keymap_layer)
 
     -- loading spinner thing
     wish.schedule(function()
@@ -49,8 +52,9 @@ function M.complete()
                 end
             end
         }
-        comp:cancel()
         loaded = true
+        wish.del_keymap_layer(keymap_layer)
+        comp:cancel()
 
         if result then
             wish.set_message{id = msg, hidden = true}

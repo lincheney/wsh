@@ -91,4 +91,5 @@ i wish i could have
     * [ ] is tokio fork safe?
         * no idea
         * seems to use tls for the handler, maybe its ok? dunno
+* [ ] control c style escape hatch
 * [ ]

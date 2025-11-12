@@ -54,8 +54,7 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Compl
         let tid = nix::unistd::gettid();
         let mut shell = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
-                let this = ui.unlocked.read();
-                this.inner.borrow_mut().await.threads.insert(tid);
+                ui.add_thread(tid);
                 ui.shell.lock().await
             })
         });
@@ -65,11 +64,11 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Compl
                 drop(shell);
                 tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current().block_on(async {
-                        let this = ui.unlocked.read();
-                        let mut ui = this.inner.borrow_mut().await;
-                        ui.threads.remove(&tid);
+                        ui.remove_thread(&tid);
                         // ui.activate();
                         if !msg.is_empty() {
+                            let this = ui.unlocked.read();
+                            let mut ui = this.inner.borrow_mut().await;
                             ui.tui.add_zle_message(msg.as_ref());
                         }
                     });
