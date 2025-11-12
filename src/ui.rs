@@ -494,10 +494,16 @@ impl Ui {
                 widget.shell.set_lastchar(buf);
                 // executing a widget may block
                 let (output, _) = tokio::task::block_in_place(|| widget.exec_and_get_output(None, [].into_iter())).unwrap();
-                let (buffer, cursor) = shell.get_zle_buffer();
+                let (new_buffer, new_cursor) = shell.get_zle_buffer();
+                let new_cursor = new_cursor.unwrap_or(new_buffer.len() as _) as _;
 
-                ui.buffer.set(Some(buffer.as_ref()), Some(cursor.unwrap_or(buffer.len() as _) as _));
-                // check for any output e.g. zle -m
+                if new_buffer != *buffer {
+                    ui.buffer.set(Some(new_buffer.as_ref()), Some(new_cursor));
+                } else if new_cursor != cursor {
+                    ui.buffer.set_cursor(new_cursor);
+                }
+
+                // check for any output e.g. zle -M
                 if !output.is_empty() {
                     ui.tui.add_zle_message(output.as_ref());
                 }
