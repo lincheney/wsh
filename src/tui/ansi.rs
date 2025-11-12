@@ -173,44 +173,41 @@ impl Parser {
             line.spans.push(span);
         } else {
             // need to overwrite things ....
+
+            let mut span = Some(span);
             let mut start = 0;
-            line.spans.retain_mut(|sp| {
-                let w = sp.width();
-                let overlap_start = start.max(self.cursor_x);
-                let overlap_end = (start + w).min(self.cursor_x + width);
-                start += w;
+            line.spans = std::mem::take(&mut line.spans).into_iter()
+                .flat_map(|sp| {
+                    let w = sp.width();
+                    let overlap_start = start.max(self.cursor_x);
+                    let overlap_end = (start + w).min(self.cursor_x + width);
+                    let nonoverlap_start = overlap_start - start;
+                    let nonoverlap_end = start + w - overlap_end;
 
-                if overlap_start == start && overlap_end == start + w {
-                    // span is fully within the overwrite range
-                    false
-                } else if overlap_start >= overlap_end {
-                    // no overlap
-                    true
-                } else {
-                    let content = sp.styled_graphemes(Style::default())
-                        .take(overlap_end - (start - w))
-                        .skip(overlap_start.saturating_sub(start - w))
-                        .map(|s| s.symbol)
-                        .collect::<Vec<_>>()
-                        .join("");
-                    *sp = std::mem::take(sp).content(content);
-                    true
-                }
-            });
-
-            if line.spans.is_empty() {
-                line.spans.push(span);
-            } else {
-                let mut start = 0;
-                for (i, sp) in line.spans.iter().enumerate() {
-                    start += sp.width();
-                    if start >= self.cursor_x {
-                        line.spans.insert(i, span);
-                        break
+                    let mut replacement = [None, None, None];
+                    if nonoverlap_start == w {
+                        // no overlap
+                        replacement[0] = Some(sp);
+                    } else {
+                        if nonoverlap_start > 0 {
+                            let content = sp.styled_graphemes(Style::default())
+                                .take(nonoverlap_start)
+                                .map(|s| s.symbol)
+                                .collect::<String>();
+                            replacement[0] = Some(sp.clone().content(content));
+                        }
+                        replacement[1] = span.take();
+                        if nonoverlap_end > 0 {
+                            let content = sp.styled_graphemes(Style::default())
+                                .skip(w - nonoverlap_end)
+                                .map(|s| s.symbol)
+                                .collect::<String>();
+                            replacement[2] = Some(sp.content(content));
+                        }
                     }
-                }
-            }
-
+                    start += w;
+                    replacement.into_iter().flatten()
+                }).collect();
         }
         self.cursor_x += width;
     }
