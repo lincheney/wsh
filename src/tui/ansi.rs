@@ -302,3 +302,11 @@ impl std::default::Default for Parser {
         }
     }
 }
+
+impl From<&[u8]> for Parser {
+    fn from(val: &[u8]) -> Self {
+        let mut parser = Self::default();
+        parser.feed(val.into());
+        parser
+    }
+}

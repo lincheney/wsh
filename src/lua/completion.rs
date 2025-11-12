@@ -52,7 +52,7 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Compl
     // run this in a thread
     tokio::task::spawn_blocking(move || {
         let tid = nix::unistd::gettid();
-        let shell = tokio::task::block_in_place(|| {
+        let mut shell = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 let this = ui.unlocked.read();
                 this.inner.borrow_mut().await.threads.insert(tid);
@@ -60,16 +60,28 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Compl
             })
         });
         // this blocks
-        producer.run(&shell);
-        drop(shell);
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                let this = ui.unlocked.read();
-                let mut ui = this.inner.borrow_mut().await;
-                ui.threads.remove(&tid);
-                // ui.activate();
-            });
-        });
+        match producer.run(&mut shell) {
+            Ok(msg) => {
+                drop(shell);
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(async {
+                        let this = ui.unlocked.read();
+                        let mut ui = this.inner.borrow_mut().await;
+                        ui.threads.remove(&tid);
+                        // ui.activate();
+                        if !msg.is_empty() {
+                            ui.tui.add_zle_message(msg.as_ref());
+                        }
+                    });
+                });
+            },
+            err => {
+                let mut ui = ui.clone();
+                tokio::task::spawn(async move {
+                    ui.report_error(false, err).await
+                });
+            },
+        }
     });
 
     Ok(CompletionStream{inner: consumer, parent})

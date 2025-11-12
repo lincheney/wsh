@@ -381,6 +381,11 @@ impl Tui {
         self.add(widget.into())
     }
 
+    pub fn add_zle_message(&mut self, message: &[u8]) -> (usize, &mut WidgetWrapper) {
+        let widget = ansi::Parser::from(message).widget;
+        self.add(widget.into())
+    }
+
     pub fn get_index(&self, id: usize) -> Option<usize> {
         for (i, w) in self.widgets.inner.iter().enumerate() {
             match w.as_ref().id.cmp(&id) {

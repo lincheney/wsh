@@ -1,6 +1,6 @@
 use std::os::fd::AsRawFd;
 use anyhow::Result;
-use std::io::{Write, Read};
+use std::io::{Write};
 use std::os::fd::{RawFd};
 use std::ptr::NonNull;
 use std::os::raw::{c_long, c_char, c_int};
@@ -95,10 +95,11 @@ pub struct Completer{
 }
 
 impl Completer {
-    pub fn run(&self, _shell: &ShellInner) {
+    pub fn run(&self, shell: &mut ShellInner) -> Result<BString> {
         let lock = self.exclusive_lock.lock().unwrap();
-        zsh::completion::get_completions(&self.inner);
+        let (msg, _) = shell.capture_shout(|_| zsh::completion::get_completions(&self.inner))?;
         drop(lock);
+        Ok(msg)
     }
 
     pub fn cancel(&self) -> anyhow::Result<()> {
@@ -414,30 +415,7 @@ impl<'a> ShellInner<'a> {
             )
         };
 
-        let result;
-        unsafe {
-            let old_shout = zsh_sys::shout;
-            let old_trashedzle = zsh::trashedzle;
-            zsh_sys::shout = shout.writer_ptr.as_ptr().cast();
-            zsh::trashedzle = 1;
-            result = f(self);
-            nix::libc::fflush(zsh_sys::shout as _);
-            zsh::trashedzle = old_trashedzle;
-            zsh_sys::shout = old_shout;
-        }
-
-        let mut buffer = BString::new(vec![]);
-        let mut buf = [0; 1024];
-        while let Ok(n) = shout.reader.read(&mut buf) {
-            let buf = &buf[..n];
-            buffer.extend(if n < buf.len() {
-                // probably the end so trim it
-                buf.trim_end()
-            } else {
-                buf
-            });
-        }
-        Ok((buffer, result))
+        Ok(zsh::capture_shout(&mut shout.reader, shout.writer_ptr, || f(self)))
     }
 
 }

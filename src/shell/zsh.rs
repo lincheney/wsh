@@ -1,9 +1,9 @@
-use std::os::raw::{c_char};
+use std::io::Read;
 use std::ffi::{CString, CStr};
 use std::os::raw::*;
 use std::default::Default;
 use std::ptr::null_mut;
-use bstr::{BStr, BString};
+use bstr::{BStr, BString, ByteSlice};
 
 mod string;
 mod bindings;
@@ -189,4 +189,36 @@ pub fn set_error_verbosity(verbosity: ErrorVerbosity) -> ErrorVerbosity {
             ErrorVerbosity::Quiet
         }
     }
+}
+
+pub fn capture_shout<T, F: FnOnce() -> T>(
+    reader: &mut std::io::PipeReader,
+    writer: std::ptr::NonNull<nix::libc::FILE>,
+    f: F,
+) -> (BString, T) {
+
+    let result;
+    unsafe {
+        let old_shout = zsh_sys::shout;
+        let old_trashedzle = bindings::trashedzle;
+        zsh_sys::shout = writer.as_ptr().cast();
+        bindings::trashedzle = 1;
+        result = f();
+        nix::libc::fflush(zsh_sys::shout as _);
+        bindings::trashedzle = old_trashedzle;
+        zsh_sys::shout = old_shout;
+    }
+
+    let mut buffer = BString::new(vec![]);
+    let mut buf = [0; 1024];
+    while let Ok(n) = reader.read(&mut buf) {
+        let buf = &buf[..n];
+        buffer.extend(if n < buf.len() {
+            // probably the end so trim it
+            buf.trim_end()
+        } else {
+            buf
+        });
+    }
+    (buffer, result)
 }

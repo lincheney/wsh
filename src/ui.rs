@@ -1,4 +1,4 @@
-use bstr::{BStr, BString, ByteSlice};
+use bstr::{BStr, BString};
 use std::time::Duration;
 use std::future::Future;
 use std::sync::{Arc, Weak as WeakArc};
@@ -498,9 +498,8 @@ impl Ui {
 
                 ui.buffer.set(Some(buffer.as_ref()), Some(cursor.unwrap_or(buffer.len() as _) as _));
                 // check for any output e.g. zle -m
-                let output = output.trim();
                 if !output.is_empty() {
-                    ui.tui.add_message(BStr::new(output).to_string());
+                    ui.tui.add_zle_message(output.as_ref());
                 }
                 drop(lock);
 
