@@ -49,7 +49,7 @@ macro_rules! TokioActor {
                 pub async fn $fn(&self, $($arg: $argtype),*) $(-> $rettype)? {
                     let thread = ::nix::unistd::gettid();
                     if thread == self.inner.main_thread {
-                        self.inner.$fn($($arg),*)
+                        tokio::task::block_in_place(|| self.inner.$fn($($arg),*))
                     } else {
                         let (sender, receiver) = ::tokio::sync::oneshot::channel();
                         self.queue.send([<$name Msg>]::$fn{$( $arg, )* returnvalue: sender}).unwrap();
