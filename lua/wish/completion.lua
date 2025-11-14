@@ -6,9 +6,13 @@ function M.complete()
     local matches = nil
     local comp = wish.get_completions()
     local loaded = false
+    local cancelled = false
     local keymap_layer = wish.add_keymap_layer()
 
-    wish.set_keymap('<esc>', function() comp:cancel() end, keymap_layer)
+    wish.set_keymap('<esc>', function()
+        comp:cancel()
+        cancelled = true
+    end, keymap_layer)
 
     -- loading spinner thing
     wish.schedule(function()
@@ -59,6 +63,9 @@ function M.complete()
         if result then
             wish.set_message{id = msg, hidden = true}
             wish.insert_completion(comp, matches[result])
+            wish.redraw()
+        elseif cancelled then
+            wish.set_message{id = msg, hidden = true}
             wish.redraw()
         elseif not matches or #matches == 0 then
             wish.set_message{id = msg, hidden = false, text='No completion matches', fg='lightred'}
