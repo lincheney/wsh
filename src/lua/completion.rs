@@ -49,26 +49,28 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Compl
     let (consumer, producer) = crate::shell::get_completions(val);
     let parent = producer.clone();
 
-    let tid = nix::unistd::gettid();
-    ui.add_thread(tid);
-
-    match ui.shell.run_completions(producer).await {
-        Ok(msg) => {
-            ui.remove_thread(tid);
-            // ui.activate();
-            if !msg.is_empty() {
-                let this = ui.unlocked.read();
-                let mut ui = this.inner.borrow_mut().await;
-                ui.tui.add_zle_message(msg.as_ref());
-            }
-        },
-        err => {
-            let mut ui = ui.clone();
-            tokio::task::spawn(async move {
-                ui.report_error(false, err).await;
-            });
-        },
-    }
+    // run this in another thread so it doesn't block us returning
+    tokio::task::spawn(async move {
+        let tid = nix::unistd::gettid();
+        ui.add_thread(tid);
+        match ui.shell.run_completions(producer).await {
+            Ok(msg) => {
+                ui.remove_thread(tid);
+                // ui.activate();
+                if !msg.is_empty() {
+                    let this = ui.unlocked.read();
+                    let mut ui = this.inner.borrow_mut().await;
+                    ui.tui.add_zle_message(msg.as_ref());
+                }
+            },
+            err => {
+                let mut ui = ui.clone();
+                tokio::task::spawn(async move {
+                    ui.report_error(false, err).await;
+                });
+            },
+        }
+    });
 
     Ok(CompletionStream{inner: consumer, parent})
 }
