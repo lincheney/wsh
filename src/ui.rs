@@ -91,7 +91,7 @@ crate::strong_weak_wrapper! {
 
 impl Ui {
 
-    pub async fn new(
+    pub fn new(
         lock: &'static RawForkLock,
         events: crate::event_stream::EventController,
         shell: ShellClient,

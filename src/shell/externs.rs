@@ -41,10 +41,11 @@ fn get_or_init_state() -> Result<Arc<GlobalState>> {
         let runtime = tokio::runtime::Runtime::new()?;
 
         let shell = Shell::default();
+        let (events, event_ctrl) = crate::event_stream::EventStream::new();
+        let (shell_client, shell_queue) = ShellClient::new(shell.clone());
+        let mut ui = Ui::new(&FORK_LOCK, event_ctrl, shell_client)?;
+
         let result: Result<_> = runtime.block_on(async {
-            let (events, event_ctrl) = crate::event_stream::EventStream::new();
-            let (shell_client, shell_queue) = ShellClient::new(shell.clone());
-            let mut ui = Ui::new(&FORK_LOCK, event_ctrl, shell_client).await?;
             ui.get().inner.read().await.activate()?;
             ui.start_cmd().await?;
 
