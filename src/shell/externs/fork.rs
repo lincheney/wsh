@@ -44,7 +44,7 @@ impl ForkState {
             let ui = super::STATE.read_with_lock(&fork_lock);
             if let Some(state) = ui.lock().unwrap().as_ref() {
                 let (ui, shell, _, _) = &**state;
-                let tid = nix::unistd::gettid();
+                let tid = std::thread::current().id();
                 if shell.main_thread != tid {
                     // shell is not locked == we are forking for some unknown reason
                     return None

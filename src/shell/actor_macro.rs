@@ -47,7 +47,7 @@ macro_rules! TokioActor {
 
                 $(
                 pub async fn $fn(&self, $($arg: $argtype),*) $(-> $rettype)? {
-                    let thread = ::nix::unistd::gettid();
+                    let thread = ::std::thread::current().id();
                     if thread == self.inner.main_thread {
                         tokio::task::block_in_place(|| self.inner.$fn($($arg),*))
                     } else {

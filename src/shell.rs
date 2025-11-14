@@ -79,7 +79,7 @@ impl Shout {
 pub struct Shell {
     is_waiting: Arc<std::sync::atomic::AtomicBool>,
     shout: Arc<Mutex<Option<Shout>>>,
-    main_thread: nix::unistd::Pid,
+    main_thread: std::thread::ThreadId,
     trampoline: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
 }
 
@@ -89,7 +89,7 @@ impl std::default::Default for Shell {
             is_waiting: Arc::default(),
             shout: Arc::default(),
             trampoline: Arc::default(),
-            main_thread: nix::unistd::gettid(),
+            main_thread: std::thread::current().id(),
         }
     }
 }
