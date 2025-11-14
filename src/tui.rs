@@ -407,8 +407,10 @@ impl Tui {
     }
 
     pub fn add_zle_message(&mut self, message: &[u8]) -> (usize, &mut WidgetWrapper) {
-        let widget = ansi::Parser::from(message).widget;
-        self.add(widget.into())
+        let mut parser = ansi::Parser::default();
+        parser.ocrnl = true; // treat \r as \n
+        parser.feed(message.into());
+        self.add(parser.widget.into())
     }
 
     pub fn get_index(&self, id: usize) -> Option<usize> {
