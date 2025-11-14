@@ -38,13 +38,13 @@ pub struct EntryPtr<'a> {
     _marker: PhantomData<&'a ()>,
 }
 
-pub struct History<'a, 'b> {
+pub struct History<'a> {
     ring: Option<EntryPtr<'a>>,
-    _shell: &'a mut crate::shell::ShellInner<'b>,
+    _shell: &'a crate::shell::Shell,
 }
 
-impl<'a, 'b> History<'a, 'b> {
-    pub fn get(shell: &'a mut crate::shell::ShellInner<'b>) -> Self {
+impl<'a> History<'a> {
+    pub fn get(shell: &'a crate::shell::Shell) -> Self {
         Self{
             ring: EntryPtr::new(unsafe{ zsh_sys::hist_ring }),
             _shell: shell,
@@ -74,6 +74,20 @@ impl<'a, 'b> History<'a, 'b> {
         }
         None
     }
+
+    pub fn set_histline(&mut self, histline: c_long) -> Option<EntryPtr<'_>> {
+        if let Some(entry) = self.closest_to(histline, std::cmp::Ordering::Greater) {
+            // found a good enough match
+            unsafe{ super::histline = entry.histnum() as _; }
+            Some(entry)
+
+        } else {
+            // no history
+            unsafe{ super::histline = 0; }
+            None
+        }
+    }
+
 }
 
 impl EntryPtr<'_> {

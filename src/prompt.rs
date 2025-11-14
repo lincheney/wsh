@@ -1,6 +1,6 @@
 use std::ffi::CString;
 use bstr::BStr;
-use crate::shell::ShellInner;
+use crate::shell::ShellClient;
 
 #[derive(Default)]
 pub struct Prompt {
@@ -23,10 +23,10 @@ impl Prompt {
         Self{ default, ..Self::default() }
     }
 
-    pub fn refresh_prompt(&mut self, shell: &mut ShellInner, width: u16) {
-        let prompt = shell.get_prompt(None, true).unwrap_or_else(|| self.default.clone());
-        let size = shell.get_prompt_size(&prompt);
-        self.inner = ShellInner::remove_invisible_chars(&prompt).into();
+    pub async fn refresh_prompt(&mut self, shell: &ShellClient, width: u16) {
+        let prompt = shell.get_prompt(None, true).await.unwrap_or_else(|| self.default.clone());
+        let size = shell.get_prompt_size(prompt.clone()).await;
+        self.inner = crate::shell::remove_invisible_chars(&prompt).into();
         self.width = size.0 as _;
         self.height = size.1 as _;
 

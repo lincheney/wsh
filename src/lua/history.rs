@@ -1,3 +1,4 @@
+use std::os::raw::{c_long};
 use anyhow::Result;
 use mlua::{prelude::*};
 use crate::ui::{Ui, ThreadsafeUiInner};
@@ -13,65 +14,85 @@ fn entry_to_lua(entry: crate::shell::history::Entry, lua: &Lua) -> Result<LuaTab
 }
 
 async fn get_history(ui: Ui, lua: Lua, _val: ()) -> Result<(usize, LuaTable)> {
-    let mut shell = ui.shell.lock().await;
-    let current = shell.get_histline();
+    let current = ui.shell.get_histline().await;
 
-    let tbl = lua.create_table()?;
-    for entry in shell.get_history().iter() {
-        let entry = entry.as_entry();
-        tbl.raw_push(entry_to_lua(entry, &lua)?)?;
-    }
-    Ok((current as _, tbl))
+    let tbl: Result<_> = *ui.shell.run(Box::new(move |shell| {
+        Box::new((|| -> Result<_> {
+            let tbl = lua.create_table()?;
+            let history = crate::shell::history::History::get(shell);
+            for entry in history.iter() {
+                let entry = entry.as_entry();
+                tbl.raw_push(entry_to_lua(entry, &lua)?)?;
+            }
+            Ok(tbl)
+        })())
+    })).await.downcast().unwrap();
+    Ok((current as _, tbl?))
 }
 
 async fn get_history_index(ui: Ui, _lua: Lua, _val: ()) -> Result<usize> {
-    Ok(ui.shell.lock().await.get_histline() as _)
+    Ok(ui.shell.get_histline().await as _)
 }
 
 async fn get_next_history(ui: Ui, lua: Lua, val: usize) -> Result<Option<LuaTable>> {
-    let mut shell = ui.shell.lock().await;
     // get the next highest one
-    if let Some(entry) = shell.get_history().closest_to((val+1) as _, std::cmp::Ordering::Greater) {
-        Ok(Some(entry_to_lua(entry.as_entry(), &lua)?))
-    } else {
-        Ok(None)
-    }
+
+    *ui.shell.run(Box::new(move |shell| {
+        Box::new((|| {
+            let history = crate::shell::history::History::get(shell);
+            if let Some(entry) = history.closest_to((val+1) as _, std::cmp::Ordering::Greater) {
+                entry_to_lua(entry.as_entry(), &lua).map(|entry| Some(entry))
+            } else {
+                Ok(None)
+            }
+        })())
+    })).await.downcast().unwrap()
 }
 
 async fn get_prev_history(ui: Ui, lua: Lua, val: usize) -> Result<Option<LuaTable>> {
-    let mut shell = ui.shell.lock().await;
-    // get the next lowest one
-    if let Some(entry) = shell.get_history().closest_to((val.saturating_sub(1)) as _, std::cmp::Ordering::Less) {
-        Ok(Some(entry_to_lua(entry.as_entry(), &lua)?))
-    } else {
-        Ok(None)
-    }
+    *ui.shell.run(Box::new(move |shell| {
+        Box::new((|| -> Result<_> {
+            let history = crate::shell::history::History::get(shell);
+            // get the next lowest one
+            if let Some(entry) = history.closest_to((val.saturating_sub(1)) as _, std::cmp::Ordering::Less) {
+                Ok(Some(entry_to_lua(entry.as_entry(), &lua)?))
+            } else {
+                Ok(None)
+            }
+        })())
+    })).await.downcast().unwrap()
 }
 
 async fn goto_history(ui: Ui, _lua: Lua, val: usize) -> Result<Option<usize>> {
-    let mut shell = ui.shell.lock().await;
+    let current = ui.shell.get_histline().await;
+    let result: Option<(Option<c_long>, c_long, BString)> = *ui.shell.run(Box::new(move |shell| {
+        let mut history = crate::shell::history::History::get(shell);
+        let latest = history.first().map(|entry| entry.histnum());
 
-    let current = shell.get_histline();
-    let latest = shell.get_history().first().map(|entry| entry.histnum());
-
-    let ui = ui.unlocked.read();
-    let mut ui = ui.inner.borrow_mut().await;
-    match shell.set_histline(val as _) {
-        Some(entry) => {
-            if Some(entry.histnum()) == latest {
-                // restore history if off history
-                ui.buffer.restore();
-            } else {
-                // save the buffer if moving to another history
-                if Some(current.into()) == latest {
-                    ui.buffer.save();
-                }
-                let text = entry.as_entry().text;
-                ui.buffer.set(Some(text.as_bytes()), Some(text.len()));
+        Box::new(
+            match history.set_histline(val as _) {
+                Some(entry) => Some((latest, entry.histnum(), entry.as_entry().text)),
+                None => None,
             }
-            Ok(Some(entry.histnum() as _))
-        },
-        None => Ok(None),
+        )
+    })).await.downcast().unwrap();
+
+    if let Some((latest, histnum, text)) = result {
+        let ui = ui.unlocked.read();
+        let mut ui = ui.inner.borrow_mut().await;
+        if Some(histnum) == latest {
+            // restore history if off history
+            ui.buffer.restore();
+        } else {
+            // save the buffer if moving to another history
+            if Some(current.into()) == latest {
+                ui.buffer.save();
+            }
+            ui.buffer.set(Some(text.as_bytes()), Some(text.len()));
+        }
+        Ok(Some(histnum as _))
+    } else {
+        Ok(None)
     }
 }
 

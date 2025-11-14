@@ -238,13 +238,14 @@ pub fn clear_cache() {
     }
 }
 
-pub fn insert_completion(line: &BStr, completion_word_len: usize, m: &bindings::cmatch) -> (BString, usize) {
+pub fn insert_completion(line: BString, completion_word_len: usize, m: &bindings::cmatch) -> (BString, usize) {
     unsafe {
         // set the zle buffer
-        super::set_zle_buffer(line.into(), line.len() as i64 + 1);
+        let len = line.len();
+        super::set_zle_buffer(line, len as i64 + 1);
 
         // set start and end of word being completed
-        zsh_sys::we = line.len() as i32;
+        zsh_sys::we = len as i32;
         zsh_sys::wb = zsh_sys::we - completion_word_len as i32;
 
         bindings::metafy_line();

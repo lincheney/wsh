@@ -17,8 +17,7 @@ pub fn setup(ui: &Ui) -> Result<()> {
         tokio::task::spawn(async move {
             loop {
                 handler.recv().await;
-                let mut shell = ui.shell.lock().await;
-                shell.call_signal_handler(sig.as_raw_value(), true);
+                ui.shell.call_signal_handler(sig.as_raw_value(), true).await;
             }
         });
     }

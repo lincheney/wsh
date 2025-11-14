@@ -457,7 +457,7 @@ impl Tui {
         &mut self,
         writer: &mut W,
         (width, height): (u16, u16),
-        shell: &crate::shell::Shell,
+        shell: &crate::shell::ShellClient,
         prompt: &mut crate::prompt::Prompt,
         buffer: &mut crate::buffer::Buffer,
         status_bar: &mut status_bar::StatusBar,
@@ -495,7 +495,7 @@ impl Tui {
 
         // redraw the prompt
         if clear || prompt.dirty {
-            prompt.refresh_prompt(&mut shell.lock().await, area.width);
+            prompt.refresh_prompt(shell, area.width).await;
             // move back to top of drawing area and redraw
             drawer.move_to_pos((0, 0))?;
             drawer.writer.write_all(prompt.as_bytes())?;

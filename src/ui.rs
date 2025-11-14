@@ -5,7 +5,7 @@ use std::sync::{Arc, Weak as WeakArc};
 use std::collections::HashSet;
 use std::default::Default;
 use mlua::prelude::*;
-use tokio::sync::{RwLock, Notify, mpsc};
+use tokio::sync::{RwLock};
 use anyhow::Result;
 use crate::keybind::parser::{Event, KeyEvent, Key, KeyModifiers};
 use crate::fork_lock::{ForkLock, RawForkLock, ForkLockReadGuard};
@@ -22,7 +22,7 @@ use crate::tui::{
     MoveDown,
 };
 
-use crate::shell::{Shell, ShellInner, WeakShell, UpgradeShell, KeybindValue, DowngradeShell};
+use crate::shell::{ShellClient, KeybindValue};
 use crate::lua::{EventCallbacks, HasEventCallbacks};
 
 fn lua_error<T>(msg: &str) -> Result<T, mlua::Error> {
@@ -73,40 +73,6 @@ impl ThreadsafeUiInner for RwLock<UiInner> {
     }
 }
 
-struct TrampolineOut {
-    out_sender: mpsc::UnboundedSender<BString>,
-    in_notify: Arc<Notify>,
-}
-
-pub struct TrampolineIn {
-    out_receiver: mpsc::UnboundedReceiver<BString>,
-    in_notify: Arc<Notify>,
-}
-
-impl TrampolineOut {
-    pub async fn jump_out(&self, shell: &mut ShellInner<'_>, string: BString) -> Result<()> {
-        self.out_sender.send(string)?;
-        self.in_notify.notified().await;
-        let _ = shell;
-        Ok(())
-    }
-}
-
-impl TrampolineIn {
-    pub async fn jump_in(&mut self, notify: bool) -> Option<BString> {
-        if notify {
-            self.in_notify.notify_one();
-        }
-        self.out_receiver.recv().await
-    }
-}
-
-fn new_trampoline() -> (TrampolineIn, TrampolineOut) {
-    let (out_sender, out_receiver) = mpsc::unbounded_channel();
-    let in_notify = Arc::new(Notify::new());
-    (TrampolineIn{out_receiver, in_notify: in_notify.clone()}, TrampolineOut{out_sender, in_notify})
-}
-
 pub struct UnlockedUi {
     pub inner: RwLock<UiInner>,
     pub event_callbacks: std::sync::Mutex<EventCallbacks> ,
@@ -116,11 +82,9 @@ pub struct UnlockedUi {
 crate::strong_weak_wrapper! {
     pub struct Ui {
         pub unlocked: Arc::<ForkLock<'static, UnlockedUi>> [WeakArc::<ForkLock<'static, UnlockedUi>>],
-        pub shell: Shell [WeakShell],
+        pub shell: Arc::<ShellClient> [WeakArc::<ShellClient>],
         pub lua: Arc::<Lua> [WeakArc::<Lua>],
         pub has_foreground_process: Arc::<tokio::sync::Mutex<()>> [WeakArc::<tokio::sync::Mutex<()>>],
-        // trampoline should not be locked
-        trampoline: Arc::<TrampolineOut> [WeakArc::<TrampolineOut>],
         threads: Arc::<ForkLock<'static, std::sync::Mutex<HashSet<nix::unistd::Pid>>>> [WeakArc::<ForkLock<'static, std::sync::Mutex<HashSet<nix::unistd::Pid>>>>],
     }
 }
@@ -130,7 +94,8 @@ impl Ui {
     pub async fn new(
         lock: &'static RawForkLock,
         events: crate::event_stream::EventController,
-    ) -> Result<(Self, TrampolineIn)> {
+        shell: ShellClient,
+    ) -> Result<Self> {
 
         let lua = Lua::new();
         let lua_api = lua.create_table()?;
@@ -151,10 +116,8 @@ impl Ui {
         };
         ui.keybinds.push(Default::default());
 
-        let shell = Shell::new();
-        ui.reset(&mut shell.lock().await);
+        ui.reset();
 
-        let trampoline = new_trampoline();
         let ui = UnlockedUi {
             inner: RwLock::new(ui),
             event_callbacks: Default::default(),
@@ -162,15 +125,14 @@ impl Ui {
         let ui = Self {
             unlocked: Arc::new(lock.wrap(ui)),
             lua: Arc::new(lua),
-            shell,
+            shell: Arc::new(shell),
             has_foreground_process: Default::default(),
-            trampoline: Arc::new(trampoline.1),
             threads: Arc::new(lock.wrap(std::sync::Mutex::new(HashSet::new()))),
         };
 
         ui.init_lua()?;
 
-        Ok((ui, trampoline.0))
+        Ok(ui)
     }
 
 
@@ -272,7 +234,7 @@ impl Ui {
         Ok(true)
     }
 
-    pub async fn pre_accept_line(&self, shell: &mut ShellInner<'_>) -> Result<()> {
+    pub async fn pre_accept_line(&self) -> Result<()> {
         let this = &*self.unlocked.read();
         let mut ui = this.inner.borrow_mut().await;
 
@@ -280,16 +242,16 @@ impl Ui {
 
         // TODO handle errors here properly
         ui.events.pause().await;
-        shell.clear_completion_cache();
+        self.shell.clear_completion_cache().await;
         ui.prepare_for_unhandled_output()?;
         Ok(())
     }
 
-    pub async fn post_accept_line(&self, shell: &mut ShellInner<'_>) -> Result<()> {
+    pub async fn post_accept_line(&self) -> Result<()> {
         let this = &*self.unlocked.read();
         let mut ui = this.inner.borrow_mut().await;
         ui.events.resume().await;
-        ui.reset(shell);
+        ui.reset();
         ui.recover_from_unhandled_output().await?;
         Ok(())
     }
@@ -303,7 +265,7 @@ impl Ui {
             let this = self.get();
             let ui = this.inner.borrow().await;
             let buffer = ui.buffer.get_contents();
-            let (complete, _tokens) = self.shell.lock().await.parse(buffer.as_ref(), false);
+            let (complete, _tokens) = self.shell.parse(buffer.clone(), false).await;
             if complete {
                 Some(buffer.clone())
             } else {
@@ -315,16 +277,14 @@ impl Ui {
         if let Some(buffer) = buffer {
             self.trigger_accept_line_callbacks(()).await;
             let lock = self.has_foreground_process.lock().await;
-            let mut shell = self.shell.lock().await;
-            self.pre_accept_line(&mut shell).await?;
+            self.pre_accept_line().await?;
             // acceptline doesn't actually accept the line right now
             // only when we return control to zle using the trampoline
-            self.trampoline.jump_out(&mut shell, buffer).await?;
-            self.post_accept_line(&mut shell).await?;
+            self.shell.accept_line_trampoline(Some(buffer)).await;
+            self.post_accept_line().await?;
 
             // prefer the result error over the activate error
             // result.and(ui.activate())?;
-            drop(shell);
             drop(lock);
             self.start_cmd().await?;
 
@@ -466,51 +426,77 @@ impl Ui {
             return Some(KeybindOutput::Value(Ok(true)))
         }
 
-        let mut shell = self.shell.lock().await;
+        enum Value {
+            String(BString),
+            Widget{buffer: Option<BString>, cursor: Option<usize>, output: Option<BString>, accept_line: bool},
+        }
+
         // look for a zle widget
-        match shell.get_keybinding(buf)? {
-            KeybindValue::String(string) => {
-                // recurse
-                Some(KeybindOutput::String(string))
-            },
-            // skip not found or where we have our own impl
-            KeybindValue::Widget(widget) if widget.is_self_insert() || widget.is_undefined_key() => None,
-            KeybindValue::Widget(widget) if widget.is_accept_line() => {
-                drop(shell);
-                Some(KeybindOutput::Value(self.accept_line().await))
-            },
-            KeybindValue::Widget(mut widget) => {
-                // execute the widget
-                // a widget may run subprocesses so lock the ui
-                let lock = self.has_foreground_process.lock().await;
-                let this = self.get();
-                let mut ui = this.inner.borrow_mut().await;
-                let buffer = ui.buffer.get_contents();
-                let cursor = ui.buffer.get_cursor();
+        let ui = self.clone();
+        let buf = buf.to_owned();
+        let result: Option<_> = *self.shell.run(Box::new(move |shell| Box::new({
+            match KeybindValue::find(shell, buf.as_ref()) {
+                Some(KeybindValue::String(string)) => {
+                    // recurse
+                    Some(Value::String(string))
+                },
+                // skip not found or where we have our own impl
+                Some(KeybindValue::Widget(widget)) if widget.is_self_insert() || widget.is_undefined_key() => None,
+                Some(KeybindValue::Widget(widget)) if widget.is_accept_line() => {
+                    Some(Value::Widget{accept_line: true, buffer: None, cursor: None, output: None})
+                },
+                Some(KeybindValue::Widget(mut widget)) => {
+                    // execute the widget
+                    // a widget may run subprocesses so lock the ui
+                    let lock = ui.has_foreground_process.blocking_lock();
+                    let this = ui.get();
+                    let ui = this.inner.blocking_write();
+                    let buffer = ui.buffer.get_contents();
+                    let cursor = ui.buffer.get_cursor();
 
-                widget.shell.set_zle_buffer(buffer.clone(), cursor as _);
-                widget.shell.set_lastchar(buf);
-                // executing a widget may block
-                let (output, _) = tokio::task::block_in_place(|| widget.exec_and_get_output(None, [].into_iter())).unwrap();
-                let (new_buffer, new_cursor) = shell.get_zle_buffer();
-                let new_cursor = new_cursor.unwrap_or(new_buffer.len() as _) as _;
-                let new_buffer = (new_buffer != *buffer).then_some(new_buffer);
-                let new_cursor = (new_cursor != cursor).then_some(new_cursor);
-                let accepted_line = shell.has_accepted_line();
+                    widget.shell.set_zle_buffer(buffer.clone(), cursor as _);
 
-                // check for any output e.g. zle -M
-                if !output.is_empty() {
-                    ui.tui.add_zle_message(output.as_ref());
+                    let mut lastchar = [0; 4];
+                    let len = buf.len().min(lastchar.len());
+                    lastchar[..len].copy_from_slice(&buf[..len]);
+
+                    widget.shell.set_lastchar(lastchar);
+                    // executing a widget may block
+                    let (output, _) = tokio::task::block_in_place(|| widget.exec_and_get_output(None, [].into_iter())).unwrap();
+                    let (new_buffer, new_cursor) = shell.get_zle_buffer();
+                    let new_cursor = new_cursor.unwrap_or(new_buffer.len() as _) as _;
+                    let new_buffer = (new_buffer != *buffer).then_some(new_buffer);
+                    let new_cursor = (new_cursor != cursor).then_some(new_cursor);
+                    let accept_line = shell.has_accepted_line();
+                    drop(lock);
+
+                    Some(Value::Widget{
+                        buffer: new_buffer,
+                        cursor: new_cursor,
+                        output: if output.is_empty() { None } else { Some(output) },
+                        accept_line,
+                    })
+                },
+                None => None,
+            }
+        }))).await.downcast().unwrap();
+
+        match result? {
+            Value::String(string) => Some(KeybindOutput::String(string)),
+            Value::Widget{buffer, cursor, output, accept_line} => {
+                {
+                    let this = self.get();
+                    let mut ui = this.inner.borrow_mut().await;
+
+                    // check for any output e.g. zle -M
+                    if let Some(output) = &output {
+                        ui.tui.add_zle_message(output.as_ref());
+                    }
+                    ui.buffer.set(buffer.as_ref().map(|x| x.as_ref()), cursor);
                 }
-                ui.buffer.set(new_buffer.as_ref().map(|x| x.as_ref()), new_cursor);
 
-                drop(lock);
-                drop(shell);
-                drop(ui);
-                drop(this);
-
-                if new_buffer.is_some() || new_cursor.is_some() || !output.is_empty() {
-                    if new_buffer.is_some() {
+                if buffer.is_some() || cursor.is_some() || output.is_some() {
+                    if buffer.is_some() {
                         self.trigger_buffer_change_callbacks(()).await;
                     }
                     if let Err(e) = self.draw().await {
@@ -519,7 +505,7 @@ impl Ui {
                 }
 
                 // this widget may have called accept-line somewhere inside
-                if accepted_line {
+                if accept_line {
                     Some(KeybindOutput::Value(self.accept_line().await))
                 } else {
                     Some(KeybindOutput::Value(Ok(true)))
@@ -619,12 +605,11 @@ impl UiInner {
         Ok(())
     }
 
-    fn reset(&mut self, _shell: &mut ShellInner) {
+    fn reset(&mut self) {
         self.buffer.reset();
         self.tui.reset();
         self.status_bar.reset();
         self.dirty = true;
-        // shell.set_curhist(i64::MAX);
     }
 
     pub fn prepare_for_unhandled_output(&mut self) -> Result<()> {

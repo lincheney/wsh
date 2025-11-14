@@ -20,13 +20,13 @@ static IMMORTAL_UNDEFINED_KEY: OnceLock<Widget> = OnceLock::new();
 static ACCEPT_LINE: OnceLock<Widget> = OnceLock::new();
 static IMMORTAL_ACCEPT_LINE: OnceLock<Widget> = OnceLock::new();
 
-pub struct ZleWidget<'a, 'b> {
+pub struct ZleWidget<'a> {
     ptr: NonNull<bindings::thingy>,
-    pub shell: &'a mut crate::shell::ShellInner<'b>,
+    pub shell: &'a crate::shell::Shell,
 }
 
-unsafe impl Send for ZleWidget<'_, '_> {}
-unsafe impl Sync for ZleWidget<'_, '_> {}
+unsafe impl Send for ZleWidget<'_> {}
+unsafe impl Sync for ZleWidget<'_> {}
 
 pub struct WidgetArgs {
     times: u16,
@@ -42,8 +42,8 @@ impl Default for WidgetArgs {
     }
 }
 
-impl<'a, 'b> ZleWidget<'a, 'b> {
-    pub fn new(ptr: NonNull<bindings::thingy>, shell: &'a mut crate::shell::ShellInner<'b>) -> Self {
+impl<'a> ZleWidget<'a> {
+    pub fn new(ptr: NonNull<bindings::thingy>, shell: &'a crate::shell::Shell) -> Self {
         let w = Self{ptr, shell};
 
         if w.is_internal() && let Some(widget) = w.widget() {
@@ -123,8 +123,13 @@ impl<'a, 'b> ZleWidget<'a, 'b> {
     }
 
     pub(crate) fn exec_and_get_output<'c, I: Iterator<Item=&'c BStr> + ExactSizeIterator>(&mut self, opts: Option<WidgetArgs>, args: I) -> Result<(BString, c_int)> {
-        let ptr = self.ptr;
-        self.shell.capture_shout(|_| Self::exec_with_ptr(ptr, opts, args))
+        let mut shout = self.shell.shout.lock().unwrap();
+        let shout = if let Some(shout) = &mut *shout {
+            shout
+        } else {
+            shout.get_or_insert(crate::shell::Shout::new()?)
+        };
+        shout.capture(|| Self::exec_with_ptr(self.ptr, opts, args))
     }
 
 }

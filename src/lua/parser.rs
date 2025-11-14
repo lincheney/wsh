@@ -20,7 +20,7 @@ fn tokens_to_lua(tokens: &Vec<crate::shell::Token>, lua: &Lua) -> Result<LuaTabl
 }
 
 async fn parse(ui: Ui, lua: Lua, (val, recursive): (bstr::BString, Option<bool>)) -> Result<(bool, LuaTable)> {
-    let (complete, tokens) = ui.shell.lock().await.parse(val.as_ref(), recursive.unwrap_or(false));
+    let (complete, tokens) = ui.shell.parse(val, recursive.unwrap_or(false)).await;
     let tokens = tokens_to_lua(&tokens, &lua)?;
     Ok((complete, tokens))
 }

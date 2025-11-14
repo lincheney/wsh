@@ -1,7 +1,7 @@
 use std::ops::Range;
 use std::ffi::CStr;
 use std::ptr::null_mut;
-use bstr::{BStr, ByteSlice};
+use bstr::{BString, BStr, ByteSlice};
 use super::bindings::{Meta, token, lextok};
 
 #[derive(Debug, Clone)]
@@ -58,7 +58,7 @@ fn find_str(needle: &BStr, haystack: &BStr, start: usize) -> Option<Range<usize>
     Some(start .. start + needle.len())
 }
 
-pub fn parse(cmd: &BStr, recursive: bool) -> (bool, Vec<Token>) {
+pub fn parse(cmd: BString, recursive: bool) -> (bool, Vec<Token>) {
     // we add some at the end to detect if the command line is actually complete
     let dummy = b" x";
     let mut cmd = cmd.to_owned();

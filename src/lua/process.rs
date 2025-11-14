@@ -191,7 +191,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
 
             let mut proc = command.spawn()?;
             let pid = proc.id().unwrap();
-            ui.shell.lock().await.add_pid(pid as _);
+            ui.shell.add_pid(pid as _).await;
 
             let stdin  = proc.stdin.take().map(|s| WriteableFile(Some(BufWriter::new(s))));
             let stdout = proc.stdout.take().map(|s| ReadableFile(Some(BufReader::new(s))));
@@ -206,8 +206,8 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
                 },
                 Err(e) => {
                     if e.raw_os_error().is_some_and(|e| e == nix::errno::Errno::ECHILD as _) {
-                        if let Some(proc) = ui.shell.lock().await.find_pid(pid as _) {
-                            Ok(proc.status)
+                        if let Some(status) = ui.shell.find_process_status(pid as _).await {
+                            Ok(status)
                         } else {
                             Err(e)
                         }
@@ -346,47 +346,25 @@ async fn shell_run_with_args(mut ui: Ui, lua: Lua, args: FullCommandSpawnArgs) -
                 );
             }
 
-            let mut shell = ui.shell.lock().await;
             let stdin = stdio_pipe!(stdin, true);
             let stdout = stdio_pipe!(stdout, false);
             let stderr = stdio_pipe!(stderr, false);
 
-            let cmd = bstr::BStr::new(&args.args);
+            let cmd = args.args;
             let mut streams = [stdin.1, stdout.1, stderr.1];
-            let pid = if args.subshell {
+            let (pid, cmd) = if args.subshell {
                 // fork it now to get the pid
-                let redirections = streams.iter().flatten().map(|s| (s.fd, s.replacement));
-                shell.exec_subshell(cmd, false, redirections)? as _
+                let redirections = streams.iter().flatten().map(|s| (s.fd, s.replacement)).collect();
+                (ui.shell.exec_subshell(cmd.into(), false, redirections).await? as _, None)
             } else {
-                std::process::id()
+                (std::process::id(), Some(cmd))
             };
 
             // send streams back to caller
             let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
 
-            let code = if args.subshell {
-
-                let result: Result<_> = tokio::task::block_in_place(|| {
-                    let pid = nix::unistd::Pid::from_raw(pid as _);
-                    loop {
-                        match waitpid(Some(pid), None) {
-                            Ok(WaitStatus::Exited(_, code)) => return Ok(code as i64),
-                            Ok(WaitStatus::Signaled(_, signal, _)) => return Ok(128 + signal as i64),
-                            Ok(_) => (),
-                            Err(e @ nix::errno::Errno::ECHILD) => {
-                                let mut shell = tokio::runtime::Handle::current().block_on(ui.shell.lock());
-                                if let Some(proc) = shell.find_pid(pid.into()) {
-                                    return Ok(proc.status as _)
-                                }
-                                Err(e)?;
-                            },
-                            Err(e) => Err(e)?,
-                        }
-                    }
-                });
-                result?
-
-            } else {
+            let code = if let Some(cmd) = cmd {
+                debug_assert!(args.subshell);
                 // no forking, override fds in place
                 let mut result = streams.iter_mut().flatten().try_for_each(|s| s.override_fd());
                 if result.is_err() {
@@ -398,7 +376,28 @@ async fn shell_run_with_args(mut ui: Ui, lua: Lua, args: FullCommandSpawnArgs) -
                 }
 
                 // run the scripts
-                tokio::task::block_in_place(|| shell.exec(cmd))
+                ui.shell.exec(cmd.into()).await
+
+            } else {
+                let result: Result<_> = tokio::task::block_in_place(|| {
+                    let pid = nix::unistd::Pid::from_raw(pid as _);
+                    loop {
+                        match waitpid(Some(pid), None) {
+                            Ok(WaitStatus::Exited(_, code)) => return Ok(code as i64),
+                            Ok(WaitStatus::Signaled(_, signal, _)) => return Ok(128 + signal as i64),
+                            Ok(_) => (),
+                            Err(e @ nix::errno::Errno::ECHILD) => {
+                                let status = tokio::runtime::Handle::current().block_on(ui.shell.find_process_status(pid.into()));
+                                if let Some(status) = status {
+                                    return Ok(status as _)
+                                }
+                                Err(e)?;
+                            },
+                            Err(e) => Err(e)?,
+                        }
+                    }
+                });
+                result?
             };
 
             let mut errors = [Ok(()), Ok(()), Ok(())];
@@ -411,7 +410,6 @@ async fn shell_run_with_args(mut ui: Ui, lua: Lua, args: FullCommandSpawnArgs) -
                 }
             }
 
-            drop(shell);
             drop(foreground_lock);
             if args.foreground {
                 ui.report_error(true, ui.activate().await).await;

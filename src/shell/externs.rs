@@ -1,18 +1,19 @@
+use std::sync::atomic::{Ordering};
 mod fork;
 use bstr::BString;
-use crate::ui::{Ui, TrampolineIn};
+use crate::ui::{Ui};
 use crate::c_string_array;
 use std::os::raw::{c_char, c_int};
 use std::ptr::null_mut;
 use std::sync::{Arc, LazyLock, OnceLock, Mutex};
 use std::ffi::CString;
 use anyhow::Result;
-use crate::shell::zsh;
+use crate::shell::{Shell, ShellClient, ShellMsg, zsh};
 use crate::fork_lock::{RawForkLock, ForkLock};
 
 static FORK_LOCK: RawForkLock = RawForkLock::new();
 
-type GlobalState = (Ui, Mutex<TrampolineIn>, tokio::runtime::Runtime);
+type GlobalState = (Ui, Shell, Mutex<tokio::sync::mpsc::UnboundedReceiver<ShellMsg>>, tokio::runtime::Runtime);
 static STATE: ForkLock<'static, Mutex<Option<Arc<GlobalState>>>> = FORK_LOCK.wrap(Mutex::new(None));
 
 fn try_get_state() -> Option<Arc<GlobalState>> {
@@ -21,12 +22,11 @@ fn try_get_state() -> Option<Arc<GlobalState>> {
     store.clone()
 }
 
-fn get_or_init_state() -> Result<(bool, Arc<GlobalState>)> {
+fn get_or_init_state() -> Result<Arc<GlobalState>> {
 
     let lock = STATE.read();
     let mut store = lock.lock().unwrap();
     let store = &mut *store;
-    let new = store.is_none();
 
     let state = if let Some(state) = store {
         state
@@ -40,13 +40,15 @@ fn get_or_init_state() -> Result<(bool, Arc<GlobalState>)> {
 
         let runtime = tokio::runtime::Runtime::new()?;
 
+        let shell = Shell::default();
         let result: Result<_> = runtime.block_on(async {
             let (events, event_ctrl) = crate::event_stream::EventStream::new();
-            let (mut ui, trampoline) = Ui::new(&FORK_LOCK, event_ctrl).await?;
+            let (shell_client, shell_queue) = ShellClient::new(shell.clone());
+            let mut ui = Ui::new(&FORK_LOCK, event_ctrl, shell_client).await?;
             ui.activate().await?;
             ui.start_cmd().await?;
 
-            if !crate::IS_FORKED.load(std::sync::atomic::Ordering::Relaxed) {
+            if !crate::IS_FORKED.load(Ordering::Relaxed) {
                 // spawn a task to take care of keyboard input
                 {
                     let ui = ui.clone();
@@ -61,19 +63,37 @@ fn get_or_init_state() -> Result<(bool, Arc<GlobalState>)> {
                 crate::signals::setup(&ui)?;
             }
 
-            Ok((ui, trampoline))
+            Ok((ui, shell, shell_queue))
         });
-        let (ui, trampoline) = result?;
-        store.get_or_insert(Arc::new((ui, Mutex::new(trampoline), runtime)))
+        let (ui, shell, shell_queue) = result?;
+        store.get_or_insert(Arc::new((ui, shell, Mutex::new(shell_queue), runtime)))
     };
 
-    Ok((new, state.clone()))
+    Ok(state.clone())
+}
+
+fn run_shell(shell: &Shell, queue: &mut tokio::sync::mpsc::UnboundedReceiver<ShellMsg>) -> Option<BString> {
+    loop {
+        if let Some(trampoline) = shell.trampoline.lock().unwrap().take() {
+            let _ = trampoline.send(());
+        }
+        shell.is_waiting.store(true, Ordering::Relaxed);
+        let msg = queue.blocking_recv()?;
+        shell.is_waiting.store(false, Ordering::Relaxed);
+        match msg {
+            ShellMsg::accept_line_trampoline{line, returnvalue} => {
+                *shell.trampoline.lock().unwrap() = Some(returnvalue);
+                return line
+            },
+            msg => tokio::task::block_in_place(|| shell.handle_one_message(msg)),
+        }
+    }
 }
 
 fn main() -> Result<Option<BString>> {
-    let (new, state) = get_or_init_state()?;
-    let (_, trampoline, runtime) = &*state;
-    Ok(runtime.block_on(trampoline.lock().unwrap().jump_in(!new)))
+    let state = get_or_init_state()?;
+    let (_, shell, shell_queue, _) = &*state;
+    Ok(run_shell(shell, &mut *shell_queue.lock().unwrap()))
 }
 
 unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _options: zsh_sys::Options, _func: c_int) -> c_int {
@@ -82,13 +102,15 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
     match argv.first().map(|s| s.as_slice()) {
         Some(b"lua") => {
             let result: Result<()> = tokio::task::block_in_place(|| {
-                let (_, state) = get_or_init_state()?;
-                let (ui, _, runtime) = &*state;
-                runtime.block_on(async {
-                    ui.shell.with_tmp_permit(|| async {
-                        ui.lua.load(argv.get(1).map_or(b"" as _, |s| s.as_slice())).exec_async().await
-                    }).await
+
+                let state = get_or_init_state()?;
+                let ui = state.0.clone();
+                let runtime = &state.3;
+
+                runtime.block_on(async move {
+                    ui.lua.load(argv.get(1).map_or(b"" as _, |s| s.as_slice())).exec_async().await
                 })?;
+
                 Ok(())
             });
 
@@ -202,7 +224,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
 
         } else if cmd == zsh_sys::ZLE_CMD_TRASH as _ && let Some(state) = try_get_state() {
             // something is probably going to print (error msgs etc) to the terminal
-            let (ui, _, _) = &*state;
+            let (ui, _, _, _) = &*state;
             if let Ok(_lock) = ui.has_foreground_process.try_lock() {
                 tokio::task::block_in_place(|| {
                     tokio::runtime::Handle::current().block_on(async {
@@ -216,16 +238,13 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
 
         } else if cmd == zsh_sys::ZLE_CMD_REFRESH as _ && let Some(state) = try_get_state() {
             // redraw the ui
-            let (ui, _, _) = &*state;
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    let result: Result<(), String> = Ok(());
-                    ui.shell.with_tmp_permit(|| async {
-                        let mut ui = ui.clone();
-                        ui.get().inner.write().await.recover_from_unhandled_output().await.unwrap();
-                        ui.report_error(true, result).await;
-                    }).await;
-                });
+            let ui = state.0.clone();
+            let runtime = &state.3;
+            runtime.block_on(async move {
+                let result: Result<(), String> = Ok(());
+                let mut ui = ui.clone();
+                ui.get().inner.write().await.recover_from_unhandled_output().await.unwrap();
+                ui.report_error(true, result).await;
             });
             return null_mut()
 

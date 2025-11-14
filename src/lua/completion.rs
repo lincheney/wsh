@@ -46,42 +46,29 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Compl
         ui.get().inner.borrow().await.buffer.get_contents().clone()
     };
 
-    let (consumer, producer) = ui.shell.lock().await.get_completions(val.as_ref());
+    let (consumer, producer) = crate::shell::get_completions(val);
     let parent = producer.clone();
 
-    // run this in a thread
-    tokio::task::spawn_blocking(move || {
-        let tid = nix::unistd::gettid();
-        let mut shell = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                ui.add_thread(tid);
-                ui.shell.lock().await
-            })
-        });
-        // this blocks
-        match producer.run(&mut shell) {
-            Ok(msg) => {
-                drop(shell);
-                tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(async {
-                        ui.remove_thread(tid);
-                        // ui.activate();
-                        if !msg.is_empty() {
-                            let this = ui.unlocked.read();
-                            let mut ui = this.inner.borrow_mut().await;
-                            ui.tui.add_zle_message(msg.as_ref());
-                        }
-                    });
-                });
-            },
-            err => {
-                let mut ui = ui.clone();
-                tokio::task::spawn(async move {
-                    ui.report_error(false, err).await;
-                });
-            },
-        }
-    });
+    let tid = nix::unistd::gettid();
+    ui.add_thread(tid);
+
+    match ui.shell.run_completions(producer).await {
+        Ok(msg) => {
+            ui.remove_thread(tid);
+            // ui.activate();
+            if !msg.is_empty() {
+                let this = ui.unlocked.read();
+                let mut ui = this.inner.borrow_mut().await;
+                ui.tui.add_zle_message(msg.as_ref());
+            }
+        },
+        err => {
+            let mut ui = ui.clone();
+            tokio::task::spawn(async move {
+                ui.report_error(false, err).await;
+            });
+        },
+    }
 
     Ok(CompletionStream{inner: consumer, parent})
 }
@@ -91,7 +78,7 @@ async fn insert_completion(mut ui: Ui, _lua: Lua, (stream, val): (CompletionStre
         let this = ui.unlocked.read();
         let buffer = this.inner.borrow().await.buffer.get_contents().clone();
         let completion_word_len = stream.parent.get_completion_word_len();
-        let (new_buffer, new_pos) = ui.shell.lock().await.insert_completion(buffer.as_ref(), completion_word_len, &val.inner);
+        let (new_buffer, new_pos) = ui.shell.insert_completion(buffer, completion_word_len, val.inner).await;
 
         // see if this can be done as an insert
         let mut ui = this.inner.borrow_mut().await;

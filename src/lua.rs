@@ -88,7 +88,7 @@ async fn exit(ui: Ui, _lua: Lua, code: Option<i32>) -> Result<()> {
 }
 
 async fn get_cwd(ui: Ui, _lua: Lua, (): ()) -> Result<BString> {
-    Ok(ui.shell.lock().await.get_cwd())
+    Ok(ui.shell.get_cwd().await)
 }
 
 pub async fn __laggy(_ui: Ui, lua: Lua, (): ()) -> Result<()> {
