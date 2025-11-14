@@ -424,7 +424,7 @@ impl Ui {
         // look for a zle widget
         let ui = self.clone();
         let buf = buf.to_owned();
-        let result: Option<_> = *self.shell.run(Box::new(move |shell| Box::new({
+        let result = self.shell.do_run(move |shell| {
             match KeybindValue::find(shell, buf.as_ref()) {
                 Some(KeybindValue::String(string)) => {
                     // recurse
@@ -469,7 +469,7 @@ impl Ui {
                 },
                 None => None,
             }
-        }))).await.downcast().unwrap();
+        }).await;
 
         match result? {
             Value::String(string) => Some(KeybindOutput::String(string)),

@@ -1,4 +1,3 @@
-use std::os::raw::{c_long};
 use anyhow::Result;
 use mlua::{prelude::*};
 use crate::ui::{Ui, ThreadsafeUiInner};
@@ -16,17 +15,15 @@ fn entry_to_lua(entry: crate::shell::history::Entry, lua: &Lua) -> Result<LuaTab
 async fn get_history(ui: Ui, lua: Lua, _val: ()) -> Result<(usize, LuaTable)> {
     let current = ui.shell.get_histline().await;
 
-    let tbl: Result<_> = *ui.shell.run(Box::new(move |shell| {
-        Box::new((|| -> Result<_> {
-            let tbl = lua.create_table()?;
-            let history = crate::shell::history::History::get(shell);
-            for entry in history.iter() {
-                let entry = entry.as_entry();
-                tbl.raw_push(entry_to_lua(entry, &lua)?)?;
-            }
-            Ok(tbl)
-        })())
-    })).await.downcast().unwrap();
+    let tbl: Result<_> = ui.shell.do_run(move |shell| {
+        let tbl = lua.create_table()?;
+        let history = crate::shell::history::History::get(shell);
+        for entry in history.iter() {
+            let entry = entry.as_entry();
+            tbl.raw_push(entry_to_lua(entry, &lua)?)?;
+        }
+        Ok(tbl)
+    }).await;
     Ok((current as _, tbl?))
 }
 
@@ -37,45 +34,39 @@ async fn get_history_index(ui: Ui, _lua: Lua, _val: ()) -> Result<usize> {
 async fn get_next_history(ui: Ui, lua: Lua, val: usize) -> Result<Option<LuaTable>> {
     // get the next highest one
 
-    *ui.shell.run(Box::new(move |shell| {
-        Box::new((|| {
-            let history = crate::shell::history::History::get(shell);
-            if let Some(entry) = history.closest_to((val+1) as _, std::cmp::Ordering::Greater) {
-                entry_to_lua(entry.as_entry(), &lua).map(|entry| Some(entry))
-            } else {
-                Ok(None)
-            }
-        })())
-    })).await.downcast().unwrap()
+    ui.shell.do_run(move |shell| {
+        let history = crate::shell::history::History::get(shell);
+        if let Some(entry) = history.closest_to((val+1) as _, std::cmp::Ordering::Greater) {
+            entry_to_lua(entry.as_entry(), &lua).map(|entry| Some(entry))
+        } else {
+            Ok(None)
+        }
+    }).await
 }
 
 async fn get_prev_history(ui: Ui, lua: Lua, val: usize) -> Result<Option<LuaTable>> {
-    *ui.shell.run(Box::new(move |shell| {
-        Box::new((|| -> Result<_> {
-            let history = crate::shell::history::History::get(shell);
-            // get the next lowest one
-            if let Some(entry) = history.closest_to((val.saturating_sub(1)) as _, std::cmp::Ordering::Less) {
-                Ok(Some(entry_to_lua(entry.as_entry(), &lua)?))
-            } else {
-                Ok(None)
-            }
-        })())
-    })).await.downcast().unwrap()
+    ui.shell.do_run(move |shell| {
+        let history = crate::shell::history::History::get(shell);
+        // get the next lowest one
+        if let Some(entry) = history.closest_to((val.saturating_sub(1)) as _, std::cmp::Ordering::Less) {
+            Ok(Some(entry_to_lua(entry.as_entry(), &lua)?))
+        } else {
+            Ok(None)
+        }
+    }).await
 }
 
 async fn goto_history(ui: Ui, _lua: Lua, val: usize) -> Result<Option<usize>> {
     let current = ui.shell.get_histline().await;
-    let result: Option<(Option<c_long>, c_long, BString)> = *ui.shell.run(Box::new(move |shell| {
+    let result = ui.shell.do_run(move |shell| {
         let mut history = crate::shell::history::History::get(shell);
         let latest = history.first().map(|entry| entry.histnum());
 
-        Box::new(
-            match history.set_histline(val as _) {
-                Some(entry) => Some((latest, entry.histnum(), entry.as_entry().text)),
-                None => None,
-            }
-        )
-    })).await.downcast().unwrap();
+        match history.set_histline(val as _) {
+            Some(entry) => Some((latest, entry.histnum(), entry.as_entry().text)),
+            None => None,
+        }
+    }).await;
 
     if let Some((latest, histnum, text)) = result {
         let ui = ui.unlocked.read();

@@ -41,6 +41,10 @@ macro_rules! TokioActor {
                     (Self{ queue: sender, inner }, receiver)
                 }
 
+                pub async fn do_run<T: 'static + Send, F: 'static + Sync + Send + Fn(&Shell) -> T>(&self, func: F) -> T {
+                    *self.run(Box::new(move |shell| Box::new(func(shell)))).await.downcast().unwrap()
+                }
+
                 $(
                 pub async fn $fn(&self, $($arg: $argtype),*) $(-> $rettype)? {
                     let thread = ::nix::unistd::gettid();
