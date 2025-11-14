@@ -219,7 +219,8 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
 
             drop(foreground_lock);
             if args.foreground {
-                ui.report_error(true, ui.activate().await).await;
+                let result = ui.get().inner.borrow().await.activate();
+                ui.report_error(true, result).await;
                 ui.get().inner.borrow_mut().await.events.resume().await;
             }
             // ignore error
@@ -412,7 +413,8 @@ async fn shell_run_with_args(mut ui: Ui, lua: Lua, args: FullCommandSpawnArgs) -
 
             drop(foreground_lock);
             if args.foreground {
-                ui.report_error(true, ui.activate().await).await;
+                let result = ui.get().inner.borrow().await.activate();
+                ui.report_error(true, result).await;
                 ui.get().inner.borrow_mut().await.events.resume().await;
             }
 

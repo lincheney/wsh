@@ -140,14 +140,6 @@ impl Ui {
         self.unlocked.read()
     }
 
-    pub async fn activate(&self) -> Result<()> {
-        self.get().inner.borrow().await.activate()
-    }
-
-    pub async fn deactivate(&mut self) -> Result<()> {
-        self.get().inner.borrow_mut().await.deactivate()
-    }
-
     pub fn get_lua_api(&self) -> LuaResult<LuaTable> {
         self.lua.globals().get("wish")
     }
