@@ -176,7 +176,6 @@ impl Ui {
             return Ok(())
         }
 
-        crossterm::terminal::disable_raw_mode()?;
         ui.size = crossterm::terminal::size()?;
         ui.tui.draw(
             &mut ui.stdout,
@@ -187,7 +186,6 @@ impl Ui {
             &mut ui.status_bar,
             ui.dirty,
         ).await?;
-        crossterm::terminal::enable_raw_mode()?;
 
         ui.dirty = false;
         Ok(())
