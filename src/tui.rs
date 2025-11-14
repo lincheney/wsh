@@ -170,7 +170,7 @@ fn render_text(
     override_style: Option<Style>,
 ) {
 
-    let mut offset = (0, 0);
+    let mut offset = (0, area.y);
     for line in text.iter() {
         if offset.1 >= area.height {
             break
