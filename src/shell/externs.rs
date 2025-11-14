@@ -85,7 +85,7 @@ fn run_shell(shell: &Shell, queue: &mut tokio::sync::mpsc::UnboundedReceiver<She
                 *shell.trampoline.lock().unwrap() = Some(returnvalue);
                 return line
             },
-            msg => tokio::task::block_in_place(|| shell.handle_one_message(msg)),
+            msg => shell.handle_one_message(msg),
         }
     }
 }
@@ -197,7 +197,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
             zsh::lpromptbuf = EMPTY_STR.as_mut_ptr().cast();
             zsh::rpromptbuf = EMPTY_STR.as_mut_ptr().cast();
 
-            let result = main();
+            let result = tokio::task::block_in_place(main);
 
             // zsh will reset the tty settings to its saved values
             // but it may have saved it at a bad time!
