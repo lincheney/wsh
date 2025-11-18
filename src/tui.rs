@@ -555,7 +555,7 @@ impl Tui {
         let resize = new_height.0 + new_height.1 + new_height.2 > old_height.0 + old_height.1 + old_height.2;
         if resize {
             // allocate height
-            drawer.move_to_pos(buffer.draw_end_pos);
+            drawer.move_to_pos(buffer.draw_end_pos)?;
             allocate_height(drawer.writer, new_height.1 + new_height.2)?;
             // clear the old status bar
             // but do not clear the buffer
