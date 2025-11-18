@@ -145,14 +145,14 @@ pub struct Widget{
     text_overrides_style: bool,
 }
 
-fn render_indent(area: Rect, buffer: &mut Buffer, y: u16, line_width: u16, alignment: Alignment, style: Option<Style>) -> u16 {
+fn render_indent(area: Rect, buffer: &mut Buffer, line_width: u16, alignment: Alignment, style: Option<Style>) -> u16 {
     let indent = match alignment {
         Alignment::Left => return 0,
         Alignment::Right => area.width.saturating_sub(line_width),
         Alignment::Center => area.width.saturating_sub(line_width) / 2,
     };
 
-    let index = buffer.index_of(0, y);
+    let index = buffer.index_of(area.x, area.y);
     for cell in &mut buffer.content[index .. index + indent as usize] {
         cell.reset();
         if let Some(style) = style {
@@ -170,7 +170,7 @@ fn render_text(
     override_style: Option<Style>,
 ) {
 
-    let mut offset = (0, area.y);
+    let mut offset = (0, 0);
     for line in text.iter() {
         if offset.1 >= area.height {
             break
@@ -187,7 +187,7 @@ fn render_text(
             None
         };
         let mut line_width = line.width();
-        offset.0 = render_indent(area, buffer, offset.1, line_width as u16, alignment, indent_style);
+        offset.0 += render_indent(Rect{ y: offset.1, ..area }, buffer, line_width as u16, alignment, indent_style);
 
         for graph in line.styled_graphemes(text.style) {
 
@@ -211,11 +211,11 @@ fn render_text(
 
             offset.0 += width as u16;
             if offset.0 >= area.width {
-                if offset.1 + 1 >= area.height {
+                offset.1 += 1;
+                if offset.1 >= area.height {
                     return
                 }
-                offset = (0, offset.1 + 1);
-                offset.0 = render_indent(area, buffer, offset.1, line_width as u16, alignment, indent_style);
+                offset.0 += render_indent(Rect{ y: offset.1, ..area }, buffer, line_width as u16, alignment, indent_style);
             }
         }
 
@@ -519,7 +519,7 @@ impl Tui {
         drawer.cur_pos = buffer.draw_end_pos;
 
         // restrict widgets to after the buffer
-        let area = Rect{ y: buffer.draw_end_pos.1, height: area.height - buffer.draw_end_pos.1, ..area };
+        let area = Rect{ height: area.height - buffer.draw_end_pos.1, ..area };
 
         // refresh status bar
         // need to refresh this FIRST
@@ -528,7 +528,6 @@ impl Tui {
         let status_bar_height = if let Some(ref mut widget) = status_bar.inner {
             if status_bar.dirty {
                 // status bar has its own buffer so pin it to y=0
-                let area = Rect{ y: 0, ..area };
                 widget.line_count = widget.line_count(area, &mut self.widgets.line_count_buffer);
                 status_bar.buffer.reset();
                 widget.render(area, &mut status_bar.buffer);
