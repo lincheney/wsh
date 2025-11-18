@@ -337,9 +337,9 @@ impl Parser {
         Some((event, len))
     }
 
-    fn parse_char(&self, start: usize, modifiers: KeyModifiers) -> Option<Option<(Event, usize)>> {
+    fn parse_char(&self, start: usize, modifiers: KeyModifiers) -> Option<(Event, usize)> {
         let Some(c) = self.buffer.get(start)
-            else { return Some(None) }; // if None, it means its incomplete
+            else { return Some((Event::Unknown, 0)) }; // incomplete
 
         let mut len = 1;
         let key = match c {
@@ -357,18 +357,18 @@ impl Parser {
                     },
                     Err(e) => {
                         let Some(len) = e.error_len()
-                            else { return Some(None) }; // if None, it means its incomplete
+                            else { return Some((Event::Unknown, 0)) }; // incomplete
 
                         let mut invalid = [0; 4];
                         invalid.copy_from_slice(&array[..len]);
-                        return Some(Some((Event::InvalidUtf8(invalid, modifiers), len)))
+                        return Some((Event::InvalidUtf8(invalid, modifiers), len))
                     },
                 }
             },
             _ => return None,
         };
         let event = Event::Key(KeyEvent{ key, modifiers });
-        Some(Some((event, len)))
+        Some((event, len))
     }
 
     pub fn get_one_event(&mut self) -> Option<(Event, BString)> {
@@ -378,8 +378,8 @@ impl Parser {
         let event;
         let event = match self.parse_char(0, KeyModifiers::NONE) {
 
-            Some(None) => return None,
-            Some(Some((e, l))) => { len = l; e },
+            Some((_, 0)) => return None,
+            Some((e, l)) => { len = l; e },
 
             None => match c {
                 b'\x00'..=b'\x1a'   => Event::Key(KeyEvent{ key: Key::Char((c + 0x60).into()), modifiers: KeyModifiers::CONTROL }),
@@ -414,11 +414,14 @@ impl Parser {
                     },
                     // no more data, probably just a single escape key
                     None => Key::Escape.into(),
-                    _ => {
-                        // check for alt-key otherwise treat as a single escape key
-                        (event, len) = self.parse_char(1, KeyModifiers::ALT).unwrap_or(Some((Key::Escape.into(), 0)))?;
-                        len += 1;
-                        event
+                    // check for alt-key otherwise treat as a single escape key
+                    _ => match self.parse_char(1, KeyModifiers::ALT) {
+                        Some((_, 0)) => return None,
+                        Some((event, l)) => {
+                            len = l + 1;
+                            event
+                        },
+                        None => Key::Escape.into(),
                     },
                 },
 
