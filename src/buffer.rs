@@ -227,14 +227,6 @@ impl Buffer {
     pub fn render<W :Write>(&mut self, drawer: &mut Drawer<W>) -> std::io::Result<()> {
 
         let cursor = self.cursor_byte_pos();
-
-        if self.contents.is_empty() {
-            drawer.clear_to_end_of_line()?;
-            self.cursor_coord = drawer.cur_pos;
-            self.draw_end_pos = drawer.cur_pos;
-            return Ok(())
-        }
-
         if cursor == 0 {
             self.cursor_coord = drawer.cur_pos;
         }
@@ -251,7 +243,7 @@ impl Buffer {
 
             if c == "\n" {
                 drawer.goto_newline()?;
-            } else if c.width() > 0 && (start + 1 != end || c != "\u{FFFD}") {
+            } else if c.width() > 0 && c != "\u{FFFD}" {
                 let mut cell = cell.clone();
                 cell.set_symbol(c);
                 drawer.draw_cell(&cell, false)?;
@@ -289,6 +281,7 @@ impl Buffer {
         }
         // clear the last/current line
         drawer.clear_to_end_of_line()?;
+        drawer.cur_pos = self.draw_end_pos;
 
         Ok(())
     }

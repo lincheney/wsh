@@ -491,6 +491,12 @@ impl Tui {
             return Ok(())
         }
 
+        let old_height = (
+            buffer.draw_end_pos.1 + 1,
+            self.widgets.height,
+            status_bar.inner.as_ref().map_or(0, |w| w.line_count),
+        );
+
         let mut drawer = backend::Drawer::new(&mut self.buffer, writer, buffer.cursor_coord);
         queue!(drawer.writer, crossterm::terminal::BeginSynchronizedUpdate)?;
         drawer.reset_colours()?;
@@ -514,7 +520,6 @@ impl Tui {
 
         // restrict widgets to after the buffer
         let area = Rect{ y: buffer.draw_end_pos.1, height: area.height - buffer.draw_end_pos.1, ..area };
-        let old_height = (self.widgets.height, status_bar.inner.as_ref().map_or(0, |w| w.line_count));
 
         // refresh status bar
         // need to refresh this FIRST
@@ -522,6 +527,8 @@ impl Tui {
         // as it in turn restricts the height available for other widgets
         let status_bar_height = if let Some(ref mut widget) = status_bar.inner {
             if status_bar.dirty {
+                // status bar has its own buffer so pin it to y=0
+                let area = Rect{ y: 0, ..area };
                 widget.line_count = widget.line_count(area, &mut self.widgets.line_count_buffer);
                 status_bar.buffer.reset();
                 widget.render(area, &mut status_bar.buffer);
@@ -538,17 +545,22 @@ impl Tui {
             self.widgets.refresh(area, max_height);
             self.widgets.height = buffer_nonempty_height(&self.widgets.buffer).saturating_sub(drawer.cur_pos.1);
         }
-        let new_height = (self.widgets.height, status_bar.inner.as_ref().map_or(0, |w| w.line_count));
 
+        let new_height = (
+            buffer.draw_end_pos.1 + 1,
+            self.widgets.height,
+            status_bar.inner.as_ref().map_or(0, |w| w.line_count),
+        );
 
         // allocate enough height for the widgets
-        let resize = new_height.0 + new_height.1 > old_height.0 + old_height.1;
+        let resize = new_height.0 + new_height.1 + new_height.2 > old_height.0 + old_height.1 + old_height.2;
         if resize {
             // allocate height
-            allocate_height(drawer.writer, new_height.0 + new_height.1 + buffer.draw_end_pos.1 - buffer.cursor_coord.1)?;
+            allocate_height(drawer.writer, new_height.0 + new_height.1 + new_height.2 - 1 - buffer.cursor_coord.1)?;
             // clear the old status bar
-            if old_height.1 > 0 {
-                drawer.cur_pos = (0, buffer.draw_end_pos.1 + old_height.0 + 1);
+            // but do not clear the buffer
+            if old_height.2 > 0 {
+                drawer.cur_pos = (0, old_height.0 + old_height.1).max(buffer.draw_end_pos);
                 drawer.clear_to_end_of_screen()?;
             }
         }
