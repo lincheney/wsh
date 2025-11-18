@@ -224,10 +224,10 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
 
         } else if cmd == zsh_sys::ZLE_CMD_TRASH as _ && let Some(state) = try_get_state() {
             // something is probably going to print (error msgs etc) to the terminal
-            let (ui, _, _, _) = &*state;
+            let (ui, _, _, runtime) = &*state;
             if let Ok(_lock) = ui.has_foreground_process.try_lock() {
                 tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(async {
+                    runtime.block_on(async {
                         let ui = ui.get();
                         let mut ui = ui.inner.write().await;
                         ui.prepare_for_unhandled_output().unwrap();
