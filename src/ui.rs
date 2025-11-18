@@ -9,6 +9,7 @@ use tokio::sync::{RwLock};
 use anyhow::Result;
 use crate::keybind::parser::{Event, KeyEvent, Key, KeyModifiers};
 use crate::fork_lock::{ForkLock, RawForkLock, ForkLockReadGuard};
+use nix::sys::termios;
 
 use crossterm::{
     terminal::{Clear, ClearType, BeginSynchronizedUpdate, EndSynchronizedUpdate},
@@ -557,6 +558,11 @@ impl Ui {
 impl UiInner {
     pub fn activate(&self) -> Result<()> {
         crossterm::terminal::enable_raw_mode()?;
+
+        // onlcr in case bg processes are outputting things
+        let mut attrs = termios::tcgetattr(&self.stdout)?;
+        attrs.output_flags.insert(termios::OutputFlags::OPOST | termios::OutputFlags::ONLCR);
+        nix::sys::termios::tcsetattr(&self.stdout, termios::SetArg::TCSADRAIN, &attrs)?;
 
         if self.enhanced_keyboard {
             queue!(
