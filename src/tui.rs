@@ -570,10 +570,17 @@ impl Tui {
             // redraw widgets
             let lines = self.widgets.buffer.content
                 .chunks(area.width as _)
-                .take(self.widgets.height as _)
-                .skip(buffer.draw_end_pos.1 as usize);
+                .take(self.widgets.height as _);
             drawer.goto_newline()?;
             drawer.draw_lines(lines)?;
+            // clear any old lines below
+            if new_height.1 < old_height.1 {
+                for _ in new_height.1 .. old_height.1 {
+                    drawer.goto_newline()?;
+                }
+            }
+            // clear the last/current line
+            drawer.clear_to_end_of_line()?;
         }
 
         // save cursor position so we can go back to it
