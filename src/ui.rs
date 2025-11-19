@@ -565,15 +565,15 @@ impl UiInner {
         nix::sys::termios::tcsetattr(&self.stdout, termios::SetArg::TCSADRAIN, &attrs)?;
 
         if self.enhanced_keyboard {
-            queue!(
-                self.stdout.lock(),
-                event::PushKeyboardEnhancementFlags(
-                    event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
-                    | event::KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
-                    | event::KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
-                    | event::KeyboardEnhancementFlags::REPORT_EVENT_TYPES
-                )
-            )?;
+            // queue!(
+                // self.stdout.lock(),
+                // event::PushKeyboardEnhancementFlags(
+                    // event::KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    // | event::KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+                    // | event::KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+                    // | event::KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+                // )
+            // )?;
         }
 
         execute!(
@@ -587,7 +587,7 @@ impl UiInner {
 
     pub fn deactivate(&mut self) -> Result<()> {
         if self.enhanced_keyboard {
-            queue!(self.stdout, event::PopKeyboardEnhancementFlags)?;
+            // queue!(self.stdout, event::PopKeyboardEnhancementFlags)?;
         }
 
         execute!(
