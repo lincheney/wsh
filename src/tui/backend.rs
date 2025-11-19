@@ -209,10 +209,9 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
             self.buffer[cur_pos] = cell.clone();
         }
 
-        cur_pos.0 += 1;
         // clear the remaining cells
-        self.clear_cells(cur_pos, cell_width - 1);
-        cur_pos.0 += cell_width - 1;
+        self.clear_cells((cur_pos.0 + 1, cur_pos.1), cell_width - 1);
+        cur_pos.0 += cell_width;
 
         self.cur_pos = cur_pos;
         if draw {
