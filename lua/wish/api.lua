@@ -30,10 +30,11 @@ function wish.async.spawn(...)
         stdin = stdin,
         stdout = stdout,
         stderr = stderr,
-        pid = function(self) return proc:pid() end,
-        wait = function(self) return proc:wait() end,
-        kill = function(self) return self:kill() end,
-        term = function(self) return self:kill('SIGTERM') end,
+        pid = function() return proc:pid() end,
+        is_finished = function() return proc:is_finished() end,
+        wait = function() return proc:wait() end,
+        kill = function() return proc:kill() end,
+        term = function() return proc:kill('SIGTERM') end,
     }
 end
 

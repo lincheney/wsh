@@ -8,7 +8,7 @@ use anyhow::{Result, Context};
 use mlua::{prelude::*, UserData, UserDataMethods};
 use tokio::io::{BufReader, BufWriter};
 use tokio::process::Command;
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 use serde::{Deserialize, Deserializer, de};
 use nix::sys::wait::{waitpid, WaitStatus};
 use crate::ui::{Ui, ThreadsafeUiInner};
@@ -17,6 +17,7 @@ use super::asyncio::{ReadableFile, WriteableFile};
 #[derive(Debug, Copy, Clone)]
 struct Signal(nix::sys::signal::Signal);
 #[derive(Debug, Deserialize, Clone)]
+#[serde(untagged)]
 enum RawSignal {
     Number(i32),
     String(String),
@@ -33,16 +34,17 @@ impl<'de> Deserialize<'de> for Signal {
 }
 
 struct CommandResult {
-    inner: Option<oneshot::Receiver<std::io::Result<i32>>>,
+    inner: watch::Receiver<Option<std::io::Result<i32>>>,
 }
 
 impl CommandResult {
-    async fn wait(&mut self) -> LuaResult<Option<i32>> {
-        if let Some(waiter) = self.inner.take() {
-            let result = waiter.await.map_err(|e| LuaError::RuntimeError(format!("{e}")))??;
-            Ok(Some(result))
-        } else {
-            Ok(None)
+    async fn wait(&mut self) -> LuaResult<i32> {
+        match self.inner.wait_for(|x| x.is_some()).await {
+            Ok(x) => match x.as_ref().unwrap() {
+                Ok(x) => Ok(*x),
+                Err(e) => Err(LuaError::RuntimeError(format!("{e}"))),
+            },
+            Err(_) => Ok(i32::MAX),
         }
     }
 }
@@ -67,14 +69,22 @@ impl UserData for Process {
             Ok(proc.pid)
         });
 
+        methods.add_method("is_finished", |_lua, proc, ()| {
+            Ok(proc.result.inner.borrow().is_some())
+        });
+
         methods.add_async_method_mut("wait", |_lua, mut proc, ()| async move {
             proc.result.wait().await
         });
 
         methods.add_method("kill", |lua, proc, signal: LuaValue| {
-            let signal: Signal = lua.from_value(signal)?;
-            let pid = nix::unistd::Pid::from_raw(proc.pid as _);
-            nix::sys::signal::kill(pid, signal.0).map_err(|e| LuaError::RuntimeError(format!("{e}")))
+            if proc.result.inner.borrow().is_none() {
+                let signal: Signal = lua.from_value(signal)?;
+                let pid = nix::unistd::Pid::from_raw(proc.pid as _);
+                nix::sys::signal::kill(pid, signal.0).map_err(|e| LuaError::RuntimeError(format!("{e}")))
+            } else {
+                Ok(())
+            }
         });
 
     }
@@ -169,7 +179,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     command.stderr(args.stderr);
 
     let (result_sender, result_receiver) = oneshot::channel();
-    let (sender, receiver) = oneshot::channel();
+    let (sender, receiver) = watch::channel(None);
 
     tokio::spawn(async move {
 
@@ -224,7 +234,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
                 ui.get().inner.borrow_mut().await.events.resume().await;
             }
             // ignore error
-            let _ = sender.send(result);
+            let _ = sender.send(Some(result));
 
             Ok(())
         })().await;
@@ -242,7 +252,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
 
     let (pid, stdin, stdout, stderr) = result_receiver.await.unwrap()?;
     Ok(lua.pack_multi((
-        Process{pid, result: CommandResult{ inner: Some(receiver) }},
+        Process{pid, result: CommandResult{ inner: receiver }},
         stdin,
         stdout,
         stderr,
@@ -302,7 +312,7 @@ async fn shell_run(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
 
 async fn shell_run_with_args(mut ui: Ui, lua: Lua, args: FullCommandSpawnArgs) -> Result<LuaMultiValue> {
     let (result_sender, result_receiver) = oneshot::channel();
-    let (sender, receiver) = oneshot::channel();
+    let (sender, receiver) = watch::channel(None);
 
     // run this in a thread
     tokio::task::spawn(async move {
@@ -423,7 +433,7 @@ async fn shell_run_with_args(mut ui: Ui, lua: Lua, args: FullCommandSpawnArgs) -
             }
 
             // send the code out
-            let _ = sender.send(Ok(code as _));
+            let _ = sender.send(Some(Ok(code as _)));
 
             Ok(())
         })().await;
@@ -442,7 +452,7 @@ async fn shell_run_with_args(mut ui: Ui, lua: Lua, args: FullCommandSpawnArgs) -
     let (pid, stdin, stdout, stderr) = result_receiver.await.unwrap()?;
 
     Ok(lua.pack_multi((
-        Process{pid, result: CommandResult{ inner: Some(receiver) }},
+        Process{pid, result: CommandResult{ inner: receiver }},
         stdin,
         stdout,
         stderr,

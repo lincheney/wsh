@@ -136,8 +136,8 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     let tbl = ui.lua.create_table()?;
     ui.get_lua_api()?.set("async", &tbl)?;
 
-    tbl.set("sleep", ui.lua.create_async_function(|_, millis: u64| async move {
-        tokio::time::sleep(std::time::Duration::from_millis(millis)).await;
+    tbl.set("sleep", ui.lua.create_async_function(|_, secs: f64| async move {
+        tokio::time::sleep(std::time::Duration::from_secs_f64(secs)).await;
         Ok(())
     })?)?;
 

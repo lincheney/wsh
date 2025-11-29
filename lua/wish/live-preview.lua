@@ -14,75 +14,108 @@ local msg = wish.set_ansi_message{
 }
 local buffer_change_callback = nil
 local accept_line_callback = nil
-local epoch = 0
-local drawing = false
+local current_preview = nil
 
-local function live_preview()
-    wish.schedule(function()
-        local buffer = wish.get_buffer()
-        local this_epoch = epoch + 1
-        epoch = this_epoch
-
-        if #buffer == 0 then
-            wish.set_ansi_message{id = msg, hidden = true}
-            wish.redraw()
-            return
+local function debounce(delay, func)
+    local next_call = nil
+    return function(...)
+        local running = next_call
+        next_call = wish.time() + delay
+        local args = {...}
+        if not running then
+            wish.schedule(function()
+                local wait = delay
+                while wait > 0 do
+                    wish.async.sleep(wait)
+                    wait = next_call - wish.time()
+                end
+                next_call = nil
+                func(unpack(args))
+            end)
         end
-
-        local proc = wish.async.spawn{
-            args = {'bash', '-c', 'exec 2>&1; ' .. buffer},
-            stdin = 'null',
-            stdout = 'piped',
-            stderr = 'null',
-        }
-        local cleared = false
-        local stdout = ''
-        while true do
-            local data = proc.stdout:read()
-            if epoch ~= this_epoch then
-                break
-            end
-
-            if data then
-                stdout = stdout .. data
-            end
-            if not data or #stdout == #data then
-                wish.schedule(function()
-                    wish.async.sleep(100)
-                    if epoch ~= this_epoch then
-                        return
-                    end
-                    local value = stdout
-                    stdout = ''
-                    if not cleared then
-                        cleared = true
-                        wish.clear_ansi_message(msg)
-                    end
-                    wish.feed_ansi_message(msg, value)
-                    wish.set_ansi_message{
-                        id = msg,
-                        hidden = false,
-                        border = {
-                            dim = not not data,
-                            title = {text = buffer},
-                        },
-                    }
-                    wish.redraw()
-                end)
-            end
-            if not data then
-                break
-            end
-        end
-
-        proc.wait()
-    end)
+    end
 end
+
+local function preview(buffer)
+
+    if not buffer:find('%S') then
+        current_preview = nil
+        wish.set_ansi_message{id = msg, hidden = true}
+        wish.redraw()
+        return
+    end
+
+    -- this ought to be using something like zpty
+    local proc = wish.async.spawn{
+        args = {'bash', '-c', 'exec 2>&1; ' .. buffer},
+        stdin = 'null',
+        stdout = 'piped',
+        stderr = 'null',
+    }
+    -- kill any old proc
+    if current_preview then
+        current_preview.proc.term()
+    end
+
+    -- become the new preview
+    current_preview = {
+        buffer = buffer,
+        need_clear = true,
+        stdout = '',
+        proc = proc,
+        is_current = function(self) return self == current_preview end,
+        read_once = function(self)
+            local data = self.proc.stdout:read()
+            if not self:is_current() then
+                return false
+            end
+            if data then
+                self.stdout = self.stdout .. data
+            end
+            self:flush()
+            return data
+        end,
+        flush = debounce(0.2, function(self)
+            if not self:is_current() then
+                return
+            end
+
+            local value = self.stdout
+            self.stdout = ''
+
+            -- clear old msg
+            if self.need_clear then
+                self.need_clear = false
+                wish.clear_ansi_message(msg)
+            end
+
+            wish.feed_ansi_message(msg, value)
+            wish.set_ansi_message{
+                id = msg,
+                hidden = false,
+                border = {
+                    dim = self.proc.is_finished(),
+                    title = {text = self.buffer},
+                },
+            }
+            wish.redraw()
+        end),
+    }
+    return current_preview
+end
+
+local live_preview = debounce(0.2, function()
+    local buffer = wish.get_buffer()
+    wish.schedule(function()
+        local preview = preview(buffer)
+        while preview and preview:read_once() do
+        end
+    end)
+end)
 
 local function stop()
     wish.remove_event_callback(buffer_change_callback)
     wish.remove_event_callback(accept_line_callback)
-    epoch = epoch + 1
     wish.set_ansi_message{id = msg, hidden = true}
     active = false
     wish.redraw()

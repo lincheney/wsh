@@ -3,6 +3,7 @@ use mlua::prelude::*;
 use serde::{Deserialize};
 use anyhow::Result;
 use crate::ui::{Ui, ThreadsafeUiInner};
+use std::time::SystemTime;
 
 mod keybind;
 mod string;
@@ -91,6 +92,10 @@ async fn get_cwd(ui: Ui, _lua: Lua, (): ()) -> Result<BString> {
     Ok(ui.shell.get_cwd().await)
 }
 
+fn time(_lua: &Lua, (): ()) -> LuaResult<f64> {
+    Ok(SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64())
+}
+
 pub async fn __laggy(_ui: Ui, lua: Lua, (): ()) -> Result<()> {
     let _ = tokio::task::spawn_blocking(move || {
         let _: Result<(), mlua::Error> = unsafe{ lua.exec_raw((), |_| {
@@ -121,6 +126,7 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_async_fn("redraw",  redraw)?;
     ui.set_lua_async_fn("exit", exit)?;
     ui.set_lua_async_fn("get_cwd", get_cwd)?;
+    ui.get_lua_api()?.set("time", ui.lua.create_function(time)?)?;
     ui.set_lua_async_fn("__laggy", __laggy)?;
 
     keybind::init_lua(ui)?;

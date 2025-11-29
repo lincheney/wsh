@@ -17,12 +17,12 @@ function M.complete()
     -- loading spinner thing
     wish.schedule(function()
         local dots = 0
-        wish.async.sleep(50)
+        wish.async.sleep(0.05)
         while not loaded do
             wish.set_message{id = msg, hidden = false, text = 'Loading matches ' .. string.rep('.', dots), fg = 'grey'}
             wish.redraw()
             dots = (dots + 1) % 4
-            wish.async.sleep(200)
+            wish.async.sleep(0.2)
         end
     end)
 
