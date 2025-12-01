@@ -463,7 +463,10 @@ async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let zpty = ui.shell.zpty(name.into(), cmd.into(), opts).await?;
 
     let pty = unsafe{ tokio::fs::File::from_raw_fd(zpty.fd) };
-    let pty = ReadWriteFile(Some(BufStream::new(pty)));
+    let pty = ReadWriteFile{
+        inner: Some(BufStream::new(pty)),
+        is_tty_master: true,
+    };
 
     let pid = zpty.pid;
     tokio::task::spawn(async move {

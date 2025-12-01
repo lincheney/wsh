@@ -71,6 +71,11 @@ pub struct Zpty {
 pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
     let mut cmd = shell_quote(cmd);
 
+    let silent = 0;
+    if unsafe{ zsh_sys::require_module(c"zsh/zpty".as_ptr(), null_mut(), silent) } > 0 {
+        anyhow::bail!("failed to load module zsh/zpty")
+    }
+
     // reversed
     cmd.insert_str(0, " ");
     cmd.insert_str(0, shell_quote(&name).as_bytes());
@@ -84,7 +89,6 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
     unsafe {
         zsh_sys::startparamscope();
     }
-    log::debug!("DEBUG(boise) \t{}\t= {:?}", stringify!(cmd), cmd);
     let code = execstring(cmd, Default::default());
 
     let result = (|| {
@@ -95,7 +99,15 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
         // get fd from $REPLY
         let Some(mut fd) = variables::Variable::get("REPLY")
             else { anyhow::bail!("could not get $REPLY") };
-        let Some(fd) = fd.try_as_int()? else { anyhow::bail!("could not get fd") };
+
+        let fd = if let Some(fd) = fd.try_as_int()? {
+            fd
+        } else if let Ok(fd) = std::str::from_utf8(&fd.to_bytes()) && let Ok(fd) = fd.parse() {
+            fd
+        } else {
+            anyhow::bail!("could not get fd: {:?}", fd.as_value());
+        };
+
 
         // how to get pid????
         // this seems yuck
@@ -108,7 +120,7 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
         // add a newline to help with parsing
         execstring("zpty_output=$'\\n'\"$(zpty & wait $!)\"", Default::default());
         let Some(mut output) = variables::Variable::get("zpty_output")
-        else { anyhow::bail!("could not get $zpty_output") };
+            else { anyhow::bail!("could not get $zpty_output") };
         let output = output.to_bytes();
 
         // now we have to parse it
@@ -117,7 +129,7 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
                 let name = name.to_bytes();
                 // it looks like: (PID) NAME: ...
                 let start = pos + 2;
-                let end = output[start..].find(") ")?;
+                let end = start + output[start..].find(") ")?;
                 if !output[start..end].iter().all(|x| x.is_ascii_digit()) {
                     return None
                 }
@@ -130,9 +142,12 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
                 Some(&output[start..end])
             });
         let Some(pid) = pid else { anyhow::bail!("could not get pid") };
+        let pid = std::str::from_utf8(pid)?.parse()?;
+        add_pid(pid as _);
+
         Ok(Zpty{
             fd: fd as _,
-            pid: std::str::from_utf8(pid)?.parse()?,
+            pid,
             name,
         })
 
@@ -142,6 +157,17 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
         zsh_sys::endparamscope();
     }
     result
+}
+
+pub fn add_pid(pid: i32) {
+    unsafe{
+        let aux = 1;
+        let bgtime = null_mut(); // this can be NULL if aux is 1
+        let oldjob = zsh_sys::thisjob;
+        zsh_sys::thisjob = *JOB;
+        zsh_sys::addproc(pid, null_mut(), aux, bgtime, -1, -1);
+        zsh_sys::thisjob = oldjob;
+    }
 }
 
 pub fn get_return_code() -> c_long {

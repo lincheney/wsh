@@ -240,14 +240,7 @@ crate::TokioActor! {
         }
 
         pub fn add_pid(&self, pid: i32) {
-            unsafe{
-                let aux = 1;
-                let bgtime = null_mut(); // this can be NULL if aux is 1
-                let oldjob = zsh_sys::thisjob;
-                zsh_sys::thisjob = *zsh::JOB;
-                zsh_sys::addproc(pid, null_mut(), aux, bgtime, -1, -1);
-                zsh_sys::thisjob = oldjob;
-            }
+            zsh::add_pid(pid)
         }
 
         pub fn find_process_status(&self, pid: i32, pop_if_done: bool) -> Option<c_int> {
@@ -259,14 +252,14 @@ crate::TokioActor! {
                     // found it
                     if p.pid == pid {
                         let status = p.status;
-                        // if pop_if_done && status >= 0 {
-                            // if prev.is_null() {
-                                // (*job).auxprocs = null_mut();
-                            // } else {
-                                // (*prev).next = p.next;
-                                // zsh_sys::zfree(proc.cast(), std::mem::size_of::<zsh_sys::process>() as _)
-                            // }
-                        // }
+                        if pop_if_done && status >= 0 {
+                            if prev.is_null() {
+                                (*job).auxprocs = null_mut();
+                            } else {
+                                (*prev).next = p.next;
+                                zsh_sys::zfree(proc.cast(), std::mem::size_of::<zsh_sys::process>() as _)
+                            }
+                        }
                         return Some(status);
                     }
                     prev = proc;

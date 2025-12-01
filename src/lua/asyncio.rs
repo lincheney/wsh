@@ -20,6 +20,7 @@ trait Writeable<W: AsyncWrite> {
 
 trait Readable<R: AsyncRead> {
     fn get_reader(&mut self) -> Option<&mut R>;
+    fn is_tty_master(&self) -> bool;
 }
 
 pub struct ReadableFile<T>(pub Option<BufReader<T>>);
@@ -27,16 +28,30 @@ impl<T: AsyncRead> Readable<BufReader<T>> for ReadableFile<T> {
     fn get_reader(&mut self) -> Option<&mut BufReader<T>> {
         self.0.as_mut()
     }
+    fn is_tty_master(&self) -> bool {
+        false
+    }
 }
 
 fn add_readable_methods<R: Send+AsyncRead+Unpin, T: 'static+Send+Readable<R>, M: UserDataMethods<T>>(methods: &mut M) {
 
     methods.add_async_method_mut("read", |lua, mut file, ()| async move {
+        let is_tty_master = file.is_tty_master();
         if let Some(file) = file.get_reader() {
             let mut buf = [0; 4096];
-            let n = file.read(&mut buf).await?;
-            if n != 0 {
-                return Ok(Some(lua.create_string(&buf[..n])?))
+            loop {
+                match file.read(&mut buf).await {
+                    Ok(0) => break,
+                    Ok(n) => return Ok(Some(lua.create_string(&buf[..n])?)),
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        continue
+                    }
+                    // master tty and EIO means EOF
+                    Err(e) if is_tty_master && e.raw_os_error() == Some(nix::errno::Errno::EIO as _) => {
+                        break
+                    }
+                    Err(e) => return Err(e.into()),
+                }
             }
         }
         Ok(None)
@@ -136,26 +151,32 @@ impl<T: AsyncWrite + AsRawFd + Unpin + mlua::MaybeSend + 'static> UserData for W
     }
 }
 
-pub struct ReadWriteFile(pub Option<BufStream<File>>);
+pub struct ReadWriteFile{
+    pub inner: Option<BufStream<File>>,
+    pub is_tty_master: bool,
+}
 impl Readable<BufStream<File>> for ReadWriteFile {
     fn get_reader(&mut self) -> Option<&mut BufStream<File>> {
-        self.0.as_mut()
+        self.inner.as_mut()
+    }
+    fn is_tty_master(&self) -> bool {
+        self.is_tty_master
     }
 }
 impl Writeable<BufStream<File>> for ReadWriteFile {
     fn get_writer(&mut self) -> Option<&mut BufStream<File>> {
-        self.0.as_mut()
+        self.inner.as_mut()
     }
 }
 
 impl UserData for ReadWriteFile {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("as_fd", |_lua, file, ()| {
-            Ok(file.0.as_ref().map(|x| x.get_ref().as_raw_fd()))
+            Ok(file.inner.as_ref().map(|x| x.get_ref().as_raw_fd()))
         });
 
         methods.add_method_mut("close", |_lua, file, ()| {
-            file.0 = None;
+            file.inner = None;
             Ok(())
         });
 

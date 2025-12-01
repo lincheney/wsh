@@ -55,7 +55,7 @@ local function preview(buffer)
     local proc = wish.async.zpty(buffer)
     -- kill any old proc
     if current_preview then
-        current_preview.proc.term()
+        current_preview.proc:term()
     end
 
     -- become the new preview
@@ -95,7 +95,7 @@ local function preview(buffer)
                 id = msg,
                 hidden = false,
                 border = {
-                    dim = self.proc.is_finished(),
+                    dim = self.proc:is_finished(),
                     title = {text = self.buffer},
                 },
             }

@@ -30,11 +30,11 @@ function wish.async.spawn(...)
         stdin = stdin,
         stdout = stdout,
         stderr = stderr,
-        pid = function() return proc:pid() end,
-        is_finished = function() return proc:is_finished() end,
-        wait = function() return proc:wait() end,
-        kill = function() return proc:kill() end,
-        term = function() return proc:kill('SIGTERM') end,
+        pid = function(self) return proc:pid() end,
+        is_finished = function(self) return proc:is_finished() end,
+        wait = function(self) return proc:wait() end,
+        kill = function(self, ...) return proc:kill(...) end,
+        term = function(self) return proc:kill('SIGTERM') end,
     }
 end
 
@@ -45,8 +45,8 @@ function wish.cmd(...)
         stdout = stdout,
         stderr = stderr,
         wait = function(self) return proc:wait() end,
-        kill = function(self) return self:kill() end,
-        term = function(self) return self:kill('SIGTERM') end,
+        kill = function(self, ...) return proc:kill(...) end,
+        term = function(self) return proc:kill('SIGTERM') end,
     }
 end
 
@@ -54,9 +54,10 @@ function wish.async.zpty(...)
     local proc, pty = wish.__zpty(...)
     return {
         pty = pty,
+        is_finished = function(self) return proc:is_finished() end,
         wait = function(self) return proc:wait() end,
-        kill = function(self) return self:kill() end,
-        term = function(self) return self:kill('SIGTERM') end,
+        kill = function(self, ...) return proc:kill(...) end,
+        term = function(self) return proc:kill('SIGTERM') end,
     }
 end
 
