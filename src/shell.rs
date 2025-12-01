@@ -20,6 +20,7 @@ pub use zsh::{
     completion,
     history,
     variables,
+    functions::Function,
     parser::Token,
     ZptyOpts,
     Zpty,
@@ -387,6 +388,16 @@ crate::TokioActor! {
                 }
             }
         }
+
+        pub fn make_function(&self, code: BString) -> Result<Arc<zsh::functions::Function>> {
+            let func = zsh::functions::Function::new(code.as_ref())?;
+            Ok(Arc::new(func))
+        }
+
+        pub fn exec_function(&self, function: Arc<zsh::functions::Function>, args: Vec<BString>) -> c_int {
+            function.execute(&args)
+        }
+
     }
 
 }

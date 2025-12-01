@@ -1,6 +1,5 @@
 use std::time::SystemTime;
 use std::str::FromStr;
-use std::os::unix::process::ExitStatusExt;
 use std::collections::HashMap;
 use std::default::Default;
 use std::os::fd::{RawFd, AsRawFd, IntoRawFd, FromRawFd};

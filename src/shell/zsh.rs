@@ -10,6 +10,7 @@ use bstr::{BStr, BString, ByteSlice, ByteVec};
 mod string;
 mod bindings;
 pub mod variables;
+pub mod functions;
 mod widget;
 pub use widget::ZleWidget;
 pub mod history;

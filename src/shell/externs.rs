@@ -186,8 +186,6 @@ static mut MODULE_FEATURES: LazyLock<Features> = LazyLock::new(|| {
 static ORIGINAL_ZLE_ENTRY_PTR: OnceLock<zsh_sys::ZleEntryPoint> = OnceLock::new();
 static IS_RUNNING: Mutex<()> = Mutex::new(());
 
-static mut EMPTY_STR: [u8; 1] = [0];
-
 #[unsafe(no_mangle)]
 #[allow(clippy::missing_safety_doc)]
 unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_list_tag) -> *mut c_char {
@@ -201,8 +199,8 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
             zsh::selectlocalmap(null_mut());
             zsh::selectkeymap(keymap.as_mut_ptr().cast(), 1);
             zsh::histline = zsh_sys::curhist as _;
-            zsh::lpromptbuf = EMPTY_STR.as_mut_ptr().cast();
-            zsh::rpromptbuf = EMPTY_STR.as_mut_ptr().cast();
+            zsh::lpromptbuf = crate::EMPTY_STR.as_mut_ptr().cast();
+            zsh::rpromptbuf = crate::EMPTY_STR.as_mut_ptr().cast();
 
             let result = tokio::task::block_in_place(main);
 
