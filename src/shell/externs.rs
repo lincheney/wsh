@@ -72,28 +72,35 @@ fn get_or_init_state() -> Result<Arc<GlobalState>> {
     Ok(state.clone())
 }
 
-fn run_shell(shell: &Shell, queue: &mut tokio::sync::mpsc::UnboundedReceiver<ShellMsg>) -> Option<BString> {
+fn main() -> Result<Option<BString>> {
+    let state = get_or_init_state()?;
+    let (ui, shell, queue, runtime) = &*state;
+    let mut ui = ui.clone();
+    let mut queue = queue.lock().unwrap();
+
     loop {
         if let Some(trampoline) = shell.trampoline.lock().unwrap().take() {
             let _ = trampoline.send(());
         }
         shell.is_waiting.store(true, Ordering::Relaxed);
-        let msg = queue.blocking_recv()?;
+        let Some(msg) = queue.blocking_recv()
+            else { return Ok(None) };
+
         shell.is_waiting.store(false, Ordering::Relaxed);
         match msg {
             ShellMsg::accept_line_trampoline{line, returnvalue} => {
                 *shell.trampoline.lock().unwrap() = Some(returnvalue);
-                return line
+                return Ok(line)
             },
             msg => shell.handle_one_message(msg),
         }
-    }
-}
 
-fn main() -> Result<Option<BString>> {
-    let state = get_or_init_state()?;
-    let (_, shell, shell_queue, _) = &*state;
-    Ok(run_shell(shell, &mut *shell_queue.lock().unwrap()))
+        // sometimes zsh will trash zle without refreshing
+        // redraw the ui
+        if runtime.block_on(ui.recover_from_unhandled_output()).unwrap() {
+            runtime.block_on(ui.try_draw());
+        }
+    }
 }
 
 unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _options: zsh_sys::Options, _func: c_int) -> c_int {
@@ -226,26 +233,17 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
             // something is probably going to print (error msgs etc) to the terminal
             let (ui, _, _, runtime) = &*state;
             if let Ok(_lock) = ui.has_foreground_process.try_lock() {
-                tokio::task::block_in_place(|| {
-                    runtime.block_on(async {
-                        let ui = ui.get();
-                        let mut ui = ui.inner.write().await;
-                        ui.prepare_for_unhandled_output().unwrap();
-                    });
-                });
+                runtime.block_on(ui.prepare_for_unhandled_output()).unwrap();
                 return null_mut()
             }
 
         } else if cmd == zsh_sys::ZLE_CMD_REFRESH as _ && let Some(state) = try_get_state() {
             // redraw the ui
-            let ui = state.0.clone();
+            let mut ui = state.0.clone();
             let runtime = &state.3;
-            runtime.block_on(async move {
-                let result: Result<(), String> = Ok(());
-                let mut ui = ui.clone();
-                ui.get().inner.write().await.recover_from_unhandled_output().await.unwrap();
-                ui.report_error(true, result).await;
-            });
+            if runtime.block_on(ui.recover_from_unhandled_output()).unwrap() {
+                runtime.block_on(ui.try_draw());
+            }
             return null_mut()
 
         }

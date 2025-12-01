@@ -148,7 +148,7 @@ impl Variable {
         unsafe{ &mut *self.value.pm }
     }
 
-    pub fn as_bytes(&mut self) -> BString {
+    pub fn to_bytes(&mut self) -> BString {
         let str = unsafe{
             let var = zsh_sys::getstrvalue(&raw mut self.value);
             if var.is_null() {
@@ -230,7 +230,7 @@ impl Variable {
             } else if let Some(x) = self.try_as_float()? {
                 x.into()
             } else {
-                self.as_bytes().into()
+                self.to_bytes().into()
             }
         )
     }

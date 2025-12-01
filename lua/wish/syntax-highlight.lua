@@ -49,6 +49,13 @@ wish.add_event_callback('buffer_change', function()
         -- rehighlight
         -- is this going to be slow? do we need a debounce or something?
         local complete, tokens = wish.parse(buffer, true)
+        if true then return end
+        wish.pprint(tokens)
+        local x = {}
+        for i = 1, #tokens do
+            x[i] = buffer:sub(tokens[i].start+1, tokens[i].finish)
+        end
+        wish.pprint(x)
 
         wish.clear_buf_highlights(NAMESPACE)
         for i = 1, #tokens do

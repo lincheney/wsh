@@ -1,7 +1,7 @@
 use bstr::{BStr, BString};
 use std::time::Duration;
 use std::future::Future;
-use std::sync::{Arc, Weak as WeakArc};
+use std::sync::{Arc, Weak as WeakArc, atomic::{AtomicBool, Ordering}};
 use std::collections::HashSet;
 use std::default::Default;
 use mlua::prelude::*;
@@ -86,6 +86,7 @@ crate::strong_weak_wrapper! {
         pub shell: Arc::<ShellClient> [WeakArc::<ShellClient>],
         pub lua: Arc::<Lua> [WeakArc::<Lua>],
         pub has_foreground_process: Arc::<tokio::sync::Mutex<()>> [WeakArc::<tokio::sync::Mutex<()>>],
+        preparing_for_unhandled_output: Arc::<AtomicBool> [WeakArc::<AtomicBool>],
         threads: Arc::<ForkLock<'static, std::sync::Mutex<HashSet<nix::unistd::Pid>>>> [WeakArc::<ForkLock<'static, std::sync::Mutex<HashSet<nix::unistd::Pid>>>>],
     }
 }
@@ -128,6 +129,7 @@ impl Ui {
             lua: Arc::new(lua),
             shell: Arc::new(shell),
             has_foreground_process: Default::default(),
+            preparing_for_unhandled_output: Default::default(),
             threads: Arc::new(lock.wrap(std::sync::Mutex::new(HashSet::new()))),
         };
 
@@ -196,7 +198,13 @@ impl Ui {
         if let Err(err) = result {
             log::error!("{}", err);
             self.show_error_message(format!("ERROR: {err}")).await;
-        } else if draw && let Err(err) = self.draw().await {
+        } else if draw {
+            self.try_draw().await;
+        }
+    }
+
+    pub async fn try_draw(&mut self) {
+        if let Err(err) = self.draw().await {
             log::error!("{:?}", err);
         }
     }
@@ -226,24 +234,48 @@ impl Ui {
     }
 
     pub async fn pre_accept_line(&self) -> Result<()> {
-        let this = &*self.unlocked.read();
-        let mut ui = this.inner.borrow_mut().await;
+        {
+            let this = &*self.unlocked.read();
+            let mut ui = this.inner.borrow_mut().await;
 
-        ui.tui.clear_non_persistent();
+            ui.tui.clear_non_persistent();
 
-        // TODO handle errors here properly
-        ui.events.pause().await;
+            // TODO handle errors here properly
+            ui.events.pause().await;
+        }
         self.shell.clear_completion_cache().await;
-        ui.prepare_for_unhandled_output()?;
+        self.prepare_for_unhandled_output().await?;
         Ok(())
     }
 
+    pub async fn prepare_for_unhandled_output(&self) -> Result<bool> {
+        let mut flag = false;
+        // TODO if forked and trashed, zsh will NOT recover
+        // we're going go to end up with janky output
+        // how do we solve this?
+        if !crate::is_forked() && !self.preparing_for_unhandled_output.swap(true, Ordering::Relaxed) {
+            self.unlocked.read().inner.borrow_mut().await.prepare_for_unhandled_output()?;
+            flag = true;
+        }
+        Ok(flag)
+    }
+
+    pub async fn recover_from_unhandled_output(&self) -> Result<bool> {
+        let flag = self.preparing_for_unhandled_output.swap(false, Ordering::Relaxed);
+        if flag {
+            self.unlocked.read().inner.borrow_mut().await.recover_from_unhandled_output().await?;
+        }
+        Ok(flag)
+    }
+
     pub async fn post_accept_line(&self) -> Result<()> {
-        let this = &*self.unlocked.read();
-        let mut ui = this.inner.borrow_mut().await;
-        ui.events.resume().await;
-        ui.reset();
-        ui.recover_from_unhandled_output().await?;
+        {
+            let this = &*self.unlocked.read();
+            let mut ui = this.inner.borrow_mut().await;
+            ui.events.resume().await;
+            ui.reset();
+        }
+        self.recover_from_unhandled_output().await?;
         Ok(())
     }
 
@@ -608,7 +640,7 @@ impl UiInner {
         self.dirty = true;
     }
 
-    pub fn prepare_for_unhandled_output(&mut self) -> Result<()> {
+    fn prepare_for_unhandled_output(&mut self) -> Result<()> {
         self.deactivate()?;
         self.dirty = true;
         // move to last line of buffer
@@ -625,7 +657,7 @@ impl UiInner {
         Ok(())
     }
 
-    pub async fn recover_from_unhandled_output(&mut self) -> Result<()> {
+    async fn recover_from_unhandled_output(&mut self) -> Result<()> {
         self.activate()?;
         // move down one line if not at start of line
         let cursor = self.events.get_cursor_position().await.unwrap_or((0, 0));

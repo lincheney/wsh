@@ -468,7 +468,11 @@ impl Tui {
 
         if clear {
             self.buffer.reset();
-            queue!(writer, Clear(ClearType::FromCursorDown))?;
+            queue!(
+                writer,
+                cursor::MoveToColumn(0),
+                Clear(ClearType::FromCursorDown),
+            )?;
             self.dirty = true;
             self.widgets.height = 0;
         }

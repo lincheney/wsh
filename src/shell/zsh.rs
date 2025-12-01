@@ -1,9 +1,11 @@
+use std::sync::{LazyLock};
+use std::os::fd::{RawFd};
 use std::io::Read;
 use std::ffi::{CString, CStr};
 use std::os::raw::*;
 use std::default::Default;
 use std::ptr::null_mut;
-use bstr::{BStr, BString, ByteSlice};
+use bstr::{BStr, BString, ByteSlice, ByteVec};
 
 mod string;
 mod bindings;
@@ -17,7 +19,15 @@ pub use string::ZString;
 pub(crate) use bindings::*;
 use variables::{Variable};
 
+pub static JOB: LazyLock<c_int> = LazyLock::new(|| unsafe{ zsh_sys::initjob() });
+
 // pub type HandlerFunc = unsafe extern "C" fn(name: *mut c_char, argv: *mut *mut c_char, options: *mut zsh_sys::options, func: c_int) -> c_int;
+
+pub fn shell_quote(string: &CStr) -> BString {
+    unsafe {
+        CStr::from_ptr(zsh_sys::quotestring(string.as_ptr(), zsh_sys::QT_SINGLE_OPTIONAL as _)).to_bytes().into()
+    }
+}
 
 #[derive(Clone, Copy)]
 pub struct ExecstringOpts<'a> {
@@ -44,6 +54,94 @@ pub fn execstring<S: AsRef<BStr>>(cmd: S, opts: ExecstringOpts) -> c_long {
         );
     }
     get_return_code()
+}
+
+#[derive(Default, Clone, Copy)]
+pub struct ZptyOpts {
+    pub echo_input: bool,
+    pub non_blocking: bool,
+}
+
+pub struct Zpty {
+    pub pid: u32,
+    pub fd: RawFd,
+    pub name: CString,
+}
+
+pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
+    let mut cmd = shell_quote(cmd);
+
+    // reversed
+    cmd.insert_str(0, " ");
+    cmd.insert_str(0, shell_quote(&name).as_bytes());
+    if opts.echo_input {
+        cmd.insert_str(0, "-e ");
+    }
+    if opts.non_blocking {
+        cmd.insert_str(0, "-b ");
+    }
+    cmd.insert_str(0, "zpty ");
+    unsafe {
+        zsh_sys::startparamscope();
+    }
+    log::debug!("DEBUG(boise) \t{}\t= {:?}", stringify!(cmd), cmd);
+    let code = execstring(cmd, Default::default());
+
+    let result = (|| {
+        if code > 0 {
+            anyhow::bail!("zpty failed with code {code}")
+        }
+
+        // get fd from $REPLY
+        let Some(mut fd) = variables::Variable::get("REPLY")
+            else { anyhow::bail!("could not get $REPLY") };
+        let Some(fd) = fd.try_as_int()? else { anyhow::bail!("could not get fd") };
+
+        // how to get pid????
+        // this seems yuck
+        // why do i fork?
+        // because zpty *insists* on making a read from the pty
+        // this is broken even with normal zsh
+        // (try do `zpty NAME sleep inf` and then `zpty -L`; this hangs because it never prints anything)
+        // *however* if i fork the child proc can't read the pty and read will always fail immediately
+        // bless
+        // add a newline to help with parsing
+        execstring("zpty_output=$'\\n'\"$(zpty & wait $!)\"", Default::default());
+        let Some(mut output) = variables::Variable::get("zpty_output")
+        else { anyhow::bail!("could not get $zpty_output") };
+        let output = output.to_bytes();
+
+        // now we have to parse it
+        let pid = output.find_iter("\n(")
+            .find_map(|pos| {
+                let name = name.to_bytes();
+                // it looks like: (PID) NAME: ...
+                let start = pos + 2;
+                let end = output[start..].find(") ")?;
+                if !output[start..end].iter().all(|x| x.is_ascii_digit()) {
+                    return None
+                }
+                if ! output[end+2..].starts_with(name) {
+                    return None
+                }
+                if ! output[end+2+name.len()..].starts_with(b": ") {
+                    return None
+                }
+                Some(&output[start..end])
+            });
+        let Some(pid) = pid else { anyhow::bail!("could not get pid") };
+        Ok(Zpty{
+            fd: fd as _,
+            pid: std::str::from_utf8(pid)?.parse()?,
+            name,
+        })
+
+    })();
+
+    unsafe {
+        zsh_sys::endparamscope();
+    }
+    result
 }
 
 pub fn get_return_code() -> c_long {
@@ -76,7 +174,7 @@ pub fn get_prompt(prompt: Option<&BStr>, escaped: bool) -> Option<CString> {
     let prompt = if let Some(prompt) = prompt {
         CString::new(prompt.to_vec()).unwrap()
     } else {
-        let prompt = variables::Variable::get("PROMPT")?.as_bytes();
+        let prompt = variables::Variable::get("PROMPT")?.to_bytes();
         CString::new(prompt).unwrap()
     };
 
@@ -162,7 +260,7 @@ pub fn set_zle_buffer(buffer: BString, cursor: i64) {
 
 pub fn get_zle_buffer() -> (BString, Option<i64>) {
     start_zle_scope();
-    let buffer = Variable::get("BUFFER").unwrap().as_bytes();
+    let buffer = Variable::get("BUFFER").unwrap().to_bytes();
     let cursor = Variable::get("CURSOR").unwrap().try_as_int();
     end_zle_scope();
     match cursor {

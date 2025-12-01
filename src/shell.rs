@@ -12,6 +12,7 @@ use std::sync::Mutex;
 use bstr::{BStr, BString, ByteSlice, ByteVec};
 
 mod externs;
+mod file_stream;
 mod zsh;
 #[macro_use]
 mod actor_macro;
@@ -20,6 +21,8 @@ pub use zsh::{
     history,
     variables,
     parser::Token,
+    ZptyOpts,
+    Zpty,
 };
 use variables::Variable;
 
@@ -193,6 +196,12 @@ crate::TokioActor! {
             Ok(unsafe{ zsh_sys::lastpid })
         }
 
+        pub fn zpty(&self, name: BString, cmd: BString, opts: ZptyOpts) -> Result<Zpty> {
+            let cmd = CString::new(cmd).unwrap();
+            let name = CString::new(name).unwrap();
+            zsh::zpty(name, &cmd, opts)
+        }
+
         pub fn run_completions(&self, completer: Completer) -> Result<BString> {
             completer.run(self)
         }
@@ -234,21 +243,34 @@ crate::TokioActor! {
             unsafe{
                 let aux = 1;
                 let bgtime = null_mut(); // this can be NULL if aux is 1
+                let oldjob = zsh_sys::thisjob;
+                zsh_sys::thisjob = *zsh::JOB;
                 zsh_sys::addproc(pid, null_mut(), aux, bgtime, -1, -1);
+                zsh_sys::thisjob = oldjob;
             }
         }
 
-        pub fn find_process_status(&self, pid: i32) -> Option<c_int> {
+        pub fn find_process_status(&self, pid: i32, pop_if_done: bool) -> Option<c_int> {
             unsafe{
-                for i in 1..=zsh_sys::maxjob {
-                    let mut proc = (*zsh_sys::jobtab.add(i as _)).auxprocs;
-                    while let Some(p) = proc.as_ref() {
-                        if p.pid == pid {
-                            return Some(p.status);
-                        }
-                        proc = p.next;
+                let job = zsh_sys::jobtab.add(*zsh::JOB as usize);
+                let mut prev: *mut zsh_sys::process = null_mut();
+                let mut proc = (*job).auxprocs;
+                while let Some(p) = proc.as_ref() {
+                    // found it
+                    if p.pid == pid {
+                        let status = p.status;
+                        // if pop_if_done && status >= 0 {
+                            // if prev.is_null() {
+                                // (*job).auxprocs = null_mut();
+                            // } else {
+                                // (*prev).next = p.next;
+                                // zsh_sys::zfree(proc.cast(), std::mem::size_of::<zsh_sys::process>() as _)
+                            // }
+                        // }
+                        return Some(status);
                     }
-
+                    prev = proc;
+                    proc = p.next;
                 }
             }
             None
@@ -321,7 +343,7 @@ crate::TokioActor! {
 
         pub fn get_zle_buffer(&self) -> (BString, Option<i64>) {
             zsh::start_zle_scope();
-            let buffer = Variable::get("BUFFER").unwrap().as_bytes();
+            let buffer = Variable::get("BUFFER").unwrap().to_bytes();
             let cursor = Variable::get("CURSOR").unwrap().try_as_int();
             zsh::end_zle_scope();
             match cursor {

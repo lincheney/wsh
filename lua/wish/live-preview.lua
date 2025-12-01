@@ -45,13 +45,14 @@ local function preview(buffer)
         return
     end
 
-    -- this ought to be using something like zpty
-    local proc = wish.async.spawn{
-        args = {'bash', '-c', 'exec 2>&1; ' .. buffer},
-        stdin = 'null',
-        stdout = 'piped',
-        stderr = 'null',
-    }
+    -- -- this ought to be using something like zpty
+    -- local proc = wish.async.spawn{
+        -- args = {'bash', '-c', 'exec 2>&1; ' .. buffer},
+        -- stdin = 'null',
+        -- stdout = 'piped',
+        -- stderr = 'null',
+    -- }
+    local proc = wish.async.zpty(buffer)
     -- kill any old proc
     if current_preview then
         current_preview.proc.term()
@@ -65,7 +66,7 @@ local function preview(buffer)
         proc = proc,
         is_current = function(self) return self == current_preview end,
         read_once = function(self)
-            local data = self.proc.stdout:read()
+            local data = self.proc.pty:read()
             if not self:is_current() then
                 return false
             end
@@ -106,11 +107,9 @@ end
 
 local live_preview = debounce(0.2, function()
     local buffer = wish.get_buffer()
-    wish.schedule(function()
-        local preview = preview(buffer)
-        while preview and preview:read_once() do
-        end
-    end)
+    local preview = preview(buffer)
+    while preview and preview:read_once() do
+    end
 end)
 
 local function stop()

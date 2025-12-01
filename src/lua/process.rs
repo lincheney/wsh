@@ -1,18 +1,23 @@
+use std::time::SystemTime;
 use std::str::FromStr;
 use std::os::unix::process::ExitStatusExt;
 use std::collections::HashMap;
 use std::default::Default;
-use std::os::fd::{RawFd, AsRawFd, IntoRawFd};
+use std::os::fd::{RawFd, AsRawFd, IntoRawFd, FromRawFd};
 use std::fs::File;
 use anyhow::{Result, Context};
 use mlua::{prelude::*, UserData, UserDataMethods};
-use tokio::io::{BufReader, BufWriter};
+use tokio::io::{
+    BufReader,
+    BufWriter,
+    BufStream,
+};
 use tokio::process::Command;
 use tokio::sync::{oneshot, watch};
 use serde::{Deserialize, Deserializer, de};
 use nix::sys::wait::{waitpid, WaitStatus};
 use crate::ui::{Ui, ThreadsafeUiInner};
-use super::asyncio::{ReadableFile, WriteableFile};
+use super::asyncio::{ReadableFile, WriteableFile, ReadWriteFile};
 
 #[derive(Debug, Copy, Clone)]
 struct Signal(nix::sys::signal::Signal);
@@ -111,7 +116,7 @@ impl From<Stdio> for std::process::Stdio {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-struct FullCommandSpawnArgs {
+struct FullShellRunArgs {
     args: String,
     stdin: Stdio,
     stdout: Stdio,
@@ -135,23 +140,39 @@ struct FullSpawnArgs {
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
-enum CommandSpawnArgs {
-    Simple(String),
-    Full(FullCommandSpawnArgs),
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
 enum SpawnArgs {
     Shell(String),
     Simple(Vec<String>),
     Full(FullSpawnArgs),
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ShellRunArgs {
+    Simple(String),
+    Full(FullShellRunArgs),
+}
+
+#[derive(Default, Debug, Deserialize)]
+#[serde(default)]
+struct FullZptyArgs {
+    args: String,
+    height: Option<usize>,
+    width: Option<usize>,
+    echo_input: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ZptyArgs {
+    Simple(String),
+    Full(FullZptyArgs),
+}
+
 async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let args = match lua.from_value(val)? {
         SpawnArgs::Shell(args) => {
-            let args = FullCommandSpawnArgs{ args, subshell: true, ..Default::default() };
+            let args = FullShellRunArgs{ args, subshell: true, ..Default::default() };
             return shell_run_with_args(ui, lua, args).await;
         },
         SpawnArgs::Full(args) => args,
@@ -207,25 +228,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
             let stdout = proc.stdout.take().map(|s| ReadableFile(Some(BufReader::new(s))));
             let stderr = proc.stderr.take().map(|s| ReadableFile(Some(BufReader::new(s))));
             let _ = result_sender.take().unwrap().send(Ok((pid, stdin, stdout, stderr)));
-
-            // zsh runs wait() in a SIGCHLD handler as well
-            // so if it gets the status first, we have to fetch it out of the job table
-            let result = match proc.wait().await {
-                Ok(e) => {
-                    Ok(e.code().unwrap_or(128 + e.signal().unwrap_or(0)))
-                },
-                Err(e) => {
-                    if e.raw_os_error().is_some_and(|e| e == nix::errno::Errno::ECHILD as _) {
-                        if let Some(status) = ui.shell.find_process_status(pid as _).await {
-                            Ok(status)
-                        } else {
-                            Err(e)
-                        }
-                    } else {
-                        Err(e)
-                    }
-                },
-            };
+            let code = crate::signals::wait_for_pid(pid as _, &*ui.shell).await.unwrap();
 
             drop(foreground_lock);
             if args.foreground {
@@ -234,7 +237,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
                 ui.get().inner.borrow_mut().await.events.resume().await;
             }
             // ignore error
-            let _ = sender.send(Some(result));
+            let _ = sender.send(Some(Ok(code as _)));
 
             Ok(())
         })().await;
@@ -260,14 +263,14 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
 
 }
 
-struct OverridenStream {
+struct OverriddenStream {
     fd: RawFd,
     replacement: RawFd,
     backup: Option<RawFd>,
     closed: bool,
 }
 
-impl OverridenStream {
+impl OverriddenStream {
     fn new<A: AsRawFd, B: IntoRawFd>(fd: &A, replacement: B) -> Self {
         Self {
             fd: fd.as_raw_fd(),
@@ -304,13 +307,13 @@ impl OverridenStream {
 
 async fn shell_run(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let args = match lua.from_value(val)? {
-        CommandSpawnArgs::Full(args) => args,
-        CommandSpawnArgs::Simple(args) => FullCommandSpawnArgs{args, ..Default::default()},
+        ShellRunArgs::Full(args) => args,
+        ShellRunArgs::Simple(args) => FullShellRunArgs{args, ..Default::default()},
     };
     shell_run_with_args(ui, lua, args).await
 }
 
-async fn shell_run_with_args(mut ui: Ui, lua: Lua, args: FullCommandSpawnArgs) -> Result<LuaMultiValue> {
+async fn shell_run_with_args(mut ui: Ui, lua: Lua, args: FullShellRunArgs) -> Result<LuaMultiValue> {
     let (result_sender, result_receiver) = oneshot::channel();
     let (sender, receiver) = watch::channel(None);
 
@@ -338,20 +341,20 @@ async fn shell_run_with_args(mut ui: Ui, lua: Lua, args: FullCommandSpawnArgs) -
                     stdio_pipe!($name, File::create("/dev/null"), {
                         let (send, recv) = tokio::net::unix::pipe::pipe()?;
                         let send = WriteableFile(Some(BufWriter::new(send)));
-                        (Some(send), Some(OverridenStream::new(&std::io::$name(), recv.into_nonblocking_fd()?)))
+                        (Some(send), Some(OverriddenStream::new(&std::io::$name(), recv.into_nonblocking_fd()?)))
                     })
                 );
                 ($name:ident, false) => (
                     stdio_pipe!($name, File::open("/dev/null"), {
                         let (send, recv) = tokio::net::unix::pipe::pipe()?;
                         let recv = ReadableFile(Some(BufReader::new(recv)));
-                        (Some(recv), Some(OverridenStream::new(&std::io::$name(), send.into_nonblocking_fd()?)))
+                        (Some(recv), Some(OverriddenStream::new(&std::io::$name(), send.into_nonblocking_fd()?)))
                     })
                 );
                 ($name:ident, $null:expr, $piped:expr) => (
                     match args.$name {
                         Stdio::inherit => (None, None),
-                        Stdio::null => (None, Some(OverridenStream::new(&std::io::$name(), $null?))),
+                        Stdio::null => (None, Some(OverriddenStream::new(&std::io::$name(), $null?))),
                         Stdio::piped => $piped,
                     }
                 );
@@ -375,7 +378,7 @@ async fn shell_run_with_args(mut ui: Ui, lua: Lua, args: FullCommandSpawnArgs) -
             let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
 
             let code = if let Some(cmd) = cmd {
-                debug_assert!(args.subshell);
+                debug_assert!(!args.subshell);
                 // no forking, override fds in place
                 let mut result = streams.iter_mut().flatten().try_for_each(|s| s.override_fd());
                 if result.is_err() {
@@ -390,25 +393,8 @@ async fn shell_run_with_args(mut ui: Ui, lua: Lua, args: FullCommandSpawnArgs) -
                 ui.shell.exec(cmd.into()).await
 
             } else {
-                let result: Result<_> = tokio::task::block_in_place(|| {
-                    let pid = nix::unistd::Pid::from_raw(pid as _);
-                    loop {
-                        match waitpid(Some(pid), None) {
-                            Ok(WaitStatus::Exited(_, code)) => return Ok(code as i64),
-                            Ok(WaitStatus::Signaled(_, signal, _)) => return Ok(128 + signal as i64),
-                            Ok(_) => (),
-                            Err(e @ nix::errno::Errno::ECHILD) => {
-                                let status = tokio::runtime::Handle::current().block_on(ui.shell.find_process_status(pid.into()));
-                                if let Some(status) = status {
-                                    return Ok(status as _)
-                                }
-                                Err(e)?;
-                            },
-                            Err(e) => Err(e)?,
-                        }
-                    }
-                });
-                result?
+                debug_assert!(args.subshell);
+                crate::signals::wait_for_pid(pid as _, &*ui.shell).await.unwrap() as _
             };
 
             let mut errors = [Ok(()), Ok(()), Ok(())];
@@ -459,10 +445,44 @@ async fn shell_run_with_args(mut ui: Ui, lua: Lua, args: FullCommandSpawnArgs) -
     ))?)
 }
 
+async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
+    let args = match lua.from_value(val)? {
+        ZptyArgs::Full(args) => args,
+        ZptyArgs::Simple(args) => FullZptyArgs{args, ..Default::default()},
+    };
+
+    let (sender, receiver) = watch::channel(None);
+
+    let cmd = args.args;
+    let time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64();
+    let name = format!("zpty-{time}");
+    let opts = crate::shell::ZptyOpts{
+        echo_input: args.echo_input,
+        non_blocking: true,
+    };
+    let zpty = ui.shell.zpty(name.into(), cmd.into(), opts).await?;
+
+    let pty = unsafe{ tokio::fs::File::from_raw_fd(zpty.fd) };
+    let pty = ReadWriteFile(Some(BufStream::new(pty)));
+
+    let pid = zpty.pid;
+    tokio::task::spawn(async move {
+        let code = crate::signals::wait_for_pid(pid as _, &*ui.shell).await.unwrap();
+        // send the code out
+        let _ = sender.send(Some(Ok(code as _)));
+    });
+
+    Ok(lua.pack_multi((
+        Process{pid, result: CommandResult{ inner: receiver }},
+        pty,
+    ))?)
+}
+
 pub fn init_lua(ui: &Ui) -> Result<()> {
 
     ui.set_lua_async_fn("__spawn", spawn)?;
     ui.set_lua_async_fn("__shell_run", shell_run)?;
+    ui.set_lua_async_fn("__zpty", zpty)?;
 
     Ok(())
 }

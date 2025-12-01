@@ -50,6 +50,16 @@ function wish.cmd(...)
     }
 end
 
+function wish.async.zpty(...)
+    local proc, pty = wish.__zpty(...)
+    return {
+        pty = pty,
+        wait = function(self) return proc:wait() end,
+        kill = function(self) return self:kill() end,
+        term = function(self) return self:kill('SIGTERM') end,
+    }
+end
+
 function wish.eval(args)
     local proc, stdin, stdout, stderr = wish.__shell_run{args = args, stdout = 'piped'}
     local stdout = stdout:read_all()
