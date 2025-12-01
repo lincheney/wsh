@@ -15,7 +15,6 @@ use tokio::io::{
 use tokio::process::Command;
 use tokio::sync::{oneshot, watch};
 use serde::{Deserialize, Deserializer, de};
-use nix::sys::wait::{waitpid, WaitStatus};
 use crate::ui::{Ui, ThreadsafeUiInner};
 use super::asyncio::{ReadableFile, WriteableFile, ReadWriteFile};
 
