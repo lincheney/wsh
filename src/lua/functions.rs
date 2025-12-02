@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use bstr::BString;
-use crate::ui::Ui;
+use crate::ui::{Ui, DowngradeUi, UpgradeUi};
 use anyhow::Result;
 use mlua::{prelude::*, UserData, UserDataMethods};
 use serde::{Deserialize};
@@ -8,7 +8,7 @@ use super::process::{shell_run_with_args, FullShellRunOpts, ShellRunCmd};
 
 pub struct Function {
     inner: Arc<crate::shell::Function>,
-    ui: Ui,
+    ui: crate::ui::WeakUi,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -46,8 +46,9 @@ impl UserData for Function {
                 (args.split_off(0), None)
             };
 
+            let ui = func.ui.try_upgrade()?;
             let cmd = ShellRunCmd::Function{func: func.inner.clone(), args};
-            let result = shell_run_with_args(func.ui.clone(), lua, cmd, opts.unwrap_or_default()).await;
+            let result = shell_run_with_args(ui, lua, cmd, opts.unwrap_or_default()).await;
             result.map_err(|e| mlua::Error::RuntimeError(format!("{e}")))
 
         });
@@ -58,7 +59,7 @@ async fn make_zsh_function(ui: Ui, lua: Lua, code: BString) -> Result<LuaValue> 
     let func = ui.shell.make_function(code).await?;
     Ok(lua.pack(Function {
         inner: func,
-        ui,
+        ui: ui.downgrade(),
     })?)
 }
 

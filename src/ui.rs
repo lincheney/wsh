@@ -687,7 +687,7 @@ impl Drop for UiInner {
 }
 
 impl WeakUi {
-    fn try_upgrade(&self) -> LuaResult<Ui> {
+    pub fn try_upgrade(&self) -> LuaResult<Ui> {
         if let Some(ui) = self.upgrade() {
             Ok(ui)
         } else {
