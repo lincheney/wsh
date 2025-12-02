@@ -66,7 +66,7 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Compl
             err => {
                 let mut ui = ui.clone();
                 tokio::task::spawn(async move {
-                    ui.report_error(false, err).await;
+                    ui.report_error(err).await;
                 });
             },
         }

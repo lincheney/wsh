@@ -45,7 +45,6 @@ enum KeybindOutput {
 pub struct UiInner {
     pub tui: crate::tui::Tui,
 
-    pub events: crate::event_stream::EventController,
     pub dirty: bool,
     pub keybinds: Vec<crate::lua::KeybindMapping>,
     pub keybind_layer_counter: usize,
@@ -85,6 +84,7 @@ crate::strong_weak_wrapper! {
         pub unlocked: Arc::<ForkLock<'static, UnlockedUi>> [WeakArc::<ForkLock<'static, UnlockedUi>>],
         pub shell: Arc::<ShellClient> [WeakArc::<ShellClient>],
         pub lua: Arc::<Lua> [WeakArc::<Lua>],
+        pub events: Arc::<ForkLock<'static, crate::event_stream::EventController>> [WeakArc::<ForkLock<'static, crate::event_stream::EventController>>],
         pub has_foreground_process: Arc::<tokio::sync::Mutex<()>> [WeakArc::<tokio::sync::Mutex<()>>],
         preparing_for_unhandled_output: Arc::<AtomicBool> [WeakArc::<AtomicBool>],
         threads: Arc::<ForkLock<'static, std::sync::Mutex<HashSet<nix::unistd::Pid>>>> [WeakArc::<ForkLock<'static, std::sync::Mutex<HashSet<nix::unistd::Pid>>>>],
@@ -104,7 +104,6 @@ impl Ui {
         lua.globals().set("wish", &lua_api)?;
 
         let mut ui = UiInner{
-            events,
             dirty: true,
             tui: Default::default(),
             buffer: Default::default(),
@@ -127,6 +126,7 @@ impl Ui {
         let ui = Self {
             unlocked: Arc::new(lock.wrap(ui)),
             lua: Arc::new(lua),
+            events: Arc::new(lock.wrap(events)),
             shell: Arc::new(shell),
             has_foreground_process: Default::default(),
             preparing_for_unhandled_output: Default::default(),
@@ -190,16 +190,19 @@ impl Ui {
         let result = callback.call_async::<LuaValue>(arg).await;
         let mut ui = self.clone();
         tokio::task::spawn(async move {
-            ui.report_error(draw, result).await;
+            if !ui.report_error(result).await && draw {
+                ui.try_draw().await;
+            }
         });
     }
 
-    pub async fn report_error<T, E: std::fmt::Display>(&mut self, draw: bool, result: std::result::Result<T, E>) {
+    pub async fn report_error<T, E: std::fmt::Display>(&mut self, result: std::result::Result<T, E>) -> bool {
         if let Err(err) = result {
             log::error!("{}", err);
             self.show_error_message(format!("ERROR: {err}")).await;
-        } else if draw {
-            self.try_draw().await;
+            true
+        } else {
+            false
         }
     }
 
@@ -241,8 +244,8 @@ impl Ui {
             ui.tui.clear_non_persistent();
 
             // TODO handle errors here properly
-            ui.events.pause().await;
         }
+        self.events.read().pause().await;
         self.shell.clear_completion_cache().await;
         self.prepare_for_unhandled_output().await?;
         Ok(())
@@ -262,8 +265,25 @@ impl Ui {
 
     pub async fn recover_from_unhandled_output(&self) -> Result<bool> {
         let flag = self.preparing_for_unhandled_output.swap(false, Ordering::Relaxed);
+
         if flag {
-            self.unlocked.read().inner.borrow_mut().await.recover_from_unhandled_output().await?;
+            if !self.has_foreground_process.try_lock().is_ok() {
+                // foreground process, can't recover yet
+                // reset it back
+                self.preparing_for_unhandled_output.store(true, Ordering::Relaxed);
+                return Ok(false)
+            }
+
+            let this = self.unlocked.read();
+            let mut ui = this.inner.borrow_mut().await;
+            ui.activate()?;
+
+            // move down one line if not at start of line
+            let cursor = self.events.read().get_cursor_position().await.unwrap_or((0, 0));
+            if cursor.0 != 0 {
+                ui.size = crossterm::terminal::size()?;
+                queue!(ui.stdout, style::Print("\r\n"))?;
+            }
         }
         Ok(flag)
     }
@@ -272,9 +292,9 @@ impl Ui {
         {
             let this = &*self.unlocked.read();
             let mut ui = this.inner.borrow_mut().await;
-            ui.events.resume().await;
             ui.reset();
         }
+        self.events.read().resume().await;
         self.recover_from_unhandled_output().await?;
         Ok(())
     }
@@ -299,16 +319,15 @@ impl Ui {
         // time to execute
         if let Some(buffer) = buffer {
             self.trigger_accept_line_callbacks(()).await;
-            let lock = self.has_foreground_process.lock().await;
-            self.pre_accept_line().await?;
-            // acceptline doesn't actually accept the line right now
-            // only when we return control to zle using the trampoline
-            self.shell.accept_line_trampoline(Some(buffer)).await;
+            {
+                let lock = self.has_foreground_process.lock().await;
+                self.pre_accept_line().await?;
+                // acceptline doesn't actually accept the line right now
+                // only when we return control to zle using the trampoline
+                self.shell.accept_line_trampoline(Some(buffer)).await;
+                drop(lock);
+            }
             self.post_accept_line().await?;
-
-            // prefer the result error over the activate error
-            // result.and(ui.activate())?;
-            drop(lock);
             self.start_cmd().await?;
 
         } else {
@@ -654,17 +673,6 @@ impl UiInner {
             Clear(ClearType::FromCursorDown),
             EndSynchronizedUpdate,
         )?;
-        Ok(())
-    }
-
-    async fn recover_from_unhandled_output(&mut self) -> Result<()> {
-        self.activate()?;
-        // move down one line if not at start of line
-        let cursor = self.events.get_cursor_position().await.unwrap_or((0, 0));
-        if cursor.0 != 0 {
-            self.size = crossterm::terminal::size()?;
-            queue!(self.stdout, style::Print("\r\n"))?;
-        }
         Ok(())
     }
 

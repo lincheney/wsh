@@ -3,27 +3,58 @@ use bstr::BString;
 use crate::ui::Ui;
 use anyhow::Result;
 use mlua::{prelude::*, UserData, UserDataMethods};
+use serde::{Deserialize};
+use super::process::{shell_run_with_args, FullShellRunOpts, ShellRunCmd};
 
-struct Function {
+pub struct Function {
     inner: Arc<crate::shell::Function>,
-    shell: Arc::<crate::shell::ShellClient>,
+    ui: Ui,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct FullFunctionArgs {
+    args: Vec<String>,
+    #[serde(flatten)]
+    opts: FullShellRunOpts,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum FunctionArgs {
+    Simple(Vec<String>),
+    Full(FullFunctionArgs),
 }
 
 impl UserData for Function {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_async_meta_method_mut(mlua::MetaMethod::Call, |_lua, func, args: Option<_>| async move {
-            let args = args.unwrap_or(vec![]);
-            Ok(func.shell.exec_function(func.inner.clone(), args).await)
+        methods.add_async_meta_method_mut(mlua::MetaMethod::Call, |lua, func, args: Option<LuaValue>| async move {
+
+            let (args, opts) = if let Some(args) = args {
+                match lua.from_value(args)? {
+                    FunctionArgs::Simple(args) => {
+                        (args, None)
+                    },
+                    FunctionArgs::Full(args) => {
+                        (args.args, Some(args.opts))
+                    },
+                }
+            } else {
+                (vec![], None)
+            };
+
+            let cmd = ShellRunCmd::Function{func: func.inner.clone(), args};
+            let result = shell_run_with_args(func.ui.clone(), lua, cmd, opts.unwrap_or_default()).await;
+            result.map_err(|e| mlua::Error::RuntimeError(format!("{e}")))
+
         });
     }
 }
 
 async fn make_sh_function(ui: Ui, lua: Lua, code: BString) -> Result<LuaValue> {
-    let shell = ui.shell.clone();
-    let func = shell.make_function(code).await?;
+    let func = ui.shell.make_function(code).await?;
     Ok(lua.pack(Function {
         inner: func,
-        shell,
+        ui,
     })?)
 }
 

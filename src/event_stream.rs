@@ -19,21 +19,21 @@ pub struct EventController {
 }
 
 impl EventController {
-    pub async fn pause(&mut self) {
+    pub async fn pause(&self) {
         let (sender, receiver) = oneshot::channel();
         if self.queue.send(InputMessage::Pause(sender)).is_ok() {
             receiver.await.unwrap();
         }
     }
 
-    pub async fn resume(&mut self) {
+    pub async fn resume(&self) {
         let (sender, receiver) = oneshot::channel();
         if self.queue.send(InputMessage::Resume(sender)).is_ok() {
             receiver.await.unwrap();
         }
     }
 
-    pub async fn get_cursor_position(&mut self) -> Option<(usize, usize)> {
+    pub async fn get_cursor_position(&self) -> Option<(usize, usize)> {
         let (sender, receiver) = oneshot::channel();
         if self.queue.send(InputMessage::CursorPosition(sender)).is_ok() {
             receiver.await.ok()
@@ -42,7 +42,7 @@ impl EventController {
         }
     }
 
-    pub async fn exit(&mut self, code: i32) {
+    pub async fn exit(&self, code: i32) {
         let (sender, receiver) = oneshot::channel();
         if self.queue.send(InputMessage::Exit(code, Some(sender))).is_ok() {
             receiver.await.unwrap();

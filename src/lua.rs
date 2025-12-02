@@ -83,9 +83,7 @@ async fn redraw(mut ui: Ui, lua: Lua, val: Option<LuaValue>) -> Result<()> {
 }
 
 async fn exit(ui: Ui, _lua: Lua, code: Option<i32>) -> Result<()> {
-    let ui = ui.get();
-    let mut ui = ui.inner.borrow_mut().await;
-    ui.events.exit(code.unwrap_or(0)).await;
+    ui.events.read().exit(code.unwrap_or(0)).await;
     Ok(())
 }
 

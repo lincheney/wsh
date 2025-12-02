@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::SystemTime;
 use std::str::FromStr;
 use std::collections::HashMap;
@@ -14,7 +15,7 @@ use tokio::io::{
 use tokio::process::Command;
 use tokio::sync::{oneshot, watch};
 use serde::{Deserialize, Deserializer, de};
-use crate::ui::{Ui, ThreadsafeUiInner};
+use crate::ui::{Ui};
 use super::asyncio::{ReadableFile, WriteableFile, ReadWriteFile};
 
 #[derive(Debug, Copy, Clone)]
@@ -114,12 +115,25 @@ impl From<Stdio> for std::process::Stdio {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-struct FullShellRunArgs {
-    args: String,
+pub struct FullShellRunOpts {
     stdin: Stdio,
     stdout: Stdio,
     stderr: Stdio,
-    foreground: bool,
+    foreground: Option<bool>,
+}
+
+pub enum ShellRunCmd {
+    Simple(String),
+    Subshell(String),
+    Function{ func: Arc<crate::shell::Function>, args: Vec<String> },
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct FullShellRunArgs {
+    args: String,
+    #[serde(flatten)]
+    opts: FullShellRunOpts,
     subshell: bool,
 }
 
@@ -133,7 +147,7 @@ struct FullSpawnArgs {
     env: Option<HashMap<String, String>>,
     clear_env: bool,
     cwd: Option<String>,
-    foreground: bool,
+    foreground: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -170,8 +184,7 @@ enum ZptyArgs {
 async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let args = match lua.from_value(val)? {
         SpawnArgs::Shell(args) => {
-            let args = FullShellRunArgs{ args, subshell: true, ..Default::default() };
-            return shell_run_with_args(ui, lua, args).await;
+            return shell_run_with_args(ui, lua, ShellRunCmd::Subshell(args), Default::default()).await;
         },
         SpawnArgs::Full(args) => args,
         SpawnArgs::Simple(args) => FullSpawnArgs{args, ..Default::default()},
@@ -196,6 +209,11 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     command.stdin(args.stdin);
     command.stdout(args.stdout);
     command.stderr(args.stderr);
+    let foreground = args.foreground.unwrap_or_else(|| {
+        matches!(args.stdin, Stdio::inherit)
+        || matches!(args.stdout, Stdio::inherit)
+        || matches!(args.stderr, Stdio::inherit)
+    });
 
     let (result_sender, result_receiver) = oneshot::channel();
     let (sender, receiver) = watch::channel(None);
@@ -205,14 +223,10 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         let mut result_sender = Some(result_sender);
         let result: Result<_> = (async || {
 
-            let foreground_lock = if args.foreground && !crate::is_forked() {
+            let foreground_lock = if foreground && !crate::is_forked() {
                 // this essentially locks ui
-                let this = ui.unlocked.read();
-                {
-                    let mut ui = this.inner.borrow_mut().await;
-                    ui.events.pause().await;
-                    ui.deactivate()?;
-                }
+                ui.events.read().pause().await;
+                ui.prepare_for_unhandled_output().await?;
                 Some(ui.has_foreground_process.lock().await)
             } else {
                 None
@@ -229,24 +243,30 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
             let code = crate::signals::wait_for_pid(pid as _, &*ui.shell).await.unwrap();
 
             drop(foreground_lock);
-            if args.foreground {
-                let result = ui.get().inner.borrow().await.activate();
-                ui.report_error(true, result).await;
-                ui.get().inner.borrow_mut().await.events.resume().await;
-            }
             // ignore error
             let _ = sender.send(Some(Ok(code as _)));
 
             Ok(())
         })().await;
 
+        let mut drawn = false;
+        if foreground {
+            ui.events.read().resume().await;
+            let result = ui.recover_from_unhandled_output().await;
+            drawn = ui.report_error(result).await || drawn;
+        }
+
         if let Err(err) = result {
             if let Some(result_sender) = result_sender {
                 let _ = result_sender.send(Err(err));
             } else {
                 let err: Result<()> = Err(err);
-                ui.report_error(true, err).await;
+                drawn = ui.report_error(err).await || drawn;
             }
+        }
+
+        if foreground && ! drawn {
+            ui.try_draw().await;
         }
 
     });
@@ -304,31 +324,40 @@ impl OverriddenStream {
 }
 
 async fn shell_run(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
-    let args = match lua.from_value(val)? {
-        ShellRunArgs::Full(args) => args,
-        ShellRunArgs::Simple(args) => FullShellRunArgs{args, ..Default::default()},
-    };
-    shell_run_with_args(ui, lua, args).await
+    match lua.from_value(val)? {
+        ShellRunArgs::Full(args) if args.subshell => {
+            shell_run_with_args(ui, lua, ShellRunCmd::Subshell(args.args), args.opts).await
+        },
+        ShellRunArgs::Full(args) => {
+            shell_run_with_args(ui, lua, ShellRunCmd::Simple(args.args), args.opts).await
+        },
+        ShellRunArgs::Simple(args) => {
+            shell_run_with_args(ui, lua, ShellRunCmd::Simple(args), Default::default()).await
+        },
+    }
 }
 
-async fn shell_run_with_args(mut ui: Ui, lua: Lua, args: FullShellRunArgs) -> Result<LuaMultiValue> {
+pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: FullShellRunOpts) -> Result<LuaMultiValue> {
     let (result_sender, result_receiver) = oneshot::channel();
     let (sender, receiver) = watch::channel(None);
+
+    let foreground = args.foreground.unwrap_or_else(|| {
+        matches!(args.stdin, Stdio::inherit)
+        || matches!(args.stdout, Stdio::inherit)
+        || matches!(args.stderr, Stdio::inherit)
+    });
 
     // run this in a thread
     tokio::task::spawn(async move {
 
         let mut result_sender = Some(result_sender);
+        let mut errors = [Ok(()), Ok(()), Ok(())];
         let result: Result<_> = (async || {
 
-            let foreground_lock = if args.foreground && !crate::is_forked() {
+            let foreground_lock = if foreground && !crate::is_forked() {
                 // this essentially locks ui
-                let this = ui.unlocked.read();
-                {
-                    let mut ui = this.inner.borrow_mut().await;
-                    ui.events.pause().await;
-                    ui.deactivate()?;
-                }
+                ui.events.read().pause().await;
+                ui.prepare_for_unhandled_output().await?;
                 Some(ui.has_foreground_process.lock().await)
             } else {
                 None
@@ -362,41 +391,48 @@ async fn shell_run_with_args(mut ui: Ui, lua: Lua, args: FullShellRunArgs) -> Re
             let stdout = stdio_pipe!(stdout, false);
             let stderr = stdio_pipe!(stderr, false);
 
-            let cmd = args.args;
             let mut streams = [stdin.1, stdout.1, stderr.1];
-            let (pid, cmd) = if args.subshell {
-                // fork it now to get the pid
-                let redirections = streams.iter().flatten().map(|s| (s.fd, s.replacement)).collect();
-                (ui.shell.exec_subshell(cmd.into(), false, redirections).await? as _, None)
-            } else {
-                (std::process::id(), Some(cmd))
-            };
 
-            // send streams back to caller
-            let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
+            let is_subshell = matches!(cmd, ShellRunCmd::Subshell(_));
+            let code = match cmd {
+                cmd @ ShellRunCmd::Simple(_) | cmd @ ShellRunCmd::Function{..} => {
 
-            let code = if let Some(cmd) = cmd {
-                debug_assert!(!args.subshell);
-                // no forking, override fds in place
-                let mut result = streams.iter_mut().flatten().try_for_each(|s| s.override_fd());
-                if result.is_err() {
-                    // didnt work, restore any backups
-                    if let Err(e) = streams.iter_mut().flatten().try_for_each(|s| s.restore()) {
-                        result = result.context(e);
+                    let pid = std::process::id();
+                    // send streams back to caller
+                    let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
+
+                    // no forking, override fds in place
+                    let mut result = streams.iter_mut().flatten().try_for_each(|s| s.override_fd());
+                    if result.is_err() {
+                        // didnt work, restore any backups
+                        if let Err(e) = streams.iter_mut().flatten().try_for_each(|s| s.restore()) {
+                            result = result.context(e);
+                        }
+                        return result
                     }
-                    return result
-                }
 
-                // run the scripts
-                ui.shell.exec(cmd.into()).await
+                    match cmd {
+                        ShellRunCmd::Simple(cmd) => ui.shell.exec(cmd.into()).await,
+                        ShellRunCmd::Function{func, args} => {
+                            let args = args.into_iter().map(|a| a.into()).collect();
+                            ui.shell.exec_function(func.clone(), args).await as _
+                        },
+                        ShellRunCmd::Subshell(_) => unreachable!(),
+                    }
+                },
+                ShellRunCmd::Subshell(cmd) => {
+                    // fork it now to get the pid
+                    let redirections = streams.iter().flatten().map(|s| (s.fd, s.replacement)).collect();
+                    let pid = ui.shell.exec_subshell(cmd.into(), false, redirections).await? as _;
 
-            } else {
-                debug_assert!(args.subshell);
-                crate::signals::wait_for_pid(pid as _, &*ui.shell).await.unwrap() as _
+                    // send streams back to caller
+                    let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
+
+                    crate::signals::wait_for_pid(pid as _, &*ui.shell).await.unwrap() as _
+                },
             };
 
-            let mut errors = [Ok(()), Ok(()), Ok(())];
-            if !args.subshell {
+            if !is_subshell {
                 // finished, restore any backups
                 for (s, e) in streams.iter_mut().zip(errors.iter_mut()) {
                     if let Some(s) = s {
@@ -406,15 +442,6 @@ async fn shell_run_with_args(mut ui: Ui, lua: Lua, args: FullShellRunArgs) -> Re
             }
 
             drop(foreground_lock);
-            if args.foreground {
-                let result = ui.get().inner.borrow().await.activate();
-                ui.report_error(true, result).await;
-                ui.get().inner.borrow_mut().await.events.resume().await;
-            }
-
-            for err in errors {
-                ui.report_error(true, err).await;
-            }
 
             // send the code out
             let _ = sender.send(Some(Ok(code as _)));
@@ -422,13 +449,29 @@ async fn shell_run_with_args(mut ui: Ui, lua: Lua, args: FullShellRunArgs) -> Re
             Ok(())
         })().await;
 
+        let mut drawn = false;
+
+        if foreground {
+            ui.events.read().resume().await;
+            let result = ui.recover_from_unhandled_output().await;
+            drawn = ui.report_error(result).await || drawn;
+        }
+
+        for err in errors {
+            drawn = ui.report_error(err).await || drawn;
+        }
+
         if let Err(err) = result {
             if let Some(result_sender) = result_sender {
                 let _ = result_sender.send(Err(err));
             } else {
                 let err: Result<()> = Err(err);
-                ui.report_error(true, err).await;
+                drawn = ui.report_error(err).await || drawn;
             }
+        }
+
+        if foreground && ! drawn {
+            ui.try_draw().await;
         }
 
     });
