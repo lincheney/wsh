@@ -158,10 +158,9 @@ impl Ui {
             return Ok(())
         }
 
-        let Ok(_lock) = self.has_foreground_process.try_lock()
-        else {
+        if self.preparing_for_unhandled_output.load(Ordering::Relaxed) {
             return Ok(())
-        };
+        }
 
         let this = &*self.unlocked.read();
         let mut ui = this.inner.borrow_mut().await;
@@ -284,6 +283,7 @@ impl Ui {
                 ui.size = crossterm::terminal::size()?;
                 queue!(ui.stdout, style::Print("\r\n"))?;
             }
+            ui.tui.reset();
         }
         Ok(flag)
     }

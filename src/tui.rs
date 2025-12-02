@@ -467,14 +467,19 @@ impl Tui {
     ) -> Result<()> {
 
         if clear {
-            self.buffer.reset();
+            self.reset();
             queue!(
                 writer,
                 cursor::MoveToColumn(0),
                 Clear(ClearType::FromCursorDown),
             )?;
-            self.dirty = true;
+        }
+
+        if self.dirty {
             self.widgets.height = 0;
+            buffer.cursor_coord = (0, 0);
+            buffer.draw_end_pos = (0, 0);
+            status_bar.reset();
         }
 
         // take up at most 2/3 of the screen
@@ -507,7 +512,9 @@ impl Tui {
 
         // redraw the prompt
         if clear || prompt.dirty {
-            prompt.refresh_prompt(shell, area.width).await;
+            if prompt.dirty {
+                prompt.refresh_prompt(shell, area.width).await;
+            }
             // move back to top of drawing area and redraw
             drawer.move_to_pos((0, 0))?;
             drawer.writer.write_all(prompt.as_bytes())?;

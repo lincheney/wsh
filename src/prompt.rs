@@ -2,7 +2,6 @@ use std::ffi::CString;
 use bstr::BStr;
 use crate::shell::ShellClient;
 
-#[derive(Default)]
 pub struct Prompt {
     inner: CString,
     default: CString,
@@ -20,7 +19,13 @@ impl Prompt {
             .map(|s| CString::new(s.to_vec()))
             .unwrap_or_else(|| CString::new(Prompt::DEFAULT))
             .unwrap();
-        Self{ default, ..Self::default() }
+        Self{
+            default,
+            inner: Default::default(),
+            width: 0,
+            height: 0,
+            dirty: true,
+        }
     }
 
     pub async fn refresh_prompt(&mut self, shell: &ShellClient, width: u16) {

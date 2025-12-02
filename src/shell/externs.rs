@@ -98,7 +98,10 @@ fn main() -> Result<Option<BString>> {
         // sometimes zsh will trash zle without refreshing
         // redraw the ui
         if runtime.block_on(ui.recover_from_unhandled_output()).unwrap() {
-            runtime.block_on(ui.try_draw());
+            // draw LATER
+            // drawing may use shell, so we need to run it later when the shell is running the loop
+            let mut ui = ui.clone();
+            runtime.spawn(async move { ui.try_draw().await });
         }
     }
 }
