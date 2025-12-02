@@ -468,18 +468,14 @@ impl Tui {
 
         if clear {
             self.reset();
+            buffer.cursor_coord = (0, 0);
+            buffer.draw_end_pos = (0, 0);
+            status_bar.reset();
             queue!(
                 writer,
                 cursor::MoveToColumn(0),
                 Clear(ClearType::FromCursorDown),
             )?;
-        }
-
-        if self.dirty {
-            self.widgets.height = 0;
-            buffer.cursor_coord = (0, 0);
-            buffer.draw_end_pos = (0, 0);
-            status_bar.reset();
         }
 
         // take up at most 2/3 of the screen

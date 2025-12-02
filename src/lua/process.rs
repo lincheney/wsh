@@ -1,3 +1,4 @@
+use std::ffi::CString;
 use std::sync::Arc;
 use std::time::SystemTime;
 use std::str::FromStr;
@@ -414,7 +415,7 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
                     match cmd {
                         ShellRunCmd::Simple(cmd) => ui.shell.exec(cmd.into()).await,
                         ShellRunCmd::Function{func, args} => {
-                            let args = args.into_iter().map(|a| a.into()).collect();
+                            let args = args.into_iter().map(|a| CString::new(a).unwrap()).collect();
                             ui.shell.exec_function(func.clone(), args).await as _
                         },
                         ShellRunCmd::Subshell(_) => unreachable!(),

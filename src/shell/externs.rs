@@ -75,7 +75,6 @@ fn get_or_init_state() -> Result<Arc<GlobalState>> {
 fn main() -> Result<Option<BString>> {
     let state = get_or_init_state()?;
     let (ui, shell, queue, runtime) = &*state;
-    let mut ui = ui.clone();
     let mut queue = queue.lock().unwrap();
 
     loop {

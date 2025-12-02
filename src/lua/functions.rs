@@ -27,9 +27,12 @@ enum FunctionArgs {
 
 impl UserData for Function {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_async_meta_method_mut(mlua::MetaMethod::Call, |lua, func, args: Option<LuaValue>| async move {
+        methods.add_async_meta_method_mut(mlua::MetaMethod::Call, |lua, func, mut args: LuaMultiValue| async move {
 
-            let (args, opts) = if let Some(args) = args {
+            let (args, opts) = if args.is_empty() {
+                (vec![], None)
+            } else if args.len() == 1 {
+                let args = args.pop_front().unwrap();
                 match lua.from_value(args)? {
                     FunctionArgs::Simple(args) => {
                         (args, None)
@@ -39,7 +42,8 @@ impl UserData for Function {
                     },
                 }
             } else {
-                (vec![], None)
+                let mut args: mlua::Variadic<String> = lua.unpack_multi(args)?;
+                (args.split_off(0), None)
             };
 
             let cmd = ShellRunCmd::Function{func: func.inner.clone(), args};
@@ -50,7 +54,7 @@ impl UserData for Function {
     }
 }
 
-async fn make_sh_function(ui: Ui, lua: Lua, code: BString) -> Result<LuaValue> {
+async fn make_zsh_function(ui: Ui, lua: Lua, code: BString) -> Result<LuaValue> {
     let func = ui.shell.make_function(code).await?;
     Ok(lua.pack(Function {
         inner: func,
@@ -60,7 +64,7 @@ async fn make_sh_function(ui: Ui, lua: Lua, code: BString) -> Result<LuaValue> {
 
 pub fn init_lua(ui: &Ui) -> Result<()> {
 
-    ui.set_lua_async_fn("make_sh_function", make_sh_function)?;
+    ui.set_lua_async_fn("make_zsh_function", make_zsh_function)?;
 
     Ok(())
 }

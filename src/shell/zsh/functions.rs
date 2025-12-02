@@ -1,5 +1,6 @@
+use std::ffi::CString;
 use std::os::raw::{c_int};
-use bstr::{BString, BStr};
+use bstr::{BStr};
 use std::ptr::null_mut;
 use anyhow::Result;
 use crate::unsafe_send::UnsafeSend;
@@ -50,43 +51,37 @@ impl Function {
         Ok(Self(unsafe{ UnsafeSend::new(func) }))
     }
 
-    pub fn execute(&self, args: &[BString]) -> c_int {
+    pub fn execute(&self, args: &[CString]) -> c_int {
         // convert args to a linked list
         const EMPTY_NODE: zsh_sys::linknode = zsh_sys::linknode{
             next: null_mut(),
             prev: null_mut(),
             dat: null_mut(),
         };
-        let mut nodes: Vec<zsh_sys::linknode>;
-        let mut list: zsh_sys::linkroot;
 
-        let list_ptr = if args.is_empty() {
-            null_mut()
-        } else {
+        let mut nodes = vec![EMPTY_NODE; args.len() + 1];
+        // arg0
+        nodes[0].dat = self.0.as_ref().node.nam.cast();
+        for (arg, node) in args.iter().zip(&mut nodes[1..]) {
+            node.dat = arg.as_ptr() as _;
+        }
+        for i in 0..nodes.len()-1 {
+            nodes[i].next = &raw const nodes[i+1] as _;
+            nodes[i+1].prev = &raw const nodes[i] as _;
+        }
 
-            nodes = vec![EMPTY_NODE; args.len()];
-            for (arg, node) in args.iter().zip(nodes.iter_mut()) {
-                node.dat = arg.as_ptr() as _;
+        let mut list = zsh_sys::linkroot{
+            list: zsh_sys::linklist{
+                first: &raw const nodes[0] as _,
+                last: &raw const nodes[nodes.len()-1] as _,
+                flags: 0,
             }
-            for i in 0..nodes.len()-1 {
-                nodes[i].next = &raw const nodes[i+1] as _;
-                nodes[i+1].prev = &raw const nodes[i] as _;
-            }
-
-            list = zsh_sys::linkroot{
-                list: zsh_sys::linklist{
-                    first: &raw const nodes[0] as _,
-                    last: &raw const nodes[nodes.len()-1] as _,
-                    flags: 0,
-                }
-            };
-            &raw mut list
         };
 
         let noreturnval = 1;
-        let mut shfunc = self.0.into_inner();
+        let shfunc = self.0.as_ref();
         unsafe {
-            zsh_sys::doshfunc(&raw mut shfunc, list_ptr, noreturnval)
+            zsh_sys::doshfunc(shfunc as *const _ as _, &raw mut list, noreturnval)
         }
     }
 }

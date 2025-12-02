@@ -394,7 +394,7 @@ crate::TokioActor! {
             Ok(Arc::new(func))
         }
 
-        pub fn exec_function(&self, function: Arc<zsh::functions::Function>, args: Vec<BString>) -> c_int {
+        pub fn exec_function(&self, function: Arc<zsh::functions::Function>, args: Vec<CString>) -> c_int {
             function.execute(&args)
         }
 
