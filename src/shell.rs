@@ -398,6 +398,10 @@ crate::TokioActor! {
             function.execute(&args)
         }
 
+        pub fn get_function_source(&self, function: Arc<zsh::functions::Function>) -> BString {
+            function.get_source()
+        }
+
     }
 
 }

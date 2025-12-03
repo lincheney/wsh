@@ -1,6 +1,6 @@
 use std::ffi::CString;
 use std::os::raw::{c_int};
-use bstr::{BStr};
+use bstr::{BString, BStr};
 use std::ptr::null_mut;
 use anyhow::Result;
 use crate::unsafe_send::UnsafeSend;
@@ -83,6 +83,13 @@ impl Function {
         unsafe {
             zsh_sys::doshfunc(shfunc as *const _ as _, &raw mut list, noreturnval)
         }
+    }
+
+    pub fn get_source(&self) -> BString {
+        let source = unsafe {
+            CString::from_raw(zsh_sys::getpermtext(self.0.as_ref().funcdef, null_mut(), 1))
+        };
+        source.into_bytes().into()
     }
 }
 
