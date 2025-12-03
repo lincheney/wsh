@@ -1,3 +1,4 @@
+use bstr::BString;
 use std::ffi::CString;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -124,15 +125,15 @@ pub struct FullShellRunOpts {
 }
 
 pub enum ShellRunCmd {
-    Simple(String),
-    Subshell(String),
-    Function{ func: Arc<crate::shell::Function>, args: Vec<String> },
+    Simple(BString),
+    Subshell(BString),
+    Function{ func: Arc<crate::shell::Function>, args: Vec<BString> },
 }
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct FullShellRunArgs {
-    args: String,
+    args: BString,
     #[serde(flatten)]
     opts: FullShellRunOpts,
     subshell: bool,
@@ -154,7 +155,7 @@ struct FullSpawnArgs {
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum SpawnArgs {
-    Shell(String),
+    Shell(BString),
     Simple(Vec<String>),
     Full(FullSpawnArgs),
 }
@@ -162,14 +163,14 @@ enum SpawnArgs {
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum ShellRunArgs {
-    Simple(String),
+    Simple(BString),
     Full(FullShellRunArgs),
 }
 
 #[derive(Default, Debug, Deserialize)]
 #[serde(default)]
 struct FullZptyArgs {
-    args: String,
+    args: BString,
     height: Option<usize>,
     width: Option<usize>,
     echo_input: bool,
@@ -178,7 +179,7 @@ struct FullZptyArgs {
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum ZptyArgs {
-    Simple(String),
+    Simple(BString),
     Full(FullZptyArgs),
 }
 

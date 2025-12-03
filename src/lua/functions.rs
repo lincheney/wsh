@@ -13,7 +13,7 @@ pub struct Function {
 
 #[derive(Debug, Default, Deserialize)]
 struct FullFunctionArgs {
-    args: Vec<String>,
+    args: Vec<BString>,
     #[serde(flatten)]
     opts: FullShellRunOpts,
 }
@@ -21,7 +21,7 @@ struct FullFunctionArgs {
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum FunctionArgs {
-    Simple(Vec<String>),
+    Simple(Vec<BString>),
     Full(FullFunctionArgs),
 }
 
@@ -42,7 +42,7 @@ impl UserData for Function {
                     },
                 }
             } else {
-                let mut args: mlua::Variadic<String> = lua.unpack_multi(args)?;
+                let mut args: mlua::Variadic<BString> = lua.unpack_multi(args)?;
                 (args.split_off(0), None)
             };
 
