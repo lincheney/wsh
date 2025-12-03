@@ -20,7 +20,7 @@ impl<'a, T: ?Sized> LinkedList<'a, T> {
         let mut nodes = Box::into_pin(vec![EMPTY_NODE; size].into_boxed_slice());
 
         for (item, node) in iter.zip(nodes.as_mut().iter_mut()) {
-            node.dat = &raw const item as _;
+            node.dat = item as *const _ as *mut _;
         }
 
         for i in 0..nodes.len()-1 {
@@ -37,8 +37,8 @@ impl<'a, T: ?Sized> LinkedList<'a, T> {
     pub fn as_linkroot(&self) -> zsh_sys::linkroot {
         zsh_sys::linkroot{
             list: zsh_sys::linklist{
-                first: self.nodes.first().map_or(null_mut(), |x| &raw const x as _),
-                last: self.nodes.last().map_or(null_mut(), |x| &raw const x as _),
+                first: self.nodes.first().map_or(null_mut(), |x| x as *const _ as _),
+                last: self.nodes.last().map_or(null_mut(), |x| x as *const _ as _),
                 flags: 0,
             }
         }
