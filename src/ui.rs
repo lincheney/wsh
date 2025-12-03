@@ -283,6 +283,7 @@ impl Ui {
                 ui.size = crossterm::terminal::size()?;
                 queue!(ui.stdout, style::Print("\r\n"))?;
             }
+            execute!(ui.stdout, style::ResetColor)?;
             ui.dirty = true;
         }
         Ok(flag)
