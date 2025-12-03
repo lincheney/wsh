@@ -218,3 +218,6 @@ mod_export void gettyinfo(struct ttyinfo *ti);
 
 char *lpromptbuf, *rpromptbuf;
 int trashedzle;
+
+void
+initundo(void);

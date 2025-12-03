@@ -198,6 +198,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
             let mut keymap = [b'm', b'a', b'i', b'n', 0];
             zsh::done = 0;
             zsh_sys::zleactive = 1;
+            zsh::initundo();
             zsh::selectlocalmap(null_mut());
             zsh::selectkeymap(keymap.as_mut_ptr().cast(), 1);
             zsh::histline = zsh_sys::curhist as _;
