@@ -79,7 +79,8 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
     }
 
     // reversed
-    cmd.insert_str(0, " ");
+    // add a read so that we have time to get the pid
+    cmd.insert_str(0, " '\\builtin read -k1;'");
     cmd.insert_str(0, shell_quote(&name).as_bytes());
     if opts.echo_input {
         cmd.insert_str(0, "-e ");
@@ -147,8 +148,13 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
         let pid = std::str::from_utf8(pid)?.parse()?;
         add_pid(pid as _);
 
+        // tell the zpty to start
+        let fd = fd as _;
+        let borrowed = unsafe{ std::os::fd::BorrowedFd::borrow_raw(fd) };
+        while nix::unistd::write(borrowed, b"\n")? != 1 { }
+
         Ok(Zpty{
-            fd: fd as _,
+            fd,
             pid,
             name,
         })
