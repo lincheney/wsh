@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use bstr::BString;
-use crate::ui::{Ui, DowngradeUi, UpgradeUi};
+use crate::ui::{Ui, DowngradeUi};
 use anyhow::Result;
 use mlua::{prelude::*, UserData, UserDataMethods};
 use serde::{Deserialize};

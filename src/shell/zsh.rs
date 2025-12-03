@@ -9,6 +9,7 @@ use bstr::{BStr, BString, ByteSlice, ByteVec};
 
 mod string;
 mod bindings;
+mod linked_list;
 pub mod variables;
 pub mod functions;
 mod widget;

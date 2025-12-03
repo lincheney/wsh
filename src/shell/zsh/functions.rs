@@ -37,7 +37,7 @@ impl Function {
             node: zsh_sys::hashnode{
                 next: null_mut(),
                 #[allow(static_mut_refs)]
-                nam: unsafe{ crate::EMPTY_STR.as_mut_ptr() }.cast(),
+                nam: crate::EMPTY_STR.as_ptr() as _,
                 flags: 0,
             },
             filename: null_mut(),
@@ -53,31 +53,11 @@ impl Function {
 
     pub fn execute(&self, args: &[CString]) -> c_int {
         // convert args to a linked list
-        const EMPTY_NODE: zsh_sys::linknode = zsh_sys::linknode{
-            next: null_mut(),
-            prev: null_mut(),
-            dat: null_mut(),
-        };
+        let len = args.len() + 1;
+        let args = std::iter::once(crate::EMPTY_STR).chain(args.iter().map(|c| c.as_ref()));
+        let args = super::linked_list::LinkedList::new(len, args);
 
-        let mut nodes = vec![EMPTY_NODE; args.len() + 1];
-        // arg0
-        nodes[0].dat = self.0.as_ref().node.nam.cast();
-        for (arg, node) in args.iter().zip(&mut nodes[1..]) {
-            node.dat = arg.as_ptr() as _;
-        }
-        for i in 0..nodes.len()-1 {
-            nodes[i].next = &raw const nodes[i+1] as _;
-            nodes[i+1].prev = &raw const nodes[i] as _;
-        }
-
-        let mut list = zsh_sys::linkroot{
-            list: zsh_sys::linklist{
-                first: &raw const nodes[0] as _,
-                last: &raw const nodes[nodes.len()-1] as _,
-                flags: 0,
-            }
-        };
-
+        let mut list = args.as_linkroot();
         let noreturnval = 1;
         let shfunc = self.0.as_ref();
         unsafe {

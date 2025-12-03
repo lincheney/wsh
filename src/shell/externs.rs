@@ -201,8 +201,8 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
             zsh::selectlocalmap(null_mut());
             zsh::selectkeymap(keymap.as_mut_ptr().cast(), 1);
             zsh::histline = zsh_sys::curhist as _;
-            zsh::lpromptbuf = crate::EMPTY_STR.as_mut_ptr().cast();
-            zsh::rpromptbuf = crate::EMPTY_STR.as_mut_ptr().cast();
+            zsh::lpromptbuf = crate::EMPTY_STR.as_ptr() as _;
+            zsh::rpromptbuf = crate::EMPTY_STR.as_ptr() as _;
 
             let result = tokio::task::block_in_place(main);
 

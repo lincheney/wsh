@@ -15,7 +15,7 @@ mod utils;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 static IS_FORKED: AtomicBool = AtomicBool::new(false);
-static mut EMPTY_STR: [u8; 1] = [0];
+static EMPTY_STR: &'static std::ffi::CStr = c"";
 
 fn is_forked() -> bool {
     IS_FORKED.load(Ordering::Relaxed)
