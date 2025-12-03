@@ -41,10 +41,10 @@ i wish i could have
 * [x] general selection widget interface
 * [x] embed process output in a tui message
 * [x] draw prompt and buffer using ratatui
-* [ ] status bar
-* [ ] poc async prompt
+* [x] status bar
+* [x] poc async prompt
 * [x] call lua from zsh
-* [ ] fork and run zsh
+* [x] fork and run zsh
 * [ ] var for last term cursor position
 * [ ] options system
 * [x] alias, history expansion
@@ -54,7 +54,7 @@ i wish i could have
 * [ ] custom buffer rendering, ghost text etc
 * [x] fix segfault when letting zle exit by itself
 * [ ] ~~try switch to termion~~
-* [ ] remove extra zle prompt after accept line
+* [x] remove extra zle prompt after accept line
 * [x] lag when exiting. does it happen in release?
 * [ ] calling exit within widget causes hang
 * [ ] magic space for completion
@@ -92,4 +92,8 @@ i wish i could have
         * no idea
         * seems to use tls for the handler, maybe its ok? dunno
 * [ ] control c style escape hatch
+* [ ] TMOUT
+* [ ] scrolling widgets
+* [ ] horizontal widget layout
+* [ ] highlight colour system
 * [ ]
