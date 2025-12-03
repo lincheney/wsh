@@ -135,9 +135,11 @@ pub struct Widget{
     pub constraint: Option<Constraint>,
     pub inner: Text<'static>,
     pub style: StyleOptions,
+    pub border_sides: Option<Borders>,
     pub border_style: Style,
     pub border_title_style: Style,
     pub border_type: BorderType,
+    pub border_show_empty: bool,
     pub block: Option<Block<'static>>,
     pub persist: bool,
     pub hidden: bool,
@@ -251,11 +253,13 @@ impl Widget {
         );
     }
 
-    fn measure(&self, mut area: Rect, buffer: &mut Buffer) {
+    fn measure(&self, mut area: Rect, buffer: &mut Buffer) -> u16 {
+        let mut border_height = 0;
         if let Some(ref block) = self.block {
             let inner = block.inner(area);
+            border_height = area.height - inner.height;
             area = Rect{
-                y: area.y + area.height - inner.height,
+                y: area.y + border_height,
                 ..inner
             };
         }
@@ -267,6 +271,12 @@ impl Widget {
             false,
             None,
         );
+
+        let mut height = buffer_nonempty_height(buffer);
+        if self.border_show_empty && height == 0 {
+            height = border_height;
+        }
+        height
     }
 
     fn line_count(&self, area: Rect, buffer: &mut Buffer) -> u16 {
@@ -278,9 +288,7 @@ impl Widget {
         if area.width >= 1 {
             buffer.resize(area);
             buffer.reset();
-            self.measure(area, buffer);
-
-            height = height.max(buffer_nonempty_height(buffer));
+            height = height.max(self.measure(area, buffer));
         }
         height
     }
@@ -452,6 +460,8 @@ impl Tui {
 
             let mut string = vec![];
             let mut writer = Cursor::new(&mut string);
+            // always start with a reset
+            writer.write_all(b"\x1b[0m").unwrap();
             let mut draw_buffer = Buffer::empty(area);
             let mut drawer = backend::Drawer::new(&mut draw_buffer, &mut writer, (0, 0));
 

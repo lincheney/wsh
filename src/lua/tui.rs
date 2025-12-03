@@ -99,12 +99,43 @@ pub struct BorderTitleOptions {
     pub style: StyleOptions,
 }
 
+#[derive(Clone, Copy, Debug, Default, strum::EnumString)]
+pub enum BorderSide {
+    Top,
+    Right,
+    Bottom,
+    Left,
+    #[default]
+    All,
+}
+
+impl From<BorderSide> for Borders {
+    fn from(val: BorderSide) -> Self {
+        match val {
+            BorderSide::Top => Borders::TOP,
+            BorderSide::Right => Borders::RIGHT,
+            BorderSide::Bottom => Borders::BOTTOM,
+            BorderSide::Left => Borders::LEFT,
+            BorderSide::All => Borders::ALL,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum BorderSides {
+    Single(SerdeWrap<BorderSide>),
+    Multiple(Vec<SerdeWrap<BorderSide>>),
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct BorderOptions {
     pub enabled: Option<bool>,
+    pub sides: Option<BorderSides>,
     pub r#type: Option<SerdeWrap<BorderType>>,
     pub title: Option<BorderTitleOptions>,
+    pub show_empty: Option<bool>,
     #[serde(flatten)]
     pub style: StyleOptions,
 }
@@ -215,6 +246,14 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
             let style: tui::StyleOptions = options.style.into();
             widget.border_style = widget.border_style.patch(style.as_style());
             widget.border_type = options.r#type.unwrap_or(SerdeWrap(widget.border_type)).0;
+            widget.border_show_empty = options.show_empty.unwrap_or(widget.border_show_empty);
+
+            let border_sides = match options.sides {
+                Some(BorderSides::Single(b)) => b.0.into(),
+                Some(BorderSides::Multiple(b)) => b.iter().map(|x| x.0.into()).reduce(|x: Borders, y| x.union(y)).unwrap_or(Borders::ALL),
+                None => widget.border_sides.unwrap_or(Borders::ALL),
+            };
+            widget.border_sides = Some(border_sides);
 
             let mut block = if let Some(title) = options.title {
                 let style: tui::StyleOptions = title.style.into();
@@ -228,7 +267,7 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
                 widget.block.clone()
             }.unwrap_or_else(Block::new);
 
-            block = block.borders(Borders::ALL);
+            block = block.borders(border_sides);
             block = block.border_style(widget.border_style);
             block = block.border_type(widget.border_type);
             block = block.title_style(widget.border_title_style);
