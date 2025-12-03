@@ -1,5 +1,6 @@
+use bstr::BString;
 use std::default::Default;
-use std::io::Write;
+use std::io::{Write, Cursor};
 use unicode_width::UnicodeWidthStr;
 use anyhow::Result;
 use crossterm::{
@@ -435,6 +436,29 @@ impl Tui {
         self.get_index(id).map(|i| {
             self.dirty = true;
             self.widgets.inner.remove(i)
+        })
+    }
+
+    pub fn render_to_string(&self, id: usize, width: Option<u16>) -> Option<BString> {
+        self.get_index(id).map(|i| {
+            let widget = self.widgets.inner[i].as_ref();
+
+            let area = Rect{ width: width.unwrap_or(self.buffer.area.width), ..self.buffer.area };
+            let mut buffer = Buffer::empty(area);
+
+            let constraint = widget.constraint.unwrap_or(Constraint::Max(widget.line_count));
+            let layout = Layout::vertical([constraint]).split(area);
+            widget.render(layout[0], &mut buffer);
+
+            let mut string = vec![];
+            let mut writer = Cursor::new(&mut string);
+            let mut draw_buffer = Buffer::empty(area);
+            let mut drawer = backend::Drawer::new(&mut draw_buffer, &mut writer, (0, 0));
+
+            let lines = buffer.content.chunks(buffer.area.width as _);
+            drawer.draw_lines(lines).unwrap();
+
+            string.into()
         })
     }
 

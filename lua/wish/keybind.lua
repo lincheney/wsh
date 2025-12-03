@@ -157,23 +157,26 @@ end)
 wish.set_keymap('<f12>', function()
     local id = wish.set_ansi_message{
         dim = true,
-        border = {
-            fg = 'blue',
-            dim = false,
-            type = 'Rounded',
-            title = {
-                text = ' running ... ',
-            },
-        },
+        -- border = {
+            -- fg = 'blue',
+            -- dim = false,
+            -- type = 'Rounded',
+            -- title = {
+                -- text = ' running ... ',
+            -- },
+        -- },
     }
     wish.schedule(function()
         local proc = wish.async.spawn{
-            args = {'bash', '-c', 'for i in {1..10}; do printf "\\rhello world %i\x1b[3%im" $i $i; sleep 0.3; done; echo; echo done'},
+            -- args = {'bash', '-c', 'for i in {1..10}; do printf "\\rhello world %i\x1b[3%im" $i $i; sleep 0.3; done; echo; echo done'},
+            args = {'script', '-fqc', 'top', '/dev/null'},
+            -- args = {'echo', '\x1b[7;39;49maslkdjalskjdaklsd'},
             stdout = 'piped',
+            stdin = 'null',
+            stderr = 'null',
         }
         while true do
             local stdout = proc.stdout:read()
-            wish.pprint("DEBUG(pile)      ".."stdout"..(" = %q\n"):format(stdout))
             if not stdout then
                 break
             end

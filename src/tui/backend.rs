@@ -56,14 +56,19 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
     }
 
     pub fn move_to_pos(&mut self, pos: (u16, u16)) -> Result<()> {
-        if pos.0 != self.last_pos.0 {
-            queue!(self.writer, MoveToColumn(pos.0))?;
+        if pos == (0, self.last_pos.1 + 1) {
+            queue!(self.writer, Print("\r\n"))?;
+        } else {
+            if pos.0 != self.last_pos.0 {
+                queue!(self.writer, MoveToColumn(pos.0))?;
+            }
+            if pos.1 > self.last_pos.1 {
+                queue!(self.writer, MoveDown(pos.1 - self.last_pos.1))?;
+            } else if pos.1 < self.last_pos.1 {
+                queue!(self.writer, MoveUp(self.last_pos.1 - pos.1))?;
+            }
         }
-        if pos.1 > self.last_pos.1 {
-            queue!(self.writer, MoveDown(pos.1 - self.last_pos.1))?;
-        } else if pos.1 < self.last_pos.1 {
-            queue!(self.writer, MoveUp(self.last_pos.1 - pos.1))?;
-        }
+
         self.cur_pos = pos;
         self.last_pos = pos;
         Ok(())

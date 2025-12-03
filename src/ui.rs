@@ -53,7 +53,7 @@ pub struct UiInner {
     pub prompt: crate::prompt::Prompt,
     pub status_bar: crate::tui::status_bar::StatusBar,
 
-    stdout: std::io::Stdout,
+    pub stdout: std::io::Stdout,
     enhanced_keyboard: bool,
     size: (u16, u16),
 }

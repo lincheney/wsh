@@ -255,7 +255,7 @@ async fn set_message(ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
             let widget = tui::Widget::default();
             tui.add(widget.into())
         },
-        Some((id, None)) => return Err(anyhow::anyhow!("can't find widget with id {}", id)),
+        Some((id, None)) => anyhow::bail!("can't find widget with id {}", id),
     };
 
     if let Some(options) = options {
@@ -289,7 +289,7 @@ async fn remove_message(ui: Ui, _lua: Lua, id: usize) -> Result<()> {
         tui.dirty = true;
         Ok(())
     } else {
-        Err(anyhow::anyhow!("can't find widget with id {}", id))
+        anyhow::bail!("can't find widget with id {}", id)
     }
 }
 
@@ -347,7 +347,7 @@ async fn set_ansi_message(ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
             let widget = tui::ansi::Parser::default();
             tui.add(widget.into())
         },
-        Some((id, None)) => return Err(anyhow::anyhow!("can't find widget with id {}", id)),
+        Some((id, None)) => anyhow::bail!("can't find widget with id {}", id),
     };
 
     if let Some(options) = options {
@@ -367,7 +367,7 @@ async fn feed_ansi_message(ui: Ui, _lua: Lua, (id, value): (usize, LuaString)) -
             tui.dirty = true;
             Ok(())
         },
-        _ => Err(anyhow::anyhow!("can't find widget with id {}", id)),
+        _ => anyhow::bail!("can't find widget with id {}", id),
     }
 }
 
@@ -381,7 +381,17 @@ async fn clear_ansi_message(ui: Ui, _lua: Lua, id: usize) -> Result<()> {
             tui.dirty = true;
             Ok(())
         },
-        _ => Err(anyhow::anyhow!("can't find widget with id {}", id)),
+        _ => anyhow::bail!("can't find widget with id {}", id),
+    }
+}
+
+async fn message_to_ansi_string(ui: Ui, _lua: Lua, (id, width): (usize, Option<u16>)) -> Result<mlua::BString> {
+    let ui = ui.get();
+    let tui = &mut ui.inner.borrow_mut().await.tui;
+
+    match tui.render_to_string(id, width) {
+        None => anyhow::bail!("can't find widget with id {}", id),
+        Some(x) => Ok(x.into()),
     }
 }
 
@@ -415,6 +425,7 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_async_fn("set_ansi_message", set_ansi_message)?;
     ui.set_lua_async_fn("feed_ansi_message", feed_ansi_message)?;
     ui.set_lua_async_fn("clear_ansi_message", clear_ansi_message)?;
+    ui.set_lua_async_fn("message_to_ansi_string", message_to_ansi_string)?;
     ui.set_lua_async_fn("set_status_bar", set_status_bar)?;
 
     Ok(())

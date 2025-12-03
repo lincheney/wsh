@@ -1,4 +1,5 @@
 use bstr::BString;
+use std::io::Write;
 use mlua::prelude::*;
 use serde::{Deserialize};
 use anyhow::Result;
@@ -91,6 +92,16 @@ async fn get_cwd(ui: Ui, _lua: Lua, (): ()) -> Result<BString> {
     Ok(ui.shell.get_cwd().await)
 }
 
+async fn print(mut ui: Ui, _lua: Lua, value: BString) -> Result<()> {
+    let lock = ui.has_foreground_process.lock().await;
+    ui.prepare_for_unhandled_output().await?;
+    ui.get().inner.borrow_mut().await.stdout.write_all(value.as_ref())?;
+    drop(lock);
+    ui.recover_from_unhandled_output().await?;
+    ui.try_draw().await;
+    Ok(())
+}
+
 fn time(_lua: &Lua, (): ()) -> LuaResult<f64> {
     Ok(SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64())
 }
@@ -125,6 +136,7 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_async_fn("redraw",  redraw)?;
     ui.set_lua_async_fn("exit", exit)?;
     ui.set_lua_async_fn("get_cwd", get_cwd)?;
+    ui.set_lua_async_fn("print", print)?;
     ui.get_lua_api()?.set("time", ui.lua.create_function(time)?)?;
     ui.set_lua_async_fn("__laggy", __laggy)?;
 
