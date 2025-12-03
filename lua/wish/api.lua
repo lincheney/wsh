@@ -5,7 +5,7 @@ function wish.repr(val)
             table.insert(text, wish.repr(v))
         end
         for k, v in pairs(val) do
-            if type(k) == 'string' and not k:find('%W') then
+            if type(k) == 'string' and not k:find('[^%w_]') then
                 table.insert(text, k .. ' = ' .. wish.repr(v))
             elseif type(k) ~= 'number' or k > #val then
                 table.insert(text, '['..wish.repr(k)..'] = ' .. wish.repr(v))
