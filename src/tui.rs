@@ -218,7 +218,7 @@ fn render_text(
                 if offset.1 >= area.height {
                     return
                 }
-                offset.0 += render_indent(Rect{ y: offset.1, ..area }, buffer, line_width as u16, alignment, indent_style);
+                offset.0 = render_indent(Rect{ y: offset.1, ..area }, buffer, line_width as u16, alignment, indent_style);
             }
         }
 
