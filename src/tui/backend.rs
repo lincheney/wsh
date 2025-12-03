@@ -195,22 +195,7 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
         if draw {
             // move to the location
             self.move_to_cur_pos()?;
-
-            if cell.modifier != self.modifier {
-                self.draw_modifier(cell.modifier)?;
-            }
-            if cell.fg != self.fg || cell.bg != self.bg {
-                queue!(self.writer, SetColors(Colors::new(cell.fg.into(), cell.bg.into())))?;
-                self.fg = cell.fg;
-                self.bg = cell.bg;
-            }
-            if cell.underline_color != self.underline_color {
-                let color = CColor::from(cell.underline_color);
-                queue!(self.writer, SetUnderlineColor(color))?;
-                self.underline_color = cell.underline_color;
-            }
-
-            queue!(self.writer, Print(cell.symbol()))?;
+            self.print_cell(cell)?;
             self.buffer[cur_pos] = cell.clone();
         }
 
@@ -223,6 +208,25 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
             self.last_pos = cur_pos;
         }
 
+        Ok(())
+    }
+
+    pub fn print_cell(&mut self, cell: &Cell) -> Result<()> {
+        if cell.modifier != self.modifier {
+            self.draw_modifier(cell.modifier)?;
+        }
+        if cell.fg != self.fg || cell.bg != self.bg {
+            queue!(self.writer, SetColors(Colors::new(cell.fg.into(), cell.bg.into())))?;
+            self.fg = cell.fg;
+            self.bg = cell.bg;
+        }
+        if cell.underline_color != self.underline_color {
+            let color = CColor::from(cell.underline_color);
+            queue!(self.writer, SetUnderlineColor(color))?;
+            self.underline_color = cell.underline_color;
+        }
+
+        queue!(self.writer, Print(cell.symbol()))?;
         Ok(())
     }
 

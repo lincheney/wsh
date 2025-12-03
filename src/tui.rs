@@ -165,12 +165,13 @@ fn render_indent(area: Rect, buffer: &mut Buffer, line_width: u16, alignment: Al
     indent
 }
 
-fn render_text(
+fn render_text<F: FnMut(&mut Buffer, (u16, u16)) -> (u16, u16)>(
     area: Rect,
     buffer: &mut Buffer,
     text: &Text,
     style: bool,
     override_style: Option<Style>,
+    mut callback: F,
 ) {
 
     let mut offset = (0, 0);
@@ -214,7 +215,9 @@ fn render_text(
 
             offset.0 += width as u16;
             if offset.0 >= area.width {
+                // newline
                 offset.1 += 1;
+                offset = callback(buffer, offset);
                 if offset.1 >= area.height {
                     return
                 }
@@ -222,7 +225,9 @@ fn render_text(
             }
         }
 
+        // newline
         offset = (0, offset.1 + 1);
+        offset = callback(buffer, offset);
     }
 }
 
@@ -234,6 +239,86 @@ impl Widget {
             text = text.replace('\t', tab);
         }
         text
+    }
+
+    fn render_iter<F: FnMut(&[ratatui::buffer::Cell])>(&self, width: u16, mut callback: F) {
+        // 3 lines in case you have borders
+        let area = Rect{ x: 0, y: 0, width, height: 3 };
+        let mut buffer = Buffer::empty(area);
+        buffer.set_style(area, self.inner.style);
+
+        let mut inner_area = if let Some(ref block) = self.block {
+            block.render_ref(area, &mut buffer);
+            block.inner(area)
+        } else {
+            area
+        };
+
+        let width = width as _;
+        let mut middle_border: Option<Vec<_>> = None;
+        let mut bottom_border: Option<Vec<_>> = None;
+
+        // split out the bottom border
+        if inner_area.y + inner_area.height < area.height {
+            bottom_border = Some(buffer.content.drain(width*2..).collect());
+        }
+
+        // top border
+        if inner_area.y > 0 {
+            callback(&buffer.content[..width]);
+            // remove top border
+            buffer.content.drain(..width);
+        }
+
+        // copy the middle borders
+        if inner_area.width < area.width {
+            middle_border = Some(buffer.content[..width].into())
+        }
+
+        inner_area.y = 0;
+        inner_area.height = 1;
+        render_text(
+            inner_area,
+            &mut buffer,
+            &self.inner,
+            true,
+            if self.text_overrides_style { Some(self.inner.style) } else { None },
+            |buffer, offset| {
+                let start = inner_area.x as usize + width * (offset.1 - 1) as usize;
+                let line = &mut buffer.content[start .. start + inner_area.width as usize];
+
+                if line.iter().all(cell_is_empty) {
+                    // line is empty; wait to see if there are any more non empty
+                    // allocate space for the next line
+                    if offset.1 >= area.height {
+                        if let Some(middle_border) = &middle_border {
+                            buffer.content.extend_from_slice(&middle_border);
+                        } else {
+                            buffer.content.resize(buffer.content.len() + width, Default::default());
+                        }
+                        buffer.area.height += 1;
+                    }
+                    return offset
+                }
+
+                // non empty line; yield all previous ones too
+                callback(&buffer.content);
+
+                for y in 0..offset.1 as _ {
+                    let start = inner_area.x as usize + width * y as usize;
+                    // reset all between the borders
+                    for cell in &mut buffer.content[start .. start + inner_area.width as usize] {
+                        cell.reset();
+                    }
+                }
+
+                (0, 0)
+            },
+        );
+
+        if let Some(bottom_border) = bottom_border {
+            callback(&bottom_border);
+        }
     }
 
     fn render(&self, area: Rect, buffer: &mut Buffer) {
@@ -250,6 +335,7 @@ impl Widget {
             &self.inner,
             true,
             if self.text_overrides_style { Some(self.inner.style) } else { None },
+            |_buffer, offset| offset,
         );
     }
 
@@ -270,6 +356,7 @@ impl Widget {
             &self.inner,
             false,
             None,
+            |_buffer, offset| offset,
         );
 
         let mut height = buffer_nonempty_height(buffer);
@@ -451,22 +538,19 @@ impl Tui {
         self.get_index(id).map(|i| {
             let widget = self.widgets.inner[i].as_ref();
 
-            let area = Rect{ width: width.unwrap_or(self.buffer.area.width), ..self.buffer.area };
-            let mut buffer = Buffer::empty(area);
-
-            let constraint = widget.constraint.unwrap_or(Constraint::Max(widget.line_count));
-            let layout = Layout::vertical([constraint]).split(area);
-            widget.render(layout[0], &mut buffer);
-
             let mut string = vec![];
             let mut writer = Cursor::new(&mut string);
             // always start with a reset
             writer.write_all(b"\x1b[0m").unwrap();
-            let mut draw_buffer = Buffer::empty(area);
-            let mut drawer = backend::Drawer::new(&mut draw_buffer, &mut writer, (0, 0));
+            let mut buffer = Buffer::default();
+            let mut drawer = backend::Drawer::new(&mut buffer, &mut writer, (0, 0));
 
-            let lines = buffer.content.chunks(buffer.area.width as _);
-            drawer.draw_lines(lines).unwrap();
+            widget.render_iter(width.unwrap_or(self.buffer.area.width), |cells| {
+                for c in cells {
+                    drawer.print_cell(c).unwrap();
+                }
+                queue!(drawer.writer, crossterm::style::Print("\r\n")).unwrap();
+            });
 
             string.into()
         })
