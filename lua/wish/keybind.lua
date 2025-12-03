@@ -216,9 +216,8 @@ wish.set_keymap('<a-a>', function()
                 fg = 'lightblue',
                 type = 'Rounded',
                 title = {
-                    fg = 'blue',
-                    bold = true,
-                    text = '─ ' .. buffer .. ' ',
+                    { fg = 'lightblue', text = '─' },
+                    { fg = 'blue', bold = true, text = buffer},
                 },
                 sides = 'Top',
                 show_empty = true,
@@ -235,7 +234,7 @@ wish.set_keymap('<a-a>', function()
             wish.feed_ansi_message(msg, data)
             if not has_output and string.find(data, '%S') then
                 has_output = true
-                wish.set_message{id = msg, border = {sides = 'All', title = {text = ' ' .. buffer .. ' '}}}
+                wish.set_message{id = msg, border = {sides = 'All', title = buffer}}
             end
             wish.redraw()
         end

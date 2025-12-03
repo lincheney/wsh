@@ -52,7 +52,7 @@ pub struct TextStyleOptions {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct TextOptions {
-    pub text: String,
+    pub text: Option<String>,
     #[serde(flatten)]
     pub style: TextStyleOptions,
 }
@@ -61,6 +61,7 @@ pub struct TextOptions {
 #[serde(untagged)]
 pub enum TextParts {
     Single(String),
+    Detailed(TextOptions),
     Many(Vec<TextOptions>),
 }
 
@@ -134,7 +135,7 @@ pub struct BorderOptions {
     pub enabled: Option<bool>,
     pub sides: Option<BorderSides>,
     pub r#type: Option<SerdeWrap<BorderType>>,
-    pub title: Option<BorderTitleOptions>,
+    pub title: Option<TextParts>,
     pub show_empty: Option<bool>,
     #[serde(flatten)]
     pub style: StyleOptions,
@@ -186,21 +187,43 @@ impl From<StyleOptions> for tui::StyleOptions {
     }
 }
 
-fn set_widget_text(widget: &mut tui::Widget, text: Option<TextParts>) {
-    if let Some(text) = text {
-
-        // there's no way to set the text on an existing paragraph ...
-        let mut lines: Vec<_> = match text {
-            TextParts::Single(text) => {
+fn parse_text_parts(text: TextParts, lines: &mut Vec<Line<'static>>) {
+    // there's no way to set the text on an existing paragraph ...
+    match text {
+        TextParts::Single(text) => {
+            lines.clear();
+            let text = tui::Widget::replace_tabs(text);
+            lines.extend(text.split('\n').map(|l| l.to_owned()).map(Line::from));
+        },
+        TextParts::Detailed(part) => {
+            let style: tui::StyleOptions = part.style.style.into();
+            let style = style.as_style();
+            if let Some(text) = part.text {
                 let text = tui::Widget::replace_tabs(text);
-                text.split('\n').map(|l| l.to_owned()).map(Line::from).collect()
-            },
-            TextParts::Many(parts) => {
-                let mut lines = vec![Line::default()];
-                for part in parts {
+                lines.clear();
+                lines.extend(
+                    text.split('\n').map(|l| l.to_owned()).map(|line| {
+                        let mut line = Line::from(line);
+                        line.style = style;
+                        line
+                    })
+                );
+            } else {
+                for line in lines.iter_mut() {
+                    for span in line.spans.iter_mut() {
+                        *span = span.clone().patch_style(style);
+                    }
+                }
+            }
+        },
+        TextParts::Many(parts) => {
+            lines.clear();
+            lines.push(Line::default());
+            for part in parts {
+                if let Some(text) = part.text {
                     let style: tui::StyleOptions = part.style.style.into();
                     let style = style.as_style();
-                    let text = tui::Widget::replace_tabs(part.text);
+                    let text = tui::Widget::replace_tabs(text);
                     for (i, text) in text.split('\n').enumerate() {
                         if i > 0 {
                             lines.push(Line::default());
@@ -210,14 +233,11 @@ fn set_widget_text(widget: &mut tui::Widget, text: Option<TextParts>) {
                         line.alignment = part.style.align.map(|a| a.0);
                     }
                 }
-                lines
-            },
-        };
+            }
+        },
+    };
 
-        lines.truncate(100);
-        widget.inner = Text::default();
-        widget.inner.lines = lines;
-    }
+    lines.truncate(100);
 }
 
 fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
@@ -255,22 +275,19 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
             };
             widget.border_sides = Some(border_sides);
 
-            let mut block = if let Some(title) = options.title {
-                let style: tui::StyleOptions = title.style.into();
-                widget.border_title_style = widget.border_title_style.patch(style.as_style());
-                if let Some(text) = title.text {
-                    Some(Block::new().title(text))
-                } else {
-                    widget.block.clone()
-                }
-            } else {
-                widget.block.clone()
-            }.unwrap_or_else(Block::new);
+            let mut block = options.title
+                .and_then(|title| {
+                    let lines = widget.border_title.get_or_insert_default();
+                    parse_text_parts(title, lines);
+                    lines.iter().cloned().next()
+                })
+                .map(|line| Block::new().title(line))
+                .or_else(|| widget.block.clone())
+                .unwrap_or_else(Block::new);
 
             block = block.borders(border_sides);
             block = block.border_style(widget.border_style);
             block = block.border_type(widget.border_type);
-            block = block.title_style(widget.border_title_style);
 
             widget.block = Some(block);
         },
@@ -298,8 +315,12 @@ async fn set_message(ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
     };
 
     if let Some(options) = options {
-        set_widget_text(widget.as_mut(), options.text);
-        set_widget_options(widget.as_mut(), options.options);
+        let widget = widget.as_mut();
+        if let Some(text) = options.text {
+            widget.inner = Text::default();
+            parse_text_parts(text, &mut widget.inner.lines);
+        }
+        set_widget_options(widget, options.options);
     }
     tui.dirty = true;
     Ok(id)
@@ -440,7 +461,10 @@ async fn set_status_bar(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
     let mut ui = ui.inner.borrow_mut().await;
     let widget = ui.status_bar.inner.get_or_insert_default();
     if let Some(options) = options {
-        set_widget_text(widget, options.text);
+        if let Some(text) = options.text {
+            widget.inner = Text::default();
+            parse_text_parts(text, &mut widget.inner.lines);
+        }
         set_widget_options(widget, options.options);
     }
     ui.status_bar.dirty = true;
