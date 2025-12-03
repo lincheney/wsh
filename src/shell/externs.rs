@@ -197,13 +197,13 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
         if cmd == zsh_sys::ZLE_CMD_READ as _ && let Ok(_lock) = IS_RUNNING.try_lock() {
             let mut keymap = [b'm', b'a', b'i', b'n', 0];
             zsh::done = 0;
-            zsh_sys::zleactive = 1;
-            zsh::initundo();
-            zsh::selectlocalmap(null_mut());
-            zsh::selectkeymap(keymap.as_mut_ptr().cast(), 1);
-            zsh::histline = zsh_sys::curhist as _;
             zsh::lpromptbuf = crate::EMPTY_STR.as_ptr() as _;
             zsh::rpromptbuf = crate::EMPTY_STR.as_ptr() as _;
+            zsh::histline = zsh_sys::curhist as _;
+            zsh::selectkeymap(keymap.as_mut_ptr().cast(), 1);
+            zsh::initundo();
+            zsh::selectlocalmap(null_mut());
+            zsh_sys::zleactive = 1;
 
             let result = tokio::task::block_in_place(main);
 
