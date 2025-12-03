@@ -1,5 +1,4 @@
 use bstr::BString;
-use std::ffi::CString;
 use std::sync::Arc;
 use std::time::SystemTime;
 use std::str::FromStr;
@@ -127,7 +126,11 @@ pub struct FullShellRunOpts {
 pub enum ShellRunCmd {
     Simple(BString),
     Subshell(BString),
-    Function{ func: Arc<crate::shell::Function>, args: Vec<BString> },
+    Function{
+        func: Arc<crate::shell::Function>,
+        args: Vec<BString>,
+        arg0: Option<BString>,
+    },
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -415,9 +418,8 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
 
                     match cmd {
                         ShellRunCmd::Simple(cmd) => ui.shell.exec(cmd.into()).await,
-                        ShellRunCmd::Function{func, args} => {
-                            let args = args.into_iter().map(|a| CString::new(a).unwrap()).collect();
-                            ui.shell.exec_function(func.clone(), args).await as _
+                        ShellRunCmd::Function{func, args, arg0} => {
+                            ui.shell.exec_function(func.clone(), arg0, args).await as _
                         },
                         ShellRunCmd::Subshell(_) => unreachable!(),
                     }

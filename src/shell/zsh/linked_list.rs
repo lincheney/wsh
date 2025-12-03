@@ -15,13 +15,19 @@ pub struct LinkedList<'a, T: ?Sized> {
 
 impl<'a, T: ?Sized> LinkedList<'a, T> {
 
-    pub fn new<I: Iterator<Item=&'a T>>(size: usize, iter: I) -> Self {
+    pub fn new<I: Iterator<Item=&'a T>>(iter: I) -> Self {
+        Self::new_from_ptrs(iter.map(|x| x as _))
+    }
 
-        let mut nodes = Box::into_pin(vec![EMPTY_NODE; size].into_boxed_slice());
+    pub fn new_from_ptrs<I: Iterator<Item=*const T>>(iter: I) -> Self {
 
-        for (item, node) in iter.zip(nodes.as_mut().iter_mut()) {
-            node.dat = item as *const _ as *mut _;
-        }
+        let nodes: Vec<_> = iter.map(|ptr| zsh_sys::linknode {
+            next: null_mut(),
+            prev: null_mut(),
+            dat: ptr as _,
+        }).collect();
+
+        let mut nodes = Box::into_pin(nodes.into_boxed_slice());
 
         for i in 0..nodes.len()-1 {
             nodes[i].next = &raw const nodes[i+1] as _;

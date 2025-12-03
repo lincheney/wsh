@@ -47,7 +47,7 @@ impl UserData for Function {
             };
 
             let ui = func.ui.try_upgrade()?;
-            let cmd = ShellRunCmd::Function{func: func.inner.clone(), args};
+            let cmd = ShellRunCmd::Function{func: func.inner.clone(), args, arg0: None};
             let result = shell_run_with_args(ui, lua, cmd, opts.unwrap_or_default()).await;
             result.map_err(|e| mlua::Error::RuntimeError(format!("{e}")))
 

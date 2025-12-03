@@ -394,8 +394,13 @@ crate::TokioActor! {
             Ok(Arc::new(func))
         }
 
-        pub fn exec_function(&self, function: Arc<zsh::functions::Function>, args: Vec<CString>) -> c_int {
-            function.execute(&args)
+        pub fn exec_function(
+            &self,
+            function: Arc<zsh::functions::Function>,
+            arg0: Option<BString>,
+            args: Vec<BString>
+        ) -> c_int {
+            function.execute(arg0.as_ref().map(|x| x.as_ref()), args.iter().map(|x| x.as_ref()))
         }
 
         pub fn get_function_source(&self, function: Arc<zsh::functions::Function>) -> BString {

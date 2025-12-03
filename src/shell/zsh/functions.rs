@@ -1,4 +1,4 @@
-use std::ffi::CString;
+use std::ffi::{CString};
 use std::os::raw::{c_int};
 use bstr::{BString, BStr};
 use std::ptr::null_mut;
@@ -51,11 +51,13 @@ impl Function {
         Ok(Self(unsafe{ UnsafeSend::new(func) }))
     }
 
-    pub fn execute(&self, args: &[CString]) -> c_int {
+    pub fn execute<'a, I: Iterator<Item=&'a BStr>>(&self, arg0: Option<&'a BStr>, args: I) -> c_int {
+        let args = arg0.or(Some(b"".into())).into_iter()
+            .chain(args)
+            .map(|x| super::metafy(x) as _);
+
         // convert args to a linked list
-        let len = args.len() + 1;
-        let args = std::iter::once(crate::EMPTY_STR).chain(args.iter().map(|c| c.as_ref()));
-        let args = super::linked_list::LinkedList::new(len, args);
+        let args = super::linked_list::LinkedList::new_from_ptrs(args);
 
         let mut list = args.as_linkroot();
         let noreturnval = 1;
