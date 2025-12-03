@@ -206,11 +206,8 @@ fn render_text<F: FnMut(&mut Buffer, (u16, u16)) -> (u16, u16)>(
             cell.set_symbol(symbol);
 
             if style {
-                if let Some(style) = override_style {
-                    cell.set_style(graph.style.patch(style));
-                } else {
-                    cell.set_style(graph.style);
-                }
+                let style = override_style.map_or(graph.style, |s| graph.style.patch(s));
+                cell.set_style(style);
             }
 
             offset.0 += width as u16;

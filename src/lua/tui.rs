@@ -92,14 +92,6 @@ pub struct AnsiWidgetOptions {
     options: CommonWidgetOptions,
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-pub struct BorderTitleOptions {
-    pub text: Option<String>,
-    #[serde(flatten)]
-    pub style: StyleOptions,
-}
-
 #[derive(Clone, Copy, Debug, Default, strum::EnumString)]
 pub enum BorderSide {
     Top,
