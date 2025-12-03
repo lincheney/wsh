@@ -208,51 +208,7 @@ wish.set_keymap('<a-a>', function()
     wish.set_buffer('')
     wish.print('')
     wish.accept_line()
-    wish.schedule(function()
-        local msg = wish.set_ansi_message{
-            persist = true,
-            dim = true,
-            border = {
-                fg = 'lightblue',
-                type = 'Rounded',
-                title = {
-                    { fg = 'lightblue', text = '─' },
-                    { fg = 'blue', bold = true, text = buffer},
-                },
-                sides = 'Top',
-                show_empty = true,
-            },
-        }
-        wish.redraw()
-        local proc = wish.async.zpty(buffer)
-        local has_output = false
-        while true do
-            local data = proc.pty:read()
-            if not data then
-                break
-            end
-            wish.feed_ansi_message(msg, data)
-            if not has_output and string.find(data, '%S') then
-                has_output = true
-                wish.set_message{id = msg, border = {sides = 'All', title = buffer}}
-            end
-            wish.redraw()
-        end
-        local code = proc:wait()
-        wish.set_message{
-            id = msg,
-            border = {
-                dim = false,
-                fg = code > 0 and 'yellow' or nil,
-                title = {
-                    fg = code > 0 and 'yellow' or nil,
-                },
-            },
-        }
-        local output = wish.message_to_ansi_string(msg)
-        wish.remove_message(msg)
-        wish.print(output)
-    end)
+    require('wish/background-job').run_in_background(buffer)
 end)
 
 wish.add_event_callback('key', function(arg)
