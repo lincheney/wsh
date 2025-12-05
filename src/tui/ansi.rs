@@ -242,28 +242,28 @@ impl Parser {
                     State::None
                 },
                 (State::Csi | State::CsiParams, b'K') => {
-                    let param = self.buffer.split(|c| *c == b';').next().unwrap_or(b"");
+                    let param = self.buffer.split(|c| *c == b';' || *c == b':').next().unwrap_or(b"");
                     let param = if param.is_empty() { b"0" } else { param };
                     let param = std::str::from_utf8(param).unwrap().parse::<usize>().unwrap();
-                    match param {
-                        0 => {
-                            let line = self.widget.inner.lines.last().unwrap();
-                            let range = self.cursor_x .. self.cursor_x + line.width();
-                            self.splice(Some(range), None, Some(Style::new()));
-                        },
-                        1 => {
-                            let line = self.widget.inner.lines.last().unwrap();
-                            let range = 0 .. self.cursor_x;
-                            let replace_with = " ".repeat(line.width());
-                            self.splice(Some(range), Some(replace_with), Some(Style::new()));
-                        },
-                        2 => {
-                            let line = self.widget.inner.lines.last().unwrap();
-                            let range = 0 .. line.width();
-                            let replace_with = " ".repeat(self.cursor_x);
-                            self.splice(Some(range), Some(replace_with), Some(Style::new()));
-                        },
-                        _ => (),
+
+                    if let Some(last_line) = self.widget.inner.lines.last() {
+                        match param {
+                            0 => {
+                                let range = self.cursor_x .. self.cursor_x + last_line.width();
+                                self.splice(Some(range), None, Some(Style::new()));
+                            },
+                            1 => {
+                                let range = 0 .. self.cursor_x;
+                                let replace_with = " ".repeat(last_line.width());
+                                self.splice(Some(range), Some(replace_with), Some(Style::new()));
+                            },
+                            2 => {
+                                let range = 0 .. last_line.width();
+                                let replace_with = " ".repeat(self.cursor_x);
+                                self.splice(Some(range), Some(replace_with), Some(Style::new()));
+                            },
+                            _ => (),
+                        }
                     }
                     self.buffer.clear();
                     State::None
