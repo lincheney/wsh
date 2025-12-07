@@ -1,12 +1,7 @@
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::ptr::null_mut;
-
-const EMPTY_NODE: zsh_sys::linknode = zsh_sys::linknode{
-    next: null_mut(),
-    prev: null_mut(),
-    dat: null_mut(),
-};
+use std::os::raw::c_void;
 
 pub struct LinkedList<'a, T: ?Sized> {
     nodes: Pin<Box<[zsh_sys::linknode]>>,
@@ -48,5 +43,32 @@ impl<'a, T: ?Sized> LinkedList<'a, T> {
                 flags: 0,
             }
         }
+    }
+}
+
+pub fn iter_linklist(list: zsh_sys::LinkList) -> impl Iterator<Item=*mut c_void> {
+    unsafe {
+        let mut node = list.as_mut().and_then(|list| list.list.first.as_mut());
+        std::iter::from_fn(move || {
+            let n = node.take()?;
+            node = n.next.as_mut();
+            Some(n.dat)
+        })
+    }
+}
+
+pub fn rev_iter_linklist(list: zsh_sys::LinkList) -> impl Iterator<Item=*mut c_void> {
+    unsafe {
+        let first = list.as_mut().map(|list| list.list.first);
+        let mut node = list.as_mut().and_then(|list| list.list.last.as_mut());
+        std::iter::from_fn(move || {
+            let n = node.take()?;
+            if n.prev == first.unwrap() {
+                node = None;
+            } else {
+                node = n.prev.as_mut();
+            }
+            Some(n.dat)
+        })
     }
 }

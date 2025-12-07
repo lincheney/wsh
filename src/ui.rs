@@ -245,7 +245,6 @@ impl Ui {
             // TODO handle errors here properly
         }
         self.events.read().pause().await;
-        self.shell.clear_completion_cache().await;
         self.prepare_for_unhandled_output().await?;
         Ok(())
     }

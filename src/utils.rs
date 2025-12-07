@@ -8,21 +8,6 @@ pub mod strong_weak_wrapper;
 pub type ArcMutex<T> = Arc<Mutex<T>>;
 pub type AsyncArcMutex<T> = Arc<AsyncMutex<T>>;
 
-macro_rules! ArcMutexNew {
-    ($expr:expr) => (
-        ::std::sync::Arc::new(::std::sync::Mutex::new($expr))
-    )
-}
-
-macro_rules! AsyncArcMutexNew {
-    ($expr:expr) => (
-        ::std::sync::Arc::new(::tokio::sync::Mutex::new($expr))
-    )
-}
-
-pub(crate) use ArcMutexNew;
-pub(crate) use AsyncArcMutexNew;
-
 pub fn set_nonblocking_fd<R: AsRawFd>(file: &R) -> Result<()> {
     let raw_fd = file.as_raw_fd();
     // 3. Set non-blocking mode

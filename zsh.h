@@ -122,6 +122,9 @@ mod_export int cfret;
 mod_export char *compfunc = NULL;
 mod_export int nbrbeg, nbrend;
 
+mod_export void
+freematches(Cmgroup g, int cm);
+
 mod_export int
 menucomplete(char **args);
 

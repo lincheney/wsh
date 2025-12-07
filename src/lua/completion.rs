@@ -1,36 +1,44 @@
+use tokio::sync::{mpsc, Mutex};
 use crate::lua::{HasEventCallbacks};
 use crate::ui::{Ui, ThreadsafeUiInner};
 use anyhow::Result;
 use mlua::{prelude::*, UserData, UserDataMethods, MetaMethod};
 use std::sync::Arc;
-use crate::utils::*;
 
 #[derive(FromLua, Clone)]
-struct CompletionStream {
-    inner: AsyncArcMutex<crate::shell::completion::StreamConsumer>,
-    parent: crate::shell::Completer,
+struct Stream {
+    inner: Arc<Mutex<mpsc::UnboundedReceiver<crate::shell::completion::Match>>>,
 }
 
 #[derive(FromLua, Clone)]
-struct CompletionMatch {
-    inner: Arc<crate::shell::completion::cmatch>,
+struct Match {
+    inner: Arc<crate::shell::completion::Match>,
 }
 
-impl UserData for CompletionStream {
+impl UserData for Stream {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_async_meta_method(MetaMethod::Call, |_lua, stream, ()| async move {
             let mut stream = stream.inner.lock().await;
-            let chunks = stream.chunks().await;
-            Ok(chunks.map(|c| c.map(|inner| CompletionMatch{inner}).collect::<Vec<_>>()))
+            let limit = stream.len().max(10);
+            let mut matches = vec![];
+            if stream.recv_many(&mut matches, limit).await == 0 {
+                return Ok(None)
+            }
+            let matches: Vec<_> = matches.into_iter().map(|x| Match{inner: Arc::new(x)}).collect();
+            Ok(Some(matches))
         });
 
         methods.add_async_method("cancel", |_lua, stream, ()| async move {
-            stream.parent.cancel().map_err(|e| mlua::Error::RuntimeError(format!("{e}")))
+            if stream.inner.lock().await.is_closed() {
+                Ok(())
+            } else {
+                crate::shell::control_c().map_err(|e| mlua::Error::RuntimeError(format!("{e}")))
+            }
         });
     }
 }
 
-impl UserData for CompletionMatch {
+impl UserData for Match {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_meta_method(MetaMethod::ToString, |_lua, m, ()| {
             Ok(m.inner.get_orig().map(|s| s.to_string_lossy().into_owned()))
@@ -38,7 +46,7 @@ impl UserData for CompletionMatch {
     }
 }
 
-async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<CompletionStream> {
+async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Stream> {
 
     let val = if let Some(val) = val {
         val.into()
@@ -46,14 +54,14 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Compl
         ui.get().inner.borrow().await.buffer.get_contents().clone()
     };
 
-    let (consumer, producer) = crate::shell::get_completions(val);
-    let parent = producer.clone();
+    let (sender, receiver) = mpsc::unbounded_channel();
 
     // run this in another thread so it doesn't block us returning
     tokio::task::spawn(async move {
         let tid = nix::unistd::gettid();
         ui.add_thread(tid);
-        match ui.shell.run_completions(producer).await {
+
+        match ui.shell.get_completions(val, sender).await {
             Ok(msg) => {
                 ui.remove_thread(tid);
                 // ui.activate();
@@ -72,15 +80,14 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Compl
         }
     });
 
-    Ok(CompletionStream{inner: consumer, parent})
+    Ok(Stream{inner: Arc::new(Mutex::new(receiver))})
 }
 
-async fn insert_completion(mut ui: Ui, _lua: Lua, (stream, val): (CompletionStream, CompletionMatch)) -> Result<()> {
+async fn insert_completion(mut ui: Ui, _lua: Lua, val: Match) -> Result<()> {
     {
         let this = ui.unlocked.read();
         let buffer = this.inner.borrow().await.buffer.get_contents().clone();
-        let completion_word_len = stream.parent.get_completion_word_len();
-        let (new_buffer, new_pos) = ui.shell.insert_completion(buffer, completion_word_len, val.inner).await;
+        let (new_buffer, new_pos) = ui.shell.insert_completion(buffer, val.inner).await;
 
         // see if this can be done as an insert
         let mut ui = this.inner.borrow_mut().await;

@@ -1,180 +1,146 @@
-use std::sync::{OnceLock, Mutex, Arc};
+use crate::unsafe_send::UnsafeSend;
+use std::collections::HashSet;
+use std::ffi::CStr;
+use tokio::sync::{mpsc};
+use anyhow::Result;
+use std::sync::{Mutex};
 use std::ffi::{CString};
 use std::os::raw::*;
-use std::ptr::{null_mut, NonNull};
+use std::ptr::{null_mut};
 use std::default::Default;
-use std::pin::Pin;
-use std::task::{Context, Poll, Waker};
-use tokio::sync::Mutex as AsyncMutex;
-use bstr::{BStr, BString};
+use bstr::{BString};
 use super::bindings;
-use crate::utils::*;
 
-#[allow(unused_imports)]
-pub use super::bindings::cmatch;
-
-pub struct WaitForChunk<'a> {
-    consumer: &'a mut StreamConsumer,
+pub struct Match {
+    inner: UnsafeSend<bindings::cmatch>,
+    // length of word being completed
+    completion_word_len: usize,
+    nbrbeg: i32,
+    nbrend: i32,
 }
 
-pub struct StreamConsumer {
-    index: usize,
-    parent: ArcMutex<Streamer>,
-}
+impl Match {
+    pub fn new(inner: &bindings::cmatch) -> Self {
+        unsafe {
+            let brpl: Vec<_> = (0..bindings::nbrbeg).map(|i| *inner.brpl.offset(i as _)).collect();
+            let brsl: Vec<_> = (0..bindings::nbrend).map(|i| *inner.brsl.offset(i as _)).collect();
 
-impl StreamConsumer {
-    pub async fn chunks(&mut self) -> Option<impl Iterator<Item=Arc<bindings::cmatch>> + use<'_>> {
-        if (WaitForChunk{ consumer: self }).await {
-            Some(std::iter::from_fn(move || {
-                let parent = self.parent.lock().unwrap();
-                let result = parent.matches.get(self.index).cloned();
-                if result.is_some() {
-                    self.index += 1;
-                }
-                result
-            }))
-        } else {
-            None
-        }
-    }
-}
+            let inner = bindings::cmatch{
+                str_: zsh_sys::ztrdup(inner.str_),
+                orig: zsh_sys::ztrdup(inner.orig),
+                ipre: zsh_sys::ztrdup(inner.ipre),
+                ripre: zsh_sys::ztrdup(inner.ripre),
+                isuf: zsh_sys::ztrdup(inner.isuf),
+                ppre: zsh_sys::ztrdup(inner.ppre),
+                psuf: zsh_sys::ztrdup(inner.psuf),
+                prpre: zsh_sys::ztrdup(inner.prpre),
+                pre: zsh_sys::ztrdup(inner.pre),
+                suf: zsh_sys::ztrdup(inner.suf),
+                disp: zsh_sys::ztrdup(inner.disp),
+                autoq: zsh_sys::ztrdup(inner.autoq),
+                rems: zsh_sys::ztrdup(inner.rems),
+                remf: zsh_sys::ztrdup(inner.remf),
+                brpl: Box::into_raw(brpl.into_boxed_slice()).cast(),
+                brsl: Box::into_raw(brsl.into_boxed_slice()).cast(),
+                ..*inner
+            };
 
-impl std::future::Future for WaitForChunk<'_> {
-    type Output = bool;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut parent = self.consumer.parent.lock().unwrap();
-        if parent.matches.len() > self.consumer.index {
-            drop(parent);
-            Poll::Ready(true)
-        } else if parent.finished {
-            Poll::Ready(false)
-        } else {
-            parent.wakers.push(cx.waker().clone());
-            Poll::Pending
-        }
-    }
-}
-
-#[derive(Debug)]
-pub struct Streamer {
-    buffer: BString,
-    pub(crate) completion_word_len: usize,
-    finished: bool,
-    matches: Vec<Arc<bindings::cmatch>>,
-    wakers: Vec<Waker>,
-    thread: Option<nix::sys::pthread::Pthread>,
-}
-unsafe impl Send for Streamer {}
-
-impl Streamer {
-    fn make_consumer(parent: &ArcMutex<Self>) -> Arc<AsyncMutex<StreamConsumer>> {
-        AsyncArcMutexNew!(StreamConsumer {
-            index: 0,
-            parent: parent.clone(),
-        })
-    }
-
-    fn wake(&mut self) {
-        for waker in self.wakers.drain(..) {
-            waker.wake();
+            Self {
+                inner: UnsafeSend::new(inner),
+                completion_word_len: (zsh_sys::we - zsh_sys::wb).max(0) as usize,
+                nbrbeg: super::nbrbeg,
+                nbrend: super::nbrend,
+            }
         }
     }
 
-    pub fn cancel(&self) -> anyhow::Result<()> {
-        if !self.finished {
-            nix::sys::signal::kill(nix::unistd::Pid::from_raw(0), nix::sys::signal::Signal::SIGINT)?;
-
-            // if let Some(pid) = self.thread {
-                // nix::sys::pthread::pthread_kill(pid, nix::sys::signal::Signal::SIGTERM)?;
-            // }
-        }
-        Ok(())
+    pub fn get_orig(&self) -> Option<&CStr> {
+        self.inner.as_ref().get_orig()
     }
 }
 
-#[derive(Debug)]
+#[derive(Default)]
 struct CompaddState {
-    original: zsh_sys::Builtin,
-    streamer: Option<ArcMutex<Streamer>>,
+    // original compadd function
+    original: UnsafeSend<zsh_sys::Builtin>,
+    // sink to send matches
+    sink: Option<mpsc::UnboundedSender<Match>>,
+    // matches we have already seen
+    seen: UnsafeSend<HashSet<*mut c_void>>,
 }
 
-static COMPFUNC: &[u8] = b"_main_complete\0";
-
-impl Default for CompaddState {
-    fn default() -> Self {
-        CompaddState{
-            original: null_mut(),
-            streamer: None,
-        }
+impl CompaddState {
+    fn reset(&mut self) {
+        self.sink.take();
+        self.seen.as_mut().clear();
     }
 }
 
-unsafe impl Send for CompaddState {}
-static COMPADD_STATE: OnceLock<Mutex<CompaddState>> = OnceLock::new();
+static COMPFUNC: &CStr = c"_main_complete";
+static COMPADD_STATE: Mutex<Option<CompaddState>> = Mutex::new(None);
 
 unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_char, options: zsh_sys::Options, func: c_int) -> c_int {
     // eprintln!("DEBUG(bombay)\t{}\t= {:?}\r", stringify!(nam), nam);
 
     unsafe {
-        let compadd = COMPADD_STATE.get().unwrap().lock().unwrap();
-        let result = (*compadd.original).handlerfunc.unwrap()(nam, argv, options, func);
+        let mut compadd = COMPADD_STATE.lock().unwrap();
+        let compadd = compadd.as_mut().unwrap();
+        let result = compadd.original.as_ref().as_ref().unwrap().handlerfunc.unwrap()(nam, argv, options, func);
 
-        let mut streamer = if let Some(streamer) = compadd.streamer.as_ref() {
-            streamer.lock().unwrap()
-        } else {
-            return result
-        };
+        if !bindings::matches.is_null() && let Some(sink) = compadd.sink.as_ref() {
+            if !bindings::amatches.is_null() && !(*bindings::amatches).name.is_null() {
+                // let g = CStr::from_ptr((*bindings::amatches).name);
+                // eprintln!("DEBUG(dachas)\t{}\t= {:?}\r", stringify!(g), g);
+            }
 
-        if !bindings::amatches.is_null() && !(*bindings::amatches).name.is_null() {
-            // let g = CStr::from_ptr((*bindings::amatches).name);
-            // eprintln!("DEBUG(dachas)\t{}\t= {:?}\r", stringify!(g), g);
-        }
+            // compadd can change the list matches points to by changing the group
+            // so we use a hashset to store what matches we've seen before
 
-        if !bindings::matches.is_null() {
-            let len = streamer.matches.len();
-            let iter = super::iter_linked_list(bindings::matches)
-                .filter_map(|ptr| {
-                    Some(Arc::new(NonNull::new(ptr.cast::<bindings::cmatch>())?.as_ref().clone()))
-                }).skip(len);
-            streamer.matches.extend(iter);
-            streamer.completion_word_len = (zsh_sys::we - zsh_sys::wb).max(0) as usize;
-            streamer.wake();
-                // eprintln!("DEBUG(pucks) \t{}\t= {:?}\r", stringify!(node), (std::ffi::CStr::from_ptr((*dat).str_), (*dat).gnum));
-            // }
+            for ptr in super::linked_list::iter_linklist(bindings::matches) {
+                if let Some(m) = (ptr as *const bindings::cmatch).as_ref() && compadd.seen.as_mut().insert(ptr) {
+                    let m = Match::new(m);
+                    if sink.send(m).is_err() {
+                        compadd.sink.take();
+                        break
+                    }
+                }
+            }
         }
 
         result
     }
 }
 
-pub fn override_compadd() {
-    super::execstring("zmodload zsh/complete", Default::default());
-
-    if super::get_return_code() == 0 {
-        let mut compadd = COMPADD_STATE.get_or_init(|| Mutex::new(Default::default())).lock().unwrap();
-        compadd.original = super::pop_builtin("compadd").unwrap();
-
-        let mut compadd = unsafe{ *compadd.original };
-        compadd.handlerfunc = Some(compadd_handlerfunc);
-        compadd.node = zsh_sys::hashnode{
-            next: null_mut(),
-            nam: CString::new("compadd").unwrap().into_raw(),
-            flags: 0,
-        };
-        super::add_builtin("compadd", Box::into_raw(Box::new(compadd)));
-
+pub fn override_compadd() -> Result<()> {
+    let silent = 0;
+    if unsafe{ zsh_sys::require_module(c"zsh/complete".as_ptr(), null_mut(), silent) } > 0 {
+        anyhow::bail!("failed to load module zsh/complete")
     }
+
+    let original = super::pop_builtin("compadd").unwrap();
+
+    *COMPADD_STATE.lock().unwrap() = Some(CompaddState{
+        original: unsafe{ UnsafeSend::new(original) },
+        ..CompaddState::default()
+    });
+
+    let mut compadd = unsafe{ *original };
+    compadd.handlerfunc = Some(compadd_handlerfunc);
+    compadd.node = zsh_sys::hashnode{
+        next: null_mut(),
+        nam: CString::new("compadd").unwrap().into_raw(),
+        flags: 0,
+    };
+    super::add_builtin("compadd", Box::into_raw(Box::new(compadd)));
+    Ok(())
 }
 
 pub fn restore_compadd() {
-    if let Some(compadd) = COMPADD_STATE.get() {
-        let mut compadd = compadd.lock().unwrap();
-        if !compadd.original.is_null() {
-            super::add_builtin("compadd", compadd.original);
-            compadd.original = null_mut();
+    if let Some(compadd) = &mut *COMPADD_STATE.lock().unwrap() {
+        if !compadd.original.as_ref().is_null() {
+            super::add_builtin("compadd", compadd.original.into_inner());
+            compadd.original = unsafe{ UnsafeSend::new(null_mut()) };
         }
-
     }
 }
 
@@ -182,36 +148,20 @@ pub fn restore_compadd() {
 // zsh completion is intimately tied to zle
 // so there's no "low-level" function to hook into
 // the best we can do is emulate completecall()
-pub fn get_completer(line: &BStr) -> (AsyncArcMutex<StreamConsumer>, ArcMutex<Streamer>) {
-    // if let Some(streamer) = compadd.streamer.as_ref().filter(|s| s.lock().unwrap().buffer == line) {
-        // return Ok(Streamer::make_consumer(&streamer))
-    // }
-    let producer = ArcMutexNew!(Streamer {
-        buffer: line.to_owned(),
-        completion_word_len: 0,
-        finished: false,
-        matches: vec![],
-        wakers: vec![],
-        thread: None,
-    });
-    let consumer = Streamer::make_consumer(&producer);
-    (consumer, producer)
-}
 
-pub fn get_completions(streamer: &Arc<Mutex<Streamer>>) {
-    if let Some(compadd) = COMPADD_STATE.get() {
-        compadd.lock().unwrap().streamer = Some(streamer.clone());
-    } else {
-        panic!("ui is not running");
-    }
-    streamer.lock().unwrap().thread = Some(nix::sys::pthread::pthread_self());
-
+pub fn get_completions(line: BString, sink: mpsc::UnboundedSender<Match>) {
     {
-        let line = &streamer.lock().unwrap().buffer;
-        super::set_zle_buffer(line.clone(), line.len() as i64 + 1);
+        if let Some(compadd) = COMPADD_STATE.lock().unwrap().as_mut() {
+            compadd.sink = Some(sink);
+        } else {
+            panic!("ui is not running");
+        }
+        let len = line.len();
+        super::set_zle_buffer(line, len as i64 + 1);
     }
 
     unsafe {
+
         // this is kinda what completecall() does
         let mut cfargs: [*mut c_char; 1] = [null_mut()];
         bindings::cfargs = cfargs.as_mut_ptr();
@@ -225,20 +175,14 @@ pub fn get_completions(streamer: &Arc<Mutex<Streamer>>) {
         // soft exit menu completion
         bindings::minfo.cur = null_mut();
         super::execstring("set -o monitor", Default::default());
-    }
 
-    let mut streamer = streamer.lock().unwrap();
-    streamer.finished = true;
-    streamer.wake();
-}
-
-pub fn clear_cache() {
-    if let Some(compadd) = COMPADD_STATE.get() {
-        compadd.lock().unwrap().streamer = None;
+        let mut compadd = COMPADD_STATE.lock().unwrap();
+        let compadd = compadd.as_mut().unwrap();
+        compadd.reset();
     }
 }
 
-pub fn insert_completion(line: BString, completion_word_len: usize, m: &bindings::cmatch) -> (BString, usize) {
+pub fn insert_completion(line: BString, m: &Match) -> (BString, usize) {
     unsafe {
         // set the zle buffer
         let len = line.len();
@@ -246,10 +190,10 @@ pub fn insert_completion(line: BString, completion_word_len: usize, m: &bindings
 
         // set start and end of word being completed
         zsh_sys::we = len as i32;
-        zsh_sys::wb = zsh_sys::we - completion_word_len as i32;
+        zsh_sys::wb = zsh_sys::we - m.completion_word_len as i32;
 
         bindings::metafy_line();
-        bindings::do_single(m as *const _ as *mut _);
+        bindings::do_single(m.inner.as_ref() as *const _ as *mut _);
         bindings::unmetafy_line();
 
         let (buffer, cursor) = super::get_zle_buffer();

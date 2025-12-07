@@ -193,17 +193,6 @@ pub fn add_builtin(cmd: &str, builtin: zsh_sys::Builtin) {
     unsafe { zsh_sys::addhashnode(zsh_sys::builtintab, cmd.into_raw(), builtin.cast()) };
 }
 
-pub(crate) fn iter_linked_list(list: zsh_sys::LinkList) -> impl Iterator<Item=*mut c_void> {
-    unsafe {
-        let mut node = list.as_mut().and_then(|list| list.list.first.as_mut());
-        std::iter::from_fn(move || {
-            let n = node.take()?;
-            node = n.next.as_mut();
-            Some(n.dat)
-        })
-    }
-}
-
 pub fn get_prompt(prompt: Option<&BStr>, escaped: bool) -> Option<CString> {
     let prompt = if let Some(prompt) = prompt {
         CString::new(prompt.to_vec()).unwrap()

@@ -1,3 +1,4 @@
+use tokio::sync::{mpsc};
 use std::os::fd::AsRawFd;
 use anyhow::Result;
 use std::io::{Write};
@@ -99,32 +100,6 @@ impl std::default::Default for Shell {
 }
 
 
-#[derive(Clone)]
-pub struct Completer{
-    inner: Arc<Mutex<zsh::completion::Streamer>>,
-}
-
-impl Completer {
-    pub fn run(&self, shell: &Shell) -> Result<BString> {
-        let mut shout = shell.shout.lock().unwrap();
-        let shout = if let Some(shout) = &mut *shout {
-            shout
-        } else {
-            shout.get_or_insert(Shout::new()?)
-        };
-        let (msg, _) = shout.capture(|| zsh::completion::get_completions(&self.inner))?;
-        Ok(msg)
-    }
-
-    pub fn cancel(&self) -> anyhow::Result<()> {
-        self.inner.lock().unwrap().cancel()
-    }
-
-    pub fn get_completion_word_len(&self) -> usize {
-        self.inner.lock().unwrap().completion_word_len
-    }
-}
-
 pub fn remove_invisible_chars(string: &CStr) -> std::borrow::Cow<'_, CStr> {
     let bytes = string.to_bytes();
     if bytes.contains(&(zsh::Inpar as _)) || bytes.contains(&(zsh::Outpar as _)) || bytes.contains(&(zsh::Meta as _)) {
@@ -136,6 +111,10 @@ pub fn remove_invisible_chars(string: &CStr) -> std::borrow::Cow<'_, CStr> {
     } else {
         std::borrow::Cow::Borrowed(string)
     }
+}
+
+pub fn control_c() -> nix::Result<()> {
+    nix::sys::signal::kill(nix::unistd::Pid::from_raw(0), nix::sys::signal::Signal::SIGINT)
 }
 
 crate::TokioActor! {
@@ -203,16 +182,20 @@ crate::TokioActor! {
             zsh::zpty(name, &cmd, opts)
         }
 
-        pub fn run_completions(&self, completer: Completer) -> Result<BString> {
-            completer.run(self)
+        pub fn get_completions(&self, line: BString, sender: mpsc::UnboundedSender<zsh::completion::Match>) -> Result<BString> {
+            let mut shout = self.shout.lock().unwrap();
+            let shout = if let Some(shout) = &mut *shout {
+                shout
+            } else {
+                shout.get_or_insert(Shout::new()?)
+            };
+            // this may block for a long time
+            let (msg, _) = shout.capture(|| zsh::completion::get_completions(line, sender))?;
+            Ok(msg)
         }
 
-        pub fn clear_completion_cache(&self) {
-            zsh::completion::clear_cache();
-        }
-
-        pub fn insert_completion(&self, string: BString, completion_word_len: usize, m: Arc<zsh::cmatch>) -> (BString, usize) {
-            zsh::completion::insert_completion(string, completion_word_len, &m)
+        pub fn insert_completion(&self, string: BString, m: Arc<zsh::completion::Match>) -> (BString, usize) {
+            zsh::completion::insert_completion(string, &m)
         }
 
         pub fn parse(&self, string: BString, recursive: bool) -> (bool, Vec<zsh::parser::Token>) {
@@ -409,12 +392,4 @@ crate::TokioActor! {
 
     }
 
-}
-
-pub fn get_completions(string: BString) -> (Arc<tokio::sync::Mutex<zsh::completion::StreamConsumer>>, Completer) {
-    let (consumer, producer) = zsh::completion::get_completer(string.as_ref());
-    let completer = Completer{
-        inner: producer,
-    };
-    (consumer, completer)
 }

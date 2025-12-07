@@ -280,8 +280,12 @@ pub unsafe extern "C" fn enables_(module: zsh_sys::Module, enables: *mut *mut c_
 
 #[unsafe(no_mangle)]
 pub extern "C" fn boot_() -> c_int {
-    zsh::completion::override_compadd();
-    0
+    if let Err(err) = zsh::completion::override_compadd() {
+        eprintln!("{err}");
+        1
+    } else {
+        0
+    }
 }
 
 #[unsafe(no_mangle)]
