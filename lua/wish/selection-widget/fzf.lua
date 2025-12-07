@@ -14,9 +14,6 @@ local function start_proc()
     -- go to last line
     wish.set_cursor(wish.str.len(wish.get_buffer()))
     wish.redraw()
-    -- then down one
-    io.stdout:write('\r\n')
-    io.stdout:flush()
 
     state.proc = wish.async.spawn{
         args = {
