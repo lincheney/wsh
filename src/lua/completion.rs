@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 #[derive(FromLua, Clone)]
 struct Stream {
-    inner: Arc<Mutex<mpsc::UnboundedReceiver<crate::shell::completion::Match>>>,
+    inner: Arc<Mutex<mpsc::UnboundedReceiver<Vec<crate::shell::completion::Match>>>>,
 }
 
 #[derive(FromLua, Clone)]
@@ -19,11 +19,8 @@ impl UserData for Stream {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_async_meta_method(MetaMethod::Call, |_lua, stream, ()| async move {
             let mut stream = stream.inner.lock().await;
-            let limit = stream.len().max(10);
-            let mut matches = vec![];
-            if stream.recv_many(&mut matches, limit).await == 0 {
-                return Ok(None)
-            }
+            let Some(matches) = stream.recv().await
+                else { return Ok(None) };
             let matches: Vec<_> = matches.into_iter().map(|x| Match{inner: Arc::new(x)}).collect();
             Ok(Some(matches))
         });

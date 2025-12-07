@@ -182,7 +182,7 @@ crate::TokioActor! {
             zsh::zpty(name, &cmd, opts)
         }
 
-        pub fn get_completions(&self, line: BString, sender: mpsc::UnboundedSender<zsh::completion::Match>) -> Result<BString> {
+        pub fn get_completions(&self, line: BString, sender: mpsc::UnboundedSender<Vec<zsh::completion::Match>>) -> Result<BString> {
             let mut shout = self.shout.lock().unwrap();
             let shout = if let Some(shout) = &mut *shout {
                 shout

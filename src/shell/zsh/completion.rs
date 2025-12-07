@@ -64,9 +64,9 @@ struct CompaddState {
     // original compadd function
     original: UnsafeSend<zsh_sys::Builtin>,
     // sink to send matches
-    sink: Option<mpsc::UnboundedSender<Match>>,
+    sink: Option<mpsc::UnboundedSender<Vec<Match>>>,
     // matches we have already seen
-    seen: UnsafeSend<HashSet<*mut c_void>>,
+    seen: UnsafeSend<HashSet<*const bindings::cmatch>>,
 }
 
 impl CompaddState {
@@ -96,14 +96,14 @@ unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_cha
             // compadd can change the list matches points to by changing the group
             // so we use a hashset to store what matches we've seen before
 
-            for ptr in super::linked_list::iter_linklist(bindings::matches) {
-                if let Some(m) = (ptr as *const bindings::cmatch).as_ref() && compadd.seen.as_mut().insert(ptr) {
-                    let m = Match::new(m);
-                    if sink.send(m).is_err() {
-                        compadd.sink.take();
-                        break
-                    }
-                }
+            let matches: Vec<_> = super::linked_list::iter_linklist(bindings::matches)
+                .filter_map(|ptr| (ptr as *const bindings::cmatch).as_ref())
+                .filter(|m| compadd.seen.as_mut().insert(*m as _))
+                .map(Match::new)
+                .collect();
+
+            if !matches.is_empty() && sink.send(matches).is_err() {
+                compadd.sink.take();
             }
         }
 
@@ -149,7 +149,7 @@ pub fn restore_compadd() {
 // so there's no "low-level" function to hook into
 // the best we can do is emulate completecall()
 
-pub fn get_completions(line: BString, sink: mpsc::UnboundedSender<Match>) {
+pub fn get_completions(line: BString, sink: mpsc::UnboundedSender<Vec<Match>>) {
     {
         if let Some(compadd) = COMPADD_STATE.lock().unwrap().as_mut() {
             compadd.sink = Some(sink);
