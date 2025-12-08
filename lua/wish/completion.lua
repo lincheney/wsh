@@ -62,7 +62,7 @@ function M.complete()
 
         if result then
             wish.set_message{id = msg, hidden = true}
-            wish.insert_completion(comp, matches[result])
+            wish.insert_completion(matches[result])
             wish.redraw()
         elseif cancelled then
             wish.set_message{id = msg, hidden = true}
