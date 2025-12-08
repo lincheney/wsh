@@ -1,3 +1,4 @@
+use nix::sys::signal;
 use std::sync::{LazyLock};
 use std::os::fd::{RawFd};
 use std::io::Read;
@@ -79,8 +80,7 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
     }
 
     // reversed
-    // add a read so that we have time to get the pid
-    cmd.insert_str(0, " '\\builtin read -k1;'");
+    cmd.insert_str(0, " ");
     cmd.insert_str(0, shell_quote(&name).as_bytes());
     if opts.echo_input {
         cmd.insert_str(0, "-e ");
@@ -89,28 +89,19 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
         cmd.insert_str(0, "-b ");
     }
     cmd.insert_str(0, "zpty ");
+
+    // prevent sigchld from triggering before we get the pid
+    queue_signals();
     unsafe {
         zsh_sys::startparamscope();
     }
+
     let code = execstring(cmd, Default::default());
 
     let result = (|| {
         if code > 0 {
             anyhow::bail!("zpty failed with code {code}")
         }
-
-        // get fd from $REPLY
-        let Some(mut fd) = variables::Variable::get("REPLY")
-            else { anyhow::bail!("could not get $REPLY") };
-
-        let fd = if let Some(fd) = fd.try_as_int()? {
-            fd
-        } else if let Ok(fd) = std::str::from_utf8(&fd.to_bytes()) && let Ok(fd) = fd.parse() {
-            fd
-        } else {
-            anyhow::bail!("could not get fd: {:?}", fd.as_value());
-        };
-
 
         // how to get pid????
         // this seems yuck
@@ -148,13 +139,20 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
         let pid = std::str::from_utf8(pid)?.parse()?;
         add_pid(pid as _);
 
-        // tell the zpty to start
-        let fd = fd as _;
-        let borrowed = unsafe{ std::os::fd::BorrowedFd::borrow_raw(fd) };
-        while nix::unistd::write(borrowed, b"\n")? != 1 { }
+        // get fd from $REPLY
+        let Some(mut fd) = variables::Variable::get("REPLY")
+            else { anyhow::bail!("could not get $REPLY") };
+
+        let fd = if let Some(fd) = fd.try_as_int()? {
+            fd
+        } else if let Ok(fd) = std::str::from_utf8(&fd.to_bytes()) && let Ok(fd) = fd.parse() {
+            fd
+        } else {
+            anyhow::bail!("could not get fd: {:?}", fd.as_value());
+        };
 
         Ok(Zpty{
-            fd,
+            fd: fd as _,
             pid,
             name,
         })
@@ -164,6 +162,7 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
     unsafe {
         zsh_sys::endparamscope();
     }
+    unqueue_signals()?;
     result
 }
 
@@ -342,4 +341,31 @@ pub fn capture_shout<T, F: FnOnce() -> T>(
         });
     }
     (buffer, result)
+}
+
+pub fn queue_signals() {
+    unsafe {
+        zsh_sys::queueing_enabled += 1;
+    }
+}
+
+pub fn unqueue_signals() -> nix::Result<()> {
+    const MAX_QUEUE_SIZE: i32 = 128;
+
+    unsafe {
+        zsh_sys::queueing_enabled -= 1;
+        if zsh_sys::queueing_enabled == 0 {
+            // run_queued_signals
+            while zsh_sys::queue_front != zsh_sys::queue_rear { /* while signals in queue */
+                zsh_sys::queue_front = (zsh_sys::queue_front + 1) % MAX_QUEUE_SIZE;
+                let sigset = zsh_sys::signal_mask_queue[zsh_sys::queue_front as usize];
+                let sigset = signal::SigSet::from_sigset_t_unchecked(std::mem::transmute(sigset));
+                let mut oset = signal::SigSet::empty();
+                signal::sigprocmask(signal::SigmaskHow::SIG_SETMASK, Some(&sigset), Some(&mut oset))?;
+                zsh_sys::zhandler(zsh_sys::signal_queue[zsh_sys::queue_front as usize]);
+                signal::sigprocmask(signal::SigmaskHow::SIG_SETMASK, Some(&oset), None)?;
+            }
+        }
+    }
+    Ok(())
 }

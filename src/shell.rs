@@ -11,7 +11,6 @@ use std::sync::{Arc};
 use std::ptr::null_mut;
 use std::sync::Mutex;
 use bstr::{BStr, BString, ByteSlice, ByteVec};
-use nix::sys::signal;
 
 mod externs;
 mod file_stream;
@@ -380,30 +379,11 @@ crate::TokioActor! {
         }
 
         pub fn queue_signals(&self) {
-            unsafe {
-                zsh_sys::queueing_enabled += 1;
-            }
+            zsh::queue_signals()
         }
 
-        pub fn unqueue_signals(&self) -> Result<()> {
-            const MAX_QUEUE_SIZE: i32 = 128;
-
-            unsafe {
-                zsh_sys::queueing_enabled -= 1;
-                if zsh_sys::queueing_enabled == 0 {
-                    // run_queued_signals
-                    while zsh_sys::queue_front != zsh_sys::queue_rear { /* while signals in queue */
-                        zsh_sys::queue_front = (zsh_sys::queue_front + 1) % MAX_QUEUE_SIZE;
-                        let sigset = zsh_sys::signal_mask_queue[zsh_sys::queue_front as usize];
-                        let sigset = signal::SigSet::from_sigset_t_unchecked(std::mem::transmute(sigset));
-                        let mut oset = signal::SigSet::empty();
-                        signal::sigprocmask(signal::SigmaskHow::SIG_SETMASK, Some(&sigset), Some(&mut oset))?;
-                        zsh_sys::zhandler(zsh_sys::signal_queue[zsh_sys::queue_front as usize]);
-                        signal::sigprocmask(signal::SigmaskHow::SIG_SETMASK, Some(&oset), None)?;
-                    }
-                }
-            }
-            Ok(())
+        pub fn unqueue_signals(&self) -> nix::Result<()> {
+            zsh::unqueue_signals()
         }
 
     }
