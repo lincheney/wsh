@@ -1,9 +1,8 @@
+use std::os::fd::{IntoRawFd, BorrowedFd};
 use std::time::Duration;
 use tokio::time::timeout;
 use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::{Mutex};
-use std::io::{Write, PipeWriter, PipeReader};
-use crate::fork_lock::{ForkLock};
+use std::io::{PipeReader};
 use std::os::raw::{c_int};
 use std::sync::{LazyLock};
 use tokio::sync::{watch};
@@ -12,7 +11,7 @@ use anyhow::Result;
 use nix::sys::signal;
 
 static CHILD_WATCH: LazyLock<(watch::Sender<()>, watch::Receiver<()>)> = LazyLock::new(|| watch::channel(()));
-static SIGCHLD_LOCK: ForkLock<'static, Mutex<Option<PipeWriter>>> = super::FORK_LOCK.wrap(Mutex::new(None));
+static CHILD_PIPE: AtomicI32 = AtomicI32::new(-1);
 static LAST_QUEUE_FRONT: AtomicI32 = AtomicI32::new(0);
 
 pub fn disable_all_signals() -> nix::Result<()> {
@@ -22,18 +21,17 @@ pub fn disable_all_signals() -> nix::Result<()> {
 
 extern "C" fn sigchld_handler(_sig: c_int) {
     // this *should* run in the main thread
-    let lock = SIGCHLD_LOCK.read();
-    let mut lock = lock.lock().unwrap();
     unsafe {
         zsh_sys::zhandler(signal::Signal::SIGCHLD as _);
-        if zsh_sys::queueing_enabled > 0 {
-            LAST_QUEUE_FRONT.store(zsh_sys::queue_front, Ordering::Release);
+        let pipe = CHILD_PIPE.load(Ordering::Acquire);
+        if pipe != -1 {
+            if zsh_sys::queueing_enabled > 0 {
+                LAST_QUEUE_FRONT.store(zsh_sys::queue_front, Ordering::Release);
+            }
+            let data = [(zsh_sys::queueing_enabled > 0).into()];
+            nix::unistd::write(BorrowedFd::borrow_raw(pipe), &data).unwrap();
         }
-        let writer = lock.as_mut().unwrap();
-        writer.write_all(&[(zsh_sys::queueing_enabled > 0).into()]).unwrap();
-        writer.flush().unwrap();
     }
-    drop(lock);
 }
 
 async fn sigchld_safe_handler(reader: PipeReader) {
@@ -87,7 +85,7 @@ pub fn setup() -> Result<()> {
     crate::utils::set_nonblocking_fd(&reader)?;
 
     // set the writer for the handler to use
-    *SIGCHLD_LOCK.read().lock().unwrap() = Some(writer);
+    CHILD_PIPE.store(writer.into_raw_fd(), Ordering::Release);
     // spawn a reader task
     tokio::task::spawn(sigchld_safe_handler(reader));
 
