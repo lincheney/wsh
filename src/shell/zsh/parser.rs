@@ -67,7 +67,7 @@ pub fn parse(cmd: BString, recursive: bool) -> (bool, Vec<Token>) {
     let (mut complete, mut tokens) = parse_internal(cmd.as_ref(), recursive, 0);
 
     if let Some(last) = tokens.last_mut() {
-        debug_assert!(last.range.end == cmd.len());
+        debug_assert_eq!(last.range.end, cmd.len());
 
         // if the last token is just the dummy, pop it
         if last.range.start == cmd.len() - 1 {

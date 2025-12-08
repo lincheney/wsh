@@ -237,15 +237,18 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
                 None
             };
 
+            // prevent sigchld from running
+            ui.shell.queue_signals().await;
             let mut proc = command.spawn()?;
             let pid = proc.id().unwrap();
             ui.shell.add_pid(pid as _).await;
+            ui.shell.unqueue_signals().await?;
 
             let stdin  = proc.stdin.take().map(|s| WriteableFile(Some(BufWriter::new(s))));
             let stdout = proc.stdout.take().map(|s| ReadableFile(Some(BufReader::new(s))));
             let stderr = proc.stderr.take().map(|s| ReadableFile(Some(BufReader::new(s))));
             let _ = result_sender.take().unwrap().send(Ok((pid, stdin, stdout, stderr)));
-            let code = crate::signals::wait_for_pid(pid as _, &*ui.shell).await.unwrap();
+            let code = crate::shell::wait_for_pid(pid as _, &*ui.shell).await.unwrap();
 
             drop(foreground_lock);
             // ignore error
@@ -432,7 +435,7 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
                     // send streams back to caller
                     let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
 
-                    crate::signals::wait_for_pid(pid as _, &*ui.shell).await.unwrap() as _
+                    crate::shell::wait_for_pid(pid as _, &*ui.shell).await.unwrap() as _
                 },
             };
 
@@ -515,7 +518,7 @@ async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
 
     let pid = zpty.pid;
     tokio::task::spawn(async move {
-        let code = crate::signals::wait_for_pid(pid as _, &*ui.shell).await.unwrap();
+        let code = crate::shell::wait_for_pid(pid as _, &*ui.shell).await.unwrap();
         // send the code out
         let _ = sender.send(Some(Ok(code as _)));
     });

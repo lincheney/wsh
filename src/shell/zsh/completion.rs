@@ -40,8 +40,16 @@ impl Match {
                 autoq: zsh_sys::ztrdup(inner.autoq),
                 rems: zsh_sys::ztrdup(inner.rems),
                 remf: zsh_sys::ztrdup(inner.remf),
-                brpl: Box::into_raw(brpl.into_boxed_slice()).cast(),
-                brsl: Box::into_raw(brsl.into_boxed_slice()).cast(),
+                brpl: if brpl.is_empty() {
+                    null_mut()
+                } else {
+                    Box::into_raw(brpl.into_boxed_slice()).cast()
+                },
+                brsl: if brsl.is_empty() {
+                    null_mut()
+                } else {
+                    Box::into_raw(brsl.into_boxed_slice()).cast()
+                },
                 ..*inner
             };
 
@@ -56,6 +64,34 @@ impl Match {
 
     pub fn get_orig(&self) -> Option<&CStr> {
         self.inner.as_ref().get_orig()
+    }
+}
+
+impl Drop for Match {
+    fn drop(&mut self) {
+        unsafe {
+            let inner = self.inner.as_ref();
+            zsh_sys::zsfree(inner.str_);
+            zsh_sys::zsfree(inner.orig);
+            zsh_sys::zsfree(inner.ipre);
+            zsh_sys::zsfree(inner.ripre);
+            zsh_sys::zsfree(inner.isuf);
+            zsh_sys::zsfree(inner.ppre);
+            zsh_sys::zsfree(inner.psuf);
+            zsh_sys::zsfree(inner.prpre);
+            zsh_sys::zsfree(inner.pre);
+            zsh_sys::zsfree(inner.suf);
+            zsh_sys::zsfree(inner.disp);
+            zsh_sys::zsfree(inner.autoq);
+            zsh_sys::zsfree(inner.rems);
+            zsh_sys::zsfree(inner.remf);
+            if !inner.brpl.is_null() {
+                drop(Box::from_raw(inner.brpl));
+            }
+            if !inner.brsl.is_null() {
+                drop(Box::from_raw(inner.brsl));
+            }
+        }
     }
 }
 
@@ -161,7 +197,6 @@ pub fn get_completions(line: BString, sink: mpsc::UnboundedSender<Vec<Match>>) {
     }
 
     unsafe {
-
         // this is kinda what completecall() does
         let mut cfargs: [*mut c_char; 1] = [null_mut()];
         bindings::cfargs = cfargs.as_mut_ptr();

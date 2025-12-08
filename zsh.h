@@ -128,6 +128,8 @@ freematches(Cmgroup g, int cm);
 mod_export int
 menucomplete(char **args);
 
+static LinkList bgstatus_list;
+
 mod_export void
 makezleparams(int ro);
 

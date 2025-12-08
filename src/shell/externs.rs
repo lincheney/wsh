@@ -1,5 +1,6 @@
 use std::sync::atomic::{Ordering};
 mod fork;
+pub(super) mod signals;
 use bstr::BString;
 use crate::ui::{Ui};
 use crate::c_string_array;
@@ -38,7 +39,16 @@ fn get_or_init_state() -> Result<Arc<GlobalState>> {
             .format_timestamp_millis()
             .init();
 
-        let runtime = tokio::runtime::Runtime::new()?;
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .on_thread_start(|| {
+                // try to make the main thread handle all threads
+                if let Err(err) = signals::disable_all_signals() {
+                    // mmmm pretty bad
+                    log::error!("{:?}", err);
+                }
+            })
+            .build()?;
 
         let shell = Shell::default();
         let result: Result<_> = runtime.block_on(async {
@@ -59,8 +69,8 @@ fn get_or_init_state() -> Result<Arc<GlobalState>> {
                     });
                 }
 
-                // spawn a task to take care of signals
-                crate::signals::setup(&ui)?;
+                // spawn tasks to take care of signals
+                signals::setup()?;
             }
 
             Ok((ui, shell, shell_queue))
@@ -82,16 +92,19 @@ fn main() -> Result<Option<BString>> {
             let _ = trampoline.send(());
         }
         shell.is_waiting.store(true, Ordering::Relaxed);
-        let Some(msg) = queue.blocking_recv()
-            else { return Ok(None) };
-
+        // let signals run while we are waiting for the next cmd
+        shell.unqueue_signals()?;
+        let msg = queue.blocking_recv();
+        shell.queue_signals();
         shell.is_waiting.store(false, Ordering::Relaxed);
+
         match msg {
-            ShellMsg::accept_line_trampoline{line, returnvalue} => {
+            Some(ShellMsg::accept_line_trampoline{line, returnvalue}) => {
                 *shell.trampoline.lock().unwrap() = Some(returnvalue);
                 return Ok(line)
             },
-            msg => shell.handle_one_message(msg),
+            Some(msg) => shell.handle_one_message(msg),
+            None => return Ok(None),
         }
 
         // sometimes zsh will trash zle without refreshing
@@ -235,8 +248,8 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
             let (ui, _, _, runtime) = &*state;
             if let Ok(_lock) = ui.has_foreground_process.try_lock() {
                 runtime.block_on(ui.prepare_for_unhandled_output()).unwrap();
-                return null_mut()
             }
+            return null_mut()
 
         } else if cmd == zsh_sys::ZLE_CMD_REFRESH as _ && let Some(state) = try_get_state() {
             // redraw the ui

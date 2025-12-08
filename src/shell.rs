@@ -11,6 +11,7 @@ use std::sync::{Arc};
 use std::ptr::null_mut;
 use std::sync::Mutex;
 use bstr::{BStr, BString, ByteSlice, ByteVec};
+use nix::sys::signal;
 
 mod externs;
 mod file_stream;
@@ -26,6 +27,7 @@ pub use zsh::{
     ZptyOpts,
     Zpty,
 };
+pub use externs::signals::{wait_for_pid};
 use variables::Variable;
 
 pub enum KeybindValue<'a> {
@@ -224,7 +226,7 @@ crate::TokioActor! {
         }
 
         pub fn add_pid(&self, pid: i32) {
-            zsh::add_pid(pid)
+            zsh::add_pid(pid);
         }
 
         pub fn find_process_status(&self, pid: i32, pop_if_done: bool) -> Option<c_int> {
@@ -359,19 +361,6 @@ crate::TokioActor! {
             unsafe{ zsh::done != 0 }
         }
 
-        pub fn call_signal_handler(&self, signal: c_int, unqueue: bool) {
-            unsafe {
-                let old_value = zsh_sys::queueing_enabled;
-                if unqueue {
-                    zsh_sys::queueing_enabled = 0;
-                }
-                zsh_sys::zhandler(signal);
-                if unqueue {
-                    zsh_sys::queueing_enabled = old_value;
-                }
-            }
-        }
-
         pub fn make_function(&self, code: BString) -> Result<Arc<zsh::functions::Function>> {
             let func = zsh::functions::Function::new(code.as_ref())?;
             Ok(Arc::new(func))
@@ -388,6 +377,33 @@ crate::TokioActor! {
 
         pub fn get_function_source(&self, function: Arc<zsh::functions::Function>) -> BString {
             function.get_source()
+        }
+
+        pub fn queue_signals(&self) {
+            unsafe {
+                zsh_sys::queueing_enabled += 1;
+            }
+        }
+
+        pub fn unqueue_signals(&self) -> Result<()> {
+            const MAX_QUEUE_SIZE: i32 = 128;
+
+            unsafe {
+                zsh_sys::queueing_enabled -= 1;
+                if zsh_sys::queueing_enabled == 0 {
+                    // run_queued_signals
+                    while zsh_sys::queue_front != zsh_sys::queue_rear { /* while signals in queue */
+                        zsh_sys::queue_front = (zsh_sys::queue_front + 1) % MAX_QUEUE_SIZE;
+                        let sigset = zsh_sys::signal_mask_queue[zsh_sys::queue_front as usize];
+                        let sigset = signal::SigSet::from_sigset_t_unchecked(std::mem::transmute(sigset));
+                        let mut oset = signal::SigSet::empty();
+                        signal::sigprocmask(signal::SigmaskHow::SIG_SETMASK, Some(&sigset), Some(&mut oset))?;
+                        zsh_sys::zhandler(zsh_sys::signal_queue[zsh_sys::queue_front as usize]);
+                        signal::sigprocmask(signal::SigmaskHow::SIG_SETMASK, Some(&oset), None)?;
+                    }
+                }
+            }
+            Ok(())
         }
 
     }

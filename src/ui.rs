@@ -5,7 +5,6 @@ use std::sync::{Arc, Weak as WeakArc, atomic::{AtomicBool, Ordering}};
 use std::collections::HashSet;
 use std::default::Default;
 use mlua::prelude::*;
-use tokio::sync::{RwLock};
 use anyhow::Result;
 use crate::keybind::parser::{Event, KeyEvent, Key, KeyModifiers};
 use crate::fork_lock::{ForkLock, RawForkLock, ForkLockReadGuard};
@@ -23,6 +22,7 @@ use crate::tui::{
     MoveDown,
 };
 
+use crate::timed_lock::{RwLock, Mutex};
 use crate::shell::{ShellClient, KeybindValue};
 use crate::lua::{EventCallbacks, HasEventCallbacks};
 
@@ -85,7 +85,7 @@ crate::strong_weak_wrapper! {
         pub shell: Arc::<ShellClient> [WeakArc::<ShellClient>],
         pub lua: Arc::<Lua> [WeakArc::<Lua>],
         pub events: Arc::<ForkLock<'static, crate::event_stream::EventController>> [WeakArc::<ForkLock<'static, crate::event_stream::EventController>>],
-        pub has_foreground_process: Arc::<tokio::sync::Mutex<()>> [WeakArc::<tokio::sync::Mutex<()>>],
+        pub has_foreground_process: Arc::<Mutex<()>> [WeakArc::<Mutex<()>>],
         preparing_for_unhandled_output: Arc::<AtomicBool> [WeakArc::<AtomicBool>],
         threads: Arc::<ForkLock<'static, std::sync::Mutex<HashSet<nix::unistd::Pid>>>> [WeakArc::<ForkLock<'static, std::sync::Mutex<HashSet<nix::unistd::Pid>>>>],
     }

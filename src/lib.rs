@@ -8,8 +8,8 @@ mod event_stream;
 mod prompt;
 mod lua;
 mod keybind;
-mod signals;
 mod unsafe_send;
+mod timed_lock;
 #[macro_use]
 mod utils;
 
