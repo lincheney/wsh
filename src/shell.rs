@@ -239,11 +239,11 @@ crate::TokioActor! {
                         let status = p.status;
                         if pop_if_done && status >= 0 {
                             if prev.is_null() {
-                                (*job).auxprocs = null_mut();
+                                (*job).auxprocs = p.next;
                             } else {
                                 (*prev).next = p.next;
-                                zsh_sys::zfree(proc.cast(), std::mem::size_of::<zsh_sys::process>() as _)
                             }
+                            zsh_sys::zfree(proc.cast(), std::mem::size_of::<zsh_sys::process>() as _)
                         }
                         return Some(status);
                     }
