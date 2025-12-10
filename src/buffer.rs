@@ -233,7 +233,7 @@ impl Buffer {
 
         let escape_style = Style::default().fg(Color::Gray);
         let mut stack = HighlightStack(vec![]);
-        let mut cell = ratatui::buffer::Cell::Default;
+        let mut cell = ratatui::buffer::Cell::default();
 
         for (i, (start, end, c)) in self.contents.grapheme_indices().enumerate() {
             if self.highlights.iter().any(|h| h.start == i) {
