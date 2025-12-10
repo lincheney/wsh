@@ -1,17 +1,24 @@
-function wish.repr(val)
+function wish.repr(val, multiline, indent)
     if type(val) == 'table' then
+        indent = indent or ''
         local text = {}
         for k, v in ipairs(val) do
-            table.insert(text, wish.repr(v))
+            table.insert(text, wish.repr(v, multiline, indent .. '  '))
         end
         for k, v in pairs(val) do
             if type(k) == 'string' and not k:find('[^%w_]') then
-                table.insert(text, k .. ' = ' .. wish.repr(v))
+                table.insert(text, k .. ' = ' .. wish.repr(v, multiline, indent .. '  '))
             elseif type(k) ~= 'number' or k > #val then
-                table.insert(text, '['..wish.repr(k)..'] = ' .. wish.repr(v))
+                table.insert(text, '['..wish.repr(k)..'] = ' .. wish.repr(v, multiline, indent .. '  '))
             end
         end
-        return '{' .. table.concat(text, ', ') .. '}'
+
+        -- multiline only if too long or newlines
+        if multiline and (#text > 2 or #table.concat(text, '') > 20 or string.find(table.concat(text, ''), '\n')) then
+            return '{\n' .. indent .. '  ' .. table.concat(text, ',\n' .. indent .. '  ') .. '\n' .. indent .. '}'
+        else
+            return '{' .. table.concat(text, ', ') .. '}'
+        end
     elseif type(val) == 'string' then
         local val = string.format('%q', val):gsub('\\\n', '\\n')
         return val

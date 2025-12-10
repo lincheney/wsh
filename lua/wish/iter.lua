@@ -1,0 +1,141 @@
+local M = {}
+local ITER_META = {}
+
+setmetatable(M, {
+    __call = function(self, x)
+        return setmetatable(x, self)
+    end,
+})
+
+M.__index = M
+
+function M.copy(self, deep)
+    local new = M{}
+    for k, v in M(self) do
+        if type(v) == 'table' and deep then
+            new[k] = M.copy(M(v), deep)
+        else
+            new[k] = v
+        end
+    end
+    return new
+end
+
+M.collect = M.copy
+
+function M.deepcopy(self)
+    return M.copy(self, true)
+end
+
+local function chain_iter(a, b)
+    return function()
+        if not a then
+            local item = a()
+            if item ~= nil then
+                return item
+            end
+            a = nil
+        end
+        return b()
+    end
+end
+
+function M.__call(self, state, var)
+    return next(self, var)
+end
+
+local function make_iter(func)
+    return setmetatable({func}, ITER_META)
+end
+
+function M.map(self, func)
+    return make_iter(function(...)
+        local k, v = self(...)
+        return k, k and func(k, v)
+    end)
+end
+
+function M.filter(self, func)
+    return make_iter(function(state, k)
+        local v
+        while true do
+            k, v = self(state, k)
+            if not k or func(k, v) then
+                return k, v
+            end
+        end
+    end)
+end
+
+function M.filter_map(self, func)
+    return M.map(self, func):filter(function(k, v) return v end)
+end
+
+function M.takewhile(self, func)
+    return make_iter(function(...)
+        local k, v = self(...)
+        if k and func(k, v) then
+            return k, v
+        end
+    end)
+end
+
+function M.dropwhile(self, func)
+    local drop = true
+    return M.filter(self, function(k, v)
+        drop = drop and func(k, v)
+        return not drop
+    end)
+end
+
+function M.enumerate(self, func)
+    local k, v
+    local i = 0
+    return make_iter(function()
+        k, v = self(nil, k)
+        i = i + 1
+        return k and i, {k, v}
+    end)
+end
+
+function M.len(self)
+    local len = 0
+    for _ in self do
+        len = len + 1
+    end
+    return len
+end
+
+function M.chain(self, other)
+    if type(other) == 'table' then
+        other = M(other)
+    end
+    local iter = self
+    return make_iter(function(state, index)
+        local x = {iter(state, index)}
+        if x[1] == nil and iter ~= other then
+            iter = other
+            x = {iter(nil, nil)}
+        end
+        return unpack(x)
+    end)
+end
+
+function M.inspect(self, func)
+    return make_iter(function(...)
+        local k, v = self(...)
+        if k then
+            func(k, v)
+        end
+        return k, v
+    end)
+end
+
+for k, v in pairs(M) do
+    ITER_META[k] = v
+end
+ITER_META.__call = function(self, ...)
+    return self[1](...)
+end
+
+return M
