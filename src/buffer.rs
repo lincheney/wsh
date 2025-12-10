@@ -233,11 +233,12 @@ impl Buffer {
 
         let escape_style = Style::default().fg(Color::Gray);
         let mut stack = HighlightStack(vec![]);
-        let mut cell = ratatui::buffer::Cell::EMPTY;
+        let mut cell = ratatui::buffer::Cell::Default;
 
         for (i, (start, end, c)) in self.contents.grapheme_indices().enumerate() {
             if self.highlights.iter().any(|h| h.start == i) {
                 stack.0.extend(self.highlights.iter().filter(|h| h.start == i));
+                cell = Default::default();
                 cell.set_style(stack.merge());
             }
 
@@ -266,6 +267,7 @@ impl Buffer {
 
             if !stack.0.iter().all(|h| h.end > i + 1) {
                 stack.0.retain(|h| h.end > i + 1 );
+                cell = Default::default();
                 cell.set_style(stack.merge());
             }
         }
