@@ -72,6 +72,8 @@ local RULES = {
     } }},
 }
 
+local apply_highlight_seq
+
 local function apply_highlight_matcher(matcher, token, str)
     if matcher.kind and matcher.kind ~= token.kind then
         return
@@ -147,19 +149,31 @@ local function apply_highlight_seq_at(seq, seq_index, tokens, str, token_index)
     return highlights, token_index
 end
 
-local function apply_highlight_seq(seq, tokens, str)
+function apply_highlight_seq(seq, tokens, str)
     local highlights = nil
     local token_index = 1
-    while token_index <= #tokens do
-        local hl, i = apply_highlight_seq_at(seq, 1, tokens, str, token_index)
-        if hl then
-            highlights = highlights or {}
-            token_index = i
-            for i = 1, #hl do
-                table.insert(highlights, hl[i])
+    for i = 1, #tokens do
+        if tokens[i].nested then
+            local hl = apply_highlight_seq(seq, tokens[i].nested, str)
+            if hl then
+                highlights = highlights or {}
+                for i = 1, #hl do
+                    table.insert(highlights, hl[i])
+                end
             end
-        else
-            token_index = token_index + 1
+        end
+
+        if i == token_index then
+            local hl, finish = apply_highlight_seq_at(seq, 1, tokens, str, token_index)
+            if hl then
+                highlights = highlights or {}
+                token_index = finish
+                for i = 1, #hl do
+                    table.insert(highlights, hl[i])
+                end
+            else
+                token_index = token_index + 1
+            end
         end
     end
     return highlights
