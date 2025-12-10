@@ -11,7 +11,7 @@ M.__index = M
 
 function M.copy(self, deep)
     local new = M{}
-    for k, v in M(self) do
+    for k, v in self do
         if type(v) == 'table' and deep then
             new[k] = M.copy(M(v), deep)
         else
@@ -69,6 +69,10 @@ end
 
 function M.filter_map(self, func)
     return M.map(self, func):filter(function(k, v) return v end)
+end
+
+function M.find(self, func)
+    return M.filter(self, func)()
 end
 
 function M.takewhile(self, func)

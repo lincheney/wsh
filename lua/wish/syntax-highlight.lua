@@ -55,28 +55,35 @@ local function debug_tokens(tokens, buffer)
 end
 
 local HL = {
-    flag = {fg = 'green'},
+    normal = {fg = 'white'},
+    flag = {fg = 'blue'},
     string = {fg = '#ff0000'},
+    variable = {fg = 'magenta'},
 }
 
 local RULES = {
     {{hl=HL.flag, kind='STRING', pat='^%-'}},
-    {{hl=HL.string, kind='STRING', pat='^".*"$'}},
-    {{kind='substitution', contains={
-        'start',
-        {hl='green', pat='%$'},
-        {hl='green', pat='('},
-        '.*',
-        {hl='green', pat=')'},
-        'end',
-    } }},
+    {{hl=HL.string, kind='STRING', pat='^".*'}},
+    {{hl=HL.normal, kind='substitution'}},
+    {
+        {hl=HL.variable, kind={'Qstring', 'String'}},
+        {hl=HL.variable, kind='Inbrace'},
+        {hl=HL.variable, mod='*?'},
+        {hl=HL.variable, kind='Outbrace'},
+    },
 }
 
 local apply_highlight_seq
 
 local function apply_highlight_matcher(matcher, token, str)
-    if matcher.kind and matcher.kind ~= token.kind then
-        return
+    if matcher.kind then
+        if type(matcher.kind) == 'table' then
+            if not wish.iter(matcher.kind):find(function(k, v) return v == token.kind end) then
+                return
+            end
+        elseif matcher.kind ~= token.kind then
+            return
+        end
     end
     if matcher.pat and not string.find(string.sub(str, token.start+1, token.finish), matcher.pat) then
         return
@@ -84,7 +91,7 @@ local function apply_highlight_matcher(matcher, token, str)
 
     local highlights = {}
     if matcher.hl then
-        local hl = wish.iter.copy(matcher.hl)
+        local hl = wish.iter(matcher.hl):copy()
         hl.start = token.start
         hl.finish = token.finish
         hl.namespace = NAMESPACE
@@ -112,35 +119,53 @@ end
 local function apply_highlight_seq_at(seq, seq_index, tokens, str, token_index)
     -- try to apply the seq[seq_index:] at tokens[token_index:] and return the end index
     local highlights = {}
+    local non_greedy = {}
     local matcher = seq[seq_index]
+    local mod = matcher.mod
+
     while seq_index <= #seq do
         if token_index > #tokens then
             -- ran out of tokens before the end of the seq
-            return
+            return unpack(non_greedy)
         end
 
         local token = tokens[token_index]
-        if matcher == '*' then
-            -- branch
-            -- non greedy?
-            local hl, index = apply_highlight_seq_at(seq, seq_index+1, tokens, str, token_index+1)
-            if hl then
-                for i = 1, #hl do
-                    table.insert(highlights, hl[i])
-                end
-                return highlights, index
-            end
 
-        else
-            local hl = apply_highlight_matcher(matcher, token, str)
+        if mod == '*' or mod == '*?' or mod == '?' or mod == '??' then
+            -- try the next matcher
+            local hl, index = apply_highlight_seq_at(seq, seq_index+1, tokens, str, token_index)
             if hl then
-                for i = 1, #hl do
-                    table.insert(highlights, hl[i])
+                if mod == '*?' or mod == '??' then
+                    for i = 1, #hl do
+                        table.insert(highlights, hl[i])
+                    end
+                    -- non greedy
+                    return highlights, index
                 end
-                seq_index = seq_index + 1
-                matcher = seq[seq_index]
-            else
-                return
+
+                hl = wish.iter(highlights):chain(hl):collect()
+                -- non greedy match when we wanted greedy, save for later
+                non_greedy = {hl, index}
+            end
+        end
+
+        local hl = apply_highlight_matcher(matcher, token, str)
+        if mod == '*' or mod == '*?' then
+        elseif mod == '+' or mod == '+?' then
+            mod = '*' .. string.sub(mod, 2)
+        elseif hl then
+            -- next matcher
+            seq_index = seq_index + 1
+            matcher = seq[seq_index]
+            mod = matcher and matcher.mod
+        else
+            -- no match
+            return unpack(non_greedy)
+        end
+
+        if hl then
+            for i = 1, #hl do
+                table.insert(highlights, hl[i])
             end
         end
 
@@ -201,23 +226,6 @@ wish.add_event_callback('buffer_change', function()
 
         wish.clear_buf_highlights(NAMESPACE)
         apply_highlight_rules(RULES, tokens, buffer)
-        -- for i = 1, #tokens do
-            -- local hl = highlights[tokens[i].kind]
-            -- if not hl and tokens[i].kind ~= 'STRING' and not buffer:sub(tokens[i].start+1, tokens[i].finish):find('%w') then
-                -- hl = PUNCTUATION
-            -- end
---
-            -- if hl and next(hl) then
-                -- local arg = {}
-                -- for k, v in pairs(hl) do
-                    -- arg[k] = v
-                -- end
-                -- arg.start = tokens[i].start
-                -- arg.finish = tokens[i].finish
-                -- arg.namespace = NAMESPACE
-                -- wish.add_buf_highlight(arg)
-            -- end
-        -- end
         wish.redraw{buffer = true}
 
         prev_buffer = buffer
