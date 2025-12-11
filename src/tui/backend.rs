@@ -9,10 +9,9 @@ use crossterm::{
         SetAttribute,
         Attribute as CAttribute,
         SetColors,
+        ResetColor,
         Color as CColor,
         Colors,
-        SetForegroundColor,
-        SetBackgroundColor,
         SetUnderlineColor,
     },
 };
@@ -101,10 +100,19 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
     pub fn reset_colours(&mut self) -> Result<()> {
         queue!(
             self.writer,
-            SetForegroundColor(CColor::Reset),
-            SetBackgroundColor(CColor::Reset),
-            SetUnderlineColor(CColor::Reset),
-            SetAttribute(CAttribute::Reset),
+            ResetColor,
+        )
+    }
+
+    fn do_clear(&mut self, clear: ClearType) -> Result<()> {
+        self.fg = Color::default();
+        self.bg = Color::default();
+        self.underline_color = Color::default();
+        self.modifier = Modifier::default();
+        queue!(
+            self.writer,
+            ResetColor,
+            Clear(clear),
         )
     }
 
@@ -127,7 +135,7 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
                     c.reset();
                 }
                 self.move_to_cur_pos()?;
-                queue!(self.writer, Clear(ClearType::UntilNewLine))?;
+                self.do_clear(ClearType::UntilNewLine)?;
             }
 
         }
@@ -152,7 +160,7 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
                 c.reset();
             }
             self.move_to_cur_pos()?;
-            queue!(self.writer, Clear(ClearType::FromCursorDown))?;
+            self.do_clear(ClearType::FromCursorDown)?;
         }
         Ok(())
     }
