@@ -55,43 +55,69 @@ local function debug_tokens(tokens, buffer)
 end
 
 local HL = {
-    normal = {fg = 'white'},
+    normal = {fg = 'reset', bg='reset'},
     flag = {fg = 'blue'},
-    string = {fg = '#ff0000'},
+    string = {fg = '#ffffaa', bg='#333300'},
     variable = {fg = 'magenta'},
+    error = {bg='red'},
 }
 
 local RULES = {
-    {{hl=HL.flag, kind='STRING', pat='^%-'}},
-    {{hl=HL.string, kind='STRING', pat='^".*'}},
-    {{hl=HL.normal, kind='substitution'}},
+    {{hl='flag', kind='STRING', pat='^%-'}},
     {
-        {hl=HL.variable, kind={'Qstring', 'String'}},
-        {hl=HL.variable, kind='Inbrace'},
-        {hl=HL.variable, mod='*?'},
-        {hl=HL.variable, kind='Outbrace'},
+        {hl='string', kind={'Dnull', 'Snull'}},
+        {hl='string', not_kind={'Dnull', 'Snull'}, mod='*'},
+        {hl='string', kind={'Dnull', 'Snull'}, mod='?'},
     },
+    {{hl='normal', kind='substitution'}},
+    {
+        {hl='variable', kind={'Qstring', 'String'}},
+        {hl='variable', kind='Inbrace'},
+        {hl='variable', mod='*?'},
+        {hl='variable', kind='Outbrace'},
+    },
+    { { hl='error', pat='^%($' }, { not_pat='%)', mod='*' }, { mod='$' } },
+    { { hl='error', pat='^%{$' }, { not_pat='%}', mod='*' }, { mod='$' } },
 }
 
 local apply_highlight_seq
 
-local function apply_highlight_matcher(matcher, token, str)
-    if matcher.kind then
-        if type(matcher.kind) == 'table' then
-            if not wish.iter(matcher.kind):find(function(k, v) return v == token.kind end) then
-                return
-            end
-        elseif matcher.kind ~= token.kind then
-            return
+local function append_highlights(highlights, new)
+    if new and #new > 0 then
+        for i = 1, #new do
+            table.insert(highlights, new[i])
         end
     end
-    if matcher.pat and not string.find(string.sub(str, token.start+1, token.finish), matcher.pat) then
+end
+
+local function check_matcher(matcher, func)
+    if type(matcher) == 'table' then
+        return wish.iter(matcher):any(function(k, v) return func(v) end)
+    else
+        return func(matcher)
+    end
+end
+
+local function apply_highlight_matcher(matcher, token, str)
+    if matcher.kind and not check_matcher(matcher.kind, function(x) return x == token.kind end) then
         return
+    end
+    if matcher.not_kind and check_matcher(matcher.not_kind, function(x) return x == token.kind end) then
+        return
+    end
+    if matcher.pat or matcher.not_pat then
+        local tokstr = string.sub(str, token.start+1, token.finish)
+        if matcher.pat and not check_matcher(matcher.pat, function(x) return string.find(tokstr, x) end) then
+            return
+        end
+        if matcher.not_pat and check_matcher(matcher.not_pat, function(x) return string.find(tokstr, x) end) then
+            return
+        end
     end
 
     local highlights = {}
     if matcher.hl then
-        local hl = wish.iter(matcher.hl):copy()
+        local hl = wish.iter(HL[matcher.hl]):copy()
         hl.start = token.start
         hl.finish = token.finish
         hl.namespace = NAMESPACE
@@ -108,9 +134,7 @@ local function apply_highlight_matcher(matcher, token, str)
             -- nested rules don't match
             return
         end
-        for i = 1, #hl do
-            table.insert(highlights, hl[i])
-        end
+        append_highlights(highlights, hl[i])
     end
 
     return highlights
@@ -121,55 +145,65 @@ local function apply_highlight_seq_at(seq, seq_index, tokens, str, token_index)
     local highlights = {}
     local non_greedy = {}
     local matcher = seq[seq_index]
-    local mod = matcher.mod
+    local mod = matcher and matcher.mod
 
     while seq_index <= #seq do
-        if token_index > #tokens then
-            -- ran out of tokens before the end of the seq
-            return unpack(non_greedy)
-        end
-
-        local token = tokens[token_index]
-
         if mod == '*' or mod == '*?' or mod == '?' or mod == '??' then
-            -- try the next matcher
+            -- try the next matcher, non greedy
             local hl, index = apply_highlight_seq_at(seq, seq_index+1, tokens, str, token_index)
             if hl then
                 if mod == '*?' or mod == '??' then
-                    for i = 1, #hl do
-                        table.insert(highlights, hl[i])
-                    end
-                    -- non greedy
+                    append_highlights(highlights, hl)
+                    -- we wanted non greedy, so return it now
                     return highlights, index
                 end
 
                 hl = wish.iter(highlights):chain(hl):collect()
-                -- non greedy match when we wanted greedy, save for later
+                -- non greedy match when we wanted greedy, save for later in case the greedy match doesn't work
                 non_greedy = {hl, index}
             end
         end
 
-        local hl = apply_highlight_matcher(matcher, token, str)
-        if mod == '*' or mod == '*?' then
-        elseif mod == '+' or mod == '+?' then
-            mod = '*' .. string.sub(mod, 2)
-        elseif hl then
-            -- next matcher
-            seq_index = seq_index + 1
-            matcher = seq[seq_index]
-            mod = matcher and matcher.mod
-        else
-            -- no match
-            return unpack(non_greedy)
-        end
+        local token = tokens[token_index]
+        local next_matcher = false
+        local hl = nil
+        if mod == '$' then
+            if token then
+                -- expected the end
+                return not_greedy and unpack(not_greedy)
+            end
+            next_matcher = true
+            hl = {}
 
-        if hl then
-            for i = 1, #hl do
-                table.insert(highlights, hl[i])
+        elseif not token then
+            -- ran out of tokens before the end of the seq
+            return unpack(non_greedy)
+        else
+
+            hl = apply_highlight_matcher(matcher, token, str)
+            if mod == '*' or mod == '*?' then
+                next_matcher = not hl
+            elseif mod == '+' or mod == '+?' then
+                mod = '*' .. string.sub(mod, 2)
+                next_matcher = not hl
+            elseif hl then
+                next_matcher = true
+            else
+                -- no match
+                return non_greedy and unpack(non_greedy)
             end
         end
 
-        token_index = token_index + 1
+        if hl then
+            append_highlights(highlights, hl)
+            token_index = token_index + 1
+        end
+
+        if next_matcher then
+            seq_index = seq_index + 1
+            matcher = seq[seq_index]
+            mod = matcher and matcher.mod
+        end
     end
     return highlights, token_index
 end
@@ -182,9 +216,7 @@ function apply_highlight_seq(seq, tokens, str)
             local hl = apply_highlight_seq(seq, tokens[i].nested, str)
             if hl then
                 highlights = highlights or {}
-                for i = 1, #hl do
-                    table.insert(highlights, hl[i])
-                end
+                append_highlights(highlights, hl)
             end
         end
 
@@ -192,10 +224,8 @@ function apply_highlight_seq(seq, tokens, str)
             local hl, finish = apply_highlight_seq_at(seq, 1, tokens, str, token_index)
             if hl then
                 highlights = highlights or {}
+                append_highlights(highlights, hl)
                 token_index = finish
-                for i = 1, #hl do
-                    table.insert(highlights, hl[i])
-                end
             else
                 token_index = token_index + 1
             end

@@ -12,6 +12,10 @@ M.__index = M
 function M.copy(self, deep)
     local new = M{}
     for k, v in self do
+        if type(k) == 'number' and k % 1 == 0 and k >= 1 and new[k] ~= nil then
+            k = #new + 1
+        end
+
         if type(v) == 'table' and deep then
             new[k] = M.copy(M(v), deep)
         else
@@ -25,19 +29,6 @@ M.collect = M.copy
 
 function M.deepcopy(self)
     return M.copy(self, true)
-end
-
-local function chain_iter(a, b)
-    return function()
-        if not a then
-            local item = a()
-            if item ~= nil then
-                return item
-            end
-            a = nil
-        end
-        return b()
-    end
 end
 
 function M.__call(self, state, var)
@@ -75,7 +66,15 @@ function M.find(self, func)
     return M.filter(self, func)()
 end
 
-function M.takewhile(self, func)
+function M.any(self, func)
+    return not not M.find(self, func)
+end
+
+function M.all(self, func)
+    return not M.any(self, function(...) return not func(...) end)
+end
+
+function M.take_while(self, func)
     return make_iter(function(...)
         local k, v = self(...)
         if k and func(k, v) then
@@ -84,7 +83,7 @@ function M.takewhile(self, func)
     end)
 end
 
-function M.dropwhile(self, func)
+function M.skip_while(self, func)
     local drop = true
     return M.filter(self, function(k, v)
         drop = drop and func(k, v)
@@ -102,12 +101,12 @@ function M.enumerate(self, func)
     end)
 end
 
-function M.len(self)
-    local len = 0
+function M.count(self)
+    local count = 0
     for _ in self do
-        len = len + 1
+        count = count + 1
     end
-    return len
+    return count
 end
 
 function M.chain(self, other)
