@@ -22,7 +22,7 @@ pub use zsh::{
     history,
     variables,
     functions::Function,
-    parser::Token,
+    parser::{Token},
     ZptyOpts,
     Zpty,
 };
@@ -199,8 +199,8 @@ crate::TokioActor! {
             zsh::completion::insert_completion(string, &m)
         }
 
-        pub fn parse(&self, string: BString, custom: bool) -> (bool, Vec<zsh::parser::Token>) {
-            zsh::parser::parse(string, custom)
+        pub fn parse(&self, string: BString, options: zsh::parser::ParserOptions) -> (bool, Vec<zsh::parser::Token>) {
+            zsh::parser::parse(string, options)
         }
 
         pub fn get_prompt(&self, prompt: Option<BString>, escaped: bool) -> Option<CString> {

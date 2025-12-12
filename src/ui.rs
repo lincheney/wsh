@@ -308,7 +308,7 @@ impl Ui {
             let this = self.get();
             let ui = this.inner.borrow().await;
             let buffer = ui.buffer.get_contents();
-            let (complete, _tokens) = self.shell.parse(buffer.clone(), false).await;
+            let (complete, _tokens) = self.shell.parse(buffer.clone(), Default::default()).await;
             if complete {
                 Some(buffer.clone())
             } else {

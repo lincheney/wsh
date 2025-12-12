@@ -1,8 +1,16 @@
+use serde::{Deserialize};
 use std::ops::Range;
 use std::ffi::CStr;
 use std::ptr::null_mut;
 use bstr::{BString, BStr, ByteSlice};
 use super::bindings::{Meta, token, lextok};
+
+#[derive(Default, Clone, Copy, Deserialize)]
+#[serde(default)]
+pub struct ParserOptions {
+    comments: Option<bool>,
+    custom: bool,
+}
 
 #[derive(Debug, Clone)]
 pub enum TokenKind {
@@ -62,13 +70,13 @@ fn find_str(needle: &BStr, haystack: &BStr, start: usize) -> Option<Range<usize>
     Some(start .. start + needle.len())
 }
 
-pub fn parse(cmd: BString, custom: bool) -> (bool, Vec<Token>) {
+pub fn parse(cmd: BString, options: ParserOptions) -> (bool, Vec<Token>) {
     // we add some at the end to detect if the command line is actually complete
     let dummy = b" x";
     let mut cmd = cmd.to_owned();
     cmd.extend(dummy);
 
-    let (mut complete, mut tokens) = parse_internal(cmd.as_ref(), custom, 0);
+    let (mut complete, mut tokens) = parse_internal(cmd.as_ref(), options, 0);
 
     if let Some(last) = tokens.last_mut() {
         debug_assert_eq!(last.range.end, cmd.len());
@@ -96,7 +104,7 @@ pub fn parse(cmd: BString, custom: bool) -> (bool, Vec<Token>) {
     (complete, tokens)
 }
 
-fn parse_internal(cmd: &BStr, custom: bool, range_offset: usize) -> (bool, Vec<Token>) {
+fn parse_internal(cmd: &BStr, options: ParserOptions, range_offset: usize) -> (bool, Vec<Token>) {
     let ptr = super::metafy(cmd);
     let metafied = unsafe{ CStr::from_ptr(ptr) };
     let metalen = metafied.count_bytes();
@@ -127,8 +135,12 @@ fn parse_internal(cmd: &BStr, custom: bool, range_offset: usize) -> (bool, Vec<T
         let old_noaliases = zsh_sys::noaliases;
         zsh_sys::noaliases = 1;
 
-        let lexflags = zsh_sys::lexflags;
-        zsh_sys::lexflags = (zsh_sys::LEXFLAGS_ACTIVE | zsh_sys::LEXFLAGS_COMMENTS_KEEP | zsh_sys::LEXFLAGS_ZLE) as _;
+        let old_lexflags = zsh_sys::lexflags;
+        let mut new_lexflags = zsh_sys::LEXFLAGS_ACTIVE | zsh_sys::LEXFLAGS_ZLE;
+        if options.comments.unwrap_or(super::isset(zsh_sys::INTERACTIVECOMMENTS as _)) {
+            new_lexflags |= zsh_sys::LEXFLAGS_COMMENTS_KEEP;
+        }
+        zsh_sys::lexflags = new_lexflags as _;
 
         // ztokens has the wrong length, so use pointer arithmetic instead
         #[allow(static_mut_refs)]
@@ -194,9 +206,9 @@ fn parse_internal(cmd: &BStr, custom: bool, range_offset: usize) -> (bool, Vec<T
                     if tokstr.len() > slice_start {
                         push_token(&mut nested, &tokstr[slice_start..], None, has_meta);
                     }
-                    if custom {
+                    if options.custom {
                         let len = nested.len();
-                        apply_custom_token(cmd, &mut nested, 0, len, range_offset);
+                        apply_custom_token(cmd, options, &mut nested, 0, len, range_offset);
                     }
                     let range = nested[0].range.start .. nested.last().unwrap().range.end;
                     tokens.push(Token{range, kind, nested: Some(nested)});
@@ -211,7 +223,7 @@ fn parse_internal(cmd: &BStr, custom: bool, range_offset: usize) -> (bool, Vec<T
         }
 
         // restore
-        zsh_sys::lexflags = lexflags;
+        zsh_sys::lexflags = old_lexflags;
         zsh_sys::strinend();
         zsh_sys::inpop();
         zsh_sys::errflag &= !zsh_sys::errflag_bits_ERRFLAG_ERROR as i32;
@@ -220,15 +232,15 @@ fn parse_internal(cmd: &BStr, custom: bool, range_offset: usize) -> (bool, Vec<T
         zsh_sys::zcontext_restore();
     }
 
-    if custom {
+    if options.custom {
         let len = tokens.len();
-        apply_custom_token(cmd, &mut tokens, 0, len, range_offset);
+        apply_custom_token(cmd, options, &mut tokens, 0, len, range_offset);
     }
 
     (complete, tokens)
 }
 
-fn apply_custom_token(cmd: &BStr, tokens: &mut Vec<Token>, start: usize, mut end: usize, range_offset: usize) {
+fn apply_custom_token(cmd: &BStr, options: ParserOptions, tokens: &mut Vec<Token>, start: usize, mut end: usize, range_offset: usize) {
     // detect subshells
     // this is inefficient but whatever
 
@@ -300,7 +312,7 @@ fn apply_custom_token(cmd: &BStr, tokens: &mut Vec<Token>, start: usize, mut end
                 TokenKind::Substitution => {
                     let tok = tok.unwrap();
                     let cmd = &cmd[tok.range.start - range_offset .. tok.range.end - range_offset];
-                    tok.nested = Some(parse_internal(cmd, true, tok.range.start).1);
+                    tok.nested = Some(parse_internal(cmd, options, tok.range.start).1);
                 },
                 TokenKind::Function => {
                     // yuck
@@ -328,7 +340,7 @@ fn apply_custom_token(cmd: &BStr, tokens: &mut Vec<Token>, start: usize, mut end
                     len += 2; // body and end bracket
                     // look for more functions
                     let body_len = body.len();
-                    apply_custom_token(cmd, body, 0, body_len, range_offset);
+                    apply_custom_token(cmd, options, body, 0, body_len, range_offset);
                 },
                 _ => (),
             }
