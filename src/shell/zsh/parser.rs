@@ -285,6 +285,7 @@ fn find_heredocs(cmd: &BStr, tokens: &mut Vec<Token>, range_offset: usize, hered
 
         let tag = unsafe { CStr::from_ptr(zsh_sys::quotesubst(*tokstr)) }.to_bytes();
         let allow_tabs = matches!(tokens[index-1].kind, Some(TokenKind::Lextok(lextok::DINANGDASH)));
+        let allow_subst = !tokens[index].as_str(cmd, range_offset).iter().any(|&c| matches!(c, b'\''|b'"'|b'\\'));
 
         let mut newlines = tokens[index+1..]
             .iter()
@@ -331,9 +332,21 @@ fn find_heredocs(cmd: &BStr, tokens: &mut Vec<Token>, range_offset: usize, hered
 
         let kind = Some(TokenKind::HeredocBody);
         let range = heredoc_start+1 .. heredoc_end.unwrap_or((tokens.len(), 0)).0;
-        let token = nest_tokens(tokens, range.start, range.end, kind);
-        for n in token.nested.iter_mut().flatten() {
-            n.kind = None;
+        let new_start = tokens[range.start-1].range.end;
+        let new_end = tokens.get(range.end).map_or(cmd.len(), |t| t.range.start);
+        if allow_subst {
+            let token = nest_tokens(tokens, range.start, range.end, kind);
+            token.range = new_start .. new_end;
+            for n in token.nested.iter_mut().flatten() {
+                n.kind = None;
+            }
+        } else {
+            let token = Token{
+                kind: Some(TokenKind::HeredocBody),
+                range: new_start .. new_end,
+                nested: None,
+            };
+            tokens.splice(range.clone(), [token]);
         }
         offset += range.end - range.start + 1;
 
