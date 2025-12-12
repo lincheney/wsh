@@ -28,6 +28,7 @@ local HL = {
     },
     flag = {fg = '#ffaaaa'},
     string = {fg = '#ffffaa', bg='#333300'},
+    heredoc_tag = {fg = 'lightblue', bold = true},
     variable = {fg = 'magenta'},
     command = {fg = 'lightgreen', bold = true},
     func = {fg = 'yellow'},
@@ -42,13 +43,16 @@ local RULES = {
     { {hl='comment', kind='comment'} },
     -- punctuation
     { {hl='punctuation', pat='^%W+$'} },
-    -- strings
     { {hl='flag', kind='STRING', pat='^%-'} },
+    -- strings
     {
         {hl='string', kind={'Dnull', 'Snull'}},
         {hl='string', not_kind={'Dnull', 'Snull'}, mod='*'},
         {hl='string', kind={'Dnull', 'Snull'}, mod='?'},
     },
+    -- heredocs
+    { {hl='string', kind='heredoc_body'} },
+    { {hl='heredoc_tag', kind={'heredoc_open_tag', 'heredoc_close_tag'}} },
     -- reset highlight on substitutions in strings
     { {kind='STRING', contains={ {hl='normal', kind='substitution'} } } },
     {
