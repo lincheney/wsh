@@ -1,47 +1,6 @@
 local prev_buffer = nil
 
-local PUNCTUATION = {fg = 'grey', bold = true}
-local NEW_COMMAND = {fg = 'yellow'}
-local STRING = {}
-local KEYWORD = {fg = 'green', bold = true}
-local COMMENT = {fg = 'grey'}
 local NAMESPACE = wish.add_buf_highlight_namespace()
-
-local highlights = {
-    SEPER = NEW_COMMAND,
-    DBAR = NEW_COMMAND,
-    DAMPER = NEW_COMMAND,
-    BAR = NEW_COMMAND,
-    BARAMP = NEW_COMMAND,
-    STRING = STRING,
-    ENVSTRING = STRING,
-    ENVARRAY = STRING,
-    LEXERR = STRING,
-
-    CASE = KEYWORD,
-    COPROC = KEYWORD,
-    DOLOOP = KEYWORD,
-    DONE = KEYWORD,
-    ELIF = KEYWORD,
-    ELSE = KEYWORD,
-    ZEND = KEYWORD,
-    ESAC = KEYWORD,
-    FI = KEYWORD,
-    FOR = KEYWORD,
-    FOREACH = KEYWORD,
-    FUNC = KEYWORD,
-    IF = KEYWORD,
-    NOCORRECT = KEYWORD,
-    REPEAT = KEYWORD,
-    SELECT = KEYWORD,
-    THEN = KEYWORD,
-    TIME = KEYWORD,
-    UNTIL = KEYWORD,
-    WHILE = KEYWORD,
-    TYPESET = KEYWORD,
-
-    comment = COMMENT,
-}
 
 local function debug_tokens(tokens, buffer)
     local x = {}
@@ -66,16 +25,23 @@ local HL = {
         reversed=false,
         blink=false,
     },
-    flag = {fg = 'blue'},
+    flag = {fg = '#ffaaaa'},
     string = {fg = '#ffffaa', bg='#333300'},
     variable = {fg = 'magenta'},
-    command = {fg='lightgreen', bold=true},
-    func = {fg='yellow'},
-    error = {bg='red'},
+    command = {fg = 'lightgreen', bold = true},
+    func = {fg = 'yellow'},
+    keyword = {fg = 'red'},
+    punctuation = {fg = 'cyan'},
+    comment = {fg = 'grey'},
+    error = {bg = 'red'},
 }
 
 local RULES = {
-    -- highlight strings
+    -- comments
+    { {hl='comment', kind='comment'} },
+    -- punctuation
+    { {hl='punctuation', pat='^%W+$' } },
+    -- strings
     { {hl='flag', kind='STRING', pat='^%-'} },
     {
         {hl='string', kind={'Dnull', 'Snull'}},
@@ -100,6 +66,8 @@ local RULES = {
     -- function
     { {kind='function', contains={ {hl='func', kind='FUNC'}, {hl='func', kind='STRING', mod='?'} }} },
     { {kind='function', contains={ {mod='^'}, {hl='func', kind='STRING'} }} },
+    -- keywords
+    { {hl='keyword', kind={'CASE', 'COPROC', 'DOLOOP', 'DONE', 'ELIF', 'ELSE', 'ZEND', 'ESAC', 'FI', 'FOR', 'FOREACH', 'FUNC', 'IF', 'NOCORRECT', 'REPEAT', 'SELECT', 'THEN', 'TIME', 'UNTIL', 'WHILE', 'TYPESET'} } },
     -- unmatched brackets
     { { hl='error', pat='^%($' }, { not_pat='%)', mod='*' }, { mod='$' } },
     { { hl='error', pat='^%{$' }, { not_pat='%}', mod='*' }, { mod='$' } },
