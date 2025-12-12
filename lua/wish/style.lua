@@ -13,6 +13,7 @@ M.normal = {
     blend = false,
 }
 M.flag = {fg = '#ffaaaa'}
+M.flag_value = {fg = '#ffdddd'}
 M.escape = {fg = '#ffaaaa'}
 M.escape_space = wish.table.merge({}, M.escape, {bg = '#442222'})
 M.string = {fg = '#ffffaa', bg='#333300'}
