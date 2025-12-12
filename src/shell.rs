@@ -199,8 +199,8 @@ crate::TokioActor! {
             zsh::completion::insert_completion(string, &m)
         }
 
-        pub fn parse(&self, string: BString, recursive: bool) -> (bool, Vec<zsh::parser::Token>) {
-            zsh::parser::parse(string, recursive)
+        pub fn parse(&self, string: BString, custom: bool) -> (bool, Vec<zsh::parser::Token>) {
+            zsh::parser::parse(string, custom)
         }
 
         pub fn get_prompt(&self, prompt: Option<BString>, escaped: bool) -> Option<CString> {

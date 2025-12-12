@@ -55,27 +55,52 @@ local function debug_tokens(tokens, buffer)
 end
 
 local HL = {
-    normal = {fg = 'reset', bg='reset'},
+    normal = {
+        fg = 'reset',
+        bg='reset',
+        bold=false,
+        dim=false,
+        italic=false,
+        underline=false,
+        strikethrough=false,
+        reversed=false,
+        blink=false,
+    },
     flag = {fg = 'blue'},
     string = {fg = '#ffffaa', bg='#333300'},
     variable = {fg = 'magenta'},
+    command = {fg='lightgreen', bold=true},
+    func = {fg='yellow'},
     error = {bg='red'},
 }
 
 local RULES = {
-    {{hl='flag', kind='STRING', pat='^%-'}},
+    -- highlight strings
+    { {hl='flag', kind='STRING', pat='^%-'} },
     {
         {hl='string', kind={'Dnull', 'Snull'}},
         {hl='string', not_kind={'Dnull', 'Snull'}, mod='*'},
         {hl='string', kind={'Dnull', 'Snull'}, mod='?'},
     },
-    {{hl='normal', kind='substitution'}},
+    -- reset highlight on substitutions in strings
+    { {kind='STRING', contains={ {hl='normal', kind='substitution'} } } },
     {
         {hl='variable', kind={'Qstring', 'String'}},
         {hl='variable', kind='Inbrace'},
         {hl='variable', mod='*?'},
         {hl='variable', kind='Outbrace'},
     },
+    -- this will match the first string then consume the rest
+    {
+        {hl='command', kind='STRING'},
+        {not_kind={'SEPER', 'BAR', 'DBAR', 'AMPER', 'DAMPER', 'BARAMP', 'AMPERBANG', 'SEMIAMP', 'SEMIBAR'}, mod='*'},
+    },
+    -- but reset highlights on these
+    { {kind='redirect', contains={ {hl='normal', kind='STRING'} }} },
+    -- function
+    { {kind='function', contains={ {hl='func', kind='FUNC'}, {hl='func', kind='STRING'} }} },
+    { {kind='function', contains={ {mod='^'}, {hl='func', kind='STRING'} }} },
+    -- unmatched brackets
     { { hl='error', pat='^%($' }, { not_pat='%)', mod='*' }, { mod='$' } },
     { { hl='error', pat='^%{$' }, { not_pat='%}', mod='*' }, { mod='$' } },
 }
@@ -134,7 +159,7 @@ local function apply_highlight_matcher(matcher, token, str)
             -- nested rules don't match
             return
         end
-        append_highlights(highlights, hl[i])
+        append_highlights(highlights, hl)
     end
 
     return highlights

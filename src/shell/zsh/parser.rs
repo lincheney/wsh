@@ -9,6 +9,8 @@ pub enum TokenKind {
     Lextok(lextok),
     Token(token),
     Substitution,
+    Redirect,
+    Function,
     Comment,
 }
 
@@ -17,8 +19,10 @@ impl std::fmt::Display for TokenKind {
         match self {
             TokenKind::Lextok(k) => write!(fmt, "{k:?}"),
             TokenKind::Token(k) => write!(fmt, "{k:?}"),
-            TokenKind::Comment => write!(fmt, "comment"),
             TokenKind::Substitution => write!(fmt, "substitution"),
+            TokenKind::Redirect => write!(fmt, "redirect"),
+            TokenKind::Function => write!(fmt, "function"),
+            TokenKind::Comment => write!(fmt, "comment"),
         }
     }
 }
@@ -58,13 +62,13 @@ fn find_str(needle: &BStr, haystack: &BStr, start: usize) -> Option<Range<usize>
     Some(start .. start + needle.len())
 }
 
-pub fn parse(cmd: BString, recursive: bool) -> (bool, Vec<Token>) {
+pub fn parse(cmd: BString, custom: bool) -> (bool, Vec<Token>) {
     // we add some at the end to detect if the command line is actually complete
     let dummy = b" x";
     let mut cmd = cmd.to_owned();
     cmd.extend(dummy);
 
-    let (mut complete, mut tokens) = parse_internal(cmd.as_ref(), recursive, 0);
+    let (mut complete, mut tokens) = parse_internal(cmd.as_ref(), custom, 0);
 
     if let Some(last) = tokens.last_mut() {
         debug_assert_eq!(last.range.end, cmd.len());
@@ -92,7 +96,7 @@ pub fn parse(cmd: BString, recursive: bool) -> (bool, Vec<Token>) {
     (complete, tokens)
 }
 
-fn parse_internal(cmd: &BStr, recursive: bool, range_offset: usize) -> (bool, Vec<Token>) {
+fn parse_internal(cmd: &BStr, custom: bool, range_offset: usize) -> (bool, Vec<Token>) {
     let ptr = super::metafy(cmd);
     let metafied = unsafe{ CStr::from_ptr(ptr) };
     let metalen = metafied.count_bytes();
@@ -190,8 +194,9 @@ fn parse_internal(cmd: &BStr, recursive: bool, range_offset: usize) -> (bool, Ve
                     if tokstr.len() > slice_start {
                         push_token(&mut nested, &tokstr[slice_start..], None, has_meta);
                     }
-                    if recursive {
-                        recurse_into_subshells(cmd, &mut nested, range_offset);
+                    if custom {
+                        let len = nested.len();
+                        apply_custom_token(cmd, &mut nested, 0, len, range_offset);
                     }
                     let range = nested[0].range.start .. nested.last().unwrap().range.end;
                     tokens.push(Token{range, kind, nested: Some(nested)});
@@ -215,22 +220,23 @@ fn parse_internal(cmd: &BStr, recursive: bool, range_offset: usize) -> (bool, Ve
         zsh_sys::zcontext_restore();
     }
 
-    if recursive {
-        recurse_into_subshells(cmd, &mut tokens, range_offset);
+    if custom {
+        let len = tokens.len();
+        apply_custom_token(cmd, &mut tokens, 0, len, range_offset);
     }
 
     (complete, tokens)
 }
 
-fn recurse_into_subshells(cmd: &BStr, tokens: &mut Vec<Token>, range_offset: usize) {
+fn apply_custom_token(cmd: &BStr, tokens: &mut Vec<Token>, start: usize, mut end: usize, range_offset: usize) {
     // detect subshells
     // this is inefficient but whatever
 
-    let mut i = 0;
-    while i < tokens.len() {
+    let mut i = start;
+    while i < end {
 
         let slice = &mut tokens[i..];
-        let tok = match *slice {
+        let action = match *slice {
 
             // [$><=](...)
             [
@@ -238,45 +244,106 @@ fn recurse_into_subshells(cmd: &BStr, tokens: &mut Vec<Token>, range_offset: usi
                 Token{kind: Some(TokenKind::Token(token::Inpar)), ..},
   ref mut tok @ Token{kind: None | Some(TokenKind::Lextok(lextok::STRING | lextok::LEXERR)), ..},
                 Token{kind: Some(TokenKind::Token(token::Outpar)), ..},
-            ..] => Some((tok, 4)),
+            ..] => Some((TokenKind::Substitution, Some(tok), 4)),
 
             // [$><=](...
             [
                 Token{kind: Some(TokenKind::Token(token::String | token::Qstring | token::OutangProc | token::Inang | token::Equals)), ..},
                 Token{kind: Some(TokenKind::Token(token::Inpar)), ..},
   ref mut tok @ Token{kind: None | Some(TokenKind::Lextok(lextok::STRING | lextok::LEXERR)), ..},
-            ] => Some((tok, 3)),
+            ..] => Some((TokenKind::Substitution, Some(tok), 3)),
 
             // `...`
             [
                 Token{kind: Some(TokenKind::Token(token::Tick | token::Qtick)), ..},
   ref mut tok @ Token{kind: None | Some(TokenKind::Lextok(lextok::STRING | lextok::LEXERR)), ..},
                 Token{kind: Some(TokenKind::Token(token::Tick | token::Qtick)), ..},
-            ..] => Some((tok, 3)),
+            ..] => Some((TokenKind::Substitution, Some(tok), 3)),
 
             // `...
             [
                 Token{kind: Some(TokenKind::Token(token::Tick | token::Qtick)), ..},
   ref mut tok @ Token{kind: None | Some(TokenKind::Lextok(lextok::STRING | lextok::LEXERR)), ..},
-            ] => Some((tok, 2)),
+            ..] => Some((TokenKind::Substitution, Some(tok), 2)),
+
+            // (<|>|>>|<>|>\||>!|<&|>&|>&\|>&!|&>\||&>!|>>&|&>>|>>&\||>>&!|&>>\||&>>!) STRING
+            [
+                Token{kind: Some(TokenKind::Lextok(lextok::OUTANG | lextok::OUTANGBANG | lextok::DOUTANG | lextok::DOUTANGBANG | lextok::INANG | lextok::INOUTANG | lextok::INANGAMP | lextok::OUTANGAMP | lextok::AMPOUTANG | lextok::OUTANGAMPBANG | lextok::DOUTANGAMP | lextok::DOUTANGAMPBANG | lextok::TRINANG)), ..},
+                Token{kind: None | Some(TokenKind::Lextok(lextok::STRING | lextok::LEXERR)), ..},
+            ..] => Some((TokenKind::Redirect, None, 2)),
+
+            // function STRING () [[{]
+            [
+                Token{kind: Some(TokenKind::Lextok(lextok::FUNC)), ..},
+                Token{kind: None | Some(TokenKind::Lextok(lextok::STRING | lextok::LEXERR)), ..},
+                Token{kind: Some(TokenKind::Lextok(lextok::INOUTPAR)), ..},
+                Token{kind: Some(TokenKind::Lextok(lextok::INBRACE | lextok::INPAR)), ..},
+            ..] => Some((TokenKind::Function, None, 4)),
+            // STRING () [[{]
+            [
+                Token{kind: None | Some(TokenKind::Lextok(lextok::STRING | lextok::LEXERR)), ..},
+                Token{kind: Some(TokenKind::Lextok(lextok::INOUTPAR)), ..},
+                Token{kind: Some(TokenKind::Lextok(lextok::INBRACE | lextok::INPAR)), ..},
+            ..] => Some((TokenKind::Function, None, 3)),
 
             _ => None,
         };
 
-        if let Some((tok, len)) = tok {
-            let cmd = &cmd[tok.range.start - range_offset .. tok.range.end - range_offset];
-            let (_, subshell) = parse_internal(cmd, true, tok.range.start);
-            tok.nested = Some(subshell);
-            let super_token = Token{
-                kind: Some(TokenKind::Substitution),
-                range: tokens[i].range.start .. tokens[i+len-1].range.end,
-                nested: None,
-            };
-            let nested = tokens.splice(i..i+len, [super_token]).collect();
-            tokens[i].nested = Some(nested);
+        if let Some((kind, tok, mut len)) = action {
+
+            match kind {
+                TokenKind::Substitution => {
+                    let tok = tok.unwrap();
+                    let cmd = &cmd[tok.range.start - range_offset .. tok.range.end - range_offset];
+                    tok.nested = Some(parse_internal(cmd, true, tok.range.start).1);
+                },
+                TokenKind::Function => {
+                    // yuck
+                    // find the last bracket
+                    let mut bracket_count = 0;
+                    let mut func_len = len;
+                    for (j, tok) in tokens[i+len-1..end].iter().enumerate() {
+                        match tok.kind {
+                            Some(TokenKind::Lextok(lextok::INBRACE | lextok::INPAR)) => bracket_count += 1,
+                            Some(TokenKind::Lextok(lextok::OUTBRACE | lextok::OUTPAR)) => {
+                                bracket_count -= 1;
+                                if bracket_count == 0 {
+                                    func_len += j;
+                                    break
+                                }
+                            },
+                            _ => (),
+                        }
+                    }
+                    if bracket_count > 0 {
+                        func_len = end - i;
+                    }
+                    let body = nest_tokens(tokens, i+len, i+func_len-1, None).nested.as_mut().unwrap();
+                    end -= func_len - len - 1;
+                    len += 2; // body and end bracket
+                    // look for more functions
+                    let body_len = body.len();
+                    apply_custom_token(cmd, body, 0, body_len, range_offset);
+                },
+                _ => (),
+            }
+
+            nest_tokens(tokens, i, i+len, Some(kind));
+            end -= len - 1;
         }
 
         i += 1;
     }
 
+}
+
+fn nest_tokens(tokens: &mut Vec<Token>, start: usize, end: usize, kind: Option<TokenKind>) -> &mut Token {
+    let super_token = Token{
+        kind,
+        range: tokens[start].range.start .. tokens[end-1].range.end,
+        nested: None,
+    };
+    let nested = tokens.splice(start..end, [super_token]).collect();
+    tokens[start].nested = Some(nested);
+    &mut tokens[start]
 }
