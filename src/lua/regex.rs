@@ -11,6 +11,13 @@ impl UserData for Regex {
         methods.add_method("is_match", |_lua, regex, (arg, start): (LuaString, Option<usize>)| {
             Ok(regex.inner.is_match_at(&arg.as_bytes(), start.unwrap_or(0)))
         });
+        methods.add_method("is_full_match", |_lua, regex, arg: LuaString| {
+            let bytes = arg.as_bytes();
+            Ok(
+                regex.inner.find(&bytes)
+                .is_some_and(|m| m.len() == bytes.len())
+            )
+        });
         methods.add_method("find", |_lua, regex, (arg, start): (LuaString, Option<usize>)| {
             if let Some(m) = regex.inner.find_at(&arg.as_bytes(), start.unwrap_or(0)) {
                 Ok((Some(m.start()+1), Some(m.end())))

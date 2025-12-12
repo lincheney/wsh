@@ -27,9 +27,11 @@ local HL = {
         blink=false,
     },
     flag = {fg = '#ffaaaa'},
+    escape = {fg = '#ffaaaa'},
+    escape_space = {fg = '#ffaaaa', underline = true},
     string = {fg = '#ffffaa', bg='#333300'},
     heredoc_tag = {fg = 'lightblue', bold = true},
-    variable = {fg = 'magenta'},
+    variable = {fg = 'lightmagenta'},
     command = {fg = 'lightgreen', bold = true},
     func = {fg = 'yellow'},
     keyword = {fg = 'red'},
@@ -42,21 +44,35 @@ local RULES = {
     -- comments
     { {hl='comment', kind='comment'} },
     -- punctuation
-    { {hl='punctuation', pat='^%W+$'} },
-    { {hl='flag', kind='STRING', pat='^%-'} },
+    { {hl='punctuation', regex='^\\W+$'} },
+    { {hl='flag', kind='STRING', regex='^-'} },
     -- strings
     {
-        {hl='string', kind={'Dnull', 'Snull'}},
-        {hl='string', not_kind={'Dnull', 'Snull'}, mod='*'},
-        {hl='string', kind={'Dnull', 'Snull'}, mod='?'},
+        {hl='string', kind='Dnull|Snull'},
+        {hl='string', not_kind='Dnull|Snull', mod='*'},
+        {hl='string', kind='Dnull|Snull', mod='?'},
     },
+    -- escapes
+    {{ kind='STRING', contains={
+        {hl='escape', kind='Bnull'},
+        {hl='escape', kind='', hlregex='^x\\d{0,2}|^u\\d{0,4}|^[^ux ]'},
+    } }},
+    {{ kind='STRING', contains={
+        {hl='escape', kind='Bnull'},
+        {hl='escape_space', kind='', hlregex='^ '},
+    } }},
     -- heredocs
     { {hl='string', kind='heredoc_body'} },
-    { {hl='heredoc_tag', kind={'heredoc_open_tag', 'heredoc_close_tag'}} },
+    { {hl='heredoc_tag', kind='heredoc_open_tag|heredoc_close_tag'} },
     -- reset highlight on substitutions in strings
     { {kind='STRING', contains={ {hl='normal', kind='substitution'} } } },
+    -- variables
     {
-        {hl='variable', kind={'Qstring', 'String'}},
+        {hl='variable', kind='Qstring|String'},
+        {hl='variable', kind='|String|Quest'},
+    },
+    {
+        {hl='variable', kind='Qstring|String'},
         {hl='variable', kind='Inbrace'},
         {hl='variable', mod='*?'},
         {hl='variable', kind='Outbrace'},
@@ -64,7 +80,7 @@ local RULES = {
     -- this will match the first string then consume the rest
     {
         {hl='command', kind='STRING'},
-        {not_kind={'SEPER', 'BAR', 'DBAR', 'AMPER', 'DAMPER', 'BARAMP', 'AMPERBANG', 'SEMIAMP', 'SEMIBAR'}, mod='*'},
+        {not_kind='SEPER|BAR|DBAR|AMPER|DAMPER|BARAMP|AMPERBANG|SEMIAMP|SEMIBAR', mod='*'},
     },
     -- but reset highlights on these
     { {kind='redirect', contains={ {hl='normal', kind='STRING'} }} },
@@ -72,10 +88,10 @@ local RULES = {
     { {kind='function', contains={ {hl='func', kind='FUNC'}, {hl='func', kind='STRING', mod='?'} }} },
     { {kind='function', contains={ {mod='^'}, {hl='func', kind='STRING'} }} },
     -- keywords
-    { {hl='keyword', kind={'CASE', 'COPROC', 'DOLOOP', 'DONE', 'ELIF', 'ELSE', 'ZEND', 'ESAC', 'FI', 'FOR', 'FOREACH', 'FUNC', 'IF', 'NOCORRECT', 'REPEAT', 'SELECT', 'THEN', 'TIME', 'UNTIL', 'WHILE', 'TYPESET'} } },
+    { {hl='keyword', kind='CASE|COPROC|DOLOOP|DONE|ELIF|ELSE|ZEND|ESAC|FI|FOR|FOREACH|FUNC|IF|NOCORRECT|REPEAT|SELECT|THEN|TIME|UNTIL|WHILE|TYPESET'} },
     -- unmatched brackets
-    { { hl='error', pat='^%($' }, { not_pat='%)', mod='*' }, { mod='$' } },
-    { { hl='error', pat='^%{$' }, { not_pat='%}', mod='*' }, { mod='$' } },
+    { { hl='error', regex='^\\($' }, { not_regex='\\)', mod='*' }, { mod='$' } },
+    { { hl='error', regex='^\\{$' }, { not_regex='\\}', mod='*' }, { mod='$' } },
 }
 
 local apply_highlight_seq
@@ -97,29 +113,69 @@ local function check_matcher(matcher, func)
 end
 
 local function apply_highlight_matcher(matcher, token, str)
-    if matcher.kind and not check_matcher(matcher.kind, function(x) return x == token.kind end) then
-        return
-    end
-    if matcher.not_kind and check_matcher(matcher.not_kind, function(x) return x == token.kind end) then
-        return
-    end
-    if matcher.pat or matcher.not_pat then
-        local tokstr = string.sub(str, token.start+1, token.finish)
-        if matcher.pat and not check_matcher(matcher.pat, function(x) return string.find(tokstr, x) end) then
+    local tokstr = nil
+    local kind = token.kind or ''
+    if matcher.kind then
+        if type(matcher.kind) == 'string' then
+            matcher.kind = wish.regex(matcher.kind)
+        end
+        if not matcher.kind:is_full_match(kind) then
             return
         end
-        if matcher.not_pat and check_matcher(matcher.not_pat, function(x) return string.find(tokstr, x) end) then
+    end
+    if matcher.not_kind then
+        if type(matcher.not_kind) == 'string' then
+            matcher.not_kind = wish.regex(matcher.not_kind)
+        end
+        if matcher.not_kind:is_full_match(kind) then
+            return
+        end
+    end
+
+    if matcher.regex or matcher.not_regex then
+        tokstr = tokstr or string.sub(str, token.start+1, token.finish)
+        if type(matcher.regex) == 'string' then
+            matcher.regex = wish.regex(matcher.regex)
+        end
+        if type(matcher.not_regex) == 'string' then
+            matcher.not_regex = wish.regex(matcher.not_regex)
+        end
+        if matcher.regex and not matcher.regex:is_full_match(tokstr) then
+            return
+        end
+        if matcher.not_regex and matcher.not_regex:is_full_match(tokstr) then
             return
         end
     end
 
     local highlights = {}
     if matcher.hl then
-        local hl = wish.iter(HL[matcher.hl]):copy()
-        hl.start = token.start
-        hl.finish = token.finish
-        hl.namespace = NAMESPACE
-        table.insert(highlights, hl)
+
+        if matcher.hlregex then
+            if type(matcher.hlregex) == 'string' then
+                matcher.hlregex = wish.regex(matcher.hlregex)
+            end
+
+            tokstr = tokstr or string.sub(str, token.start+1, token.finish)
+            local matches = matcher.hlregex:find_all(tokstr)
+            if #matches == 0 then
+                return
+            end
+            for _, index in ipairs(matches) do
+                local hl = wish.iter(HL[matcher.hl]):copy()
+                hl.start = token.start + index[1] - 1
+                hl.finish = token.start + index[2]
+                hl.namespace = NAMESPACE
+                table.insert(highlights, hl)
+            end
+
+        else
+            local hl = wish.iter(HL[matcher.hl]):copy()
+            hl.start = token.start
+            hl.finish = token.finish
+            hl.namespace = NAMESPACE
+            table.insert(highlights, hl)
+        end
     end
 
     if matcher.contains then
