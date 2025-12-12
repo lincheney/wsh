@@ -116,6 +116,20 @@ impl Buffer {
         self.fix_cursor();
     }
 
+    pub fn insert_or_set(&mut self, contents: Option<&[u8]>, cursor: Option<usize>) {
+        if let Some(contents) = contents {
+            // see if this can be done as an insert
+            let (prefix, suffix) = &self.contents.split_at_checked(self.cursor).unwrap_or((self.contents.as_ref(), b""));
+            if contents.starts_with(prefix) && contents.ends_with(suffix) {
+                let contents = &contents[prefix.len() .. contents.len() - suffix.len()];
+                self.insert_at_cursor(contents);
+                self.set(None, cursor);
+                return
+            }
+        }
+        self.set(contents, cursor);
+    }
+
     pub fn set_contents(&mut self, contents: &[u8]) {
         self.set(Some(contents), None);
     }

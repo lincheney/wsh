@@ -88,19 +88,7 @@ async fn insert_completion(mut ui: Ui, _lua: Lua, val: Match) -> Result<()> {
 
         // see if this can be done as an insert
         let mut ui = this.inner.borrow_mut().await;
-        let cursor = ui.buffer.cursor_byte_pos();
-        let contents = ui.buffer.get_contents();
-        let (prefix, suffix) = &contents.split_at_checked(cursor).unwrap_or((contents, b""));
-
-        if new_buffer.starts_with(prefix) && new_buffer.ends_with(suffix) {
-            let new_buffer = &new_buffer[prefix.len() .. new_buffer.len() - suffix.len()];
-            ui.buffer.insert_at_cursor(new_buffer);
-            if ui.buffer.get_cursor() != new_pos {
-                ui.buffer.set_cursor(new_pos);
-            }
-        } else {
-            ui.buffer.set(Some(&new_buffer), Some(new_pos));
-        }
+        ui.buffer.insert_or_set(Some(new_buffer.as_ref()), Some(new_pos));
     }
 
     ui.trigger_buffer_change_callbacks(()).await;

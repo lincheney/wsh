@@ -534,7 +534,7 @@ impl Ui {
                     if let Some(output) = &output {
                         ui.tui.add_zle_message(output.as_ref());
                     }
-                    ui.buffer.set(buffer.as_ref().map(|x| x.as_ref()), cursor);
+                    ui.buffer.insert_or_set(buffer.as_ref().map(|x| x.as_ref()), cursor);
                 }
 
                 if buffer.is_some() || cursor.is_some() || output.is_some() {

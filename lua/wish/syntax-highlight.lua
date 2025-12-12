@@ -1,4 +1,5 @@
 local prev_buffer = nil
+local prev_complete = false
 
 local NAMESPACE = wish.add_buf_highlight_namespace()
 
@@ -246,17 +247,18 @@ end
 
 wish.add_event_callback('buffer_change', function()
     local buffer = wish.get_buffer()
-    if buffer ~= prev_buffer then
-        -- rehighlight
+    -- rehighlight if last buffer was not a valid zsh command
+    -- or the new buffer has changed (excepting ending whitespace changes)
+    if not prev_complete or string.sub(buffer, 1, #prev_buffer) ~= prev_buffer or string.find(buffer, '%S', #prev_buffer+1) then
         -- is this going to be slow? do we need a debounce or something?
         local complete, tokens = wish.parse(buffer)
         -- wish.pprint(tokens)
         wish.log.debug(wish.repr(debug_tokens(tokens, buffer), true))
+        prev_buffer = buffer
+        prev_complete = complete
 
         wish.clear_buf_highlights(NAMESPACE)
         apply_highlight_rules(RULES, tokens, buffer)
         wish.redraw{buffer = true}
-
-        prev_buffer = buffer
     end
 end)
