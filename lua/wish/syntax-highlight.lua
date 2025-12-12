@@ -18,8 +18,7 @@ local RULES = {
     -- comments
     { {hl='comment', kind='comment'} },
     -- punctuation
-    { {hl='punctuation', regex='^\\W+$'} },
-    { {hl='flag', kind='STRING', regex='^-'} },
+    { {hl='symbol', regex='^\\W+$'} },
     -- strings
     {
         {hl='string', kind='Dnull|Snull'},
@@ -57,7 +56,10 @@ local RULES = {
     { {hl='env_var_key', kind='ENVSTRING', hlregex='^[^=]+'} },
     { {hl='env_var_value', kind='ENVSTRING', hlregex='=(.*)$'} },
     -- reset highlight on substitutions in strings
-    { {kind='STRING', contains={ {hl='normal', kind='substitution'} } } },
+    { {kind='STRING', contains={
+        {hl='normal', kind='substitution', contains={{hl='symbol', regex='^\\W+$'}} },
+    } } },
+    { {hl='flag', kind='STRING', regex='^-'} },
     { {kind='heredoc_body', contains={ {contains={ {hl='normal', kind='substitution'} } } } } },
     -- variables
     {

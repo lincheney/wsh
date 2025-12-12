@@ -21,7 +21,7 @@ M.variable = {fg = 'lightmagenta'}
 M.command = {fg = '#aaffaa', bold = true}
 M.func = {fg = 'yellow'}
 M.keyword = {fg = 'red'}
-M.punctuation = {fg = 'cyan'}
+M.symbol = {fg = 'cyan'}
 M.comment = {fg = 'grey'}
 M.env_var_key = {fg = '#aa77ff'}
 M.env_var_value = {fg = '#77aaff'}
