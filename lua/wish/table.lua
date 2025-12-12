@@ -12,7 +12,7 @@ function M.copy(tbl, deep)
 end
 
 function M.merge(tbl, ...)
-    for _, other in ipairs(...) do
+    for _, other in ipairs{...} do
         for k, v in pairs(other) do
             tbl[k] = v
         end
@@ -21,7 +21,7 @@ function M.merge(tbl, ...)
 end
 
 function M.deep_merge(tbl, ...)
-    for _, other in ipairs(...) do
+    for _, other in ipairs{...} do
         for k, v in pairs(other) do
             if type(tbl[k]) == 'table' and type(v) == 'table' then
                 v = M.deep_merge(tbl[k], v)
