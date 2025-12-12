@@ -356,16 +356,6 @@ async fn remove_message(ui: Ui, _lua: Lua, id: usize) -> Result<()> {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-struct Highlight {
-    start: usize,
-    finish: usize,
-    #[serde(flatten)]
-    style: StyleOptions,
-    namespace: Option<usize>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
 struct BufferHighlight {
     start: usize,
     finish: usize,

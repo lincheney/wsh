@@ -76,12 +76,6 @@ impl Token {
     }
 }
 
-enum State<'a> {
-    None,
-    HereDocTag,
-    HereDocBody(&'a CStr),
-}
-
 fn find_str(needle: &BStr, haystack: &BStr, start: usize) -> Option<Range<usize>> {
     let start = start + match needle.as_bytes() {
         b";" => haystack[start..].iter().position(|&c| c == b';' || c == b'\n'),

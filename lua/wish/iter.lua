@@ -9,26 +9,23 @@ setmetatable(M, {
 
 M.__index = M
 
-function M.copy(self, deep)
+function M.cloned(self, deep)
+    local TABLE = require('wish/table')
+    return make_iter(function(...)
+        local k, v = self(...)
+        return k, TABLE.copy(v, deep)
+    end)
+end
+
+function M.collect(self)
     local new = M{}
     for k, v in self do
         if type(k) == 'number' and k % 1 == 0 and k >= 1 and new[k] ~= nil then
             k = #new + 1
         end
-
-        if type(v) == 'table' and deep then
-            new[k] = M.copy(M(v), deep)
-        else
-            new[k] = v
-        end
+        new[k] = v
     end
     return new
-end
-
-M.collect = M.copy
-
-function M.deepcopy(self)
-    return M.copy(self, true)
 end
 
 function M.__call(self, state, var)

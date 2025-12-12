@@ -1,3 +1,4 @@
+use crate::lua::{HasEventCallbacks};
 use anyhow::Result;
 use mlua::{prelude::*};
 use crate::ui::{Ui, ThreadsafeUiInner};
@@ -69,18 +70,21 @@ async fn goto_history(ui: Ui, _lua: Lua, val: usize) -> Result<Option<usize>> {
     }).await;
 
     if let Some((latest, histnum, text)) = result {
-        let ui = ui.unlocked.read();
-        let mut ui = ui.inner.borrow_mut().await;
-        if Some(histnum) == latest {
-            // restore history if off history
-            ui.buffer.restore();
-        } else {
-            // save the buffer if moving to another history
-            if Some(current.into()) == latest {
-                ui.buffer.save();
+        {
+            let ui = ui.unlocked.read();
+            let mut ui = ui.inner.borrow_mut().await;
+            if Some(histnum) == latest {
+                // restore history if off history
+                ui.buffer.restore();
+            } else {
+                // save the buffer if moving to another history
+                if Some(current.into()) == latest {
+                    ui.buffer.save();
+                }
+                ui.buffer.set(Some(text.as_bytes()), Some(text.len()));
             }
-            ui.buffer.set(Some(text.as_bytes()), Some(text.len()));
         }
+        ui.trigger_buffer_change_callbacks(()).await;
         Ok(Some(histnum as _))
     } else {
         Ok(None)

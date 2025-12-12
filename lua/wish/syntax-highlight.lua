@@ -14,33 +14,6 @@ local function debug_tokens(tokens, buffer)
     return x
 end
 
-local HL = {
-    normal = {
-        fg = 'reset',
-        bg = 'reset',
-        bold = false,
-        dim = false,
-        italic = false,
-        underline = false,
-        strikethrough = false,
-        reversed = false,
-        blink = false,
-        blend = false,
-    },
-    flag = {fg = '#ffaaaa'},
-    escape = {fg = '#ffaaaa'},
-    escape_space = {fg = '#ffaaaa', bg = '#442222'},
-    string = {fg = '#ffffaa', bg='#333300'},
-    heredoc_tag = {fg = 'lightblue', bold = true},
-    variable = {fg = 'lightmagenta'},
-    command = {fg = 'lightgreen', bold = true},
-    func = {fg = 'yellow'},
-    keyword = {fg = 'red'},
-    punctuation = {fg = 'cyan'},
-    comment = {fg = 'grey'},
-    error = {bg = 'red'},
-}
-
 local RULES = {
     -- comments
     { {hl='comment', kind='comment'} },
@@ -168,7 +141,7 @@ local function apply_highlight_matcher(matcher, token, str)
             tokstr = tokstr or string.sub(str, token.start+1, token.finish)
             local matches = matcher.hlregex:find_all(tokstr)
             for _, index in ipairs(matches) do
-                local hl = wish.iter(HL[matcher.hl]):copy()
+                local hl = wish.table.copy(wish.style[matcher.hl])
                 hl.start = token.start + index[1] - 1
                 hl.finish = token.start + index[2]
                 hl.namespace = NAMESPACE
@@ -176,7 +149,7 @@ local function apply_highlight_matcher(matcher, token, str)
             end
 
         else
-            local hl = wish.iter(HL[matcher.hl]):copy()
+            local hl = wish.table.copy(wish.style[matcher.hl])
             hl.start = token.start
             hl.finish = token.finish
             hl.namespace = NAMESPACE
