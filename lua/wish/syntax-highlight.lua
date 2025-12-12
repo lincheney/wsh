@@ -17,14 +17,15 @@ end
 local HL = {
     normal = {
         fg = 'reset',
-        bg='reset',
-        bold=false,
-        dim=false,
-        italic=false,
-        underline=false,
-        strikethrough=false,
-        reversed=false,
-        blink=false,
+        bg = 'reset',
+        bold = false,
+        dim = false,
+        italic = false,
+        underline = false,
+        strikethrough = false,
+        reversed = false,
+        blink = false,
+        blend = false,
     },
     flag = {fg = '#ffaaaa'},
     escape = {fg = '#ffaaaa'},
@@ -52,31 +53,36 @@ local RULES = {
         {hl='string', not_kind='Dnull|Snull', mod='*'},
         {hl='string', kind='Dnull|Snull', mod='?'},
     },
+    -- heredocs
+    { {hl='string', kind='heredoc_body'} },
+    { {hl='heredoc_tag', kind='heredoc_open_tag|heredoc_close_tag'} },
     -- escapes
     {{ kind='STRING', contains={
         {hl='escape', kind='Bnull'},
-        {hl='escape', kind='', regex='^.', hlregex='^.'},
-    } }},
-    {{ kind='STRING', contains={
-        {kind='String'},
-        {kind='Snull'},
-        {hl='escape', not_kind='Snull', hlregex=[=[\\x[0-9a-fA-F]{0,2}|\\u\d{0,4}|\\[^ux ]]=], mod='*'},
-        {kind='Snull', mod='?'},
-    } }},
-    {{ kind='STRING', contains={
-        {kind='Dnull'},
-        {hl='escape', not_kind='Dnull', hlregex=[=[\\x[0-9a-fA-F]{0,2}|\\u\d{0,4}|\\[^ux ]]=], mod='*'},
-        {kind='Dnull', mod='?'},
+        {hl='escape', kind='', regex='^[^ ]', hlregex='^[^ ]'},
     } }},
     {{ kind='STRING', contains={
         {hl='escape_space', kind='Bnull'},
         {hl='escape_space', kind='', regex='^ ', hlregex='^ '},
     } }},
-    -- heredocs
-    { {hl='string', kind='heredoc_body'} },
-    { {hl='heredoc_tag', kind='heredoc_open_tag|heredoc_close_tag'} },
+    {{ kind='STRING', contains={
+        {kind='String'},
+        {kind='Snull'},
+        {hl='escape', not_kind='Snull', hlregex=[=[\\x[0-9a-fA-F]{0,2}|\\u\d{0,4}|\\.]=], mod='*'},
+        {kind='Snull', mod='?'},
+    } }},
+    {{ kind='STRING', contains={
+        {kind='Dnull'},
+        {hl='escape', not_kind='Dnull', hlregex='\\\\.', mod='*'},
+        {kind='Dnull', mod='?'},
+    } }},
+    {{ kind='heredoc_body', contains={{contains={
+        { hl='escape', kind='Bnull'},
+        { hl='escape', hlregex='^[\\\\$]'},
+    } }} }},
     -- reset highlight on substitutions in strings
     { {kind='STRING', contains={ {hl='normal', kind='substitution'} } } },
+    { {kind='heredoc_body', contains={ {contains={ {hl='normal', kind='substitution'} } } } } },
     -- variables
     {
         {hl='variable', kind='Qstring|String'},
