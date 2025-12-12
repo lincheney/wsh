@@ -159,6 +159,14 @@ pub struct StyleOptions {
     pub blink: Option<bool>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct BufferStyleOptions {
+    #[serde(flatten)]
+    inner: StyleOptions,
+    no_blend: bool,
+}
+
 impl From<StyleOptions> for tui::StyleOptions {
     fn from(style: StyleOptions) -> Self {
         Self {
@@ -355,16 +363,29 @@ struct Highlight {
     namespace: Option<usize>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct BufferHighlight {
+    start: usize,
+    finish: usize,
+    #[serde(flatten)]
+    style: BufferStyleOptions,
+    namespace: Option<usize>,
+}
+
 async fn add_buf_highlight(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
     let ui = ui.get();
-    let hl: Highlight = lua.from_value(val)?;
-    let style: tui::StyleOptions = hl.style.into();
+    let hl: BufferHighlight = lua.from_value(val)?;
+    let style: BufferStyleOptions = hl.style.into();
+    let blend = !style.no_blend;
+    let style: tui::StyleOptions = style.inner.into();
 
     ui.inner.borrow_mut().await.buffer.highlights.push(crate::buffer::Highlight{
         start: hl.start,
         end: hl.finish,
         style: style.as_style(),
         namespace: hl.namespace.unwrap_or(0),
+        blend,
     });
 
     Ok(())

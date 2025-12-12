@@ -18,6 +18,7 @@ pub struct Highlight {
     pub end: usize,
     pub style: Style,
     pub namespace: usize,
+    pub blend: bool,
 }
 
 impl Highlight {
@@ -48,6 +49,10 @@ impl HighlightStack<'_> {
     fn merge(&self) -> Style {
         let mut style = Style::new();
         for h in &self.0 {
+            if !h.blend {
+                // start from scratch
+                style = Style::new();
+            }
             style = style.patch(h.style);
         }
         style
