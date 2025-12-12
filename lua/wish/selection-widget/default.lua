@@ -46,6 +46,10 @@ local function score(haystack, needle)
 end
 
 local function recalc_filter()
+    if not state then
+        return
+    end
+
     local buffer = wish.get_buffer()
     local filter = buffer:sub(#state.buffer + 1)
 
