@@ -98,7 +98,7 @@ local RULES = {
     -- but reset highlights on these
     { {kind='redirect', contains={ {hl='normal', kind='STRING'} }} },
     -- function
-    { {kind='function', contains={ {hl='func', kind='FUNC'}, {hl='func', kind='STRING'} }} },
+    { {kind='function', contains={ {hl='func', kind='FUNC'}, {hl='func', kind='STRING', mod='?'} }} },
     { {kind='function', contains={ {mod='^'}, {hl='func', kind='STRING'} }} },
     -- unmatched brackets
     { { hl='error', pat='^%($' }, { not_pat='%)', mod='*' }, { mod='$' } },
@@ -154,7 +154,7 @@ local function apply_highlight_matcher(matcher, token, str)
             -- matcher asserts nested tokens but there aren't any
             return
         end
-        local hl = apply_highlight_seq(matcher.contains, token.nested, str)
+        local hl = apply_highlight_seq(matcher.contains, token.nested, str, false)
         if not hl then
             -- nested rules don't match
             return
@@ -198,7 +198,13 @@ local function apply_highlight_seq_at(seq, seq_index, tokens, str, token_index)
                 return not_greedy and unpack(not_greedy)
             end
             next_matcher = true
-            hl = {}
+
+        elseif mod == '^' then
+            if token_index ~= 1 then
+                -- expected the start
+                return not_greedy and unpack(not_greedy)
+            end
+            next_matcher = true
 
         elseif not token then
             -- ran out of tokens before the end of the seq
@@ -233,12 +239,12 @@ local function apply_highlight_seq_at(seq, seq_index, tokens, str, token_index)
     return highlights, token_index
 end
 
-function apply_highlight_seq(seq, tokens, str)
+function apply_highlight_seq(seq, tokens, str, do_nested)
     local highlights = nil
     local token_index = 1
     for i = 1, #tokens do
-        if tokens[i].nested then
-            local hl = apply_highlight_seq(seq, tokens[i].nested, str)
+        if do_nested and tokens[i].nested then
+            local hl = apply_highlight_seq(seq, tokens[i].nested, str, do_nested)
             if hl then
                 highlights = highlights or {}
                 append_highlights(highlights, hl)
@@ -261,7 +267,7 @@ end
 
 local function apply_highlight_rules(rules, tokens, str)
     for i = 1, #rules do
-        local hl = apply_highlight_seq(rules[i], tokens, str)
+        local hl = apply_highlight_seq(rules[i], tokens, str, true)
         if hl then
             for _, hl in ipairs(hl) do
                 wish.add_buf_highlight(hl)

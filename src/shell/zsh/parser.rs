@@ -279,6 +279,11 @@ fn apply_custom_token(cmd: &BStr, tokens: &mut Vec<Token>, start: usize, mut end
                 Token{kind: Some(TokenKind::Lextok(lextok::INOUTPAR)), ..},
                 Token{kind: Some(TokenKind::Lextok(lextok::INBRACE | lextok::INPAR)), ..},
             ..] => Some((TokenKind::Function, None, 4)),
+            // function {
+            [
+                Token{kind: Some(TokenKind::Lextok(lextok::FUNC)), ..},
+                Token{kind: Some(TokenKind::Lextok(lextok::INBRACE)), ..},
+            ..] => Some((TokenKind::Function, None, 2)),
             // STRING () [[{]
             [
                 Token{kind: None | Some(TokenKind::Lextok(lextok::STRING | lextok::LEXERR)), ..},
