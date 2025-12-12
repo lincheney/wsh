@@ -1,3 +1,4 @@
+use std::os::raw::{c_char};
 use serde::{Deserialize};
 use std::ops::Range;
 use std::ffi::CStr;
@@ -5,11 +6,20 @@ use std::ptr::null_mut;
 use bstr::{BString, BStr, ByteSlice};
 use super::bindings::{Meta, token, lextok};
 
-#[derive(Default, Clone, Copy, Deserialize)]
+#[derive(Clone, Copy, Deserialize)]
 #[serde(default)]
 pub struct ParserOptions {
     comments: Option<bool>,
     custom: bool,
+}
+
+impl Default for ParserOptions {
+    fn default() -> Self {
+        Self {
+            comments: Default::default(),
+            custom: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -20,6 +30,9 @@ pub enum TokenKind {
     Redirect,
     Function,
     Comment,
+    HeredocOpenTag,
+    HeredocCloseTag,
+    HeredocBody,
 }
 
 impl std::fmt::Display for TokenKind {
@@ -30,6 +43,9 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Substitution => write!(fmt, "substitution"),
             TokenKind::Redirect => write!(fmt, "redirect"),
             TokenKind::Function => write!(fmt, "function"),
+            TokenKind::HeredocOpenTag => write!(fmt, "heredoc_open_tag"),
+            TokenKind::HeredocCloseTag => write!(fmt, "heredoc_close_tag"),
+            TokenKind::HeredocBody => write!(fmt, "heredoc_body"),
             TokenKind::Comment => write!(fmt, "comment"),
         }
     }
@@ -43,8 +59,8 @@ pub struct Token {
 }
 
 impl Token {
-    pub fn as_str<'a>(&self, cmd: &'a BStr) -> &'a BStr {
-        &cmd[self.range.clone()]
+    pub fn as_str<'a>(&self, cmd: &'a BStr, range_offset: usize) -> &'a BStr {
+        &cmd[self.range.start - range_offset .. self.range.end - range_offset]
     }
 
     pub fn remove_dummy_from_nested(&mut self, len: usize) {
@@ -58,6 +74,12 @@ impl Token {
             tok = nested.last_mut().unwrap();
         }
     }
+}
+
+enum State<'a> {
+    None,
+    HereDocTag,
+    HereDocBody(&'a CStr),
 }
 
 fn find_str(needle: &BStr, haystack: &BStr, start: usize) -> Option<Range<usize>> {
@@ -109,6 +131,7 @@ fn parse_internal(cmd: &BStr, options: ParserOptions, range_offset: usize) -> (b
     let metafied = unsafe{ CStr::from_ptr(ptr) };
     let metalen = metafied.count_bytes();
     let mut complete = true;
+    let mut heredocs = vec![];
     let mut tokens = vec![];
     let mut start = 0;
 
@@ -213,6 +236,12 @@ fn parse_internal(cmd: &BStr, options: ParserOptions, range_offset: usize) -> (b
                     let range = nested[0].range.start .. nested.last().unwrap().range.end;
                     tokens.push(Token{range, kind, nested: Some(nested)});
                 }
+
+                // previous token was a <<
+                if tokens.len() > 1 && matches!(tokens[tokens.len()-2].kind, Some(TokenKind::Lextok(lextok::DINANG | lextok::DINANGDASH))) {
+                    heredocs.push((tokens.len()-1, zsh_sys::tokstr));
+                }
+
             }
 
             if zsh_sys::tok == zsh_sys::lextok_LEXERR || (zsh_sys::errflag & zsh_sys::errflag_bits_ERRFLAG_INT as i32) > 0 {
@@ -232,12 +261,90 @@ fn parse_internal(cmd: &BStr, options: ParserOptions, range_offset: usize) -> (b
         zsh_sys::zcontext_restore();
     }
 
+    complete = find_heredocs(cmd, &mut tokens, range_offset, &heredocs) && complete;
     if options.custom {
         let len = tokens.len();
         apply_custom_token(cmd, options, &mut tokens, 0, len, range_offset);
     }
 
     (complete, tokens)
+}
+
+fn find_heredocs(cmd: &BStr, tokens: &mut Vec<Token>, range_offset: usize, heredocs: &Vec<(usize, *mut c_char)>) -> bool {
+
+    let mut offset = 0;
+    let mut prev_index = 0;
+
+    for (index, tokstr) in heredocs {
+        let index = index - offset;
+        if index < prev_index {
+            // this heredoc has probably been deleted as hit
+            continue
+        }
+        prev_index = index;
+
+        let tag = unsafe { CStr::from_ptr(zsh_sys::quotesubst(*tokstr)) }.to_bytes();
+        let allow_tabs = matches!(tokens[index-1].kind, Some(TokenKind::Lextok(lextok::DINANGDASH)));
+
+        let mut newlines = tokens[index+1..]
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.as_str(cmd, range_offset) == b"\n")
+            .map(|(i, _)| index + 1 + i);
+
+        // look for the first newline
+        let Some(heredoc_start) = newlines.next()
+            else { break };
+        let mut heredoc_end = None;
+
+        // iterate over all lines
+        let mut prev_newline = heredoc_start;
+        for i in newlines.chain(std::iter::once(tokens.len())) {
+
+            let start = tokens[prev_newline].range.end;
+            let end = tokens.get(i).map_or(cmd.len(), |tok| tok.range.start);
+
+            let line = &cmd[start .. end];
+            if line == tag || (allow_tabs && line.trim_start_with(|c| c == '\t') == tag) {
+                // found the tag
+                heredoc_end = Some((prev_newline, i));
+                break
+            }
+            prev_newline = i;
+        }
+
+        // the opening tag is at index
+        // the body is everything from heredoc_start+1 .. heredoc_end.0
+        // the closing tag is at heredoc_end.0+1 .. heredoc_end.1
+        // do in descending order of indexes as it will shift things
+
+        if let Some(heredoc_end) = heredoc_end {
+            let range = heredoc_end.0+1 .. heredoc_end.1;
+            let token = Token{
+                kind: Some(TokenKind::HeredocCloseTag),
+                range: tokens[range.start].range.start .. tokens[range.end-1].range.end,
+                nested: None,
+            };
+            offset += range.end - range.start + 1;
+            tokens.splice(range, [token]);
+        }
+
+        let kind = Some(TokenKind::HeredocBody);
+        let range = heredoc_start+1 .. heredoc_end.unwrap_or((tokens.len(), 0)).0;
+        let token = nest_tokens(tokens, range.start, range.end, kind);
+        for n in token.nested.iter_mut().flatten() {
+            n.kind = None;
+        }
+        offset += range.end - range.start + 1;
+
+        tokens[index].kind = Some(TokenKind::HeredocOpenTag);
+
+        if heredoc_end.is_none() {
+            return false
+        }
+    }
+
+    true
 }
 
 fn apply_custom_token(cmd: &BStr, options: ParserOptions, tokens: &mut Vec<Token>, start: usize, mut end: usize, range_offset: usize) {
@@ -311,7 +418,7 @@ fn apply_custom_token(cmd: &BStr, options: ParserOptions, tokens: &mut Vec<Token
             match kind {
                 TokenKind::Substitution => {
                     let tok = tok.unwrap();
-                    let cmd = &cmd[tok.range.start - range_offset .. tok.range.end - range_offset];
+                    let cmd = tok.as_str(cmd, range_offset);
                     tok.nested = Some(parse_internal(cmd, options, tok.range.start).1);
                 },
                 TokenKind::Function => {
