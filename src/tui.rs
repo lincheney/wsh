@@ -67,6 +67,14 @@ fn buffer_nonempty_height(buffer: &Buffer) -> u16 {
     buffer.area.height - trailing_empty_lines as u16
 }
 
+#[derive(Default, Debug, Clone, Copy)]
+pub enum UnderlineOption {
+    #[default]
+    None,
+    Set,
+    Color(Color),
+}
+
 #[derive(Debug, Default)]
 pub struct StyleOptions {
     pub fg: Option<Color>,
@@ -74,7 +82,7 @@ pub struct StyleOptions {
     pub bold: Option<bool>,
     pub dim: Option<bool>,
     pub italic: Option<bool>,
-    pub underline: Option<Option<Color>>,
+    pub underline: Option<UnderlineOption>,
     pub strikethrough: Option<bool>,
     pub reversed: Option<bool>,
     pub blink: Option<bool>,
@@ -82,12 +90,25 @@ pub struct StyleOptions {
 
 impl StyleOptions {
     pub fn as_style(&self) -> Style {
+        let mut add_modifier = Modifier::empty();
+        let mut sub_modifier = Modifier::empty();
+        let mut underline_color = None;
+        match self.underline {
+            None => (),
+            Some(UnderlineOption::None) => { sub_modifier |= Modifier::UNDERLINED; },
+            Some(UnderlineOption::Set) => { add_modifier |= Modifier::UNDERLINED; },
+            Some(UnderlineOption::Color(color)) => {
+                underline_color = Some(color);
+                add_modifier |= Modifier::UNDERLINED;
+            },
+        }
+
         let mut style = Style {
             fg: self.fg,
             bg: self.bg,
-            underline_color: self.underline.flatten(),
-            add_modifier: Modifier::empty(),
-            sub_modifier: Modifier::empty(),
+            underline_color,
+            add_modifier,
+            sub_modifier,
         };
 
         macro_rules! set_modifier {

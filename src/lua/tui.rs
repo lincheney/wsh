@@ -140,7 +140,7 @@ pub struct UnderlineStyleOptions {
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
-pub enum UnderlineOptions {
+pub enum UnderlineOption {
     Bool(bool),
     Options(UnderlineStyleOptions),
 }
@@ -153,7 +153,7 @@ pub struct StyleOptions {
     pub bold: Option<bool>,
     pub dim: Option<bool>,
     pub italic: Option<bool>,
-    pub underline: Option<UnderlineOptions>,
+    pub underline: Option<UnderlineOption>,
     pub strikethrough: Option<bool>,
     pub reversed: Option<bool>,
     pub blink: Option<bool>,
@@ -176,9 +176,10 @@ impl From<StyleOptions> for tui::StyleOptions {
             dim: style.dim,
             italic: style.italic,
             underline: match style.underline {
-                None | Some(UnderlineOptions::Bool(false)) => None,
-                Some(UnderlineOptions::Bool(true)) => Some(None),
-                Some(UnderlineOptions::Options(opts)) => Some(Some(opts.color.0)),
+                None => None,
+                Some(UnderlineOption::Bool(false)) => Some(tui::UnderlineOption::None),
+                Some(UnderlineOption::Bool(true)) => Some(tui::UnderlineOption::Set),
+                Some(UnderlineOption::Options(opts)) => Some(tui::UnderlineOption::Color(opts.color.0)),
             },
             strikethrough: style.strikethrough,
             reversed: style.reversed,
