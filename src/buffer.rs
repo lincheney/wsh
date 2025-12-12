@@ -243,18 +243,25 @@ impl Buffer {
         self.byte_pos(self.cursor)
     }
 
-    pub fn render<W :Write>(&mut self, drawer: &mut Drawer<W>) -> std::io::Result<()> {
+    pub fn render<W :Write>(&mut self, drawer: &mut Drawer<W>, old_height: u16) -> std::io::Result<()> {
 
         let cursor = self.cursor_byte_pos();
         if cursor == 0 {
             self.cursor_coord = drawer.cur_pos;
         }
 
+        let mut old_height = Some(old_height);
         let escape_style = Style::default().fg(Color::Gray);
         let mut stack = HighlightStack(vec![]);
         let mut cell = ratatui::buffer::Cell::default();
 
         for (i, (start, end, c)) in self.contents.grapheme_indices().enumerate() {
+            if old_height.is_some_and(|h| drawer.cur_pos.1 >= h) {
+                // we don't know whats down here so clear it
+                drawer.clear_to_end_of_screen()?;
+                old_height = None;
+            }
+
             if self.highlights.iter().any(|h| h.start == i || h.end == i) {
                 stack.0.splice(.., self.highlights.iter().filter(|h| h.start <= i && i < h.end));
                 cell = Default::default();

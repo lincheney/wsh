@@ -635,7 +635,7 @@ impl Tui {
         // redraw the buffer
         if clear || buffer.dirty {
             drawer.cur_pos = (prompt.width, prompt.height - 1);
-            buffer.render(&mut drawer)?;
+            buffer.render(&mut drawer, old_height.0 + old_height.1)?;
         }
         // move to end of buffer
         drawer.cur_pos = buffer.draw_end_pos;
