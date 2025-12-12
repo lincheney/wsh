@@ -51,8 +51,11 @@ local RULES = {
     } }},
     {{ kind='heredoc_body', contains={{contains={
         { hl='escape', kind='Bnull'},
-        { hl='escape', hlregex='^[\\\\$]'},
+        { hl='escape', regex='^[\\\\$]', hlregex='^[\\\\$]'},
     } }} }},
+    -- env vars
+    { {hl='env_var_key', kind='ENVSTRING', hlregex='^[^=]+'} },
+    { {hl='env_var_value', kind='ENVSTRING', hlregex='=(.*)$'} },
     -- reset highlight on substitutions in strings
     { {kind='STRING', contains={ {hl='normal', kind='substitution'} } } },
     { {kind='heredoc_body', contains={ {contains={ {hl='normal', kind='substitution'} } } } } },
@@ -139,8 +142,9 @@ local function apply_highlight_matcher(matcher, token, str)
             end
 
             tokstr = tokstr or string.sub(str, token.start+1, token.finish)
-            local matches = matcher.hlregex:find_all(tokstr)
-            for _, index in ipairs(matches) do
+            local captures = matcher.hlregex:captures_all(tokstr)
+            for _, capture in ipairs(captures) do
+                local index = capture[2] or capture[1]
                 local hl = wish.table.copy(wish.style[matcher.hl])
                 hl.start = token.start + index[1] - 1
                 hl.finish = token.start + index[2]
