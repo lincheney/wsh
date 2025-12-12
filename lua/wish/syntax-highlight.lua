@@ -40,7 +40,7 @@ local RULES = {
     -- comments
     { {hl='comment', kind='comment'} },
     -- punctuation
-    { {hl='punctuation', pat='^%W+$' } },
+    { {hl='punctuation', pat='^%W+$'} },
     -- strings
     { {hl='flag', kind='STRING', pat='^%-'} },
     {
@@ -249,7 +249,7 @@ wish.add_event_callback('buffer_change', function()
     if buffer ~= prev_buffer then
         -- rehighlight
         -- is this going to be slow? do we need a debounce or something?
-        local complete, tokens = wish.parse(buffer, true)
+        local complete, tokens = wish.parse(buffer)
         -- wish.pprint(tokens)
         wish.log.debug(wish.repr(debug_tokens(tokens, buffer), true))
 
