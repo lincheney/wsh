@@ -1,5 +1,5 @@
 use anyhow::Result;
-use mlua::{prelude::*, UserData, UserDataMethods};
+use mlua::{prelude::*, UserData, UserDataMethods, MetaMethod};
 use crate::ui::Ui;
 
 struct Regex {
@@ -8,6 +8,9 @@ struct Regex {
 
 impl UserData for Regex {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
+        methods.add_meta_method(MetaMethod::ToString, |_lua, regex, ()| {
+            Ok(format!("{:?}", regex.inner.as_str()))
+        });
         methods.add_method("is_match", |_lua, regex, (arg, start): (LuaString, Option<usize>)| {
             Ok(regex.inner.is_match_at(&arg.as_bytes(), start.unwrap_or(0)))
         });

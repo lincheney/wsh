@@ -28,7 +28,7 @@ local HL = {
     },
     flag = {fg = '#ffaaaa'},
     escape = {fg = '#ffaaaa'},
-    escape_space = {fg = '#ffaaaa', underline = true},
+    escape_space = {fg = '#ffaaaa', bg = '#442222'},
     string = {fg = '#ffffaa', bg='#333300'},
     heredoc_tag = {fg = 'lightblue', bold = true},
     variable = {fg = 'lightmagenta'},
@@ -55,11 +55,22 @@ local RULES = {
     -- escapes
     {{ kind='STRING', contains={
         {hl='escape', kind='Bnull'},
-        {hl='escape', kind='', hlregex='^x\\d{0,2}|^u\\d{0,4}|^[^ux ]'},
+        {hl='escape', kind='', regex='^.', hlregex='^.'},
     } }},
     {{ kind='STRING', contains={
-        {hl='escape', kind='Bnull'},
-        {hl='escape_space', kind='', hlregex='^ '},
+        {kind='String'},
+        {kind='Snull'},
+        {hl='escape', not_kind='Snull', hlregex=[=[\\x[0-9a-fA-F]{0,2}|\\u\d{0,4}|\\[^ux ]]=], mod='*'},
+        {kind='Snull', mod='?'},
+    } }},
+    {{ kind='STRING', contains={
+        {kind='Dnull'},
+        {hl='escape', not_kind='Dnull', hlregex=[=[\\x[0-9a-fA-F]{0,2}|\\u\d{0,4}|\\[^ux ]]=], mod='*'},
+        {kind='Dnull', mod='?'},
+    } }},
+    {{ kind='STRING', contains={
+        {hl='escape_space', kind='Bnull'},
+        {hl='escape_space', kind='', regex='^ ', hlregex='^ '},
     } }},
     -- heredocs
     { {hl='string', kind='heredoc_body'} },
@@ -104,14 +115,6 @@ local function append_highlights(highlights, new)
     end
 end
 
-local function check_matcher(matcher, func)
-    if type(matcher) == 'table' then
-        return wish.iter(matcher):any(function(k, v) return func(v) end)
-    else
-        return func(matcher)
-    end
-end
-
 local function apply_highlight_matcher(matcher, token, str)
     local tokstr = nil
     local kind = token.kind or ''
@@ -140,10 +143,10 @@ local function apply_highlight_matcher(matcher, token, str)
         if type(matcher.not_regex) == 'string' then
             matcher.not_regex = wish.regex(matcher.not_regex)
         end
-        if matcher.regex and not matcher.regex:is_full_match(tokstr) then
+        if matcher.regex and not matcher.regex:is_match(tokstr) then
             return
         end
-        if matcher.not_regex and matcher.not_regex:is_full_match(tokstr) then
+        if matcher.not_regex and matcher.not_regex:is_match(tokstr) then
             return
         end
     end
@@ -158,9 +161,6 @@ local function apply_highlight_matcher(matcher, token, str)
 
             tokstr = tokstr or string.sub(str, token.start+1, token.finish)
             local matches = matcher.hlregex:find_all(tokstr)
-            if #matches == 0 then
-                return
-            end
             for _, index in ipairs(matches) do
                 local hl = wish.iter(HL[matcher.hl]):copy()
                 hl.start = token.start + index[1] - 1
