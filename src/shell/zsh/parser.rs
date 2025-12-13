@@ -16,7 +16,7 @@ pub struct ParserOptions {
 impl Default for ParserOptions {
     fn default() -> Self {
         Self {
-            comments: Default::default(),
+            comments: None,
             custom: true,
         }
     }

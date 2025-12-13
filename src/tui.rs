@@ -290,7 +290,7 @@ impl Widget {
 
         // copy the middle borders
         if inner_area.width < area.width {
-            middle_border = Some(buffer.content[..width].into())
+            middle_border = Some(buffer.content[..width].into());
         }
 
         inner_area.y = 0;

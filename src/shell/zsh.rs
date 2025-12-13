@@ -324,7 +324,7 @@ pub fn capture_shout<T, F: FnOnce() -> T>(
         zsh_sys::shout = writer.as_ptr().cast();
         bindings::trashedzle = 1;
         result = f();
-        nix::libc::fflush(zsh_sys::shout as _);
+        nix::libc::fflush(zsh_sys::shout.cast());
         bindings::trashedzle = old_trashedzle;
         zsh_sys::shout = old_shout;
     }

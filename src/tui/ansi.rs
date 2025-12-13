@@ -161,7 +161,7 @@ impl Parser {
     fn splice(&mut self, range: Option<std::ops::Range<usize>>, replace_with: Option<String>, style: Option<Style>) -> usize {
         let line = self.widget.inner.lines.last_mut().unwrap();
         let mut span = replace_with.map(|s| Span::styled(s, style.unwrap_or(self.style)));
-        let span_width = span.as_ref().map(|span| span.width()).unwrap_or(0);
+        let span_width = span.as_ref().map_or(0, |span| span.width());
         let range = range.unwrap_or_else(|| self.cursor_x .. self.cursor_x + span_width);
 
         if range.start >= line.width() {

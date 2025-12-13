@@ -200,7 +200,7 @@ pub fn get_completions(line: BString, sink: mpsc::UnboundedSender<Vec<Match>>) {
         // this is kinda what completecall() does
         let mut cfargs: [*mut c_char; 1] = [null_mut()];
         bindings::cfargs = cfargs.as_mut_ptr();
-        bindings::compfunc = COMPFUNC.as_ptr() as *mut _;
+        bindings::compfunc = COMPFUNC.as_ptr().cast_mut();
         // zsh will switch up the pgid if monitor and interactive are set
         super::execstring("set +o monitor", Default::default());
         bindings::menucomplete(null_mut());

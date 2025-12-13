@@ -43,9 +43,7 @@ fn add_readable_methods<R: Send+AsyncRead+Unpin, T: 'static+Send+Readable<R>, M:
                 match file.read(&mut buf).await {
                     Ok(0) => break,
                     Ok(n) => return Ok(Some(lua.create_string(&buf[..n])?)),
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                        continue
-                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => (),
                     // master tty and EIO means EOF
                     Err(e) if is_tty_master && e.raw_os_error() == Some(nix::errno::Errno::EIO as _) => {
                         break

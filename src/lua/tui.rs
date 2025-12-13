@@ -211,7 +211,7 @@ fn parse_text_parts(text: TextParts, lines: &mut Vec<Line<'static>>) {
                 );
             } else {
                 for line in lines.iter_mut() {
-                    for span in line.spans.iter_mut() {
+                    for span in &mut line.spans {
                         *span = span.clone().patch_style(style);
                     }
                 }
@@ -236,7 +236,7 @@ fn parse_text_parts(text: TextParts, lines: &mut Vec<Line<'static>>) {
                 }
             }
         },
-    };
+    }
 
     lines.truncate(100);
 }

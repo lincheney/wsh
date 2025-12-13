@@ -25,8 +25,8 @@ impl<'a, T: ?Sized> LinkedList<'a, T> {
         let mut nodes = Box::into_pin(nodes.into_boxed_slice());
 
         for i in 0..nodes.len()-1 {
-            nodes[i].next = &raw const nodes[i+1] as _;
-            nodes[i+1].prev = &raw const nodes[i] as _;
+            nodes[i].next = (&raw const nodes[i+1]).cast_mut();
+            nodes[i+1].prev = (&raw const nodes[i]).cast_mut();
         }
 
         Self {

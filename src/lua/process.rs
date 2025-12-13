@@ -403,7 +403,7 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
 
             let is_subshell = matches!(cmd, ShellRunCmd::Subshell(_));
             let code = match cmd {
-                cmd @ ShellRunCmd::Simple(_) | cmd @ ShellRunCmd::Function{..} => {
+                cmd @ (ShellRunCmd::Simple(_) | ShellRunCmd::Function{..}) => {
 
                     let pid = std::process::id();
                     // send streams back to caller

@@ -243,7 +243,7 @@ crate::TokioActor! {
                             } else {
                                 (*prev).next = p.next;
                             }
-                            zsh_sys::zfree(proc.cast(), std::mem::size_of::<zsh_sys::process>() as _)
+                            zsh_sys::zfree(proc.cast(), std::mem::size_of::<zsh_sys::process>() as _);
                         }
                         return Some(status);
                     }
@@ -379,7 +379,7 @@ crate::TokioActor! {
         }
 
         pub fn queue_signals(&self) {
-            zsh::queue_signals()
+            zsh::queue_signals();
         }
 
         pub fn unqueue_signals(&self) -> nix::Result<()> {

@@ -37,7 +37,7 @@ impl Function {
             node: zsh_sys::hashnode{
                 next: null_mut(),
                 #[allow(static_mut_refs)]
-                nam: crate::EMPTY_STR.as_ptr() as _,
+                nam: crate::EMPTY_STR.as_ptr().cast_mut(),
                 flags: 0,
             },
             filename: null_mut(),
@@ -54,7 +54,7 @@ impl Function {
     pub fn execute<'a, I: Iterator<Item=&'a BStr>>(&self, arg0: Option<&'a BStr>, args: I) -> c_int {
         let args = arg0.or(Some(b"".into())).into_iter()
             .chain(args)
-            .map(|x| super::metafy(x) as _);
+            .map(|x| super::metafy(x).cast_const());
 
         // convert args to a linked list
         let args = super::linked_list::LinkedList::new_from_ptrs(args);

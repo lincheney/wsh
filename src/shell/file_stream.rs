@@ -46,16 +46,12 @@ impl Sink {
             // Try to read data, this may still fail with `WouldBlock`
             // if the readiness event is a false positive.
             match reader.try_read(&mut buf[old_len .. ]) {
-                Ok(BUF_SIZE) => {
-                    continue
-                },
+                Ok(BUF_SIZE) => (),
                 Ok(n) => {
                     buf.truncate(old_len + n);
                     break
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    continue
-                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => (),
                 Err(e) => {
                     return Err(e);
                 }
@@ -64,20 +60,20 @@ impl Sink {
         Ok(buf)
     }
 
-    pub async fn override_file(&mut self, file: UnsafeSend<*mut *mut nix::libc::FILE>) -> ShoutGuard<'_> {
+    pub fn override_file(&mut self, file: UnsafeSend<*mut *mut nix::libc::FILE>) -> ShoutGuard<'_> {
         ShoutGuard::new(self, file)
     }
 
-    pub async fn override_stdout(&mut self) -> ShoutGuard<'_> {
-        self.override_file(unsafe{ UnsafeSend::new(&raw mut stdout) }).await
+    pub fn override_stdout(&mut self) -> ShoutGuard<'_> {
+        self.override_file(unsafe{ UnsafeSend::new(&raw mut stdout) })
     }
 
-    pub async fn override_stderr(&mut self) -> ShoutGuard<'_> {
-        self.override_file(unsafe{ UnsafeSend::new(&raw mut stderr) }).await
+    pub fn override_stderr(&mut self) -> ShoutGuard<'_> {
+        self.override_file(unsafe{ UnsafeSend::new(&raw mut stderr) })
     }
 
-    pub async fn override_shout(&mut self) -> ShoutGuard<'_> {
-        self.override_file(unsafe{ UnsafeSend::new(&raw mut zsh_sys::shout as _) }).await
+    pub fn override_shout(&mut self) -> ShoutGuard<'_> {
+        self.override_file(unsafe{ UnsafeSend::new((&raw mut zsh_sys::shout).cast()) })
     }
 
 }
@@ -107,7 +103,7 @@ impl ShoutGuard<'_> {
         }
     }
 
-    async fn _read(&mut self) -> Result<BString> {
+    pub async fn read(&mut self) -> Result<BString> {
         unsafe{
             nix::libc::fflush(self.inner.writer_ptr.into_inner()); // ignore errors?
             *self.dest.into_inner() = self.old_file.into_inner();
@@ -118,15 +114,12 @@ impl ShoutGuard<'_> {
 
     }
 
-    pub async fn read(mut self) -> Result<BString> {
-        self._read().await
-    }
 }
 
 impl Drop for ShoutGuard<'_> {
     fn drop(&mut self) {
         tokio::task::block_in_place(|| {
-            let _ = tokio::runtime::Handle::current().block_on(self._read());
+            let _ = tokio::runtime::Handle::current().block_on(self.read());
         });
     }
 }
