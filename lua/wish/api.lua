@@ -28,7 +28,13 @@ function wish.repr(val, multiline, indent)
 end
 
 function wish.pprint(...)
-    local val = table.concat(wish.iter{...}:map(function(k, v) return wish.repr(v) end):collect(), ' ')
+    local val = {...}
+    if #val == 0 then
+        -- you probably passed in nil
+        val = 'nil'
+    else
+        val = table.concat(wish.iter{...}:map(function(k, v) return wish.repr(v) end):collect(), ' ')
+    end
     wish.log.debug(val)
 end
 
