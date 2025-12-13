@@ -205,14 +205,14 @@ local function apply_highlight_seq_at(seq, seq_index, tokens, str, token_index)
         if mod == '$' then
             if token then
                 -- expected the end
-                return unpack(not_greedy)
+                return unpack(non_greedy)
             end
             next_matcher = true
 
         elseif mod == '^' then
             if token_index ~= 1 then
                 -- expected the start
-                return unpack(not_greedy)
+                return unpack(non_greedy)
             end
             next_matcher = true
 
@@ -231,7 +231,7 @@ local function apply_highlight_seq_at(seq, seq_index, tokens, str, token_index)
                 next_matcher = true
             else
                 -- no match
-                return non_greedy and unpack(non_greedy)
+                return unpack(non_greedy)
             end
         end
 
