@@ -310,7 +310,7 @@ impl Widget {
                     // allocate space for the next line
                     if offset.1 >= area.height {
                         if let Some(middle_border) = &middle_border {
-                            buffer.content.extend_from_slice(&middle_border);
+                            buffer.content.extend_from_slice(middle_border);
                         } else {
                             buffer.content.resize(buffer.content.len() + width, Default::default());
                         }

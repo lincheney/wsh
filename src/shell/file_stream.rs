@@ -57,7 +57,7 @@ impl Sink {
                     continue
                 }
                 Err(e) => {
-                    return Err(e.into());
+                    return Err(e);
                 }
             }
         }

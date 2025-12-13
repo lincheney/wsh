@@ -38,7 +38,7 @@ async fn get_next_history(ui: Ui, lua: Lua, val: usize) -> Result<Option<LuaTabl
     ui.shell.do_run(move |shell| {
         let history = crate::shell::history::History::get(shell);
         if let Some(entry) = history.closest_to((val+1) as _, std::cmp::Ordering::Greater) {
-            entry_to_lua(entry.as_entry(), &lua).map(|entry| Some(entry))
+            entry_to_lua(entry.as_entry(), &lua).map(Some)
         } else {
             Ok(None)
         }
@@ -63,10 +63,8 @@ async fn goto_history(ui: Ui, _lua: Lua, val: usize) -> Result<Option<usize>> {
         let mut history = crate::shell::history::History::get(shell);
         let latest = history.first().map(|entry| entry.histnum());
 
-        match history.set_histline(val as _) {
-            Some(entry) => Some((latest, entry.histnum(), entry.as_entry().text)),
-            None => None,
-        }
+        history.set_histline(val as _)
+            .map(|entry| (latest, entry.histnum(), entry.as_entry().text))
     }).await;
 
     if let Some((latest, histnum, text)) = result {

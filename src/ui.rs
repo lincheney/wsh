@@ -265,7 +265,7 @@ impl Ui {
         let flag = self.preparing_for_unhandled_output.swap(false, Ordering::Relaxed);
 
         if flag {
-            if !self.has_foreground_process.try_lock().is_ok() {
+            if self.has_foreground_process.try_lock().is_err() {
                 // foreground process, can't recover yet
                 // reset it back
                 self.preparing_for_unhandled_output.store(true, Ordering::Relaxed);

@@ -280,7 +280,7 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
                 .and_then(|title| {
                     let lines = widget.border_title.get_or_insert_default();
                     parse_text_parts(title, lines);
-                    lines.iter().cloned().next()
+                    lines.iter().next().cloned()
                 })
                 .map(|line| Block::new().title(line))
                 .or_else(|| widget.block.clone())
@@ -367,7 +367,7 @@ struct BufferHighlight {
 async fn add_buf_highlight(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
     let ui = ui.get();
     let hl: BufferHighlight = lua.from_value(val)?;
-    let style: BufferStyleOptions = hl.style.into();
+    let style: BufferStyleOptions = hl.style;
     let blend = !style.no_blend;
     let style: tui::StyleOptions = style.inner.into();
 
@@ -455,7 +455,7 @@ async fn message_to_ansi_string(ui: Ui, _lua: Lua, (id, width): (usize, Option<u
 
     match tui.render_to_string(id, width) {
         None => anyhow::bail!("can't find widget with id {}", id),
-        Some(x) => Ok(x.into()),
+        Some(x) => Ok(x),
     }
 }
 

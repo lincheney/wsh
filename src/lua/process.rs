@@ -214,11 +214,11 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     command.stdin(args.stdin);
     command.stdout(args.stdout);
     command.stderr(args.stderr);
-    let foreground = args.foreground.unwrap_or_else(|| {
+    let foreground = args.foreground.unwrap_or(
         matches!(args.stdin, Stdio::inherit)
         || matches!(args.stdout, Stdio::inherit)
         || matches!(args.stderr, Stdio::inherit)
-    });
+    );
 
     let (result_sender, result_receiver) = oneshot::channel();
     let (sender, receiver) = watch::channel(None);
@@ -248,7 +248,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
             let stdout = proc.stdout.take().map(|s| ReadableFile(Some(BufReader::new(s))));
             let stderr = proc.stderr.take().map(|s| ReadableFile(Some(BufReader::new(s))));
             let _ = result_sender.take().unwrap().send(Ok((pid, stdin, stdout, stderr)));
-            let code = crate::shell::wait_for_pid(pid as _, &*ui.shell).await.unwrap();
+            let code = crate::shell::wait_for_pid(pid as _, &ui.shell).await.unwrap();
 
             drop(foreground_lock);
             // ignore error
@@ -349,11 +349,11 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
     let (result_sender, result_receiver) = oneshot::channel();
     let (sender, receiver) = watch::channel(None);
 
-    let foreground = args.foreground.unwrap_or_else(|| {
+    let foreground = args.foreground.unwrap_or(
         matches!(args.stdin, Stdio::inherit)
         || matches!(args.stdout, Stdio::inherit)
         || matches!(args.stderr, Stdio::inherit)
-    });
+    );
 
     // run this in a thread
     tokio::task::spawn(async move {
@@ -420,7 +420,7 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
                     }
 
                     match cmd {
-                        ShellRunCmd::Simple(cmd) => ui.shell.exec(cmd.into()).await,
+                        ShellRunCmd::Simple(cmd) => ui.shell.exec(cmd).await,
                         ShellRunCmd::Function{func, args, arg0} => {
                             ui.shell.exec_function(func.clone(), arg0, args).await as _
                         },
@@ -430,12 +430,12 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
                 ShellRunCmd::Subshell(cmd) => {
                     // fork it now to get the pid
                     let redirections = streams.iter().flatten().map(|s| (s.fd, s.replacement)).collect();
-                    let pid = ui.shell.exec_subshell(cmd.into(), false, redirections).await? as _;
+                    let pid = ui.shell.exec_subshell(cmd, false, redirections).await? as _;
 
                     // send streams back to caller
                     let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
 
-                    crate::shell::wait_for_pid(pid as _, &*ui.shell).await.unwrap() as _
+                    crate::shell::wait_for_pid(pid as _, &ui.shell).await.unwrap() as _
                 },
             };
 
@@ -508,7 +508,7 @@ async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         echo_input: args.echo_input,
         non_blocking: true,
     };
-    let zpty = ui.shell.zpty(name.into(), cmd.into(), opts).await?;
+    let zpty = ui.shell.zpty(name.into(), cmd, opts).await?;
 
     let pty = unsafe{ tokio::fs::File::from_raw_fd(zpty.fd) };
     let pty = ReadWriteFile{
@@ -518,7 +518,7 @@ async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
 
     let pid = zpty.pid;
     tokio::task::spawn(async move {
-        let code = crate::shell::wait_for_pid(pid as _, &*ui.shell).await.unwrap();
+        let code = crate::shell::wait_for_pid(pid as _, &ui.shell).await.unwrap();
         // send the code out
         let _ = sender.send(Some(Ok(code as _)));
     });

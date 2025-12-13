@@ -77,7 +77,7 @@ impl Shout {
     }
 
     fn capture<T, F: FnOnce() -> T>(&mut self, f: F) -> Result<(BString, T)> {
-        Ok(zsh::capture_shout(&mut self.reader, self.writer_ptr, || f()))
+        Ok(zsh::capture_shout(&mut self.reader, self.writer_ptr, f))
     }
 }
 
@@ -321,7 +321,7 @@ crate::TokioActor! {
 
         pub fn get_zle_buffer(&self) -> (BString, Option<i64>) {
             zsh::start_zle_scope();
-            let buffer = Variable::get("BUFFER").unwrap().to_bytes();
+            let buffer = Variable::get("BUFFER").unwrap().as_bytes();
             let cursor = Variable::get("CURSOR").unwrap().try_as_int();
             zsh::end_zle_scope();
             match cursor {

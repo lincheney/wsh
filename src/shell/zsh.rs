@@ -115,7 +115,7 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
         execstring("zpty_output=$'\\n'\"$(zpty & wait $!)\"", Default::default());
         let Some(mut output) = variables::Variable::get("zpty_output")
             else { anyhow::bail!("could not get $zpty_output") };
-        let output = output.to_bytes();
+        let output = output.as_bytes();
 
         // now we have to parse it
         let pid = output.find_iter("\n(")
@@ -145,7 +145,7 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
 
         let fd = if let Some(fd) = fd.try_as_int()? {
             fd
-        } else if let Ok(fd) = std::str::from_utf8(&fd.to_bytes()) && let Ok(fd) = fd.parse() {
+        } else if let Ok(fd) = std::str::from_utf8(&fd.as_bytes()) && let Ok(fd) = fd.parse() {
             fd
         } else {
             anyhow::bail!("could not get fd: {:?}", fd.as_value());
@@ -196,7 +196,7 @@ pub fn get_prompt(prompt: Option<&BStr>, escaped: bool) -> Option<CString> {
     let prompt = if let Some(prompt) = prompt {
         CString::new(prompt.to_vec()).unwrap()
     } else {
-        let prompt = variables::Variable::get("PROMPT")?.to_bytes();
+        let prompt = variables::Variable::get("PROMPT")?.as_bytes();
         CString::new(prompt).unwrap()
     };
 
@@ -282,7 +282,7 @@ pub fn set_zle_buffer(buffer: BString, cursor: i64) {
 
 pub fn get_zle_buffer() -> (BString, Option<i64>) {
     start_zle_scope();
-    let buffer = Variable::get("BUFFER").unwrap().to_bytes();
+    let buffer = Variable::get("BUFFER").unwrap().as_bytes();
     let cursor = Variable::get("CURSOR").unwrap().try_as_int();
     end_zle_scope();
     match cursor {
