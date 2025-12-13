@@ -160,13 +160,8 @@ fn parse_internal(
 
             if zsh_sys::tokstr.is_null() {
 
-                let bytes = if 0 < zsh_sys::tok && zsh_sys::tok <= zsh_sys::lextok_SEMIBAR {
-                    CStr::from_ptr(zsh_sys::tokstrings[zsh_sys::tok as usize]).to_bytes()
-                } else {
-                    let range = metalen - 1 - zsh_sys::wordbeg as usize .. metalen - zsh_sys::inbufct as usize;
-                    &metafied.to_bytes()[range]
-                };
-
+                let range = metalen - 1 - zsh_sys::wordbeg as usize .. metalen - zsh_sys::inbufct as usize;
+                let bytes = &metafied.to_bytes()[range];
                 let has_meta = bytes.contains(&Meta);
                 push_token(&mut tokens, bytes, kind, has_meta);
 
