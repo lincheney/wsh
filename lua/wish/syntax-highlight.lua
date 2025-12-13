@@ -94,6 +94,12 @@ local RULES = {
 local apply_highlight_seq
 
 local function apply_highlight_matcher(matcher, token, str)
+
+    if matcher.contains and not token.nested then
+        -- matcher asserts nested tokens but there aren't any
+        return
+    end
+
     local tokstr = nil
     local kind = token.kind or ''
     if matcher.kind then
@@ -158,10 +164,6 @@ local function apply_highlight_matcher(matcher, token, str)
     end
 
     if matcher.contains then
-        if not token.nested then
-            -- matcher asserts nested tokens but there aren't any
-            return
-        end
         local hl = apply_highlight_seq(matcher.contains, token.nested, str)
         if not hl then
             -- nested rules don't match
@@ -203,14 +205,14 @@ local function apply_highlight_seq_at(seq, seq_index, tokens, str, token_index)
         if mod == '$' then
             if token then
                 -- expected the end
-                return not_greedy and unpack(not_greedy)
+                return unpack(not_greedy)
             end
             next_matcher = true
 
         elseif mod == '^' then
             if token_index ~= 1 then
                 -- expected the start
-                return not_greedy and unpack(not_greedy)
+                return unpack(not_greedy)
             end
             next_matcher = true
 
