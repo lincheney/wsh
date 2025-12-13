@@ -27,8 +27,9 @@ function wish.repr(val, multiline, indent)
     end
 end
 
-function wish.pprint(val)
-    wish.log.debug(wish.repr(val))
+function wish.pprint(...)
+    local val = table.concat(wish.iter{...}:map(function(k, v) return wish.repr(v) end):collect(), ' ')
+    wish.log.debug(val)
 end
 
 function wish.async.spawn(...)

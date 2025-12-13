@@ -18,12 +18,13 @@ local RULES = {
     -- comments
     { {hl='comment', kind='comment'} },
     -- punctuation
-    { {hl='symbol', regex='^\\W+$'} },
+    { {hl='symbol', regex='^\\W+$'}, priority=-1000 },
     -- strings
     {
         {hl='string', kind='Dnull|Snull'},
         {hl='string', not_kind='Dnull|Snull', mod='*'},
         {hl='string', kind='Dnull|Snull', mod='?'},
+        priority=-1,
     },
     -- heredocs
     { {hl='string', kind='heredoc_body'} },
@@ -91,14 +92,6 @@ local RULES = {
 }
 
 local apply_highlight_seq
-
-local function append_highlights(highlights, new)
-    if new and #new > 0 then
-        for i = 1, #new do
-            table.insert(highlights, new[i])
-        end
-    end
-end
 
 local function apply_highlight_matcher(matcher, token, str)
     local tokstr = nil
@@ -169,12 +162,12 @@ local function apply_highlight_matcher(matcher, token, str)
             -- matcher asserts nested tokens but there aren't any
             return
         end
-        local hl = apply_highlight_seq(matcher.contains, token.nested, str, false)
+        local hl = apply_highlight_seq(matcher.contains, token.nested, str)
         if not hl then
             -- nested rules don't match
             return
         end
-        append_highlights(highlights, hl)
+        wish.table.extend(highlights, hl)
     end
 
     return highlights
@@ -193,7 +186,7 @@ local function apply_highlight_seq_at(seq, seq_index, tokens, str, token_index)
             local hl, index = apply_highlight_seq_at(seq, seq_index+1, tokens, str, token_index)
             if hl then
                 if mod == '*?' or mod == '??' then
-                    append_highlights(highlights, hl)
+                    wish.table.extend(highlights, hl)
                     -- we wanted non greedy, so return it now
                     return highlights, index
                 end
@@ -241,7 +234,7 @@ local function apply_highlight_seq_at(seq, seq_index, tokens, str, token_index)
         end
 
         if hl then
-            append_highlights(highlights, hl)
+            wish.table.extend(highlights, hl)
             token_index = token_index + 1
         end
 
@@ -254,23 +247,14 @@ local function apply_highlight_seq_at(seq, seq_index, tokens, str, token_index)
     return highlights, token_index
 end
 
-function apply_highlight_seq(seq, tokens, str, do_nested)
+function apply_highlight_seq(seq, tokens, str)
     local highlights = nil
     local token_index = 1
     for i = 1, #tokens do
-        if do_nested and tokens[i].nested then
-            local hl = apply_highlight_seq(seq, tokens[i].nested, str, do_nested)
-            if hl then
-                highlights = highlights or {}
-                append_highlights(highlights, hl)
-            end
-        end
-
         if i == token_index then
             local hl, finish = apply_highlight_seq_at(seq, 1, tokens, str, token_index)
-            if hl then
-                highlights = highlights or {}
-                append_highlights(highlights, hl)
+            if hl and #hl > 0 then
+                highlights = wish.table.extend(highlights or {}, hl)
                 token_index = finish
             else
                 token_index = token_index + 1
@@ -280,15 +264,25 @@ function apply_highlight_seq(seq, tokens, str, do_nested)
     return highlights
 end
 
-local function apply_highlight_rules(rules, tokens, str)
+local function apply_highlight_rules(rules, tokens, str, highlights, priority)
     for i = 1, #rules do
-        local hl = apply_highlight_seq(rules[i], tokens, str, true)
+        local hl = apply_highlight_seq(rules[i], tokens, str)
         if hl then
-            for _, hl in ipairs(hl) do
-                wish.add_buf_highlight(hl)
+            local p = priority + (rules[i].priority or 0) + i / #rules / 2
+            for j = 1, #hl do
+                hl[j].priority = p
             end
+            wish.table.extend(highlights, hl)
         end
     end
+
+    for i = 1, #tokens do
+        if tokens[i].nested then
+            apply_highlight_rules(rules, tokens[i].nested, str, highlights, priority+1)
+        end
+    end
+
+    return highlights
 end
 
 wish.add_event_callback('buffer_change', function()
@@ -298,13 +292,18 @@ wish.add_event_callback('buffer_change', function()
     if not prev_complete or string.sub(buffer, 1, #prev_buffer) ~= prev_buffer or string.find(buffer, '%S', #prev_buffer+1) then
         -- is this going to be slow? do we need a debounce or something?
         local complete, tokens = wish.parse(buffer)
-        -- wish.pprint(tokens)
         wish.log.debug(wish.repr(debug_tokens(tokens, buffer), true))
         prev_buffer = buffer
         prev_complete = complete
 
         wish.clear_buf_highlights(NAMESPACE)
-        apply_highlight_rules(RULES, tokens, buffer)
+
+        local highlights = apply_highlight_rules(RULES, tokens, buffer, {}, 0)
+        wish.table.sort_by(highlights, 'priority')
+        for i = 1, #highlights do
+            wish.add_buf_highlight(highlights[i])
+        end
+
         wish.redraw{buffer = true}
     end
 end)

@@ -52,4 +52,15 @@ function M.extend(tbl, other)
     return tbl
 end
 
+function M.sort_by(tbl, key)
+    local func = key
+    if type(key) == 'function' then
+        func = function(a, b) return key(a) < key(b) end
+    else
+        func = function(a, b) return a[key] < b[key] end
+    end
+    table.sort(tbl, func)
+    return tbl
+end
+
 return M
