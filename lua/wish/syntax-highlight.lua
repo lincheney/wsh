@@ -6,15 +6,17 @@ local NAMESPACE = wish.add_buf_highlight_namespace()
 local function debug_tokens(tokens, buffer)
     local x = {}
     for i = 1, #tokens do
-        x[i] = {buffer:sub(tokens[i].start+1, tokens[i].finish), tokens[i].kind}
-        if tokens[i].nested then
-            x[i][3] = debug_tokens(tokens[i].nested, buffer)
-        end
+        x[i] = {
+            buffer:sub(tokens[i].start+1, tokens[i].finish),
+            tokens[i].kind,
+            tokens[i].nested and debug_tokens(tokens[i].nested, buffer)
+        }
     end
     return x
 end
 
 local RULES = {
+    { { hl='command', kind='command' } },
     -- comments
     { {hl='comment', kind='comment'} },
     -- punctuation
@@ -30,21 +32,21 @@ local RULES = {
     { {hl='string', kind='heredoc_body'} },
     { {hl='heredoc_tag', kind='heredoc_open_tag|heredoc_close_tag'} },
     -- escapes
-    {{ kind='STRING', contains={
+    {{ kind='STRING|command', contains={
         {hl='escape', kind='Bnull'},
         {hl='escape', kind='', regex='^[^ ]', hlregex='^[^ ]'},
     } }},
-    {{ kind='STRING', contains={
+    {{ kind='STRING|command', contains={
         {hl='escape_space', kind='Bnull'},
         {hl='escape_space', kind='', regex='^ ', hlregex='^ '},
     } }},
-    {{ kind='STRING', contains={
+    {{ kind='STRING|command', contains={
         {kind='String'},
         {kind='Snull'},
         {hl='escape', not_kind='Snull', hlregex=[=[\\x[0-9a-fA-F]{0,2}|\\u\d{0,4}|\\.]=], mod='*'},
         {kind='Snull', mod='?'},
     } }},
-    {{ kind='STRING', contains={
+    {{ kind='STRING|command', contains={
         {kind='Dnull'},
         {hl='escape', not_kind='Dnull', hlregex='\\\\.', mod='*'},
         {kind='Dnull', mod='?'},
@@ -57,7 +59,7 @@ local RULES = {
     { {hl='env_var_key', kind='ENVSTRING', hlregex='^[^=]+'} },
     { {hl='env_var_value', kind='ENVSTRING', hlregex='=(.*)$'} },
     -- reset highlight on substitutions in strings
-    { {kind='STRING', contains={
+    { {kind='STRING|command', contains={
         {hl='normal', kind='substitution', contains={{hl='symbol', regex='^\\W+$'}} },
     } } },
     { {hl='flag', kind='STRING', regex='^-', hlregex='^-[^=]*'} },
@@ -74,11 +76,6 @@ local RULES = {
         {hl='variable', mod='*?'},
         {hl='variable', kind='Outbrace'},
     },
-    -- this will match the first string then consume the rest
-    {
-        {hl='command', kind='STRING'},
-        {not_kind='SEPER|BAR|DBAR|AMPER|DAMPER|BARAMP|AMPERBANG|SEMIAMP|SEMIBAR', mod='*'},
-    },
     -- but reset highlights on these
     { {kind='redirect', contains={ {hl='normal', kind='STRING'} }} },
     -- function
@@ -87,8 +84,8 @@ local RULES = {
     -- keywords
     { {hl='keyword', kind='CASE|COPROC|DOLOOP|DONE|ELIF|ELSE|ZEND|ESAC|FI|FOR|FOREACH|FUNC|IF|NOCORRECT|REPEAT|SELECT|THEN|TIME|UNTIL|WHILE|TYPESET'} },
     -- unmatched brackets
-    { { hl='error', regex='^\\($' }, { not_regex='\\)', mod='*' }, { mod='$' } },
-    { { hl='error', regex='^\\{$' }, { not_regex='\\}', mod='*' }, { mod='$' } },
+    -- { { hl='error', regex='^\\($' }, { not_regex='\\)', mod='*' }, { mod='$' } },
+    -- { { hl='error', regex='^\\{$' }, { not_regex='\\}', mod='*' }, { mod='$' } },
 }
 
 local apply_highlight_seq

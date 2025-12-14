@@ -30,6 +30,7 @@ pub enum TokenKind {
     Redirect,
     Function,
     Comment,
+    Command,
     HeredocOpenTag,
     HeredocCloseTag,
     HeredocBody,
@@ -47,6 +48,7 @@ impl std::fmt::Display for TokenKind {
             TokenKind::HeredocCloseTag => write!(fmt, "heredoc_close_tag"),
             TokenKind::HeredocBody => write!(fmt, "heredoc_body"),
             TokenKind::Comment => write!(fmt, "comment"),
+            TokenKind::Command => write!(fmt, "command"),
         }
     }
 }
@@ -137,6 +139,7 @@ fn parse_internal(
         let old_noerrs = super::set_error_verbosity(super::ErrorVerbosity::Ignore);
         let old_noaliases = zsh_sys::noaliases;
         zsh_sys::noaliases = 1;
+        zsh_sys::incmdpos = 1;
 
         let old_lexflags = zsh_sys::lexflags;
         let mut new_lexflags = zsh_sys::LEXFLAGS_ACTIVE | zsh_sys::LEXFLAGS_ZLE;
@@ -150,6 +153,7 @@ fn parse_internal(
         let ztokens = zsh_sys::ztokens.as_ptr();
 
         loop {
+            let incmdpos = zsh_sys::incmdpos > 0;
             zsh_sys::ctxtlex();
 
             if zsh_sys::tok == zsh_sys::lextok_ENDINPUT {
@@ -196,10 +200,10 @@ fn parse_internal(
                     }
                 }
 
-                let kind = if matches!(kind, Some(TokenKind::Lextok(lextok::STRING))) && tokstr.starts_with(b"#") {
-                    Some(TokenKind::Comment)
-                } else {
-                    kind
+                let kind = match kind {
+                    Some(TokenKind::Lextok(lextok::STRING)) if tokstr.starts_with(b"#") => Some(TokenKind::Comment),
+                    Some(TokenKind::Lextok(lextok::STRING)) if incmdpos => Some(TokenKind::Command),
+                    _ => kind,
                 };
 
                 if slice_start == 0 {
