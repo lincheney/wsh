@@ -23,6 +23,7 @@ M.command = {fg = '#aaffaa', bold = true}
 M.func = {fg = 'yellow'}
 M.keyword = {fg = 'red'}
 M.symbol = {fg = 'cyan'}
+M.redirect = {fg = '#aaffff'}
 M.comment = {fg = 'grey'}
 M.env_var_key = {fg = '#aa77ff'}
 M.env_var_value = {fg = '#77aaff'}

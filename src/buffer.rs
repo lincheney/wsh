@@ -29,9 +29,9 @@ impl Highlight {
             self.start = new_end;
         }
 
-        if range.end <= self.end {
+        if range.end < self.end {
             self.end = self.end + new_end - range.end;
-        } else if range.start <= self.end {
+        } else if range.start < self.end {
             self.end = new_end;
         }
 

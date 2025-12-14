@@ -46,7 +46,7 @@ local RULES = {
     { {hl='env_var_value', kind='ENVSTRING', hlregex='=(.*)$'} },
     -- reset highlight on substitutions in strings
     { {kind='STRING|command', contains={
-        {hl='normal', kind='substitution', contains={{hl='symbol', regex='^\\W+$'}} },
+        {hl='normal', kind='substitution'},
     } } },
     { {hl='flag', kind='STRING', regex='^-', hlregex='^-[^=]*'} },
     { {hl='flag_value', kind='STRING', regex='^-.*=', hlregex='^-[^=]*=(.+)'} },
@@ -63,7 +63,7 @@ local RULES = {
         {hl='variable', kind='Outbrace'},
     },
     -- but reset highlights on these
-    { {kind='redirect', contains={ {hl='normal', kind='STRING'} }} },
+    { {hl='redirect', kind='redirect'} },
     -- function
     { {kind='function', contains={ {hl='func', kind='FUNC'}, {hl='func', kind='STRING', mod='?'} }} },
     { {kind='function', contains={ {mod='^'}, {hl='func', kind='STRING'} }} },
