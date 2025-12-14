@@ -69,9 +69,6 @@ local RULES = {
     { {kind='function', contains={ {mod='^'}, {hl='func', kind='STRING'} }} },
     -- keywords
     { {hl='keyword', kind='CASE|COPROC|DOLOOP|DONE|ELIF|ELSE|ZEND|ESAC|FI|FOR|FOREACH|FUNC|IF|NOCORRECT|REPEAT|SELECT|THEN|TIME|UNTIL|WHILE|TYPESET'} },
-    -- unmatched brackets
-    -- { { hl='error', regex='^\\($' }, { not_regex='\\)', mod='*' }, { mod='$' } },
-    -- { { hl='error', regex='^\\{$' }, { not_regex='\\}', mod='*' }, { mod='$' } },
 }
 
 local function apply_highlight_matcher(matcher, token, str, highlights, priority)
@@ -136,7 +133,6 @@ QUERY.add_buffer_callback(function(tokens, str)
         highlights[i].priority = highlights[i].priority + i / #highlights / 2
     end
     wish.table.sort_by(highlights, 'priority')
-    wish.log.debug(wish.repr(highlights, true))
     for i = 1, #highlights do
         wish.add_buf_highlight(highlights[i])
     end
