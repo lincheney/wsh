@@ -369,3 +369,9 @@ pub fn unqueue_signals() -> nix::Result<()> {
     }
     Ok(())
 }
+
+pub fn zistype(x: c_char, y: c_short) -> bool {
+    unsafe {
+        zsh_sys::typtab[x as usize] & y > 0
+    }
+}

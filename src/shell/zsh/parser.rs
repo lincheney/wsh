@@ -79,12 +79,7 @@ impl Token {
 }
 
 fn find_str(needle: &BStr, haystack: &BStr, start: usize) -> Option<Range<usize>> {
-    let start = start + match needle.as_bytes() {
-        b";" => haystack[start..].iter().position(|&c| c == b';' || c == b'\n'),
-        // b"&|" | b"&!"
-        _ => haystack[start..].find(needle),
-    }?;
-
+    let start = start + haystack[start..].find(needle)?;
     Some(start .. start + needle.len())
 }
 
@@ -116,6 +111,7 @@ fn parse_internal(
     let mut heredocs = vec![];
     let mut tokens = vec![];
     let mut start = 0;
+    let mut metafied_start = 0;
 
     let mut push_token = |tokens: &mut Vec<Token>, tokstr: &[u8], kind: Option<TokenKind>, has_meta| {
         let range = if has_meta {
@@ -161,10 +157,13 @@ fn parse_internal(
             }
 
             let kind: Option<TokenKind> = num::FromPrimitive::from_u32(zsh_sys::tok).map(TokenKind::Lextok);
+            // don't use wordbeg as it is unreliable and not always updatsed
 
             if zsh_sys::tokstr.is_null() {
 
-                let range = metalen - 1 - zsh_sys::wordbeg as usize .. metalen - zsh_sys::inbufct as usize;
+                // get the start of the next word
+                metafied_start += metafied.to_bytes()[metafied_start..].iter().position(|c| !super::zistype(*c as _, zsh_sys::IBLANK as _)).unwrap();
+                let range = metafied_start .. metalen - zsh_sys::inbufct as usize;
                 let bytes = &metafied.to_bytes()[range];
                 let has_meta = bytes.contains(&Meta);
                 push_token(&mut tokens, bytes, kind, has_meta);
@@ -234,6 +233,7 @@ fn parse_internal(
                 break
             }
 
+            metafied_start = metalen - zsh_sys::inbufct as usize;
         }
 
         // restore
