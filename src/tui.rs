@@ -112,7 +112,6 @@ impl Widgets {
     }
 
     fn refresh(&mut self, area: Rect) {
-
         let mut height = 0;
         for w in &mut self.inner {
             let w = w.as_mut();
@@ -312,18 +311,20 @@ impl Tui {
         let old_status_bar_height = status_bar.inner.as_ref().map_or(0, |w| w.line_count) as usize;
         let old_height = old_buffer_height + old_widgets_height + old_status_bar_height;
 
-        // new heights
-        if prompt.dirty {
-            prompt.refresh_prompt(shell, area.width).await;
-        }
-        let new_buffer_height = prompt.height as usize + buffer.get_height_for_width(area.width as _, prompt.width as _).max(1) - 1;
+        // refresh the widgets etc
         if status_bar.dirty {
             status_bar.refresh(area);
         }
-        let new_status_bar_height = status_bar.get_height() as usize;
         if self.dirty {
-            self.widgets.refresh(Rect{ height: max_height.saturating_sub(new_status_bar_height as u16), ..area });
+            self.widgets.refresh(Rect{ height: max_height.saturating_sub(status_bar.get_height()), ..area });
         }
+        if prompt.dirty {
+            prompt.refresh_prompt(shell, area.width).await;
+        }
+
+        // new heights
+        let new_buffer_height = prompt.height as usize + buffer.get_height_for_width(area.width as _, prompt.width as _).max(1) - 1;
+        let new_status_bar_height = status_bar.get_height() as usize;
         let new_widgets_height = self.widgets.get_height() as usize;
         let new_height = new_buffer_height + new_widgets_height + new_status_bar_height;
 
