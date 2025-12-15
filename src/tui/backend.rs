@@ -23,8 +23,8 @@ use ratatui::{
 pub struct Drawer<'a, 'b, W: Write> {
     buffer: &'a mut Buffer,
     pub writer: &'b mut W,
-    last_pos: (u16, u16),
-    pub cur_pos: (u16, u16),
+    real_pos: (u16, u16),
+    pos: (u16, u16),
     fg: Color,
     bg: Color,
     underline_color: Color,
@@ -36,8 +36,8 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
         Self {
             buffer,
             writer,
-            last_pos: pos,
-            cur_pos: pos,
+            real_pos: pos,
+            pos,
             fg: Color::default(),
             bg: Color::default(),
             underline_color: Color::default(),
@@ -54,44 +54,58 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
     }
 
     pub fn set_pos(&mut self, pos: (u16, u16)) {
-        self.cur_pos = pos;
-        self.last_pos = pos;
+        self.pos = pos;
+        self.real_pos = pos;
+    }
+
+    pub fn get_pos(&mut self) -> (u16, u16) {
+        self.pos
+    }
+
+    pub fn move_to(&mut self, pos: (u16, u16)) {
+        self.pos = pos;
     }
 
     pub fn move_to_pos(&mut self, pos: (u16, u16)) -> Result<()> {
-        if pos == (0, self.last_pos.1 + 1) {
+        if pos == (0, self.real_pos.1 + 1) {
             queue!(self.writer, Print("\r\n"))?;
         } else {
-            if pos.0 != self.last_pos.0 {
+            if pos.0 != self.real_pos.0 {
                 queue!(self.writer, MoveToColumn(pos.0))?;
             }
-            if pos.1 > self.last_pos.1 {
-                queue!(self.writer, MoveDown(pos.1 - self.last_pos.1))?;
-            } else if pos.1 < self.last_pos.1 {
-                queue!(self.writer, MoveUp(self.last_pos.1 - pos.1))?;
+            if pos.1 > self.real_pos.1 {
+                queue!(self.writer, MoveDown(pos.1 - self.real_pos.1))?;
+            } else if pos.1 < self.real_pos.1 {
+                queue!(self.writer, MoveUp(self.real_pos.1 - pos.1))?;
             }
         }
 
-        self.cur_pos = pos;
-        self.last_pos = pos;
+        self.pos = pos;
+        self.real_pos = pos;
         Ok(())
     }
 
     pub fn move_to_cur_pos(&mut self) -> Result<()> {
-        if self.cur_pos != self.last_pos {
-            if self.cur_pos.0 < self.term_width() {
-                self.move_to_pos(self.cur_pos)?;
+        if self.pos != self.real_pos {
+            if self.pos.0 < self.term_width() {
+                self.move_to_pos(self.pos)?;
             } else {
                 // oh tricky
                 // in order to get back to the very very edge of the screen, we have to reprint the
                 // char just before
                 // TODO what about when it is a multi width char
-                let pos = (self.term_width() - 1, self.cur_pos.1);
+                let pos = (self.term_width() - 1, self.pos.1);
                 self.move_to_pos(pos)?;
                 let cell = self.buffer[pos].clone();
                 self.draw_cell(&cell, true)?;
             }
         }
+        Ok(())
+    }
+
+    pub fn allocate_height(&mut self, height: u16) -> Result<()> {
+        self.move_to_cur_pos()?;
+        super::allocate_height(self.writer, height)?;
         Ok(())
     }
 
@@ -120,7 +134,7 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
 
     pub fn goto_newline(&mut self, cell: Option<&Cell>) -> Result<()> {
         self.clear_to_end_of_line(cell)?;
-        self.cur_pos = (0, self.cur_pos.1 + 1);
+        self.pos = (0, self.pos.1 + 1);
         Ok(())
     }
 
@@ -135,10 +149,10 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
     pub fn clear_to_end_of_line(&mut self, cell: Option<&Cell>) -> Result<()> {
         // clear the rest of this line
         let width = self.term_width();
-        if self.cur_pos.0 < width {
+        if self.pos.0 < width {
 
-            let i = self.buffer.index_of(self.cur_pos.0, self.cur_pos.1);
-            let cells = &mut self.buffer.content[i..i + (width - self.cur_pos.0) as usize];
+            let i = self.buffer.index_of(self.pos.0, self.pos.1);
+            let cells = &mut self.buffer.content[i..i + (width - self.pos.0) as usize];
 
             let style = cell.map(|c| c.style());
             if !Self::cells_are_cleared(cells, style) {
@@ -161,10 +175,10 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
     pub fn clear_to_end_of_screen(&mut self, cell: Option<&Cell>) -> Result<()> {
         // clear everything from cursor onwards
         let width = self.term_width();
-        let i = if self.cur_pos.0 < width {
-            self.buffer.index_of(self.cur_pos.0, self.cur_pos.1)
-        } else if self.cur_pos.1 + 1 < self.buffer.area.height {
-            self.buffer.index_of(0, self.cur_pos.1 + 1)
+        let i = if self.pos.0 < width {
+            self.buffer.index_of(self.pos.0, self.pos.1)
+        } else if self.pos.1 + 1 < self.buffer.area.height {
+            self.buffer.index_of(0, self.pos.1 + 1)
         } else {
             // we already at bottom of screen
             return Ok(())
@@ -184,6 +198,13 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
             self.move_to_cur_pos()?;
             self.do_clear(ClearType::FromCursorDown, cell)?;
         }
+        Ok(())
+    }
+
+    pub fn write_raw(&mut self, data: &[u8], pos: (u16, u16)) -> Result<()> {
+        self.move_to_cur_pos()?;
+        self.writer.write_all(data)?;
+        self.set_pos(pos);
         Ok(())
     }
 
@@ -211,31 +232,31 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
 
     pub fn draw_cell(&mut self, cell: &Cell, force: bool) -> Result<()> {
         let cell_width = cell.symbol().width() as u16;
-        let will_wrap = self.cur_pos.0 + cell_width > self.term_width();
+        let will_wrap = self.pos.0 + cell_width > self.term_width();
 
-        let mut cur_pos = self.cur_pos;
+        let mut pos = self.pos;
         if will_wrap {
             // not actually enough space to fit this char
-            self.clear_cells(cur_pos, self.term_width() - cur_pos.0);
+            self.clear_cells(pos, self.term_width() - pos.0);
             // wrap to next line
-            cur_pos = (0, cur_pos.1 + 1);
+            pos = (0, pos.1 + 1);
         }
 
-        let draw = force || will_wrap || &self.buffer[cur_pos] != cell;
+        let draw = force || will_wrap || &self.buffer[pos] != cell;
         if draw {
             // move to the location
             self.move_to_cur_pos()?;
             self.print_cell(cell)?;
-            self.buffer[cur_pos] = cell.clone();
+            self.buffer[pos] = cell.clone();
         }
 
         // clear the remaining cells
-        self.clear_cells((cur_pos.0 + 1, cur_pos.1), cell_width - 1);
-        cur_pos.0 += cell_width;
+        self.clear_cells((pos.0 + 1, pos.1), cell_width - 1);
+        pos.0 += cell_width;
 
-        self.cur_pos = cur_pos;
+        self.pos = pos;
         if draw {
-            self.last_pos = cur_pos;
+            self.real_pos = pos;
         }
 
         Ok(())

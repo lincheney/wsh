@@ -44,7 +44,7 @@ impl crossterm::Command for MoveDown {
     }
 }
 
-pub fn allocate_height<W: Write>(stdout: &mut W, height: u16) -> Result<()> {
+pub fn allocate_height<W: Write>(stdout: &mut W, height: u16) -> std::io::Result<()> {
     for _ in 0 .. height {
         // vertical tab, this doesn't change x
         queue!(stdout, style::Print("\x0b"))?;
@@ -335,8 +335,8 @@ impl Tui {
             if !clear && old_status_bar_height > 0 {
                 // we don't know where exactly the status bar is,
                 // but it possibly overlaps with the new drawing area
-                // clear it
-                drawer.move_to_pos((0, self.prev_status_bar_position as _))?;
+                // so we clear it
+                drawer.move_to((0, self.prev_status_bar_position as _));
                 drawer.clear_to_end_of_screen(None)?;
                 // it now needs to be redrawn
                 status_bar.dirty = true;
@@ -346,39 +346,44 @@ impl Tui {
 
         // allocate more height
         if new_height > old_height {
-            drawer.move_to_pos((0, 0))?;
-            allocate_height(drawer.writer, new_height as u16 - 1)?;
+            drawer.move_to((0, 0));
+            drawer.allocate_height(new_height as u16 - 1)?;
             status_bar.dirty = true;
         }
 
         // redraw the prompt
         if dirty || prompt.dirty {
             // move back to top of drawing area and redraw
-            drawer.move_to_pos((0, 0))?;
-            drawer.writer.write_all(prompt.as_bytes())?;
-            drawer.set_pos((prompt.width, prompt.height - 1));
+            drawer.move_to((0, 0));
+            drawer.write_raw(prompt.as_bytes(), (prompt.width, prompt.height - 1))?;
         }
-        drawer.cur_pos = (prompt.width, prompt.height - 1);
 
         // redraw the buffer
         if dirty || buffer.dirty {
+            // draw buffer starting from end of prompt
+            drawer.move_to((prompt.width, prompt.height - 1));
             buffer.render(&mut drawer)?;
         }
-        // move to end of buffer
-        drawer.cur_pos = buffer.draw_end_pos;
 
         // redraw the widgets
         if (dirty || self.dirty) && new_widgets_height > 0 {
-            drawer.cur_pos = buffer.draw_end_pos;
+            // go to next line after end of buffer
+            drawer.move_to(buffer.draw_end_pos);
             drawer.goto_newline(None)?;
             self.widgets.render(&mut drawer, &mut self.border_buffer, Rect{ height: new_widgets_height as u16, ..area})?;
         }
 
-        drawer.cur_pos = (area.width, (new_buffer_height + new_widgets_height - 1) as _);
-        for _ in new_buffer_height + new_widgets_height .. old_buffer_height + old_widgets_height {
-            drawer.goto_newline(None)?;
+        // the prompt/buffer/widgets used to be bigger, so clear the extra bits
+        let trailing_height = (old_buffer_height + old_widgets_height).saturating_sub(new_buffer_height + new_widgets_height);
+        if trailing_height > 0 {
+            drawer.move_to((area.width, (new_buffer_height + new_widgets_height - 1) as _));
+            for _ in 0 .. trailing_height {
+                drawer.goto_newline(None)?;
+            }
+            drawer.clear_to_end_of_line(None)?;
         }
-        drawer.clear_to_end_of_line(None)?;
+
+        // go back to the cursor
         drawer.move_to_pos(buffer.cursor_coord)?;
 
         if new_status_bar_height > 0 && (dirty || status_bar.dirty) && let Some(widget) = &status_bar.inner {

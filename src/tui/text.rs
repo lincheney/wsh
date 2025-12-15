@@ -380,7 +380,7 @@ impl<T> Text<T> {
                 Ok(())
             };
             if Some((lineno, end)) == marker {
-                marker_pos = Some(drawer.cur_pos);
+                marker_pos = Some(drawer.get_pos());
             }
             result
         })?;
@@ -431,9 +431,9 @@ impl<T> Text<T> {
             None
         };
 
-        let mut marker_pos = drawer.cur_pos;
+        let mut marker_pos = drawer.get_pos();
         let mut first_line = true;
-        let mut max_height = max_height.unwrap_or(usize::MAX).min(full_height - drawer.cur_pos.1 as usize);
+        let mut max_height = max_height.unwrap_or(usize::MAX).min(full_height - drawer.get_pos().1 as usize);
         let border_bottom_height = full_height - (area.y + area.height) as usize;
 
         let clear_cell = self.make_default_style_cell();
@@ -451,11 +451,7 @@ impl<T> Text<T> {
 
         'outer: for (lineno, line) in self.lines.iter().enumerate() {
 
-            let initial = if drawer.cur_pos.0 as usize >= full_width {
-                0
-            } else {
-                drawer.cur_pos.0 as _
-            };
+            let initial = drawer.get_pos().0 as usize % full_width;
 
             for (range, line_width) in wrap(line.as_ref(), area.width as usize, initial) {
                 // leave room for the bottom border
@@ -489,7 +485,8 @@ impl<T> Text<T> {
                 // draw right border
                 if let Some(borders) = &borders && !borders.right.is_empty()  {
                     drawer.clear_to_end_of_line(clear_cell.as_ref())?;
-                    drawer.cur_pos.0 = (full_width - borders.right.len()) as _;
+                    let pos = drawer.get_pos();
+                    drawer.move_to(((full_width - borders.right.len()) as _, pos.1));
                     for cell in borders.right {
                         drawer.draw_cell(cell, false)?;
                     }

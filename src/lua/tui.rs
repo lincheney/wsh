@@ -496,7 +496,8 @@ async fn set_status_bar(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
 }
 
 async fn allocate_height(_ui: Ui, _lua: Lua, height: u16) -> Result<()> {
-    tui::allocate_height(&mut std::io::stdout(), height)
+    tui::allocate_height(&mut std::io::stdout(), height)?;
+    Ok(())
 }
 
 pub fn init_lua(ui: &Ui) -> Result<()> {

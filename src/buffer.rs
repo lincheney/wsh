@@ -211,7 +211,7 @@ impl Buffer {
     pub fn render<W :Write>(&mut self, drawer: &mut Drawer<W>) -> std::io::Result<()> {
         let cursor = self.cursor_byte_pos();
         self.cursor_coord = self.contents.render(drawer, None, Some((0, cursor)), None)?;
-        self.draw_end_pos = drawer.cur_pos;
+        self.draw_end_pos = drawer.get_pos();
         Ok(())
     }
 
