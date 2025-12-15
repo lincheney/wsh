@@ -368,6 +368,16 @@ impl<T> Text<T> {
         Ok(())
     }
 
+    pub fn make_default_style_cell(&self) -> Option<ratatui::buffer::Cell> {
+        if self.style != Style::default() {
+            let mut cell = ratatui::buffer::Cell::new("");
+            cell.set_style(self.style);
+            Some(cell)
+        } else {
+            None
+        }
+    }
+
     pub fn render_line<'a, W :Write>(
         &'a self,
         state: &mut RenderState<'a, T>,
@@ -406,13 +416,14 @@ impl<T> Text<T> {
         let mut state = RenderState::default();
         let mut marker_pos = drawer.cur_pos;
         let mut first_line = true;
+        let clear_cell = self.make_default_style_cell();
 
         for (lineno, line) in self.lines.iter().enumerate() {
             state.clear();
 
             for (range, _width) in wrap(line.as_ref(), width, drawer.cur_pos.0 as _) {
                 if !first_line {
-                    drawer.goto_newline()?;
+                    drawer.goto_newline(clear_cell.as_ref())?;
                 }
                 first_line = false;
 
@@ -421,7 +432,7 @@ impl<T> Text<T> {
                 }
             }
         }
-        drawer.clear_to_end_of_line()?;
+        drawer.clear_to_end_of_line(None)?;
 
         Ok(marker_pos)
     }

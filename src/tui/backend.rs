@@ -109,18 +109,23 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
         queue!(self.writer, ResetColor)
     }
 
-    fn do_clear(&mut self, clear: ClearType) -> Result<()> {
-        self.reset_colours()?;
+    fn do_clear(&mut self, clear: ClearType, cell: Option<&Cell>) -> Result<()> {
+        if let Some(cell) = cell {
+            self.print_style_of_cell(cell)?;
+        } else {
+            self.reset_colours()?;
+        }
+        log::debug!("DEBUG(iciest)\t{}\t= {:?}", stringify!(cell), cell);
         queue!(self.writer, Clear(clear))
     }
 
-    pub fn goto_newline(&mut self) -> Result<()> {
-        self.clear_to_end_of_line()?;
+    pub fn goto_newline(&mut self, cell: Option<&Cell>) -> Result<()> {
+        self.clear_to_end_of_line(cell)?;
         self.cur_pos = (0, self.cur_pos.1 + 1);
         Ok(())
     }
 
-    pub fn clear_to_end_of_line(&mut self) -> Result<()> {
+    pub fn clear_to_end_of_line(&mut self, cell: Option<&Cell>) -> Result<()> {
         // clear the rest of this line
         let width = self.term_width();
         if self.cur_pos.0 < width {
@@ -128,19 +133,25 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
             let i = self.buffer.index_of(self.cur_pos.0, self.cur_pos.1);
             let cells = &mut self.buffer.content[i..i + (width - self.cur_pos.0) as usize];
 
-            if !cells.iter().all(super::cell_is_empty) {
-                for c in cells {
+            let style = cell.map(|c| c.style());
+            if style.is_some_and(|style| !cells.iter().all(|c| c.style() == style)) || !cells.iter().all(super::cell_is_empty) {
+                for c in cells.iter_mut() {
                     c.reset();
                 }
+                if let Some(style) = style {
+                    for c in cells.iter_mut() {
+                        c.set_style(style);
+                    }
+                }
                 self.move_to_cur_pos()?;
-                self.do_clear(ClearType::UntilNewLine)?;
+                self.do_clear(ClearType::UntilNewLine, cell)?;
             }
 
         }
         Ok(())
     }
 
-    pub fn clear_to_end_of_screen(&mut self) -> Result<()> {
+    pub fn clear_to_end_of_screen(&mut self, cell: Option<&Cell>) -> Result<()> {
         // clear everything from cursor onwards
         let width = self.term_width();
         let i = if self.cur_pos.0 < width {
@@ -153,12 +164,18 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
         };
         let cells = &mut self.buffer.content[i..];
 
-        if !cells.iter().all(super::cell_is_empty) {
-            for c in cells {
+        let style = cell.map(|c| c.style());
+        if style.is_some_and(|style| !cells.iter().all(|c| c.style() == style)) || !cells.iter().all(super::cell_is_empty) {
+            for c in cells.iter_mut() {
                 c.reset();
             }
+            if let Some(style) = style {
+                for c in cells.iter_mut() {
+                    c.set_style(style);
+                }
+            }
             self.move_to_cur_pos()?;
-            self.do_clear(ClearType::FromCursorDown)?;
+            self.do_clear(ClearType::FromCursorDown, cell)?;
         }
         Ok(())
     }
@@ -166,14 +183,14 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
     pub fn draw_lines<'c, I: Iterator<Item=&'c [Cell]>>(&mut self, lines: I) -> Result<()> {
         for (i, line) in lines.enumerate() {
             if i > 0 {
-                self.goto_newline()?;
+                self.goto_newline(None)?;
             }
             let mut skip = 0;
             for (i, cell) in line.iter().enumerate() {
                 if skip > 0 {
                     skip -= 1;
                 } else if super::cell_is_empty(cell) && line[i..].iter().all(super::cell_is_empty) {
-                    self.clear_to_end_of_line()?;
+                    self.clear_to_end_of_line(None)?;
                     break
                 } else {
                     skip = cell.symbol().width() - 1;
@@ -181,7 +198,7 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
                 }
             }
         }
-        self.clear_to_end_of_line()?;
+        self.clear_to_end_of_line(None)?;
         Ok(())
     }
 
@@ -217,7 +234,7 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
         Ok(())
     }
 
-    pub fn print_cell(&mut self, cell: &Cell) -> Result<()> {
+    pub fn print_style_of_cell(&mut self, cell: &Cell) -> Result<()> {
         if cell.modifier != self.modifier {
             self.draw_modifier(cell.modifier)?;
         }
@@ -231,7 +248,11 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
             queue!(self.writer, SetUnderlineColor(color))?;
             self.underline_color = cell.underline_color;
         }
+        Ok(())
+    }
 
+    pub fn print_cell(&mut self, cell: &Cell) -> Result<()> {
+        self.print_style_of_cell(cell)?;
         queue!(self.writer, Print(cell.symbol()))?;
         Ok(())
     }

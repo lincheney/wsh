@@ -387,14 +387,14 @@ impl Tui {
         // redraw the widgets
         if (dirty || self.dirty) && new_widgets_height > 0 {
             drawer.cur_pos = buffer.draw_end_pos;
-            drawer.goto_newline()?;
+            drawer.goto_newline(None)?;
             self.widgets.render(&mut drawer, &mut self.border_buffer, Rect{ height: new_widgets_height as u16, ..area})?;
         }
 
         for _ in new_buffer_height + new_widgets_height .. old_buffer_height + old_widgets_height {
-            drawer.goto_newline()?;
+            drawer.goto_newline(None)?;
         }
-        drawer.clear_to_end_of_line()?;
+        drawer.clear_to_end_of_line(None)?;
         drawer.move_to_pos(buffer.cursor_coord)?;
 
         if new_status_bar_height > 0 && (dirty || status_bar.dirty) && let Some(widget) = &status_bar.inner {
@@ -414,7 +414,7 @@ impl Tui {
             drawer.set_pos((0, area.height - new_status_bar_height as u16));
             widget.render(&mut drawer, &mut self.border_buffer, None)?;
             // clear everything else below
-            drawer.clear_to_end_of_screen()?;
+            // drawer.clear_to_end_of_screen(None)?;
 
             // go back to cursor
             queue!(drawer.writer, cursor::RestorePosition)?;

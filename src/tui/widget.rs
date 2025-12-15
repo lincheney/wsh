@@ -138,9 +138,11 @@ impl Widget {
 
         if self.border_show_empty || !self.inner.get().is_empty() {
             // draw top border
-            let border_height = max_height.min(border_top_height as _);
-            drawer.draw_lines(buffer.content[border_top].chunks(buffer.area.width as _).take(border_height))?;
-            max_height -= border_height;
+            let height = max_height.min(border_top_height as _);
+            if height > 0 {
+                drawer.draw_lines(buffer.content[border_top].chunks(buffer.area.width as _).take(height))?;
+                max_height -= height;
+            }
         }
 
         let line_iter = self.inner.get().iter()
@@ -150,6 +152,7 @@ impl Widget {
                 .map(move |(range, _width)| (lineno, line, range))
             });
 
+        let clear_cell = self.inner.make_default_style_cell();
         for (lineno, line, range) in line_iter {
             // leave room for the bottom border
             if max_height <= border_bottom_height as _ {
@@ -158,7 +161,7 @@ impl Widget {
             max_height -= 1;
 
             if !first_line {
-                drawer.goto_newline()?;
+                drawer.goto_newline(clear_cell.as_ref())?;
             }
             first_line = false;
 
@@ -166,21 +169,31 @@ impl Widget {
             for cell in &buffer.content[border_left.clone()] {
                 drawer.draw_cell(cell, false)?;
             }
+
             // draw line
             self.inner.render_line(&mut state, lineno, line.as_ref(), range, drawer, None)?;
-            drawer.clear_to_end_of_line()?;
+
             // draw right border
-            drawer.cur_pos.0 = buffer.area.width - border_right.len() as u16;
-            for cell in &buffer.content[border_right.clone()] {
-                drawer.draw_cell(cell, false)?;
+            if !border_right.is_empty()  {
+                drawer.clear_to_end_of_line(clear_cell.as_ref())?;
+                drawer.cur_pos.0 = buffer.area.width - border_right.len() as u16;
+                for cell in &buffer.content[border_right.clone()] {
+                    drawer.draw_cell(cell, false)?;
+                }
             }
+        }
+
+        if !self.inner.get().is_empty() {
+            drawer.clear_to_end_of_line(clear_cell.as_ref())?;
         }
 
         // draw bottom border
         if self.border_show_empty || !self.inner.get().is_empty() {
-            let border_height = max_height.min(border_bottom_height as _);
-            drawer.draw_lines(buffer.content[border_bottom].chunks(buffer.area.width as _).take(border_height))?;
-            // max_height -= border_height;
+            let height = max_height.min(border_bottom_height as _);
+            if height > 0 {
+                drawer.draw_lines(buffer.content[border_bottom].chunks(buffer.area.width as _).take(height))?;
+                // max_height -= border_height;
+            }
         }
 
         Ok(())
