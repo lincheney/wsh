@@ -116,94 +116,12 @@ impl Widget {
         buffer: &mut Buffer,
         max_height: Option<usize>,
     ) -> std::io::Result<()> {
-
-        let area = if let Some(block) = &self.block {
-            block.render_ref(buffer.area, buffer);
-            block.inner(buffer.area)
-        } else {
-            buffer.area
-        };
-
-        let border_top = 0 .. (area.y * buffer.area.width) as usize;
-        let border_bottom = (buffer.area.width * (area.y + area.height)) as usize .. (buffer.area.width * buffer.area.height) as usize;
-        let border_left = border_top.end .. border_top.end + area.x as usize;
-        let border_right = border_top.end + (area.x + area.width) as usize .. border_top.end + buffer.area.width as usize;
-
-        let border_top_height = area.y;
-        let border_bottom_height = buffer.area.height - area.height - area.y;
-
-        let mut first_line = true;
-        let mut max_height = max_height.unwrap_or(usize::MAX).min((drawer.term_height() - drawer.cur_pos.1) as _);
-
-        if self.border_show_empty || !self.inner.get().is_empty() {
-            // draw top border
-            let height = max_height.min(border_top_height as _);
-            if height > 0 {
-                drawer.draw_lines(buffer.content[border_top].chunks(buffer.area.width as _).take(height))?;
-                max_height -= height;
-            }
-        }
-
-        let mut indent_cell = ratatui::buffer::Cell::EMPTY;
-        indent_cell.set_style(self.inner.style);
-
-        let line_iter = self.inner.get().iter()
-            .enumerate()
-            .flat_map(|(lineno, line)| {
-                super::text::wrap(line.as_ref(), area.width as usize, 0)
-                .map(move |(range, line_width)| (lineno, line, range, line_width))
-            });
-
-        let clear_cell = self.inner.make_default_style_cell();
-        for (lineno, line, range, line_width) in line_iter {
-            // leave room for the bottom border
-            if max_height <= border_bottom_height as _ {
-                break
-            }
-            max_height -= 1;
-
-            if !first_line {
-                drawer.goto_newline(clear_cell.as_ref())?;
-            }
-            first_line = false;
-
-            // draw left border
-            for cell in &buffer.content[border_left.clone()] {
-                drawer.draw_cell(cell, false)?;
-            }
-
-            // draw the indent
-            for _ in 0 .. self.inner.get_alignment_indent(area.width as _, line_width) {
-                drawer.draw_cell(&indent_cell, false)?;
-            }
-
-            // draw the line
-            self.inner.render_line(lineno, line.as_ref(), range, drawer, None)?;
-
-            // draw right border
-            if !border_right.is_empty()  {
-                drawer.clear_to_end_of_line(clear_cell.as_ref())?;
-                drawer.cur_pos.0 = buffer.area.width - border_right.len() as u16;
-                for cell in &buffer.content[border_right.clone()] {
-                    drawer.draw_cell(cell, false)?;
-                }
-            }
-        }
-
-        if !self.inner.get().is_empty() {
-            drawer.clear_to_end_of_line(clear_cell.as_ref())?;
-        }
-
-        // draw bottom border
-        if self.border_show_empty || !self.inner.get().is_empty() {
-            let height = max_height.min(border_bottom_height as _);
-            if height > 0 {
-                drawer.draw_lines(buffer.content[border_bottom].chunks(buffer.area.width as _).take(height))?;
-                // max_height -= border_height;
-            }
-        }
-
-        Ok(())
+        self.inner.render(
+            drawer,
+            self.block.as_ref().map(|block| (block, buffer)),
+            None,
+            max_height,
+        ).map(|_| ())
     }
 
     pub(super) fn get_height_for_width(&self, mut area: Rect) -> u16 {

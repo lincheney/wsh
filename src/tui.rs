@@ -104,7 +104,6 @@ impl From<ansi::Parser> for WidgetWrapper {
 struct Widgets {
     inner: Vec<WidgetWrapper>,
     pub height: u16,
-    max_height: u16,
 }
 
 impl Widgets {
@@ -113,12 +112,11 @@ impl Widgets {
     }
 
     fn refresh(&mut self, area: Rect) {
-        self.max_height = area.height;
 
         let mut height = 0;
         for w in &mut self.inner {
             let w = w.as_mut();
-            if w.hidden || self.max_height <= height as _ {
+            if w.hidden || area.height <= height as _ {
                 w.line_count = 0;
             } else {
                 w.line_count = w.get_height_for_width(area);
@@ -152,6 +150,7 @@ pub struct Tui {
     buffer: Buffer,
     border_buffer: Buffer,
     prev_status_bar_position: usize,
+    max_height: u16,
     pub dirty: bool,
 }
 
@@ -291,12 +290,13 @@ impl Tui {
         // take up at most 2/3 of the screen
         let max_height = (height * 2 / 3).max(1);
         // reset all if dimensions have changed
-        if max_height != self.widgets.max_height || width != self.buffer.area.width {
+        if max_height != self.max_height || width != self.buffer.area.width {
+            self.max_height = max_height;
             dirty = true;
         }
 
         // resize buffers
-        let area = Rect{x: 0, y: 0, width, height: max_height};
+        let area = Rect{x: 0, y: 0, width, height: self.max_height};
         self.buffer.resize(area);
         // enough space to render borders
         self.border_buffer.resize(Rect{ height: 3, ..area});
@@ -337,7 +337,7 @@ impl Tui {
                 // but it possibly overlaps with the new drawing area
                 // clear it
                 drawer.move_to_pos((0, self.prev_status_bar_position as _))?;
-                queue!(drawer.writer, Clear(ClearType::FromCursorDown))?;
+                drawer.clear_to_end_of_screen(None)?;
                 // it now needs to be redrawn
                 status_bar.dirty = true;
             }
@@ -374,6 +374,7 @@ impl Tui {
             self.widgets.render(&mut drawer, &mut self.border_buffer, Rect{ height: new_widgets_height as u16, ..area})?;
         }
 
+        drawer.cur_pos = (area.width, (new_buffer_height + new_widgets_height - 1) as _);
         for _ in new_buffer_height + new_widgets_height .. old_buffer_height + old_widgets_height {
             drawer.goto_newline(None)?;
         }

@@ -16,7 +16,7 @@ use crossterm::{
     },
 };
 use ratatui::{
-    style::{Color, Modifier},
+    style::{Style, Color, Modifier},
     buffer::{Cell, Buffer},
 };
 
@@ -124,6 +124,14 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
         Ok(())
     }
 
+    fn cells_are_cleared(cells: &[Cell], style: Option<Style>) -> bool {
+        if let Some(style) = style {
+            cells.iter().all(|c| c.style() == style)
+        } else {
+            cells.iter().all(super::cell_is_empty)
+        }
+    }
+
     pub fn clear_to_end_of_line(&mut self, cell: Option<&Cell>) -> Result<()> {
         // clear the rest of this line
         let width = self.term_width();
@@ -133,7 +141,7 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
             let cells = &mut self.buffer.content[i..i + (width - self.cur_pos.0) as usize];
 
             let style = cell.map(|c| c.style());
-            if style.is_some_and(|style| !cells.iter().all(|c| c.style() == style)) || !cells.iter().all(super::cell_is_empty) {
+            if !Self::cells_are_cleared(cells, style) {
                 for c in cells.iter_mut() {
                     c.reset();
                 }
@@ -164,7 +172,7 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
         let cells = &mut self.buffer.content[i..];
 
         let style = cell.map(|c| c.style());
-        if style.is_some_and(|style| !cells.iter().all(|c| c.style() == style)) || !cells.iter().all(super::cell_is_empty) {
+        if !Self::cells_are_cleared(cells, style) {
             for c in cells.iter_mut() {
                 c.reset();
             }

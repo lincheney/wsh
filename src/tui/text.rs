@@ -4,7 +4,9 @@ use bstr::{BStr, BString, ByteVec, ByteSlice};
 use unicode_width::UnicodeWidthStr;
 use ratatui::style::{Style, Color};
 use ratatui::text::{Line, Span};
-use ratatui::layout::{Alignment};
+use ratatui::layout::{Alignment, Rect};
+use ratatui::widgets::{Block, WidgetRef};
+use ratatui::buffer::{Buffer, Cell};
 use crate::tui::{Drawer};
 
 const TAB_WIDTH: usize = 4;
@@ -347,9 +349,9 @@ impl<T> Text<T> {
         Ok(())
     }
 
-    pub fn make_default_style_cell(&self) -> Option<ratatui::buffer::Cell> {
+    pub fn make_default_style_cell(&self) -> Option<Cell> {
         if self.style != Style::default() {
-            let mut cell = ratatui::buffer::Cell::new("");
+            let mut cell = Cell::new("");
             cell.set_style(self.style);
             Some(cell)
         } else {
@@ -367,7 +369,7 @@ impl<T> Text<T> {
     ) -> std::io::Result<Option<(u16, u16)>> {
 
         let mut marker_pos = None;
-        let mut cell = ratatui::buffer::Cell::EMPTY;
+        let mut cell = Cell::EMPTY;
         self.make_line_cells(lineno, line, range, |_start, end, data| {
             let result = if let Some((symbol, style)) = data {
                 cell.reset();
@@ -393,30 +395,89 @@ impl<T> Text<T> {
         }
     }
 
-    pub fn render<W :Write>(
+    pub fn render<'a, W :Write>(
         &self,
         drawer: &mut Drawer<W>,
+        mut block: Option<(&Block<'a>, &mut Buffer)>,
         marker: Option<(usize, usize)>,
+        max_height: Option<usize>,
+
     ) -> std::io::Result<(u16, u16)> {
 
-        let max_width = drawer.term_width() as _;
+        struct Borders<'a> {
+            top: &'a [Cell],
+            bottom: &'a [Cell],
+            left: &'a [Cell],
+            right: &'a [Cell],
+        }
+
+        let full_width = drawer.term_width() as usize;
+        let full_height = drawer.term_height() as usize;
+        let mut area = Rect{ x: 0, y: 0, height: full_height as u16, width: full_width as u16 };
+
+        let borders = if let Some((ref block, ref mut buffer)) = block {
+            buffer.resize(area);
+            block.render_ref(buffer.area, buffer);
+            area = block.inner(buffer.area);
+
+            let cells = &buffer.content;
+            Some(Borders{
+                top: &cells[.. full_width * area.y as usize],
+                bottom: &cells[full_width * (area.y + area.height) as usize ..],
+                left: &cells[full_width * area.y as usize ..][.. area.x as usize],
+                right: &cells[full_width * area.y as usize ..][(area.x + area.width) as usize .. full_width],
+            })
+        } else {
+            None
+        };
+
         let mut marker_pos = drawer.cur_pos;
         let mut first_line = true;
-        let clear_cell = self.make_default_style_cell();
+        let mut max_height = max_height.unwrap_or(usize::MAX).min(full_height - drawer.cur_pos.1 as usize);
+        let border_bottom_height = full_height - (area.y + area.height) as usize;
 
-        let mut indent_cell = ratatui::buffer::Cell::EMPTY;
+        let clear_cell = self.make_default_style_cell();
+        let mut indent_cell = Cell::EMPTY;
         indent_cell.set_style(self.style);
 
-        for (lineno, line) in self.lines.iter().enumerate() {
+        // draw top border
+        if let Some(borders) = &borders {
+            let height = max_height.min(borders.top.len() / full_width as usize);
+            if height > 0 {
+                drawer.draw_lines(borders.top.chunks(full_width as _).take(height))?;
+                max_height -= height;
+            }
+        }
 
-            for (range, line_width) in wrap(line.as_ref(), max_width, drawer.cur_pos.0 as _) {
+        'outer: for (lineno, line) in self.lines.iter().enumerate() {
+
+            let initial = if drawer.cur_pos.0 as usize >= full_width {
+                0
+            } else {
+                drawer.cur_pos.0 as _
+            };
+
+            for (range, line_width) in wrap(line.as_ref(), area.width as usize, initial) {
+                // leave room for the bottom border
+                if max_height <= border_bottom_height as _ {
+                    break 'outer
+                }
+                max_height -= 1;
+
                 if !first_line {
                     drawer.goto_newline(clear_cell.as_ref())?;
                 }
                 first_line = false;
 
+                // draw left border
+                if let Some(borders) = &borders {
+                    for cell in borders.left {
+                        drawer.draw_cell(cell, false)?;
+                    }
+                }
+
                 // draw the indent
-                for _ in 0 .. self.get_alignment_indent(max_width, line_width) {
+                for _ in 0 .. self.get_alignment_indent(area.width as _, line_width) {
                     drawer.draw_cell(&indent_cell, false)?;
                 }
 
@@ -424,9 +485,30 @@ impl<T> Text<T> {
                 if let Some(pos) = self.render_line(lineno, line.as_ref(), range, drawer, marker)? {
                     marker_pos = pos;
                 }
+
+                // draw right border
+                if let Some(borders) = &borders && !borders.right.is_empty()  {
+                    drawer.clear_to_end_of_line(clear_cell.as_ref())?;
+                    drawer.cur_pos.0 = (full_width - borders.right.len()) as _;
+                    for cell in borders.right {
+                        drawer.draw_cell(cell, false)?;
+                    }
+                }
             }
         }
-        drawer.clear_to_end_of_line(None)?;
+
+        if !self.lines.is_empty() {
+            drawer.clear_to_end_of_line(clear_cell.as_ref())?;
+        }
+
+        // draw bottom border
+        if let Some(borders) = &borders {
+            let height = max_height.min(borders.bottom.len() / full_width);
+            if height > 0 {
+                drawer.draw_lines(borders.bottom.chunks(full_width).take(height))?;
+                // max_height -= border_height;
+            }
+        }
 
         Ok(marker_pos)
     }
