@@ -23,7 +23,7 @@ pub struct Parser {
     buffer: BString,
     style: Style,
     state: State,
-    pub(super) widget: super::Widget,
+    pub(super) widget: super::widget::Widget,
     cursor_x: usize,
     need_newline: bool,
     pub ocrnl: bool,
@@ -142,7 +142,7 @@ fn parse_ansi_col(mut style: Style, string: &BStr) -> Style {
 
 impl Parser {
 
-    pub fn as_widget(&mut self) -> &mut super::Widget {
+    pub fn as_widget(&mut self) -> &mut super::widget::Widget {
         &mut self.widget
     }
 
@@ -319,7 +319,7 @@ impl std::default::Default for Parser {
             buffer: Default::default(),
             style: Default::default(),
             state: Default::default(),
-            widget: super::Widget::default(),
+            widget: super::widget::Widget::default(),
             cursor_x: 0,
             need_newline: false,
             ocrnl: false,

@@ -180,7 +180,7 @@ struct BufferStyleOptions {
     no_blend: bool,
 }
 
-impl From<StyleOptions> for tui::StyleOptions {
+impl From<StyleOptions> for tui::widget::StyleOptions {
     fn from(style: StyleOptions) -> Self {
         Self {
             fg: style.fg.map(|x| x.0),
@@ -190,9 +190,9 @@ impl From<StyleOptions> for tui::StyleOptions {
             italic: style.italic,
             underline: match style.underline {
                 None => None,
-                Some(UnderlineOption::Bool(false)) => Some(tui::UnderlineOption::None),
-                Some(UnderlineOption::Bool(true)) => Some(tui::UnderlineOption::Set),
-                Some(UnderlineOption::Options(opts)) => Some(tui::UnderlineOption::Color(opts.color.0)),
+                Some(UnderlineOption::Bool(false)) => Some(tui::widget::UnderlineOption::None),
+                Some(UnderlineOption::Bool(true)) => Some(tui::widget::UnderlineOption::Set),
+                Some(UnderlineOption::Options(opts)) => Some(tui::widget::UnderlineOption::Color(opts.color.0)),
             },
             strikethrough: style.strikethrough,
             reversed: style.reversed,
@@ -211,7 +211,7 @@ fn parse_text_parts(parts: TextParts, text: &mut tui::text::Text) {
             let hl = if part.style.style.is_default() {
                 None
             } else {
-                let style: tui::StyleOptions = part.style.style.into();
+                let style: tui::widget::StyleOptions = part.style.style.into();
                 Some(tui::text::Highlight{
                     style: style.as_style(),
                     namespace: (),
@@ -241,7 +241,7 @@ fn parse_text_parts(parts: TextParts, text: &mut tui::text::Text) {
                     let hl = if part.style.style.is_default() {
                         None
                     } else {
-                        let style: tui::StyleOptions = part.style.style.into();
+                        let style: tui::widget::StyleOptions = part.style.style.into();
                         Some(tui::text::Highlight{
                             style: style.as_style(),
                             namespace: (),
@@ -261,7 +261,7 @@ fn parse_text_parts(parts: TextParts, text: &mut tui::text::Text) {
     }
 }
 
-fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
+fn set_widget_options(widget: &mut tui::widget::Widget, options: CommonWidgetOptions) {
     if let Some(persist) = options.persist {
         widget.persist = persist;
     }
@@ -284,7 +284,7 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
             widget.block = None;
         },
         Some(options) => {
-            let style: tui::StyleOptions = options.style.into();
+            let style: tui::widget::StyleOptions = options.style.into();
             widget.border_style = widget.border_style.patch(style.as_style());
             widget.border_type = options.r#type.unwrap_or(SerdeWrap(widget.border_type)).0;
             widget.border_show_empty = options.show_empty.unwrap_or(widget.border_show_empty);
@@ -327,7 +327,7 @@ async fn set_message(ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
     let (id, widget) = match options.as_ref().and_then(|o| o.options.id).map(|id| (id, tui.get_mut(id))) {
         Some((id, Some(widget))) => (id, widget),
         None => {
-            let widget = tui::Widget::default();
+            let widget = tui::widget::Widget::default();
             tui.add(widget.into())
         },
         Some((id, None)) => anyhow::bail!("can't find widget with id {}", id),
@@ -386,7 +386,7 @@ async fn add_buf_highlight(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
     let hl: BufferHighlight = lua.from_value(val)?;
     let style: BufferStyleOptions = hl.style;
     let blend = !style.no_blend;
-    let style: tui::StyleOptions = style.inner.into();
+    let style: tui::widget::StyleOptions = style.inner.into();
 
     ui.inner.borrow_mut().await.buffer.add_highlight(tui::text::HighlightedRange{
         lineno: 0,

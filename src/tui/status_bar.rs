@@ -2,7 +2,7 @@ use ratatui::layout::Rect;
 
 #[derive(Default)]
 pub struct StatusBar {
-    pub inner: Option<super::Widget>,
+    pub inner: Option<super::widget::Widget>,
     pub dirty: bool,
 }
 
