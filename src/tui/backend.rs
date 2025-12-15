@@ -45,6 +45,10 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
         }
     }
 
+    pub fn term_height(&self) -> u16 {
+        self.buffer.area.height
+    }
+
     pub fn term_width(&self) -> u16 {
         self.buffer.area.width
     }

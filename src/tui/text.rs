@@ -6,6 +6,7 @@ use ratatui::style::{Style, Color};
 use ratatui::text::{Line, Span};
 use crate::tui::{Drawer};
 
+const TAB_WIDTH: usize = 4;
 const ESCAPE_STYLE: Style = Style::new().fg(Color::Gray);
 
 #[derive(Debug, Clone)]
@@ -74,70 +75,89 @@ impl<T> HighlightStack<'_, T> {
     }
 }
 
-pub fn wrap(line: &BStr, width: usize, initial_indent: usize) -> impl Iterator<Item=((usize, usize), usize)> {
-    const TAB_WIDTH: usize = 4;
-    let mut line_range = (0, 0);
-    let mut line_width = initial_indent;
-    let mut graphemes = line.grapheme_indices().fuse();
-    let mut invalid = None;
+pub struct Wrapper<'a> {
+    prev_range: (usize, usize),
+    width: usize,
+    max_width: usize,
+    invalid: Option<(usize, usize)>,
+    line: &'a BStr,
+    graphemes: bstr::GraphemeIndices<'a>,
+}
 
-    let mut try_add_width = move |w, end| {
-        let old_width = line_width;
-        line_width += w;
-        if line_width > width {
+impl Wrapper<'_> {
+    fn add_width(&mut self, width: usize, new_end: usize) -> Option<((usize, usize), usize)> {
+        let old_width = self.width;
+        self.width += width;
+        if self.width > self.max_width {
             // wrap
-            line_range = (line_range.1, end);
-            line_width = w;
-            Some((line_range, old_width))
+            self.width = width;
+            self.prev_range = (self.prev_range.1, new_end);
+            Some((self.prev_range, old_width))
         } else {
             None
         }
-    };
+    }
+}
 
-    std::iter::from_fn(move || {
+impl Iterator for Wrapper<'_> {
+    type Item = ((usize, usize), usize);
+    fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if let Some((start, end)) = invalid.take() {
+            if self.prev_range.1 >= self.line.len() {
+                return None
+
+            } else if let Some((start, end)) = self.invalid.take() {
                 // iter over previous invalid text
                 let mut cursor = Cursor::new([0; 64]);
-                for (i, c) in line[start .. end].iter().enumerate() {
+                for (i, c) in self.line[start .. end].iter().enumerate() {
                     cursor.set_position(0);
                     write!(cursor, "<u{c:04x}>").unwrap();
-                    if let Some(result) = try_add_width(cursor.position() as usize, start + i) {
-                        invalid = Some((start + i, end));
+                    if let Some(result) = self.add_width(cursor.position() as usize, start + i) {
+                        self.invalid = Some((start + i, end));
                         return Some(result)
                     }
                 }
 
-            } else if let Some((start, end, c)) = graphemes.next() {
+            } else if let Some((start, end, c)) = self.graphemes.next() {
+
                 if c == "\n" {
                     // newline
-                    let old_width = line_width;
-                    line_width = 0;
-                    line_range = (line_range.1, end);
-                    return Some((line_range, old_width))
+                    let old_width = self.width;
+                    self.width = 0;
+                    self.prev_range = (self.prev_range.1, end);
+                    return Some((self.prev_range, old_width))
                 } else if c == "\t" {
-                    let result = try_add_width(TAB_WIDTH, start);
+                    let result = self.add_width(TAB_WIDTH, start);
                     if result.is_some() {
                         return result
                     }
                 } else if c.width() > 0 && c != "\u{FFFD}" {
-                    let result = try_add_width(c.width(), start);
+                    let result = self.add_width(c.width(), start);
                     if result.is_some() {
                         return result
                     }
                 } else {
                     // invalid text
-                    invalid = Some((start, end));
+                    self.invalid = Some((start, end));
                 }
-            } else if line_range.1 < line.len() {
-                // no more text, emit last line
-                line_range = (line_range.1, line.len());
-                return Some((line_range, line_width))
             } else {
-                return None
+                // no more text, emit last line
+                self.prev_range = (self.prev_range.1, self.line.len());
+                return Some((self.prev_range, self.width))
             }
         }
-    })
+    }
+}
+
+pub fn wrap(line: &BStr, max_width: usize, initial_indent: usize) -> Wrapper<'_> {
+    Wrapper {
+        prev_range: (0, 0),
+        width: initial_indent,
+        max_width,
+        invalid: None,
+        line,
+        graphemes: line.grapheme_indices(),
+    }
 }
 
 pub struct RenderState<'a, T> {
@@ -311,18 +331,22 @@ impl<T> Text<T> {
     ) -> Result<(), E> {
 
         let mut style = self.style;
-        for (i, (start, end, c)) in line[range.0 .. range.1].grapheme_indices().enumerate() {
+        for (start, end, c) in line[range.0 .. range.1].grapheme_indices() {
             let start = start + range.0;
             let end = end + range.0;
 
-            if self.highlights.iter().any(|h| h.lineno == lineno && (h.start == i || h.end == i)) {
-                highlights.0.splice(.., self.highlights.iter().filter(|h| h.lineno == lineno && h.start <= i && i < h.end));
+            if self.highlights.iter().any(|h| h.lineno == lineno && (h.start == start || h.end == start)) {
+                highlights.0.splice(.., self.highlights.iter().filter(|h| h.lineno == lineno && h.start <= start && start < h.end));
                 style = highlights.merge(self.style);
             }
 
             if c == "\n" {
                 // do nothing
                 callback(start, end, None)?;
+            } else if c == "\t" {
+                for _ in 0 .. TAB_WIDTH {
+                    callback(start, end, Some((" ", style)))?;
+                }
             } else if c.width() > 0 && c != "\u{FFFD}" {
                 callback(start, end, Some((c, style)))?;
             } else {

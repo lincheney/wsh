@@ -206,49 +206,58 @@ impl Widget {
         let border_left = border_top.end .. border_top.end + area.x as usize;
         let border_right = border_top.end + (area.x + area.width) as usize .. border_top.end + buffer.area.width as usize;
 
+        let border_top_height = area.y;
+        let border_bottom_height = buffer.area.height - area.height - area.y;
+
         let mut state = text::RenderState::default();
         let mut first_line = true;
-        let start_pos = drawer.cur_pos;
+        let mut max_height = max_height.unwrap_or(usize::MAX).min((drawer.term_height() - drawer.cur_pos.1) as _);
 
-        for (lineno, line) in self.inner.get().iter().enumerate() {
-            if let Some(max_height) = max_height && start_pos.1 + max_height as u16 + buffer.area.height - area.height <= drawer.cur_pos.1 {
-                break
-            }
-
-            state.clear();
-
-            for (range, _width) in text::wrap(line.as_ref(), area.width as usize, 0) {
-                if !first_line {
-                    drawer.goto_newline()?;
-                } else {
-                    // draw top border
-                    drawer.draw_lines(buffer.content[border_top.clone()].chunks(buffer.area.width as _))?;
-                }
-                first_line = false;
-
-                // draw left border
-                for cell in &buffer.content[border_left.clone()] {
-                    drawer.draw_cell(cell, false)?;
-                }
-                // draw line
-                self.inner.render_line(&mut state, lineno, line.as_ref(), range, drawer, None)?;
-                drawer.clear_to_end_of_line()?;
-                // draw right border
-                drawer.cur_pos.0 = buffer.area.width - border_right.len() as u16;
-                for cell in &buffer.content[border_right.clone()] {
-                    drawer.draw_cell(cell, false)?;
-                }
-            }
+        if self.border_show_empty || !self.inner.get().is_empty() {
+            // draw top border
+            let border_height = max_height.min(border_top_height as _);
+            drawer.draw_lines(buffer.content[border_top].chunks(buffer.area.width as _).take(border_height))?;
+            max_height -= border_height;
         }
 
-        // draw top border if not already
-        if self.border_show_empty && first_line {
-            drawer.draw_lines(buffer.content[border_top].chunks(buffer.area.width as _))?;
+        let line_iter = self.inner.get().iter()
+            .enumerate()
+            .flat_map(|(lineno, line)| {
+                text::wrap(line.as_ref(), area.width as usize, 0)
+                .map(move |(range, _width)| (lineno, line, range))
+            });
+
+        for (lineno, line, range) in line_iter {
+            // leave room for the bottom border
+            if max_height <= border_bottom_height as _ {
+                break
+            }
+            max_height -= 1;
+
+            if !first_line {
+                drawer.goto_newline()?;
+            }
+            first_line = false;
+
+            // draw left border
+            for cell in &buffer.content[border_left.clone()] {
+                drawer.draw_cell(cell, false)?;
+            }
+            // draw line
+            self.inner.render_line(&mut state, lineno, line.as_ref(), range, drawer, None)?;
+            drawer.clear_to_end_of_line()?;
+            // draw right border
+            drawer.cur_pos.0 = buffer.area.width - border_right.len() as u16;
+            for cell in &buffer.content[border_right.clone()] {
+                drawer.draw_cell(cell, false)?;
+            }
         }
 
         // draw bottom border
-        if self.border_show_empty || !first_line {
-            drawer.draw_lines(buffer.content[border_bottom].chunks(buffer.area.width as _))?;
+        if self.border_show_empty || !self.inner.get().is_empty() {
+            let border_height = max_height.min(border_bottom_height as _);
+            drawer.draw_lines(buffer.content[border_bottom].chunks(buffer.area.width as _).take(border_height))?;
+            // max_height -= border_height;
         }
 
         Ok(())
@@ -256,8 +265,12 @@ impl Widget {
 
     fn get_height_for_width(&self, mut area: Rect) -> u16 {
         let mut height = 0;
-        if let Some(Constraint::Min(min)) = self.constraint {
-            height = height.max(min);
+        let mut min_height = None;
+        let mut max_height = None;
+        match self.constraint {
+            Some(Constraint::Min(min)) => min_height = Some(min),
+            Some(Constraint::Max(max)) => max_height = Some(max),
+            _ => (),
         }
 
         let mut border_height = 0;
@@ -271,6 +284,12 @@ impl Widget {
 
         if self.border_show_empty || height > 0 {
             height += border_height;
+        }
+        if let Some(min_height) = min_height {
+            height = height.max(min_height);
+        }
+        if let Some(max_height) = max_height {
+            height = height.min(max_height);
         }
         height
     }
@@ -582,7 +601,7 @@ impl Tui {
         if (dirty || self.dirty) && new_widgets_height > 0 {
             drawer.cur_pos = buffer.draw_end_pos;
             drawer.goto_newline()?;
-            self.widgets.render(&mut drawer, &mut self.border_buffer, Rect{ height: area.height - new_status_bar_height as u16, ..area})?;
+            self.widgets.render(&mut drawer, &mut self.border_buffer, Rect{ height: new_widgets_height as u16, ..area})?;
         }
 
         for _ in new_buffer_height + new_widgets_height .. old_buffer_height + old_widgets_height {
