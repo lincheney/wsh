@@ -60,19 +60,17 @@ impl<T> HighlightedRange<T> {
     }
 }
 
-struct HighlightStack<'a, T>(Vec<&'a HighlightedRange<T>>);
 
-impl<T> HighlightStack<'_, T> {
-    fn merge(&self, mut style: Style) -> Style {
-        for h in &self.0 {
-            if !h.inner.blend {
-                // start from scratch
-                style = Style::new();
-            }
-            style = style.patch(h.inner.style);
+fn merge_highlights<'a, T: 'a, I: Iterator<Item=&'a Highlight<T>>>(init: Style, iter: I) -> Style {
+    let mut style = init;
+    for h in iter {
+        if !h.blend {
+            // start from scratch
+            style = Style::new();
         }
-        style
+        style = style.patch(h.style);
     }
+    style
 }
 
 pub struct Wrapper<'a> {
@@ -159,28 +157,6 @@ pub fn wrap(line: &BStr, max_width: usize, initial_indent: usize) -> Wrapper<'_>
         graphemes: line.grapheme_indices(),
     }
 }
-
-pub struct RenderState<'a, T> {
-    highlights: HighlightStack<'a, T>,
-    cell: ratatui::buffer::Cell,
-}
-
-impl<T> RenderState<'_, T> {
-    pub fn clear(&mut self) {
-        self.highlights.0.clear();
-        self.cell = Default::default();
-    }
-}
-
-impl<T> Default for RenderState<'_, T> {
-    fn default() -> Self {
-        Self{
-            highlights: HighlightStack(vec![]),
-            cell: ratatui::buffer::Cell::default(),
-        }
-    }
-}
-
 
 #[derive(Debug, Default)]
 pub struct Text<T=()> {
@@ -323,7 +299,6 @@ impl<T> Text<T> {
 
     fn make_line_cells<'a, E, F: FnMut(usize, usize, Option<(&str, Style)>) -> Result<(), E>>(
         &'a self,
-        highlights: &mut HighlightStack<'a, T>,
         lineno: usize,
         line: &BStr,
         range: (usize, usize),
@@ -336,8 +311,10 @@ impl<T> Text<T> {
             let end = end + range.0;
 
             if self.highlights.iter().any(|h| h.lineno == lineno && (h.start == start || h.end == start)) {
-                highlights.0.splice(.., self.highlights.iter().filter(|h| h.lineno == lineno && h.start <= start && start < h.end));
-                style = highlights.merge(self.style);
+                let highlights = self.highlights.iter()
+                    .filter(|h| h.lineno == lineno && h.start <= start && start < h.end)
+                    .map(|h| &h.inner);
+                style = merge_highlights(self.style, highlights);
             }
 
             if c == "\n" {
@@ -380,7 +357,6 @@ impl<T> Text<T> {
 
     pub fn render_line<'a, W :Write>(
         &'a self,
-        state: &mut RenderState<'a, T>,
         lineno: usize,
         line: &BStr,
         range: (usize, usize),
@@ -389,12 +365,13 @@ impl<T> Text<T> {
     ) -> std::io::Result<Option<(u16, u16)>> {
 
         let mut marker_pos = None;
-        self.make_line_cells(&mut state.highlights, lineno, line, range, |_start, end, data| {
+        let mut cell = ratatui::buffer::Cell::EMPTY;
+        self.make_line_cells(lineno, line, range, |_start, end, data| {
             let result = if let Some((symbol, style)) = data {
-                state.cell.reset();
-                state.cell.set_symbol(symbol);
-                state.cell.set_style(style);
-                drawer.draw_cell(&state.cell, false)
+                cell.reset();
+                cell.set_symbol(symbol);
+                cell.set_style(style);
+                drawer.draw_cell(&cell, false)
             } else {
                 Ok(())
             };
@@ -413,13 +390,11 @@ impl<T> Text<T> {
     ) -> std::io::Result<(u16, u16)> {
 
         let width = drawer.term_width() as _;
-        let mut state = RenderState::default();
         let mut marker_pos = drawer.cur_pos;
         let mut first_line = true;
         let clear_cell = self.make_default_style_cell();
 
         for (lineno, line) in self.lines.iter().enumerate() {
-            state.clear();
 
             for (range, _width) in wrap(line.as_ref(), width, drawer.cur_pos.0 as _) {
                 if !first_line {
@@ -427,7 +402,7 @@ impl<T> Text<T> {
                 }
                 first_line = false;
 
-                if let Some(pos) = self.render_line(&mut state, lineno, line.as_ref(), range, drawer, marker)? {
+                if let Some(pos) = self.render_line(lineno, line.as_ref(), range, drawer, marker)? {
                     marker_pos = pos;
                 }
             }
@@ -464,10 +439,9 @@ impl<T> From<&Text<T>> for Line<'_> {
 
         let line = line.lines().next().unwrap();
         let mut spans = vec![];
-        let mut state = RenderState::default();
         let mut prev_style = Style::new();
         let mut string = String::new();
-        let _: Result<(), ()> = val.make_line_cells(&mut state.highlights, 0, line.as_ref(), (0, line.len()), |_, _, cell| {
+        let _: Result<(), ()> = val.make_line_cells(0, line.as_ref(), (0, line.len()), |_, _, cell| {
             if let Some((str, style)) = cell {
                 if style != prev_style {
                     if !string.is_empty() {

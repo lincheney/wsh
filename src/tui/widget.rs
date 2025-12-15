@@ -132,7 +132,6 @@ impl Widget {
         let border_top_height = area.y;
         let border_bottom_height = buffer.area.height - area.height - area.y;
 
-        let mut state = super::text::RenderState::default();
         let mut first_line = true;
         let mut max_height = max_height.unwrap_or(usize::MAX).min((drawer.term_height() - drawer.cur_pos.1) as _);
 
@@ -171,7 +170,7 @@ impl Widget {
             }
 
             // draw line
-            self.inner.render_line(&mut state, lineno, line.as_ref(), range, drawer, None)?;
+            self.inner.render_line(lineno, line.as_ref(), range, drawer, None)?;
 
             // draw right border
             if !border_right.is_empty()  {
