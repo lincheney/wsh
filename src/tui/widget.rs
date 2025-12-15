@@ -144,15 +144,18 @@ impl Widget {
             }
         }
 
+        let mut indent_cell = ratatui::buffer::Cell::EMPTY;
+        indent_cell.set_style(self.inner.style);
+
         let line_iter = self.inner.get().iter()
             .enumerate()
             .flat_map(|(lineno, line)| {
                 super::text::wrap(line.as_ref(), area.width as usize, 0)
-                .map(move |(range, _width)| (lineno, line, range))
+                .map(move |(range, line_width)| (lineno, line, range, line_width))
             });
 
         let clear_cell = self.inner.make_default_style_cell();
-        for (lineno, line, range) in line_iter {
+        for (lineno, line, range, line_width) in line_iter {
             // leave room for the bottom border
             if max_height <= border_bottom_height as _ {
                 break
@@ -169,7 +172,12 @@ impl Widget {
                 drawer.draw_cell(cell, false)?;
             }
 
-            // draw line
+            // draw the indent
+            for _ in 0 .. self.inner.get_alignment_indent(area.width as _, line_width) {
+                drawer.draw_cell(&indent_cell, false)?;
+            }
+
+            // draw the line
             self.inner.render_line(lineno, line.as_ref(), range, drawer, None)?;
 
             // draw right border

@@ -274,9 +274,9 @@ fn set_widget_options(widget: &mut tui::widget::Widget, options: CommonWidgetOpt
         widget.constraint = Some(constraint.0);
     }
 
-    // if let Some(align) = options.style.align {
-        // widget.inner = std::mem::take(&mut widget.inner).alignment(align.0);
-    // }
+    if let Some(align) = options.style.align {
+        widget.inner.alignment = align.0;
+    }
 
     match options.border {
         // explicitly disabled

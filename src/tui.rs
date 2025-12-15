@@ -66,23 +66,6 @@ fn buffer_nonempty_height(buffer: &Buffer) -> u16 {
     buffer.area.height - trailing_empty_lines as u16
 }
 
-fn render_indent(area: Rect, buffer: &mut Buffer, line_width: u16, alignment: Alignment, style: Option<Style>) -> u16 {
-    let indent = match alignment {
-        Alignment::Left => return 0,
-        Alignment::Right => area.width.saturating_sub(line_width),
-        Alignment::Center => area.width.saturating_sub(line_width) / 2,
-    };
-
-    let index = buffer.index_of(area.x, area.y);
-    for cell in &mut buffer.content[index .. index + indent as usize] {
-        cell.reset();
-        if let Some(style) = style {
-            cell.set_style(style);
-        }
-    }
-    indent
-}
-
 #[derive(Debug)]
 pub enum WidgetWrapper {
     Widget(widget::Widget),

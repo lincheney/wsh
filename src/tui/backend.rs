@@ -115,7 +115,6 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
         } else {
             self.reset_colours()?;
         }
-        log::debug!("DEBUG(iciest)\t{}\t= {:?}", stringify!(cell), cell);
         queue!(self.writer, Clear(clear))
     }
 

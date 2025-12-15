@@ -4,6 +4,7 @@ use bstr::{BStr, BString, ByteVec, ByteSlice};
 use unicode_width::UnicodeWidthStr;
 use ratatui::style::{Style, Color};
 use ratatui::text::{Line, Span};
+use ratatui::layout::{Alignment};
 use crate::tui::{Drawer};
 
 const TAB_WIDTH: usize = 4;
@@ -161,6 +162,7 @@ pub fn wrap(line: &BStr, max_width: usize, initial_indent: usize) -> Wrapper<'_>
 #[derive(Debug, Default)]
 pub struct Text<T=()> {
     lines: Vec<BString>,
+    pub alignment: Alignment,
     pub highlights: Vec<HighlightedRange<T>>,
     pub style: Style,
     pub dirty: bool,
@@ -383,25 +385,42 @@ impl<T> Text<T> {
         Ok(marker_pos)
     }
 
+    pub fn get_alignment_indent(&self, max_width: usize, line_width: usize) -> usize {
+        match self.alignment {
+            Alignment::Left => 0,
+            Alignment::Right => max_width.saturating_sub(line_width),
+            Alignment::Center => max_width.saturating_sub(line_width) / 2,
+        }
+    }
+
     pub fn render<W :Write>(
         &self,
         drawer: &mut Drawer<W>,
         marker: Option<(usize, usize)>,
     ) -> std::io::Result<(u16, u16)> {
 
-        let width = drawer.term_width() as _;
+        let max_width = drawer.term_width() as _;
         let mut marker_pos = drawer.cur_pos;
         let mut first_line = true;
         let clear_cell = self.make_default_style_cell();
 
+        let mut indent_cell = ratatui::buffer::Cell::EMPTY;
+        indent_cell.set_style(self.style);
+
         for (lineno, line) in self.lines.iter().enumerate() {
 
-            for (range, _width) in wrap(line.as_ref(), width, drawer.cur_pos.0 as _) {
+            for (range, line_width) in wrap(line.as_ref(), max_width, drawer.cur_pos.0 as _) {
                 if !first_line {
                     drawer.goto_newline(clear_cell.as_ref())?;
                 }
                 first_line = false;
 
+                // draw the indent
+                for _ in 0 .. self.get_alignment_indent(max_width, line_width) {
+                    drawer.draw_cell(&indent_cell, false)?;
+                }
+
+                // draw the line
                 if let Some(pos) = self.render_line(lineno, line.as_ref(), range, drawer, marker)? {
                     marker_pos = pos;
                 }
