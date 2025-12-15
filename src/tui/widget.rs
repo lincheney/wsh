@@ -110,9 +110,9 @@ pub struct Widget{
 
 impl Widget {
 
-    pub(super) fn render<W :Write>(
+    pub(super) fn render<W: Write, C: super::Canvas>(
         &self,
-        drawer: &mut super::Drawer<W>,
+        drawer: &mut super::Drawer<W, C>,
         buffer: &mut Buffer,
         max_height: Option<usize>,
     ) -> std::io::Result<()> {

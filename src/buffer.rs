@@ -1,6 +1,6 @@
 use std::io::Write;
 use bstr::{BString, ByteSlice};
-use crate::tui::{Drawer, text::Text, text::HighlightedRange};
+use crate::tui::{Drawer, Canvas, text::Text, text::HighlightedRange};
 
 #[derive(Debug)]
 pub struct Edit {
@@ -204,7 +204,7 @@ impl Buffer {
         self.byte_pos(self.cursor)
     }
 
-    pub fn render<W :Write>(&mut self, drawer: &mut Drawer<W>) -> std::io::Result<()> {
+    pub fn render<W: Write, C: Canvas>(&mut self, drawer: &mut Drawer<W, C>) -> std::io::Result<()> {
         let cursor = self.cursor_byte_pos();
         self.cursor_coord = self.contents.render(drawer, None, Some((0, cursor)), None)?;
         self.draw_end_pos = drawer.get_pos();

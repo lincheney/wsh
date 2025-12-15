@@ -20,8 +20,77 @@ use ratatui::{
     buffer::{Cell, Buffer},
 };
 
-pub struct Drawer<'a, 'b, W: Write> {
-    buffer: &'a mut Buffer,
+pub trait Canvas {
+    fn get_cell(&self, pos: (u16, u16)) -> &Cell;
+    fn get_cell_mut(&mut self, pos: (u16, u16)) -> &mut Cell;
+    fn set_cell(&mut self, pos: (u16, u16), cell: &Cell);
+    fn get_cell_range(&self, start: (u16, u16), end: (u16, u16)) -> &[Cell];
+    fn get_cell_range_mut(&mut self, start: (u16, u16), end: (u16, u16)) -> &mut [Cell];
+    fn get_size(&self) -> (u16, u16);
+}
+
+impl Canvas for Buffer {
+    fn get_cell(&self, pos: (u16, u16)) -> &Cell {
+        &self[pos]
+    }
+
+    fn get_cell_mut(&mut self, pos: (u16, u16)) -> &mut Cell {
+        &mut self[pos]
+    }
+
+    fn set_cell(&mut self, pos: (u16, u16), cell: &Cell) {
+        self[pos] = cell.clone();
+    }
+
+    fn get_cell_range(&self, start: (u16, u16), end: (u16, u16)) -> &[Cell] {
+        let start = start.0 + start.1 * self.area.width;
+        let end = end.0 + end.1 * self.area.width;
+        &self.content[start as usize .. end as usize]
+    }
+
+    fn get_cell_range_mut(&mut self, start: (u16, u16), end: (u16, u16)) -> &mut [Cell] {
+        let start = start.0 + start.1 * self.area.width;
+        let end = end.0 + end.1 * self.area.width;
+        &mut self.content[start as usize .. end as usize]
+    }
+
+    fn get_size(&self) -> (u16, u16) {
+        (self.area.width, self.area.height)
+    }
+}
+
+#[derive(Default)]
+pub struct DummyCanvas {
+    pub size: (u16, u16),
+    cell: Cell,
+}
+impl Canvas for DummyCanvas {
+    fn get_cell(&self, _pos: (u16, u16)) -> &Cell {
+        &self.cell
+    }
+
+    fn get_cell_mut(&mut self, _pos: (u16, u16)) -> &mut Cell {
+        &mut self.cell
+    }
+
+    fn set_cell(&mut self, _pos: (u16, u16), _cell: &Cell) {
+    }
+
+    fn get_cell_range(&self, _start: (u16, u16), _end: (u16, u16)) -> &[Cell] {
+        &[]
+    }
+
+    fn get_cell_range_mut(&mut self, _start: (u16, u16), _end: (u16, u16)) -> &mut [Cell] {
+        &mut []
+    }
+
+    fn get_size(&self) -> (u16, u16) {
+        self.size
+    }
+}
+
+pub struct Drawer<'a, 'b, W: Write, C: Canvas> {
+    canvas: &'a mut C,
     pub writer: &'b mut W,
     real_pos: (u16, u16),
     pos: (u16, u16),
@@ -31,10 +100,10 @@ pub struct Drawer<'a, 'b, W: Write> {
     modifier: Modifier,
 }
 
-impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
-    pub fn new(buffer: &'a mut Buffer, writer: &'b mut W, pos: (u16, u16)) -> Self {
+impl<'a, 'b, W: Write, C: Canvas> Drawer<'a, 'b, W, C> {
+    pub fn new(canvas: &'a mut C, writer: &'b mut W, pos: (u16, u16)) -> Self {
         Self {
-            buffer,
+            canvas,
             writer,
             real_pos: pos,
             pos,
@@ -46,11 +115,11 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
     }
 
     pub fn term_height(&self) -> u16 {
-        self.buffer.area.height
+        self.canvas.get_size().1
     }
 
     pub fn term_width(&self) -> u16 {
-        self.buffer.area.width
+        self.canvas.get_size().0
     }
 
     pub fn set_pos(&mut self, pos: (u16, u16)) {
@@ -96,7 +165,7 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
                 // TODO what about when it is a multi width char
                 let pos = (self.term_width() - 1, self.pos.1);
                 self.move_to_pos(pos)?;
-                let cell = self.buffer[pos].clone();
+                let cell = self.canvas.get_cell(pos).clone();
                 self.draw_cell(&cell, true)?;
             }
         }
@@ -111,7 +180,7 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
 
     pub fn clear_cells(&mut self, (x, y): (u16, u16), n: u16) {
         for i in 0..n {
-            self.buffer[(x + i, y)].reset();
+            self.canvas.get_cell_mut((x + i, y)).reset();
         }
     }
 
@@ -151,8 +220,7 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
         let width = self.term_width();
         if self.pos.0 < width {
 
-            let i = self.buffer.index_of(self.pos.0, self.pos.1);
-            let cells = &mut self.buffer.content[i..i + (width - self.pos.0) as usize];
+            let cells = self.canvas.get_cell_range_mut(self.pos, (width, self.pos.1));
 
             let style = cell.map(|c| c.style());
             if !Self::cells_are_cleared(cells, style) {
@@ -175,15 +243,15 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
     pub fn clear_to_end_of_screen(&mut self, cell: Option<&Cell>) -> Result<()> {
         // clear everything from cursor onwards
         let width = self.term_width();
-        let i = if self.pos.0 < width {
-            self.buffer.index_of(self.pos.0, self.pos.1)
-        } else if self.pos.1 + 1 < self.buffer.area.height {
-            self.buffer.index_of(0, self.pos.1 + 1)
+        let height = self.term_height();
+        let cells = if self.pos.0 < width {
+            self.canvas.get_cell_range_mut(self.pos, (0, height))
+        } else if self.pos.1 + 1 < height {
+            self.canvas.get_cell_range_mut((0, self.pos.1 + 1), (0, height))
         } else {
             // we already at bottom of screen
             return Ok(())
         };
-        let cells = &mut self.buffer.content[i..];
 
         let style = cell.map(|c| c.style());
         if !Self::cells_are_cleared(cells, style) {
@@ -242,12 +310,12 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
             pos = (0, pos.1 + 1);
         }
 
-        let draw = force || will_wrap || &self.buffer[pos] != cell;
+        let draw = force || will_wrap || self.canvas.get_cell(pos) != cell;
         if draw {
             // move to the location
             self.move_to_cur_pos()?;
             self.print_cell(cell)?;
-            self.buffer[pos] = cell.clone();
+            self.canvas.set_cell(pos, cell);
         }
 
         // clear the remaining cells

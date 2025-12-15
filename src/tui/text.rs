@@ -7,7 +7,7 @@ use ratatui::text::{Line, Span};
 use ratatui::layout::{Alignment, Rect};
 use ratatui::widgets::{Block, WidgetRef};
 use ratatui::buffer::{Buffer, Cell};
-use crate::tui::{Drawer};
+use crate::tui::{Drawer, Canvas};
 
 const TAB_WIDTH: usize = 4;
 const ESCAPE_STYLE: Style = Style::new().fg(Color::Gray);
@@ -359,12 +359,12 @@ impl<T> Text<T> {
         }
     }
 
-    pub fn render_line<'a, W :Write>(
+    pub fn render_line<'a, W :Write, C: Canvas>(
         &'a self,
         lineno: usize,
         line: &BStr,
         range: (usize, usize),
-        drawer: &mut Drawer<W>,
+        drawer: &mut Drawer<W, C>,
         marker: Option<(usize, usize)>,
     ) -> std::io::Result<Option<(u16, u16)>> {
 
@@ -395,9 +395,9 @@ impl<T> Text<T> {
         }
     }
 
-    pub fn render<'a, W :Write>(
+    pub fn render<'a, W :Write, C: Canvas>(
         &self,
-        drawer: &mut Drawer<W>,
+        drawer: &mut Drawer<W, C>,
         mut block: Option<(&Block<'a>, &mut Buffer)>,
         marker: Option<(usize, usize)>,
         max_height: Option<usize>,
@@ -432,7 +432,6 @@ impl<T> Text<T> {
         };
 
         let mut marker_pos = drawer.get_pos();
-        let mut first_line = true;
         let mut max_height = max_height.unwrap_or(usize::MAX).min(full_height - drawer.get_pos().1 as usize);
         let border_bottom_height = full_height - (area.y + area.height) as usize;
 
@@ -440,11 +439,14 @@ impl<T> Text<T> {
         let mut indent_cell = Cell::EMPTY;
         indent_cell.set_style(self.style);
 
+        let mut need_newline = None;
+
         // draw top border
         if let Some(borders) = &borders {
             let height = max_height.min(borders.top.len() / full_width as usize);
             if height > 0 {
                 drawer.draw_lines(borders.top.chunks(full_width as _).take(height))?;
+                need_newline = Some(None);
                 max_height -= height;
             }
         }
@@ -460,10 +462,10 @@ impl<T> Text<T> {
                 }
                 max_height -= 1;
 
-                if !first_line {
-                    drawer.goto_newline(clear_cell.as_ref())?;
+                if let Some(need_newline) = need_newline.take() {
+                    drawer.goto_newline(need_newline)?;
                 }
-                first_line = false;
+                need_newline = Some(clear_cell.as_ref());
 
                 // draw left border
                 if let Some(borders) = &borders {
@@ -494,17 +496,20 @@ impl<T> Text<T> {
             }
         }
 
-        if !self.lines.is_empty() {
-            drawer.clear_to_end_of_line(clear_cell.as_ref())?;
-        }
-
         // draw bottom border
         if let Some(borders) = &borders {
             let height = max_height.min(borders.bottom.len() / full_width);
             if height > 0 {
+                if let Some(need_newline) = need_newline.take() {
+                    drawer.goto_newline(need_newline)?;
+                }
                 drawer.draw_lines(borders.bottom.chunks(full_width).take(height))?;
                 // max_height -= border_height;
             }
+        }
+
+        if let Some(need_newline) = need_newline.take() {
+            drawer.clear_to_end_of_line(need_newline)?;
         }
 
         Ok(marker_pos)

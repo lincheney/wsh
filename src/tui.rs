@@ -20,7 +20,7 @@ pub mod widget;
 pub mod status_bar;
 pub mod ansi;
 pub mod text;
-pub use backend::{Drawer};
+pub use backend::{Drawer, Canvas};
 
 pub struct MoveUp(pub u16);
 impl crossterm::Command for MoveUp {
@@ -124,9 +124,9 @@ impl Widgets {
         }
     }
 
-    fn render<W :Write>(
+    fn render<W :Write, C: Canvas>(
         &self,
-        drawer: &mut Drawer<W>,
+        drawer: &mut Drawer<W, C>,
         buffer: &mut Buffer,
         area: Rect,
     ) -> std::io::Result<()> {
@@ -221,25 +221,21 @@ impl Tui {
     pub fn render_to_string(&self, id: usize, width: Option<u16>) -> Option<BString> {
         self.get_index(id).map(|i| {
             let widget = self.widgets.inner[i].as_ref();
+            // let width = width.unwrap_or(self.buffer.area.width);
+            let width = width.unwrap_or(80);
 
             let mut string = vec![];
             let mut writer = Cursor::new(&mut string);
             // always start with a reset
             writer.write_all(b"\x1b[0m").unwrap();
-            let mut buffer = Buffer::default();
-            let mut drawer = backend::Drawer::new(&mut buffer, &mut writer, (0, 0));
+            let mut canvas = backend::DummyCanvas::default();
+            canvas.size = (width, u16::MAX);
+            let mut drawer = backend::Drawer::new(&mut canvas, &mut writer, (0, 0));
             // 3 lines in case you have borders
-            let area = Rect{ x: 0, y: 0, width: width.unwrap_or(80), height: 3 };
+            let area = Rect{ x: 0, y: 0, width, height: 3 };
             let mut border_buffer = Buffer::empty(area);
 
             widget.render(&mut drawer, &mut border_buffer, None).unwrap();
-            // widget.render_iter(width.unwrap_or(self.buffer.area.width), |cells| {
-                // for c in cells {
-                    // drawer.print_cell(c).unwrap();
-                // }
-                // queue!(drawer.writer, crossterm::style::Print("\r\n")).unwrap();
-            // });
-
             string.into()
         })
     }
