@@ -178,10 +178,6 @@ impl Buffer {
         self.fix_cursor();
     }
 
-    pub fn cursor_is_at_end(&self) -> bool {
-        self.cursor_byte_pos() >= self.get_contents().len()
-    }
-
     pub fn reset(&mut self) {
         self.contents.reset();
         self.contents.push_line(b"".into(), None);

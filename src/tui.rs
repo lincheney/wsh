@@ -367,7 +367,8 @@ impl Tui {
         }
 
         // redraw the widgets
-        if (dirty || self.dirty) && new_widgets_height > 0 {
+        // if buffer height has changed then the widgets get repositioned
+        if (dirty || self.dirty || old_buffer_height != new_buffer_height) && new_widgets_height > 0 {
             // go to next line after end of buffer
             drawer.move_to(buffer.draw_end_pos);
             drawer.goto_newline(None)?;

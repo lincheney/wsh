@@ -1,12 +1,7 @@
 use anyhow::Result;
 use std::os::fd::AsRawFd;
-use std::sync::{Arc, Mutex};
-use tokio::sync::Mutex as AsyncMutex;
 #[macro_use]
 pub mod strong_weak_wrapper;
-
-pub type ArcMutex<T> = Arc<Mutex<T>>;
-pub type AsyncArcMutex<T> = Arc<AsyncMutex<T>>;
 
 pub fn set_nonblocking_fd<R: AsRawFd>(file: &R) -> Result<()> {
     let raw_fd = file.as_raw_fd();
