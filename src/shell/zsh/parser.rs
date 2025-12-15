@@ -84,6 +84,10 @@ fn find_str(needle: &BStr, haystack: &BStr, start: usize) -> Option<Range<usize>
 }
 
 pub fn parse(mut cmd: BString, options: ParserOptions) -> (bool, Vec<Token>) {
+    if cmd.trim().is_empty() {
+        return (true, vec![])
+    }
+
     // we add some at the end to detect if the command line is actually complete
     let dummy = b" x".into();
     cmd.push_str(dummy);
