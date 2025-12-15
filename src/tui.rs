@@ -54,7 +54,7 @@ pub fn allocate_height<W: Write>(stdout: &mut W, height: u16) -> Result<()> {
 }
 
 fn cell_is_empty(cell: &ratatui::buffer::Cell) -> bool {
-    cell.symbol() == " " && cell.bg == Color::Reset && !cell.modifier.intersects(Modifier::UNDERLINED | Modifier::REVERSED)
+    cell.symbol() == " " && cell.bg == Color::Reset && !cell.modifier.intersects(Modifier::UNDERLINED | Modifier::REVERSED | Modifier::CROSSED_OUT)
 }
 
 fn buffer_nonempty_height(buffer: &Buffer) -> u16 {
