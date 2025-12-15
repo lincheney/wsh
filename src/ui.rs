@@ -106,7 +106,7 @@ impl Ui {
         let mut ui = UiInner{
             dirty: true,
             tui: Default::default(),
-            buffer: Default::default(),
+            buffer: crate::buffer::Buffer::new(),
             prompt: crate::prompt::Prompt::new(None),
             status_bar: Default::default(),
             keybinds: Default::default(),

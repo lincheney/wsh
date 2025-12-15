@@ -1,9 +1,6 @@
-use std::ops::Range;
 use std::io::Write;
 use bstr::{BString, ByteSlice};
-use unicode_width::UnicodeWidthStr;
-use ratatui::style::{Style, Color};
-use crate::tui::{Drawer};
+use crate::tui::{Drawer, text::Text, text::HighlightedRange};
 
 #[derive(Debug)]
 pub struct Edit {
@@ -12,56 +9,9 @@ pub struct Edit {
     position: usize,
 }
 
-#[derive(Debug)]
-pub struct Highlight {
-    pub start: usize,
-    pub end: usize,
-    pub style: Style,
-    pub namespace: usize,
-    pub blend: bool,
-}
-
-impl Highlight {
-    fn shift(&mut self, range: Range<usize>, new_end: usize) {
-        if range.end <= self.start {
-            self.start = self.start + new_end - range.end;
-        } else if range.start <= self.start {
-            self.start = new_end;
-        }
-
-        if range.end < self.end {
-            self.end = self.end + new_end - range.end;
-        } else if range.start < self.end {
-            self.end = new_end;
-        }
-
-        self.start = self.start.min(self.end);
-    }
-
-    fn is_empty(&self) -> bool {
-        self.start == self.end
-    }
-}
-
-struct HighlightStack<'a>(Vec<&'a Highlight>);
-
-impl HighlightStack<'_> {
-    fn merge(&self) -> Style {
-        let mut style = Style::new();
-        for h in &self.0 {
-            if !h.blend {
-                // start from scratch
-                style = Style::new();
-            }
-            style = style.patch(h.style);
-        }
-        style
-    }
-}
-
 #[derive(Debug, Default)]
 pub struct Buffer {
-    contents: BString,
+    contents: Text<usize>,
     // display: String,
     len: Option<usize>,
     cursor: usize,
@@ -73,18 +23,38 @@ pub struct Buffer {
     saved_cursor: usize,
 
     pub dirty: bool,
-
     pub draw_end_pos: (u16, u16),
     pub cursor_coord: (u16, u16),
-
-    pub highlights: Vec<Highlight>,
     pub highlight_counter: usize,
+    pub height: usize,
 }
 
 impl Buffer {
 
+    pub fn new() -> Self {
+        let mut new = Self::default();
+        new.contents.push_line(b"".into(), None);
+        new
+    }
+
+    pub fn add_highlight(&mut self, hl: HighlightedRange<usize>) {
+        self.contents.add_highlight(hl)
+    }
+
+    pub fn clear_highlights(&mut self) {
+        self.contents.clear_highlights();
+    }
+
+    pub fn retain_highlights<F: Fn(&HighlightedRange<usize>) -> bool>(&mut self, func: F) {
+        self.contents.retain_highlights(func);
+    }
+
+    pub fn get_height_for_width(&self, width: usize, initial_indent: usize) -> usize {
+        self.contents.get_height_for_width(width, initial_indent)
+    }
+
     fn get_len(&mut self) -> usize {
-        *self.len.get_or_insert_with(|| self.contents.graphemes().count())
+        *self.len.get_or_insert_with(|| self.contents.get()[0].graphemes().count())
     }
 
     fn fix_cursor(&mut self) {
@@ -95,7 +65,7 @@ impl Buffer {
     }
 
     pub fn get_contents(&self) -> &BString {
-        &self.contents
+        &self.contents.get()[0]
     }
 
     pub fn get_cursor(&self) -> usize {
@@ -105,10 +75,10 @@ impl Buffer {
     pub fn set(&mut self, contents: Option<&[u8]>, cursor: Option<usize>) {
         if let Some(contents) = contents {
             // all highlights are now invalid!
-            self.highlights.clear();
-            self.contents.resize(contents.len(), 0);
+            let len = self.get_contents().len();
+            self.contents.delete_str(0, 0, len);
             self.cursor = 0;
-            self.splice_at_cursor(contents, Some(self.contents.len()));
+            self.splice_at_cursor(contents, None);
         }
         if let Some(cursor) = cursor {
             self.cursor = cursor;
@@ -119,7 +89,7 @@ impl Buffer {
     pub fn insert_or_set(&mut self, contents: Option<&[u8]>, cursor: Option<usize>) {
         if let Some(contents) = contents {
             // see if this can be done as an insert
-            let (prefix, suffix) = &self.contents.split_at_checked(self.cursor).unwrap_or((self.contents.as_ref(), b""));
+            let (prefix, suffix) = &self.get_contents().split_at_checked(self.cursor).unwrap_or((self.get_contents().as_ref(), b""));
             if contents.starts_with(prefix) && contents.ends_with(suffix) {
                 let contents = &contents[prefix.len() .. contents.len() - suffix.len()];
                 self.insert_at_cursor(contents);
@@ -144,10 +114,10 @@ impl Buffer {
         let end = if let Some(replace_len) = replace_len {
             self.byte_pos(self.cursor + replace_len)
         } else {
-            self.contents.len()
+            self.get_contents().len()
         };
         let edit = Edit{
-            before: self.contents[start .. end].into(),
+            before: self.get_contents()[start .. end].into(),
             after: data.into(),
             position: start,
         };
@@ -167,19 +137,13 @@ impl Buffer {
             (&edit.before, &edit.after)
         };
 
-        let start = edit.position;
-        let end = start + old.len();
-        self.contents.splice(start .. end, new.iter().copied());
+        self.contents.delete_str(0, edit.position, old.len());
+        self.contents.insert_str(new.as_ref(), 0, edit.position, None);
         self.len = None;
 
-        self.highlights.retain_mut(|hl| {
-            hl.shift(start .. end, start + new.len());
-            !hl.is_empty()
-        });
-
         // calculate the new cursor
-        let end = start + new.len();
-        self.cursor = self.contents.grapheme_indices().take_while(|(s, _, _)| *s < end).count();
+        let end = edit.position + new.len();
+        self.cursor = self.get_contents().grapheme_indices().take_while(|(s, _, _)| *s < end).count();
         self.fix_cursor();
     }
 
@@ -202,109 +166,52 @@ impl Buffer {
     }
 
     pub fn save(&mut self) {
-        self.saved_contents.resize(self.contents.len(), 0);
-        self.saved_contents.copy_from_slice(&self.contents);
+        self.saved_contents.resize(self.contents.get()[0].len(), 0);
+        self.saved_contents.copy_from_slice(self.contents.get()[0].as_ref());
         self.saved_cursor = self.cursor;
     }
 
     pub fn restore(&mut self) {
-        std::mem::swap(&mut self.contents, &mut self.saved_contents);
+        self.contents.swap_line(&mut self.saved_contents, 0);
         std::mem::swap(&mut self.cursor, &mut self.saved_cursor);
         self.len = None;
         self.fix_cursor();
     }
 
     pub fn cursor_is_at_end(&self) -> bool {
-        self.cursor_byte_pos() >= self.contents.len()
+        self.cursor_byte_pos() >= self.get_contents().len()
     }
 
     pub fn reset(&mut self) {
-        self.contents.clear();
+        self.contents.reset();
+        self.contents.push_line(b"".into(), None);
         self.len = None;
         self.history.clear();
         self.history_index = 0;
+        self.height = 0;
         self.cursor = 0;
         self.cursor_coord = (0, 0);
-        self.draw_end_pos = (0, 0);
         self.saved_contents.clear();
         self.saved_cursor = 0;
         self.dirty = true;
     }
 
     fn byte_pos(&self, pos: usize) -> usize {
-        self.contents
+        self.get_contents()
             .grapheme_indices()
             .nth(pos)
             .map(|(s, _, _)| s)
-            .unwrap_or_else(|| self.contents.len())
+            .unwrap_or_else(|| self.get_contents().len())
     }
 
     pub fn cursor_byte_pos(&self) -> usize {
         self.byte_pos(self.cursor)
     }
 
-    pub fn render<W :Write>(&mut self, drawer: &mut Drawer<W>, old_height: u16) -> std::io::Result<()> {
-
+    pub fn render<W :Write>(&mut self, drawer: &mut Drawer<W>) -> std::io::Result<()> {
         let cursor = self.cursor_byte_pos();
-        if cursor == 0 {
-            self.cursor_coord = drawer.cur_pos;
-        }
-
-        let mut old_height = Some(old_height);
-        let escape_style = Style::default().fg(Color::Gray);
-        let mut stack = HighlightStack(vec![]);
-        let mut cell = ratatui::buffer::Cell::default();
-
-        for (i, (start, end, c)) in self.contents.grapheme_indices().enumerate() {
-            if old_height.is_some_and(|h| drawer.cur_pos.1 >= h) {
-                // we don't know whats down here so clear it
-                drawer.clear_to_end_of_screen()?;
-                old_height = None;
-            }
-
-            if self.highlights.iter().any(|h| h.start == i || h.end == i) {
-                stack.0.splice(.., self.highlights.iter().filter(|h| h.start <= i && i < h.end));
-                cell = Default::default();
-                cell.set_style(stack.merge());
-            }
-
-            if c == "\n" {
-                drawer.goto_newline()?;
-            } else if c.width() > 0 && c != "\u{FFFD}" {
-                let mut cell = cell.clone();
-                cell.set_symbol(c);
-                drawer.draw_cell(&cell, false)?;
-            } else {
-                // invalid
-                let mut cell = cell.clone();
-                cell.set_style(cell.style().patch(escape_style));
-                for c in &self.contents[start..end] {
-                    let mut cursor = std::io::Cursor::new([0; 64]);
-                    write!(cursor, "<u{c:04x}>").unwrap();
-                    let buf = &cursor.get_ref()[..cursor.position() as usize];
-                    cell.set_symbol(std::str::from_utf8(buf).unwrap());
-                    drawer.draw_cell(&cell, false)?;
-                }
-            }
-
-            if end == cursor {
-                self.cursor_coord = drawer.cur_pos;
-            }
-        }
-
-        let old_end_pos = self.draw_end_pos;
+        self.cursor_coord = self.contents.render(drawer, Some((0, cursor)))?;
         self.draw_end_pos = drawer.cur_pos;
-
-        // clear any old lines below
-        if self.draw_end_pos.1 < old_end_pos.1 {
-            for _ in self.draw_end_pos.1 .. old_end_pos.1 {
-                drawer.goto_newline()?;
-            }
-        }
-        // clear the last/current line
-        drawer.clear_to_end_of_line()?;
-        drawer.cur_pos = self.draw_end_pos;
-
         Ok(())
     }
 

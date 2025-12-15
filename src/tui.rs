@@ -1,7 +1,6 @@
 use bstr::BString;
 use std::default::Default;
 use std::io::{Write, Cursor};
-use unicode_width::UnicodeWidthStr;
 use anyhow::Result;
 use crossterm::{
     cursor,
@@ -12,7 +11,6 @@ use crossterm::{
 };
 use ratatui::{
     *,
-    text::*,
     layout::*,
     widgets::*,
     style::*,
@@ -22,6 +20,7 @@ mod backend;
 pub use backend::{Drawer};
 pub mod status_bar;
 pub mod ansi;
+pub mod text;
 
 pub struct MoveUp(pub u16);
 impl crossterm::Command for MoveUp {
@@ -154,19 +153,19 @@ impl StyleOptions {
 pub struct Widget{
     id: usize,
     pub constraint: Option<Constraint>,
-    pub inner: Text<'static>,
+    pub inner: text::Text,
     pub style: StyleOptions,
     pub border_sides: Option<Borders>,
     pub border_style: Style,
     pub border_type: BorderType,
     pub border_show_empty: bool,
-    pub border_title: Option<Vec<Line<'static>>>,
+    pub border_title: Option<text::Text>,
     pub block: Option<Block<'static>>,
     pub persist: bool,
     pub hidden: bool,
 
     line_count: u16,
-    text_overrides_style: bool,
+    // text_overrides_style: bool,
 }
 
 fn render_indent(area: Rect, buffer: &mut Buffer, line_width: u16, alignment: Alignment, style: Option<Style>) -> u16 {
@@ -186,214 +185,92 @@ fn render_indent(area: Rect, buffer: &mut Buffer, line_width: u16, alignment: Al
     indent
 }
 
-fn render_text<F: FnMut(&mut Buffer, (u16, u16)) -> (u16, u16)>(
-    area: Rect,
-    buffer: &mut Buffer,
-    text: &Text,
-    style: bool,
-    override_style: Option<Style>,
-    mut callback: F,
-) {
-
-    let mut offset = (0, 0);
-    for line in text.iter() {
-        if offset.1 >= area.height {
-            break
-        }
-
-        let alignment = line.alignment.or(text.alignment).unwrap_or_default();
-        let indent_style = if style {
-            if let Some(style) = override_style {
-                Some(text.style.patch(line.style).patch(style))
-            } else {
-                Some(text.style.patch(line.style))
-            }
-        } else {
-            None
-        };
-        let mut line_width = line.width();
-        offset.0 += render_indent(Rect{ y: offset.1, ..area }, buffer, line_width as u16, alignment, indent_style);
-
-        for graph in line.styled_graphemes(text.style) {
-
-            let width = graph.symbol.width();
-            if width == 0 {
-                continue
-            }
-            line_width -= width;
-
-            let symbol = if graph.symbol.is_empty() { " " } else { graph.symbol };
-            let cell = &mut buffer[(area.x + offset.0, area.y + offset.1)];
-            cell.set_symbol(symbol);
-
-            if style {
-                let style = override_style.map_or(graph.style, |s| graph.style.patch(s));
-                cell.set_style(style);
-            }
-
-            offset.0 += width as u16;
-            if offset.0 >= area.width {
-                // newline
-                offset.1 += 1;
-                offset = callback(buffer, offset);
-                if offset.1 >= area.height {
-                    return
-                }
-                offset.0 = render_indent(Rect{ y: offset.1, ..area }, buffer, line_width as u16, alignment, indent_style);
-            }
-        }
-
-        // newline
-        offset = (0, offset.1 + 1);
-        offset = callback(buffer, offset);
-    }
-}
-
 impl Widget {
 
-    pub fn replace_tabs(mut text: String) -> String {
-        let tab = "    ";
-        if text.contains('\t') {
-            text = text.replace('\t', tab);
-        }
-        text
-    }
+    fn render<W :Write>(
+        &self,
+        drawer: &mut Drawer<W>,
+        buffer: &mut Buffer,
+        max_height: Option<usize>,
+    ) -> std::io::Result<()> {
 
-    fn render_iter<F: FnMut(&[ratatui::buffer::Cell])>(&self, width: u16, mut callback: F) {
-        // 3 lines in case you have borders
-        let area = Rect{ x: 0, y: 0, width, height: 3 };
-        let mut buffer = Buffer::empty(area);
-        buffer.set_style(area, self.inner.style);
-
-        let mut inner_area = if let Some(ref block) = self.block {
-            block.render_ref(area, &mut buffer);
-            block.inner(area)
+        let area = if let Some(block) = &self.block {
+            block.render_ref(buffer.area, buffer);
+            block.inner(buffer.area)
         } else {
-            area
+            buffer.area
         };
 
-        let width = width as _;
-        let mut middle_border: Option<Vec<_>> = None;
-        let mut bottom_border: Option<Vec<_>> = None;
+        let border_top = 0 .. (area.y * buffer.area.width) as usize;
+        let border_bottom = (buffer.area.width * (area.y + area.height)) as usize .. (buffer.area.width * buffer.area.height) as usize;
+        let border_left = border_top.end .. border_top.end + area.x as usize;
+        let border_right = border_top.end + (area.x + area.width) as usize .. border_top.end + buffer.area.width as usize;
 
-        // split out the bottom border
-        if inner_area.y + inner_area.height < area.height {
-            bottom_border = Some(buffer.content.drain(width*2..).collect());
-        }
+        let mut state = text::RenderState::default();
+        let mut first_line = true;
+        let start_pos = drawer.cur_pos;
 
-        // top border
-        if inner_area.y > 0 {
-            callback(&buffer.content[..width]);
-            // remove top border
-            buffer.content.drain(..width);
-        }
+        for (lineno, line) in self.inner.get().iter().enumerate() {
+            if let Some(max_height) = max_height && start_pos.1 + max_height as u16 + buffer.area.height - area.height <= drawer.cur_pos.1 {
+                break
+            }
 
-        // copy the middle borders
-        if inner_area.width < area.width {
-            middle_border = Some(buffer.content[..width].into());
-        }
+            state.clear();
 
-        inner_area.y = 0;
-        inner_area.height = 1;
-        render_text(
-            inner_area,
-            &mut buffer,
-            &self.inner,
-            true,
-            if self.text_overrides_style { Some(self.inner.style) } else { None },
-            |buffer, offset| {
-                let start = inner_area.x as usize + width * (offset.1 - 1) as usize;
-                let line = &mut buffer.content[start .. start + inner_area.width as usize];
-
-                if line.iter().all(cell_is_empty) {
-                    // line is empty; wait to see if there are any more non empty
-                    // allocate space for the next line
-                    if offset.1 >= area.height {
-                        if let Some(middle_border) = &middle_border {
-                            buffer.content.extend_from_slice(middle_border);
-                        } else {
-                            buffer.content.resize(buffer.content.len() + width, Default::default());
-                        }
-                        buffer.area.height += 1;
-                    }
-                    return offset
+            for (range, _width) in text::wrap(line.as_ref(), area.width as usize, 0) {
+                if !first_line {
+                    drawer.goto_newline()?;
+                } else {
+                    // draw top border
+                    drawer.draw_lines(buffer.content[border_top.clone()].chunks(buffer.area.width as _))?;
                 }
+                first_line = false;
 
-                // non empty line; yield all previous ones too
-                callback(&buffer.content);
-
-                for y in 0..offset.1 as _ {
-                    let start = inner_area.x as usize + width * y as usize;
-                    // reset all between the borders
-                    for cell in &mut buffer.content[start .. start + inner_area.width as usize] {
-                        cell.reset();
-                    }
+                // draw left border
+                for cell in &buffer.content[border_left.clone()] {
+                    drawer.draw_cell(cell, false)?;
                 }
-
-                (0, 0)
-            },
-        );
-
-        if let Some(bottom_border) = bottom_border {
-            callback(&bottom_border);
-        }
-    }
-
-    fn render(&self, area: Rect, buffer: &mut Buffer) {
-        buffer.set_style(area, self.inner.style);
-        let area = if let Some(ref block) = self.block {
-            block.render_ref(area, buffer);
-            block.inner(area)
-        } else {
-            area
-        };
-        render_text(
-            area,
-            buffer,
-            &self.inner,
-            true,
-            if self.text_overrides_style { Some(self.inner.style) } else { None },
-            |_buffer, offset| offset,
-        );
-    }
-
-    fn measure(&self, mut area: Rect, buffer: &mut Buffer) -> u16 {
-        let mut border_height = 0;
-        if let Some(ref block) = self.block {
-            let inner = block.inner(area);
-            border_height = area.height - inner.height;
-            area = Rect{
-                y: area.y + border_height,
-                ..inner
-            };
+                // draw line
+                self.inner.render_line(&mut state, lineno, line.as_ref(), range, drawer, None)?;
+                drawer.clear_to_end_of_line()?;
+                // draw right border
+                drawer.cur_pos.0 = buffer.area.width - border_right.len() as u16;
+                for cell in &buffer.content[border_right.clone()] {
+                    drawer.draw_cell(cell, false)?;
+                }
+            }
         }
 
-        render_text(
-            area,
-            buffer,
-            &self.inner,
-            false,
-            None,
-            |_buffer, offset| offset,
-        );
-
-        let mut height = buffer_nonempty_height(buffer);
-        if self.border_show_empty && height == 0 {
-            height = border_height;
+        // draw top border if not already
+        if self.border_show_empty && first_line {
+            drawer.draw_lines(buffer.content[border_top].chunks(buffer.area.width as _))?;
         }
-        height
+
+        // draw bottom border
+        if self.border_show_empty || !first_line {
+            drawer.draw_lines(buffer.content[border_bottom].chunks(buffer.area.width as _))?;
+        }
+
+        Ok(())
     }
 
-    fn line_count(&self, area: Rect, buffer: &mut Buffer) -> u16 {
+    fn get_height_for_width(&self, mut area: Rect) -> u16 {
         let mut height = 0;
         if let Some(Constraint::Min(min)) = self.constraint {
             height = height.max(min);
         }
 
-        if area.width >= 1 {
-            buffer.resize(area);
-            buffer.reset();
-            height = height.max(self.measure(area, buffer));
+        let mut border_height = 0;
+        if let Some(ref block) = self.block {
+            let inner = block.inner(area);
+            border_height = area.height - inner.height;
+            area = inner;
+        }
+
+        height = height.max(self.inner.get_height_for_width(area.width as _, 0) as _);
+
+        if self.border_show_empty || height > 0 {
+            height += border_height;
         }
         height
     }
@@ -437,50 +314,45 @@ impl From<ansi::Parser> for WidgetWrapper {
 #[derive(Default)]
 struct Widgets {
     inner: Vec<WidgetWrapper>,
-    width: u16,
     pub height: u16,
     max_height: u16,
-    buffer: Buffer,
-    line_count_buffer: Buffer,
 }
 
 impl Widgets {
-    fn refresh(&mut self, area: Rect, max_height: u16) -> bool {
-        self.width = area.width;
-        self.max_height = max_height;
+    fn get_height(&self) -> u16 {
+        self.inner.iter().map(|w| w.as_ref().line_count).sum()
+    }
 
-        if self.inner.is_empty() {
-            return false
-        }
+    fn refresh(&mut self, area: Rect) {
+        self.max_height = area.height;
 
-        let mut max_height = 0;
-        let mut last_widget = 0;
-        for (i, w) in self.inner.iter_mut().enumerate() {
+        let mut height = 0;
+        for w in &mut self.inner {
             let w = w.as_mut();
-            if !w.hidden {
-                w.line_count = w.line_count(area, &mut self.line_count_buffer);
-                max_height += w.line_count;
-                last_widget = i;
-                if max_height >= area.height as _ {
-                    break
-                }
+            if w.hidden || self.max_height <= height as _ {
+                w.line_count = 0;
+            } else {
+                w.line_count = w.get_height_for_width(area);
+                height += w.line_count;
             }
         }
+    }
 
-        let area = Rect{ height: area.height.min(max_height as _), ..area };
+    fn render<W :Write>(
+        &self,
+        drawer: &mut Drawer<W>,
+        buffer: &mut Buffer,
+        area: Rect,
+    ) -> std::io::Result<()> {
 
-        let widgets = &self.inner[..=last_widget];
-        let widgets = widgets.iter().map(|w| w.as_ref()).filter(|w| !w.hidden && w.line_count > 0);
-
+        let widgets = self.inner.iter().map(|w| w.as_ref()).filter(|w| !w.hidden && w.line_count > 0);
         let layout = Layout::vertical(widgets.clone().map(|w| w.constraint.unwrap_or(Constraint::Max(w.line_count))));
         let layouts = layout.split(area);
 
-        let mut found = false;
-        for (widget, layout) in widgets.zip(layouts.iter()) {
-            widget.render(*layout, &mut self.buffer);
-            found = true;
+        for (widget, area) in widgets.zip(layouts.iter()) {
+            widget.render(drawer, buffer, Some(area.height as usize))?;
         }
-        found
+        Ok(())
     }
 }
 
@@ -489,6 +361,8 @@ pub struct Tui {
     counter: usize,
     widgets: Widgets,
     buffer: Buffer,
+    border_buffer: Buffer,
+    prev_status_bar_position: usize,
     pub dirty: bool,
 }
 
@@ -505,18 +379,23 @@ impl Tui {
 
     pub fn add_message(&mut self, message: String) -> (usize, &mut WidgetWrapper) {
         let mut widget = Widget::default();
-        let message = Widget::replace_tabs(message);
-        let message: Vec<_> = message.split('\n').map(|l| Line::from(l.to_owned())).collect();
-        widget.inner.lines = message;
+        widget.inner.clear();
+        for line in message.split('\n') {
+            widget.inner.push_line(line.into(), None);
+        }
         self.add(widget.into())
     }
 
     pub fn add_error_message(&mut self, message: String) -> (usize, &mut WidgetWrapper) {
         let mut widget = Widget::default();
-        let message = Widget::replace_tabs(message);
-        let message: Vec<_> = message.split('\n').map(|l| Line::from(l.to_owned())).collect();
-        widget.inner = widget.inner.fg(Color::Red);
-        widget.inner.lines = message;
+        widget.inner.clear();
+        for line in message.split('\n') {
+            widget.inner.push_line(line.into(), Some(text::Highlight{
+                style: Style::new().fg(Color::Red),
+                namespace: (),
+                blend: true,
+            }));
+        }
         self.add(widget.into())
     }
 
@@ -562,13 +441,17 @@ impl Tui {
             writer.write_all(b"\x1b[0m").unwrap();
             let mut buffer = Buffer::default();
             let mut drawer = backend::Drawer::new(&mut buffer, &mut writer, (0, 0));
+            // 3 lines in case you have borders
+            let area = Rect{ x: 0, y: 0, width: width.unwrap_or(80), height: 3 };
+            let mut border_buffer = Buffer::empty(area);
 
-            widget.render_iter(width.unwrap_or(self.buffer.area.width), |cells| {
-                for c in cells {
-                    drawer.print_cell(c).unwrap();
-                }
-                queue!(drawer.writer, crossterm::style::Print("\r\n")).unwrap();
-            });
+            widget.render(&mut drawer, &mut border_buffer, None).unwrap();
+            // widget.render_iter(width.unwrap_or(self.buffer.area.width), |cells| {
+                // for c in cells {
+                    // drawer.print_cell(c).unwrap();
+                // }
+                // queue!(drawer.writer, crossterm::style::Print("\r\n")).unwrap();
+            // });
 
             string.into()
         })
@@ -585,8 +468,9 @@ impl Tui {
     }
 
     pub fn reset(&mut self) {
+        self.prev_status_bar_position = 0;
         self.buffer.reset();
-        self.widgets.buffer.reset();
+        self.border_buffer.reset();
         self.widgets.height = 0;
         self.dirty = true;
     }
@@ -599,14 +483,15 @@ impl Tui {
         prompt: &mut crate::prompt::Prompt,
         buffer: &mut crate::buffer::Buffer,
         status_bar: &mut status_bar::StatusBar,
-        mut clear: bool,
+        clear: bool,
     ) -> Result<()> {
 
+        let mut dirty = clear;
         if clear {
             self.reset();
             buffer.cursor_coord = (0, 0);
             buffer.draw_end_pos = (0, 0);
-            status_bar.reset();
+            status_bar.dirty = true;
             queue!(
                 writer,
                 cursor::MoveToColumn(0),
@@ -617,120 +502,99 @@ impl Tui {
         // take up at most 2/3 of the screen
         let max_height = (height * 2 / 3).max(1);
         // reset all if dimensions have changed
-        if max_height != self.widgets.max_height || width != self.widgets.width {
-            clear = true;
+        if max_height != self.widgets.max_height || width != self.buffer.area.width {
+            dirty = true;
         }
 
         // resize buffers
         let area = Rect{x: 0, y: 0, width, height: max_height};
         self.buffer.resize(area);
-        self.widgets.buffer.resize(area);
-        status_bar.buffer.resize(area);
+        // enough space to render borders
+        self.border_buffer.resize(Rect{ height: 3, ..area});
 
         // quit early if nothing is dirty
-        if !clear && !prompt.dirty && !buffer.dirty && !self.dirty && !status_bar.dirty {
+        if !dirty && !prompt.dirty && !buffer.dirty && !self.dirty && !status_bar.dirty {
             return Ok(())
         }
 
-        let old_height = (
-            buffer.draw_end_pos.1 + 1,
-            self.widgets.height,
-            status_bar.inner.as_ref().map_or(0, |w| w.line_count),
-        );
+        // old heights
+        let old_buffer_height = (prompt.height + buffer.draw_end_pos.1) as usize;
+        let old_widgets_height = self.widgets.get_height() as usize;
+        let old_status_bar_height = status_bar.inner.as_ref().map_or(0, |w| w.line_count) as usize;
+        let old_height = old_buffer_height + old_widgets_height + old_status_bar_height;
+
+        // new heights
+        if prompt.dirty {
+            prompt.refresh_prompt(shell, area.width).await;
+        }
+        let new_buffer_height = prompt.height as usize + buffer.get_height_for_width(area.width as _, prompt.width as _).max(1) - 1;
+        if status_bar.dirty {
+            status_bar.refresh(area);
+        }
+        let new_status_bar_height = status_bar.get_height() as usize;
+        if self.dirty {
+            self.widgets.refresh(Rect{ height: max_height.saturating_sub(new_status_bar_height as u16), ..area });
+        }
+        let new_widgets_height = self.widgets.get_height() as usize;
+        let new_height = new_buffer_height + new_widgets_height + new_status_bar_height;
 
         let mut drawer = backend::Drawer::new(&mut self.buffer, writer, buffer.cursor_coord);
         queue!(drawer.writer, crossterm::terminal::BeginSynchronizedUpdate)?;
         drawer.reset_colours()?;
 
-        // redraw the prompt
-        if clear || prompt.dirty {
-            if prompt.dirty {
-                prompt.refresh_prompt(shell, area.width).await;
+        if (self.prev_status_bar_position < new_buffer_height + new_widgets_height) || old_status_bar_height > new_status_bar_height {
+            if !clear && old_status_bar_height > 0 {
+                // we don't know where exactly the status bar is,
+                // but it possibly overlaps with the new drawing area
+                // clear it
+                drawer.move_to_pos((0, self.prev_status_bar_position as _))?;
+                queue!(drawer.writer, Clear(ClearType::FromCursorDown))?;
+                // it now needs to be redrawn
+                status_bar.dirty = true;
             }
+            self.prev_status_bar_position = self.prev_status_bar_position.max(new_buffer_height + new_widgets_height);
+        }
+
+        // allocate more height
+        if new_height > old_height {
+            drawer.move_to_pos((0, 0))?;
+            allocate_height(drawer.writer, new_height as u16 - 1)?;
+            status_bar.dirty = true;
+        }
+
+        // redraw the prompt
+        if dirty || prompt.dirty {
             // move back to top of drawing area and redraw
             drawer.move_to_pos((0, 0))?;
             drawer.writer.write_all(prompt.as_bytes())?;
             drawer.set_pos((prompt.width, prompt.height - 1));
         }
+        drawer.cur_pos = (prompt.width, prompt.height - 1);
 
         // redraw the buffer
-        if clear || buffer.dirty {
-            drawer.cur_pos = (prompt.width, prompt.height - 1);
-            buffer.render(&mut drawer, old_height.0 + old_height.1)?;
+        if dirty || buffer.dirty {
+            buffer.render(&mut drawer)?;
         }
         // move to end of buffer
         drawer.cur_pos = buffer.draw_end_pos;
 
-        // restrict widgets to after the buffer
-        let area = Rect{ height: area.height - buffer.draw_end_pos.1, ..area };
-
-        // refresh status bar
-        // need to refresh this FIRST
-        // to get the bar height
-        // as it in turn restricts the height available for other widgets
-        let status_bar_height = if let Some(ref mut widget) = status_bar.inner {
-            if status_bar.dirty {
-                // status bar has its own buffer so pin it to y=0
-                widget.line_count = widget.line_count(area, &mut self.widgets.line_count_buffer);
-                status_bar.buffer.reset();
-                widget.render(area, &mut status_bar.buffer);
-            }
-            widget.line_count
-        } else {
-            0
-        };
-
-        // refresh widgets
-        if clear || self.dirty {
-            let area = Rect{ height: area.height - status_bar_height, ..area };
-            self.widgets.buffer.reset();
-            self.widgets.refresh(area, max_height);
-            self.widgets.height = buffer_nonempty_height(&self.widgets.buffer).saturating_sub(drawer.cur_pos.1);
-        }
-
-        let new_height = (
-            buffer.draw_end_pos.1 + 1,
-            self.widgets.height,
-            status_bar.inner.as_ref().map_or(0, |w| w.line_count),
-        );
-
-        // allocate enough height for the widgets
-        let resize = new_height.0 + new_height.1 + new_height.2 > old_height.0 + old_height.1 + old_height.2;
-        if resize {
-            // allocate height
-            drawer.move_to_pos(buffer.draw_end_pos)?;
-            allocate_height(drawer.writer, new_height.1 + new_height.2)?;
-            // clear the old status bar
-            // but do not clear the buffer
-            if old_height.2 > 0 {
-                drawer.cur_pos = (0, old_height.0 + old_height.1).max(buffer.draw_end_pos);
-                drawer.clear_to_end_of_screen()?;
-            }
-        }
-
-        if (clear || self.dirty) && self.widgets.height > 0 {
+        // redraw the widgets
+        if (dirty || self.dirty) && new_widgets_height > 0 {
             drawer.cur_pos = buffer.draw_end_pos;
-            // redraw widgets
-            let lines = self.widgets.buffer.content
-                .chunks(area.width as _)
-                .take(self.widgets.height as _);
             drawer.goto_newline()?;
-            drawer.draw_lines(lines)?;
-            // clear any old lines below
-            if new_height.1 < old_height.1 {
-                for _ in new_height.1 .. old_height.1 {
-                    drawer.goto_newline()?;
-                }
-            }
-            // clear the last/current line
-            drawer.clear_to_end_of_line()?;
+            self.widgets.render(&mut drawer, &mut self.border_buffer, Rect{ height: area.height - new_status_bar_height as u16, ..area})?;
         }
 
-        // save cursor position so we can go back to it
+        for _ in new_buffer_height + new_widgets_height .. old_buffer_height + old_widgets_height {
+            drawer.goto_newline()?;
+        }
+        drawer.clear_to_end_of_line()?;
         drawer.move_to_pos(buffer.cursor_coord)?;
-        queue!(drawer.writer, cursor::SavePosition)?;
 
-        if status_bar_height > 0 && (clear || status_bar.dirty || resize) {
+        if new_status_bar_height > 0 && (dirty || status_bar.dirty) && let Some(widget) = &status_bar.inner {
+            // save cursor position so we can go back to it
+            queue!(drawer.writer, cursor::SavePosition)?;
+
             // redraw status bar
             // go to the bottom of the screen
             queue!(
@@ -738,19 +602,19 @@ impl Tui {
                 // i dont actually know how far down the bottom of the screen is
                 // so just go down by a bigger than amount than it could possibly be
                 MoveDown(area.height * 10),
-                MoveUp(status_bar_height - 1),
+                MoveUp(new_status_bar_height as u16 - 1),
                 cursor::MoveToColumn(0),
             )?;
-            drawer.set_pos((0, area.height - status_bar_height));
-            let lines = status_bar.buffer.content.chunks(area.width as _).take(status_bar_height as _);
-            drawer.draw_lines(lines)?;
+            drawer.set_pos((0, area.height - new_status_bar_height as u16));
+            widget.render(&mut drawer, &mut self.border_buffer, None)?;
             // clear everything else below
             drawer.clear_to_end_of_screen()?;
+
+            // go back to cursor
+            queue!(drawer.writer, cursor::RestorePosition)?;
         }
 
         drawer.reset_colours()?;
-        // go back to cursor
-        queue!(drawer.writer, cursor::RestorePosition)?;
         execute!(writer, crossterm::terminal::EndSynchronizedUpdate)?;
 
         self.dirty = false;

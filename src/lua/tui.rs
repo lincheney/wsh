@@ -3,7 +3,6 @@ use std::str::FromStr;
 use serde::{Deserialize, Deserializer, de};
 use anyhow::Result;
 use ratatui::{
-    text::*,
     layout::*,
     widgets::*,
     style::*,
@@ -159,6 +158,20 @@ pub struct StyleOptions {
     pub blink: Option<bool>,
 }
 
+impl StyleOptions {
+    fn is_default(&self) -> bool {
+        return self.fg.is_none() &&
+            self.bg.is_none() &&
+            self.bold.is_none() &&
+            self.dim.is_none() &&
+            self.italic.is_none() &&
+            self.underline.is_none() &&
+            self.strikethrough.is_none() &&
+            self.reversed.is_none() &&
+            self.blink.is_none()
+    }
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct BufferStyleOptions {
@@ -188,57 +201,64 @@ impl From<StyleOptions> for tui::StyleOptions {
     }
 }
 
-fn parse_text_parts(text: TextParts, lines: &mut Vec<Line<'static>>) {
-    // there's no way to set the text on an existing paragraph ...
-    match text {
-        TextParts::Single(text) => {
-            lines.clear();
-            let text = tui::Widget::replace_tabs(text);
-            lines.extend(text.split('\n').map(|l| l.to_owned()).map(Line::from));
+fn parse_text_parts(parts: TextParts, text: &mut tui::text::Text) {
+    match parts {
+        TextParts::Single(part) => {
+            text.clear();
+            text.push_lines(part.split('\n').map(|s| s.into()), None);
         },
         TextParts::Detailed(part) => {
-            let style: tui::StyleOptions = part.style.style.into();
-            let style = style.as_style();
-            if let Some(text) = part.text {
-                let text = tui::Widget::replace_tabs(text);
-                lines.clear();
-                lines.extend(
-                    text.split('\n').map(|l| l.to_owned()).map(|line| {
-                        let mut line = Line::from(line);
-                        line.style = style;
-                        line
-                    })
-                );
+            let hl = if part.style.style.is_default() {
+                None
             } else {
-                for line in lines.iter_mut() {
-                    for span in &mut line.spans {
-                        *span = span.clone().patch_style(style);
-                    }
+                let style: tui::StyleOptions = part.style.style.into();
+                Some(tui::text::Highlight{
+                    style: style.as_style(),
+                    namespace: (),
+                    blend: true,
+                })
+            };
+
+            if let Some(string) = part.text {
+                text.clear();
+                text.push_lines(string.split('\n').map(|s| s.into()),hl);
+            } else if let Some(hl) = hl {
+                for lineno in 0 .. text.get().len() {
+                    text.add_highlight(tui::text::HighlightedRange{
+                        lineno,
+                        start: 0,
+                        end: text.get()[lineno].len(),
+                        inner: hl.clone(),
+                    });
                 }
             }
         },
         TextParts::Many(parts) => {
-            lines.clear();
-            lines.push(Line::default());
+            text.clear();
+            text.push_line(b"".into(), None);
             for part in parts {
-                if let Some(text) = part.text {
-                    let style: tui::StyleOptions = part.style.style.into();
-                    let style = style.as_style();
-                    let text = tui::Widget::replace_tabs(text);
-                    for (i, text) in text.split('\n').enumerate() {
+                if let Some(string) = part.text {
+                    let hl = if part.style.style.is_default() {
+                        None
+                    } else {
+                        let style: tui::StyleOptions = part.style.style.into();
+                        Some(tui::text::Highlight{
+                            style: style.as_style(),
+                            namespace: (),
+                            blend: true,
+                        })
+                    };
+
+                    for (i, string) in string.split('\n').enumerate() {
                         if i > 0 {
-                            lines.push(Line::default());
+                            text.push_line(b"".into(), None);
                         }
-                        let line = lines.last_mut().unwrap();
-                        line.spans.push(Span::styled(text.to_owned(), style));
-                        line.alignment = part.style.align.map(|a| a.0);
+                        text.push_str(string.into(), hl.clone());
                     }
                 }
             }
         },
     }
-
-    lines.truncate(100);
 }
 
 fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
@@ -254,9 +274,9 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
         widget.constraint = Some(constraint.0);
     }
 
-    if let Some(align) = options.style.align {
-        widget.inner = std::mem::take(&mut widget.inner).alignment(align.0);
-    }
+    // if let Some(align) = options.style.align {
+        // widget.inner = std::mem::take(&mut widget.inner).alignment(align.0);
+    // }
 
     match options.border {
         // explicitly disabled
@@ -277,12 +297,11 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
             widget.border_sides = Some(border_sides);
 
             let mut block = options.title
-                .and_then(|title| {
-                    let lines = widget.border_title.get_or_insert_default();
-                    parse_text_parts(title, lines);
-                    lines.iter().next().cloned()
+                .map(|title| {
+                    let text = widget.border_title.get_or_insert_default();
+                    parse_text_parts(title, text);
+                    Block::new().title(text as &tui::text::Text)
                 })
-                .map(|line| Block::new().title(line))
                 .or_else(|| widget.block.clone())
                 .unwrap_or_else(Block::new);
 
@@ -296,9 +315,8 @@ fn set_widget_options(widget: &mut tui::Widget, options: CommonWidgetOptions) {
     }
 
     widget.style = widget.style.merge(&options.style.style.into());
-    widget.inner = std::mem::take(&mut widget.inner).style(widget.style.as_style());
+    widget.inner.style = widget.style.as_style();
     widget.block = std::mem::take(&mut widget.block).map(|b| b.style(widget.style.as_style()));
-
 }
 
 async fn set_message(ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
@@ -318,8 +336,7 @@ async fn set_message(ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
     if let Some(options) = options {
         let widget = widget.as_mut();
         if let Some(text) = options.text {
-            widget.inner = Text::default();
-            parse_text_parts(text, &mut widget.inner.lines);
+            parse_text_parts(text, &mut widget.inner);
         }
         set_widget_options(widget, options.options);
     }
@@ -371,12 +388,15 @@ async fn add_buf_highlight(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
     let blend = !style.no_blend;
     let style: tui::StyleOptions = style.inner.into();
 
-    ui.inner.borrow_mut().await.buffer.highlights.push(crate::buffer::Highlight{
+    ui.inner.borrow_mut().await.buffer.add_highlight(tui::text::HighlightedRange{
+        lineno: 0,
         start: hl.start,
         end: hl.finish,
-        style: style.as_style(),
-        namespace: hl.namespace.unwrap_or(0),
-        blend,
+        inner: tui::text::Highlight{
+            style: style.as_style(),
+            namespace: hl.namespace.unwrap_or(0),
+            blend,
+        },
     });
 
     Ok(())
@@ -386,9 +406,9 @@ async fn clear_buf_highlights(ui: Ui, _lua: Lua, namespace: Option<usize>) -> Re
     let ui = ui.get();
     let mut ui = ui.inner.borrow_mut().await;
     if let Some(namespace) = namespace {
-        ui.buffer.highlights.retain(|h| h.namespace != namespace);
+        ui.buffer.retain_highlights(|h| *h.namespace() != namespace);
     } else {
-        ui.buffer.highlights.clear();
+        ui.buffer.clear_highlights();
     }
     Ok(())
 }
@@ -463,11 +483,11 @@ async fn set_status_bar(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
     let ui = ui.get();
     let options: Option<WidgetOptions> = lua.from_value(val)?;
     let mut ui = ui.inner.borrow_mut().await;
-    let widget = ui.status_bar.inner.get_or_insert_default();
     if let Some(options) = options {
+        let widget = ui.status_bar.inner.get_or_insert_default();
         if let Some(text) = options.text {
-            widget.inner = Text::default();
-            parse_text_parts(text, &mut widget.inner.lines);
+            widget.inner.clear();
+            parse_text_parts(text, &mut widget.inner);
         }
         set_widget_options(widget, options.options);
     }
@@ -476,7 +496,7 @@ async fn set_status_bar(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
 }
 
 async fn allocate_height(_ui: Ui, _lua: Lua, height: u16) -> Result<()> {
-    crate::tui::allocate_height(&mut std::io::stdout(), height)
+    tui::allocate_height(&mut std::io::stdout(), height)
 }
 
 pub fn init_lua(ui: &Ui) -> Result<()> {

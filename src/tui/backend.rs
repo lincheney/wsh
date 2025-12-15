@@ -45,7 +45,7 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
         }
     }
 
-    fn term_width(&self) -> u16 {
+    pub fn term_width(&self) -> u16 {
         self.buffer.area.width
     }
 
@@ -98,22 +98,16 @@ impl<'a, 'b, W: Write> Drawer<'a, 'b, W> {
     }
 
     pub fn reset_colours(&mut self) -> Result<()> {
-        queue!(
-            self.writer,
-            ResetColor,
-        )
-    }
-
-    fn do_clear(&mut self, clear: ClearType) -> Result<()> {
         self.fg = Color::default();
         self.bg = Color::default();
         self.underline_color = Color::default();
         self.modifier = Modifier::default();
-        queue!(
-            self.writer,
-            ResetColor,
-            Clear(clear),
-        )
+        queue!(self.writer, ResetColor)
+    }
+
+    fn do_clear(&mut self, clear: ClearType) -> Result<()> {
+        self.reset_colours()?;
+        queue!(self.writer, Clear(clear))
     }
 
     pub fn goto_newline(&mut self) -> Result<()> {

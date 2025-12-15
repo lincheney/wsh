@@ -1,6 +1,7 @@
+use std::ops::Range;
+use unicode_width::{UnicodeWidthStr};
 use bstr::{BStr, BString, ByteSlice};
 use ratatui::{
-    text::*,
     style::*,
 };
 
@@ -146,7 +147,7 @@ impl Parser {
     }
 
     fn add_line(&mut self) {
-        self.widget.inner.lines.push(Line::default());
+        self.widget.inner.push_line(b"".into(), None);
         self.cursor_x = 0;
         self.need_newline = false;
     }
@@ -158,56 +159,35 @@ impl Parser {
         }
     }
 
-    fn splice(&mut self, range: Option<std::ops::Range<usize>>, replace_with: Option<String>, style: Option<Style>) -> usize {
-        let line = self.widget.inner.lines.last_mut().unwrap();
-        let mut span = replace_with.map(|s| Span::styled(s, style.unwrap_or(self.style)));
-        let span_width = span.as_ref().map_or(0, |span| span.width());
-        let range = range.unwrap_or_else(|| self.cursor_x .. self.cursor_x + span_width);
+    fn cursor_x_to_byte_pos(&self) -> usize {
+        let line = self.widget.inner.get().last().unwrap();
+        let mut width = 0;
+        let mut pos = 0;
+        for (s, _, c) in line.grapheme_indices().chain(std::iter::once((line.len(), line.len(), " "))) {
+            if width <= self.cursor_x {
+                pos = s;
+            }
+            width += c.width();
+        }
+        pos
+    }
 
-        if range.start >= line.width() {
-            if let Some(span) = span {
-                line.spans.push(span);
+    fn splice(&mut self, range: Option<Range<usize>>, replace_with: Option<String>, style: Option<Style>) {
+        let replace_with = replace_with.as_ref().map(|x| x.as_str().into());
+        let style = style.map(|s| s.into());
+
+        if let Some(range) = range {
+            let lineno = self.widget.inner.len() - 1;
+            let len = self.widget.inner.get()[0].len();
+
+            self.widget.inner.delete_str(lineno, range.start, range.end - range.start);
+            if let Some(replace_with) = replace_with {
+                self.widget.inner.insert_str(replace_with, lineno, len, style);
             }
 
-        } else {
-            // need to overwrite things ....
-
-            let mut start = 0;
-            line.spans = std::mem::take(&mut line.spans).into_iter()
-                .flat_map(|sp| {
-                    let w = sp.width();
-                    let overlap_start = start.max(range.start);
-                    let overlap_end = (start + w).min(range.end);
-                    let nonoverlap_start = overlap_start - start;
-                    let nonoverlap_end = start + w - overlap_end;
-
-                    let mut replacement = [None, None, None];
-                    if nonoverlap_start == w {
-                        // no overlap
-                        replacement[0] = Some(sp);
-                    } else {
-                        if nonoverlap_start > 0 {
-                            let content = sp.styled_graphemes(Style::default())
-                                .take(nonoverlap_start)
-                                .map(|s| s.symbol)
-                                .collect::<String>();
-                            replacement[0] = Some(sp.clone().content(content));
-                        }
-                        replacement[1] = span.take();
-                        if nonoverlap_end > 0 {
-                            let content = sp.styled_graphemes(Style::default())
-                                .skip(w - nonoverlap_end)
-                                .map(|s| s.symbol)
-                                .collect::<String>();
-                            replacement[2] = Some(sp.content(content));
-                        }
-                    }
-                    start += w;
-                    replacement.into_iter().flatten()
-                }).collect();
+        } else if let Some(replace_with) = replace_with {
+            self.widget.inner.push_str(replace_with, style);
         }
-
-        span_width
     }
 
     fn add_str(&mut self, string: String) {
@@ -215,12 +195,12 @@ impl Parser {
             return
         }
 
-        if self.need_newline || self.widget.inner.lines.is_empty() {
+        if self.need_newline || self.widget.inner.get().is_empty() {
             self.add_line();
         }
 
-        let new_width = self.splice(None, Some(string), None);
-        self.cursor_x += new_width;
+        self.cursor_x += string.width();
+        self.splice(None, Some(string), Some(self.style));
     }
 
     pub fn feed(&mut self, string: &BStr) {
@@ -246,19 +226,20 @@ impl Parser {
                     let param = if param.is_empty() { b"0" } else { param };
                     let param = std::str::from_utf8(param).unwrap().parse::<usize>().unwrap();
 
-                    if let Some(last_line) = self.widget.inner.lines.last() {
+                    if let Some(last_line) = self.widget.inner.get().last() {
+                        let cursor_x = self.cursor_x_to_byte_pos();
                         match param {
                             0 => {
-                                let range = self.cursor_x .. self.cursor_x + last_line.width();
+                                let range = cursor_x .. last_line.len();
                                 self.splice(Some(range), None, Some(Style::new()));
                             },
                             1 => {
-                                let range = 0 .. self.cursor_x;
-                                let replace_with = " ".repeat(last_line.width());
+                                let range = 0 .. cursor_x;
+                                let replace_with = " ".repeat(self.cursor_x);
                                 self.splice(Some(range), Some(replace_with), Some(Style::new()));
                             },
                             2 => {
-                                let range = 0 .. last_line.width();
+                                let range = 0 .. last_line.len();
                                 let replace_with = " ".repeat(self.cursor_x);
                                 self.splice(Some(range), Some(replace_with), Some(Style::new()));
                             },
@@ -323,7 +304,7 @@ impl Parser {
     }
 
     pub fn clear(&mut self) {
-        self.widget.inner.lines.clear();
+        self.widget.inner.clear();
         self.buffer.clear();
         self.state = State::None;
         self.cursor_x = 0;
@@ -338,7 +319,7 @@ impl std::default::Default for Parser {
             buffer: Default::default(),
             style: Default::default(),
             state: Default::default(),
-            widget: super::Widget{ text_overrides_style: true, ..Default::default() },
+            widget: super::Widget::default(),
             cursor_x: 0,
             need_newline: false,
             ocrnl: false,
