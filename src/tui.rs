@@ -221,8 +221,8 @@ impl Tui {
     pub fn render_to_string(&self, id: usize, width: Option<u16>) -> Option<BString> {
         self.get_index(id).map(|i| {
             let widget = self.widgets.inner[i].as_ref();
-            // let width = width.unwrap_or(self.buffer.area.width);
-            let width = width.unwrap_or(80);
+            let width = width.unwrap_or(self.buffer.area.width);
+            let width = std::num::NonZero::new(width).map_or(80, |w| w.get());
 
             let mut string = vec![];
             let mut writer = Cursor::new(&mut string);
