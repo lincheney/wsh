@@ -508,9 +508,7 @@ impl<T> Text<T> {
             }
         }
 
-        if let Some(need_newline) = need_newline.take() {
-            drawer.clear_to_end_of_line(need_newline)?;
-        }
+        drawer.clear_to_end_of_line(need_newline.unwrap_or(None))?;
 
         Ok(marker_pos)
     }
