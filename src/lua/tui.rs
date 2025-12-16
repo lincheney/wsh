@@ -471,7 +471,7 @@ async fn clear_ansi_message(ui: Ui, _lua: Lua, id: usize) -> Result<()> {
 
 async fn message_to_ansi_string(ui: Ui, _lua: Lua, (id, width): (usize, Option<u16>)) -> Result<mlua::BString> {
     let ui = ui.get();
-    let tui = &mut ui.inner.borrow_mut().await.tui;
+    let tui = &ui.inner.borrow().await.tui;
 
     match tui.render_to_string(id, width) {
         None => anyhow::bail!("can't find widget with id {}", id),

@@ -231,9 +231,7 @@ impl Tui {
             let mut canvas = backend::DummyCanvas::default();
             canvas.size = (width, u16::MAX);
             let mut drawer = backend::Drawer::new(&mut canvas, &mut writer, (0, 0));
-            // 3 lines in case you have borders
-            let area = Rect{ x: 0, y: 0, width, height: 3 };
-            let mut border_buffer = Buffer::empty(area);
+            let mut border_buffer = Buffer::default();
 
             widget.render(&mut drawer, &mut border_buffer, None).unwrap();
             string.into()
@@ -293,8 +291,6 @@ impl Tui {
         // resize buffers
         let area = Rect{x: 0, y: 0, width, height: self.max_height};
         self.buffer.resize(area);
-        // enough space to render borders
-        self.border_buffer.resize(Rect{ height: 3, ..area});
 
         // quit early if nothing is dirty
         if !dirty && !prompt.dirty && !buffer.dirty && !self.dirty && !status_bar.dirty {

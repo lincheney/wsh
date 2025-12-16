@@ -416,16 +416,19 @@ impl<T> Text<T> {
         let mut area = Rect{ x: 0, y: 0, height: full_height as u16, width: full_width as u16 };
 
         let borders = if let Some((ref block, ref mut buffer)) = block {
-            buffer.resize(area);
+            // 3 lines in case you have borders
+            buffer.resize(Rect{ height: 3, ..area });
             block.render_ref(buffer.area, buffer);
-            area = block.inner(buffer.area);
+            let inner_area = block.inner(buffer.area);
+            // since the border buffer height is different, the inner height will be wrong
+            area = Rect{ height: full_height as u16 - (buffer.area.height - inner_area.height), ..inner_area };
 
             let cells = &buffer.content;
             Some(Borders{
-                top: &cells[.. full_width * area.y as usize],
-                bottom: &cells[full_width * (area.y + area.height) as usize ..],
-                left: &cells[full_width * area.y as usize ..][.. area.x as usize],
-                right: &cells[full_width * area.y as usize ..][(area.x + area.width) as usize .. full_width],
+                top: &cells[.. full_width * inner_area.y as usize],
+                bottom: &cells[full_width * (inner_area.y + inner_area.height) as usize ..],
+                left: &cells[full_width * inner_area.y as usize ..][.. inner_area.x as usize],
+                right: &cells[full_width * inner_area.y as usize ..][(inner_area.x + inner_area.width) as usize .. full_width],
             })
         } else {
             None
