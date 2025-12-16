@@ -80,7 +80,8 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
     }
 
     // reversed
-    cmd.insert_str(0, " ");
+    // add a read so that we have time to get the pid
+    cmd.insert_str(0, " '\\builtin read -k1;'");
     cmd.insert_str(0, shell_quote(&name).as_bytes());
     if opts.echo_input {
         cmd.insert_str(0, "-e ");
@@ -90,8 +91,6 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
     }
     cmd.insert_str(0, "zpty ");
 
-    // prevent sigchld from triggering before we get the pid
-    queue_signals();
     unsafe {
         zsh_sys::startparamscope();
     }
@@ -102,6 +101,19 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
         if code > 0 {
             anyhow::bail!("zpty failed with code {code}")
         }
+
+        // get fd from $REPLY
+        let Some(mut fd) = variables::Variable::get("REPLY")
+            else { anyhow::bail!("could not get $REPLY") };
+
+        let fd = if let Some(fd) = fd.try_as_int()? {
+            fd
+        } else if let Ok(fd) = std::str::from_utf8(&fd.as_bytes()) && let Ok(fd) = fd.parse() {
+            fd
+        } else {
+            anyhow::bail!("could not get fd: {:?}", fd.as_value());
+        };
+
 
         // how to get pid????
         // this seems yuck
@@ -139,20 +151,13 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
         let pid = std::str::from_utf8(pid)?.parse()?;
         add_pid(pid as _);
 
-        // get fd from $REPLY
-        let Some(mut fd) = variables::Variable::get("REPLY")
-            else { anyhow::bail!("could not get $REPLY") };
-
-        let fd = if let Some(fd) = fd.try_as_int()? {
-            fd
-        } else if let Ok(fd) = std::str::from_utf8(&fd.as_bytes()) && let Ok(fd) = fd.parse() {
-            fd
-        } else {
-            anyhow::bail!("could not get fd: {:?}", fd.as_value());
-        };
+        // tell the zpty to start
+        let fd = fd as _;
+        let borrowed = unsafe{ std::os::fd::BorrowedFd::borrow_raw(fd) };
+        while nix::unistd::write(borrowed, b"\n")? != 1 { }
 
         Ok(Zpty{
-            fd: fd as _,
+            fd,
             pid,
             name,
         })
@@ -162,7 +167,6 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
     unsafe {
         zsh_sys::endparamscope();
     }
-    unqueue_signals()?;
     result
 }
 
