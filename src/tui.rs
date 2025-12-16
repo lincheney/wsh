@@ -118,7 +118,7 @@ impl Widgets {
             if w.hidden || area.height <= height as _ {
                 w.line_count = 0;
             } else {
-                w.line_count = w.get_height_for_width(area);
+                w.line_count = w.get_height_for_width(area).min(area.height - height);
                 height += w.line_count;
             }
         }
