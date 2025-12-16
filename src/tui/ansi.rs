@@ -176,7 +176,7 @@ impl Parser {
         let style = style.map(|s| s.into());
 
         let lineno = self.widget.inner.len() - 1;
-        let len = self.widget.inner.get()[0].len();
+        let len = self.widget.inner.get()[lineno].len();
 
         let range = match (range, &replace_with) {
             (Some(range), _) => range,
