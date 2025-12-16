@@ -302,9 +302,15 @@ impl Tui {
         }
 
         // old heights
-        let old_buffer_height = (prompt.height + buffer.draw_end_pos.1) as usize;
-        let old_widgets_height = self.widgets.get_height() as usize;
-        let old_status_bar_height = status_bar.inner.as_ref().map_or(0, |w| w.line_count) as usize;
+        let mut old_buffer_height = (prompt.height + buffer.draw_end_pos.1) as usize;
+        let mut old_widgets_height = self.widgets.get_height() as usize;
+        let mut old_status_bar_height = status_bar.inner.as_ref().map_or(0, |w| w.line_count) as usize;
+        if clear {
+            old_buffer_height = 0;
+            old_widgets_height = 0;
+            old_status_bar_height = 0;
+        }
+
         let old_height = old_buffer_height + old_widgets_height + old_status_bar_height;
 
         // refresh the widgets etc
