@@ -62,9 +62,26 @@ impl UserData for CommandResult {
     }
 }
 
+struct Zpty {
+    name: String,
+    shell: Arc<crate::shell::ShellClient>,
+}
+
 struct Process {
     pid: u32,
     result: CommandResult,
+    #[allow(unused)]
+    zpty: Option<Zpty>,
+}
+
+impl Drop for Zpty {
+    fn drop(&mut self) {
+        let name = std::mem::take(&mut self.name);
+        let shell = self.shell.clone();
+        tokio::task::spawn(async move {
+            shell.zpty_delete(name.into()).await
+        });
+    }
 }
 
 impl UserData for Process {
@@ -281,7 +298,11 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
 
     let (pid, stdin, stdout, stderr) = result_receiver.await.unwrap()?;
     Ok(lua.pack_multi((
-        Process{pid, result: CommandResult{ inner: receiver }},
+        Process{
+            pid,
+            result: CommandResult{ inner: receiver },
+            zpty: None,
+        },
         stdin,
         stdout,
         stderr,
@@ -486,7 +507,11 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
     let (pid, stdin, stdout, stderr) = result_receiver.await.unwrap()?;
 
     Ok(lua.pack_multi((
-        Process{pid, result: CommandResult{ inner: receiver }},
+        Process{
+            pid,
+            result: CommandResult{ inner: receiver },
+            zpty: None,
+        },
         stdin,
         stdout,
         stderr,
@@ -508,7 +533,7 @@ async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         echo_input: args.echo_input,
         non_blocking: true,
     };
-    let zpty = ui.shell.zpty(name.into(), cmd, opts).await?;
+    let zpty = ui.shell.zpty(name.clone().into(), cmd, opts).await?;
 
     let pty = unsafe{ tokio::fs::File::from_raw_fd(zpty.fd) };
     let pty = ReadWriteFile{
@@ -516,6 +541,7 @@ async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         is_tty_master: true,
     };
 
+    let shell = ui.shell.clone();
     let pid = zpty.pid;
     tokio::task::spawn(async move {
         let code = crate::shell::wait_for_pid(pid as _, &ui.shell).await.unwrap();
@@ -524,7 +550,11 @@ async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     });
 
     Ok(lua.pack_multi((
-        Process{pid, result: CommandResult{ inner: receiver }},
+        Process{
+            pid,
+            result: CommandResult{ inner: receiver },
+            zpty: Some(Zpty{ shell, name }),
+        },
         pty,
     ))?)
 }

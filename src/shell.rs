@@ -183,6 +183,13 @@ crate::TokioActor! {
             zsh::zpty(name, &cmd, opts)
         }
 
+        pub fn zpty_delete(&self, name: BString) -> c_long {
+            let name = CString::new(name).unwrap();
+            let mut cmd = zsh::shell_quote(&name);
+            cmd.insert_str(0, "zpty -d ");
+            zsh::execstring(cmd, Default::default())
+        }
+
         pub fn get_completions(&self, line: BString, sender: mpsc::UnboundedSender<Vec<zsh::completion::Match>>) -> Result<BString> {
             let mut shout = self.shout.lock().unwrap();
             let shout = if let Some(shout) = &mut *shout {
