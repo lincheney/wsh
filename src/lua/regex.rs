@@ -4,6 +4,7 @@ use crate::ui::Ui;
 
 struct Regex {
     inner: regex::bytes::Regex,
+    full: Option<regex::bytes::Regex>,
 }
 
 impl UserData for Regex {
@@ -14,12 +15,15 @@ impl UserData for Regex {
         methods.add_method("is_match", |_lua, regex, (arg, start): (LuaString, Option<usize>)| {
             Ok(regex.inner.is_match_at(&arg.as_bytes(), start.unwrap_or(0)))
         });
-        methods.add_method("is_full_match", |_lua, regex, arg: LuaString| {
+        methods.add_method_mut("is_full_match", |_lua, regex, arg: LuaString| {
+            let regex = regex.full.get_or_insert_with(|| {
+                let pat = regex.inner.as_str();
+                let pat = format!("^(?:{pat})$");
+                regex::bytes::Regex::new(&pat).unwrap()
+            });
+
             let bytes = arg.as_bytes();
-            Ok(
-                regex.inner.find(&bytes)
-                .is_some_and(|m| m.len() == bytes.len())
-            )
+            Ok(regex.is_match(&bytes))
         });
         methods.add_method("find", |_lua, regex, (arg, start): (LuaString, Option<usize>)| {
             if let Some(m) = regex.inner.find_at(&arg.as_bytes(), start.unwrap_or(0)) {
@@ -60,7 +64,7 @@ impl UserData for Regex {
 fn regex(_lua: &Lua, string: String) -> LuaResult<Regex> {
     let regex = regex::bytes::Regex::new(&string);
     let regex = regex.map_err(|e| mlua::Error::RuntimeError(format!("{e}")))?;
-    Ok(Regex{ inner: regex })
+    Ok(Regex{ inner: regex, full: None })
 }
 
 pub fn init_lua(ui: &Ui) -> Result<()> {
