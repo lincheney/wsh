@@ -159,34 +159,37 @@ impl Parser {
         }
     }
 
-    fn cursor_x_to_byte_pos(&self) -> usize {
+    fn to_byte_pos(&self, pos: usize) -> usize {
         let line = self.widget.inner.get().last().unwrap();
         let mut width = 0;
-        let mut pos = 0;
+        let mut byte_pos = 0;
         for (s, _, c) in line.grapheme_indices().chain(std::iter::once((line.len(), line.len(), " "))) {
-            if width <= self.cursor_x {
-                pos = s;
+            if width <= pos {
+                byte_pos = s;
             }
             width += c.width();
         }
-        pos
+        byte_pos
     }
 
     fn splice(&mut self, range: Option<Range<usize>>, replace_with: Option<String>, style: Option<Style>) {
-        let replace_with = replace_with.as_ref().map(|x| x.as_str().into());
         let style = style.map(|s| s.into());
 
-        if let Some(range) = range {
-            let lineno = self.widget.inner.len() - 1;
-            let len = self.widget.inner.get()[0].len();
+        let lineno = self.widget.inner.len() - 1;
+        let len = self.widget.inner.get()[0].len();
 
-            self.widget.inner.delete_str(lineno, range.start, range.end - range.start);
-            if let Some(replace_with) = replace_with {
-                self.widget.inner.insert_str(replace_with, lineno, len, style);
-            }
+        let range = match (range, &replace_with) {
+            (Some(range), _) => range,
+            (None, Some(replace_with)) => {
+                // calculate the range based on the cursor
+                self.to_byte_pos(self.cursor_x) .. self.to_byte_pos(self.cursor_x + replace_with.width()).min(len)
+            },
+            (None, None) => return,
+        };
 
-        } else if let Some(replace_with) = replace_with {
-            self.widget.inner.push_str(replace_with, style);
+        self.widget.inner.delete_str(lineno, range.start, range.end - range.start);
+        if let Some(replace_with) = replace_with {
+            self.widget.inner.insert_str(replace_with.as_str().into(), lineno, range.start, style);
         }
     }
 
@@ -199,8 +202,9 @@ impl Parser {
             self.add_line();
         }
 
-        self.cursor_x += string.width();
+        let width = string.width();
         self.splice(None, Some(string), Some(self.style));
+        self.cursor_x += width;
     }
 
     pub fn feed(&mut self, string: &BStr) {
@@ -227,7 +231,7 @@ impl Parser {
                     let param = std::str::from_utf8(param).unwrap().parse::<usize>().unwrap();
 
                     if let Some(last_line) = self.widget.inner.get().last() {
-                        let cursor_x = self.cursor_x_to_byte_pos();
+                        let cursor_x = self.to_byte_pos(self.cursor_x);
                         match param {
                             0 => {
                                 let range = cursor_x .. last_line.len();
