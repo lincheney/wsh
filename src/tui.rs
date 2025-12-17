@@ -16,6 +16,7 @@ use ratatui::{
     buffer::Buffer,
 };
 mod backend;
+mod wrap;
 pub mod widget;
 pub mod status_bar;
 pub mod ansi;

@@ -9,7 +9,7 @@ use ratatui::widgets::{Block, WidgetRef};
 use ratatui::buffer::{Buffer, Cell};
 use crate::tui::{Drawer, Canvas};
 
-const TAB_WIDTH: usize = 4;
+pub(super) const TAB_WIDTH: usize = 4;
 const ESCAPE_STYLE: Style = Style::new().fg(Color::Gray);
 
 #[derive(Debug, Clone)]
@@ -76,89 +76,6 @@ fn merge_highlights<'a, T: 'a, I: Iterator<Item=&'a Highlight<T>>>(init: Style, 
     style
 }
 
-pub struct Wrapper<'a> {
-    prev_range: (usize, usize),
-    width: usize,
-    max_width: usize,
-    invalid: Option<(usize, usize)>,
-    line: &'a BStr,
-    graphemes: bstr::GraphemeIndices<'a>,
-}
-
-impl Wrapper<'_> {
-    fn add_width(&mut self, width: usize, new_end: usize) -> Option<((usize, usize), usize)> {
-        let old_width = self.width;
-        self.width += width;
-        if self.width > self.max_width {
-            // wrap
-            self.width = width;
-            self.prev_range = (self.prev_range.1, new_end);
-            Some((self.prev_range, old_width))
-        } else {
-            None
-        }
-    }
-}
-
-impl Iterator for Wrapper<'_> {
-    type Item = ((usize, usize), usize);
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if self.prev_range.1 >= self.line.len() {
-                return None
-
-            } else if let Some((start, end)) = self.invalid.take() {
-                // iter over previous invalid text
-                let mut cursor = Cursor::new([0; 64]);
-                for (i, c) in self.line[start .. end].iter().enumerate() {
-                    cursor.set_position(0);
-                    write!(cursor, "<u{c:04x}>").unwrap();
-                    if let Some(result) = self.add_width(cursor.position() as usize, start + i) {
-                        self.invalid = Some((start + i, end));
-                        return Some(result)
-                    }
-                }
-
-            } else if let Some((start, end, c)) = self.graphemes.next() {
-
-                if c == "\n" {
-                    // newline
-                    let old_width = self.width;
-                    self.width = 0;
-                    self.prev_range = (self.prev_range.1, end);
-                    return Some((self.prev_range, old_width))
-                } else if c == "\t" {
-                    let result = self.add_width(TAB_WIDTH, start);
-                    if result.is_some() {
-                        return result
-                    }
-                } else if c.width() > 0 && c != "\u{FFFD}" {
-                    let result = self.add_width(c.width(), start);
-                    if result.is_some() {
-                        return result
-                    }
-                } else {
-                    // invalid text
-                    self.invalid = Some((start, end));
-                }
-            } else {
-                // no more text, emit last line
-                self.prev_range = (self.prev_range.1, self.line.len());
-                return Some((self.prev_range, self.width))
-            }
-        }
-    }
-}
-
-pub fn wrap(line: &BStr, max_width: usize, initial_indent: usize) -> Wrapper<'_> {
-    Wrapper {
-        prev_range: (0, 0),
-        width: initial_indent,
-        max_width,
-        invalid: None,
-        line,
-        graphemes: line.grapheme_indices(),
-    }
 }
 
 #[derive(Debug, Default)]
@@ -298,7 +215,7 @@ impl<T> Text<T> {
     }
 
     pub fn get_height_for_width(&self, width: usize, initial_indent: usize) -> usize {
-        self.lines.iter().flat_map(|line| wrap(line.as_ref(), width, initial_indent)).count()
+        self.lines.iter().flat_map(|line| super::wrap::wrap(line.as_ref(), width, initial_indent)).count()
     }
 
     fn make_line_cells<'a, E, F: FnMut(usize, usize, Option<(&str, Style)>) -> Result<(), E>>(
@@ -458,7 +375,7 @@ impl<T> Text<T> {
 
             let initial = drawer.get_pos().0 as usize % full_width;
 
-            for (range, line_width) in wrap(line.as_ref(), area.width as usize, initial) {
+            for (range, line_width) in super::wrap::wrap(line.as_ref(), area.width as usize, initial) {
                 // leave room for the bottom border
                 if max_height <= border_bottom_height as _ {
                     break 'outer
