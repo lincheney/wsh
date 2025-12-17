@@ -14,6 +14,7 @@ function M.run_in_background(command)
         local msg = wish.set_ansi_message{
             persist = true,
             dim = true,
+            height = 'max:7',
             border = {
                 fg = M.BORDER_RUNNING,
                 type = 'Rounded',

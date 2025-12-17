@@ -120,7 +120,7 @@ impl Widget {
             drawer,
             self.block.as_ref().map(|block| (block, buffer)),
             None,
-            max_height,
+            max_height.map(|w| (w, super::text::Scroll{ show_scrollbar: true, position: super::scroll::ScrollPosition::StickyBottom } )),
         ).map(|_| ())
     }
 

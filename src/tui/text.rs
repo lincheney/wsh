@@ -11,6 +11,7 @@ use crate::tui::{Drawer, Canvas};
 
 pub(super) const TAB_WIDTH: usize = 4;
 const ESCAPE_STYLE: Style = Style::new().fg(Color::Gray);
+const SCROLLBAR_CHAR: &str = "▕";
 
 #[derive(Debug, Clone)]
 pub struct Highlight<T> {
@@ -76,6 +77,9 @@ fn merge_highlights<'a, T: 'a, I: Iterator<Item=&'a Highlight<T>>>(init: Style, 
     style
 }
 
+pub struct Scroll {
+    pub show_scrollbar: bool,
+    pub position: super::scroll::ScrollPosition,
 }
 
 #[derive(Debug, Default)]
@@ -317,7 +321,7 @@ impl<T> Text<T> {
         drawer: &mut Drawer<W, C>,
         mut block: Option<(&Block<'a>, &mut Buffer)>,
         marker: Option<(usize, usize)>,
-        max_height: Option<usize>,
+        max_height: Option<(usize, Scroll)>,
 
     ) -> std::io::Result<(u16, u16)> {
 
@@ -352,7 +356,12 @@ impl<T> Text<T> {
         };
 
         let mut marker_pos = drawer.get_pos();
-        let mut max_height = max_height.unwrap_or(usize::MAX).min(full_height - drawer.get_pos().1 as usize);
+        let (max_height, scroll) = if let Some((max_height, scroll)) = max_height {
+            (max_height, scroll)
+        } else {
+            (usize::MAX, Scroll{ show_scrollbar: false, position: super::scroll::ScrollPosition::Line(0) })
+        };
+        let mut max_height = max_height.min(full_height - drawer.get_pos().1 as usize);
         let border_bottom_height = full_height - (area.y + area.height) as usize;
 
         let clear_cell = self.make_default_style_cell();
@@ -371,47 +380,69 @@ impl<T> Text<T> {
             }
         }
 
-        'outer: for (lineno, line) in self.lines.iter().enumerate() {
+        let initial = drawer.get_pos().0 as usize % full_width;
+        let max_lines = max_height.saturating_sub(border_bottom_height);
+        let scrolled = super::scroll::wrap(&self.lines, area.width as usize, max_lines, initial, scroll.position);
+        max_height -= scrolled.in_view.len();
 
-            let initial = drawer.get_pos().0 as usize % full_width;
+        let scrollbar_range = if scroll.show_scrollbar {
+            area.width -= 1;
 
-            for (range, line_width) in super::wrap::wrap(line.as_ref(), area.width as usize, initial) {
-                // leave room for the bottom border
-                if max_height <= border_bottom_height as _ {
-                    break 'outer
+            let mut start = scrolled.in_view.start * scrolled.in_view.len() / scrolled.ranges.len().max(1);
+            if scrolled.in_view.start > 0 && start == 0 {
+                start = 1;
+            }
+            let mut end = scrolled.in_view.end * scrolled.in_view.len() / scrolled.ranges.len().max(1);
+            if scrolled.in_view.end < scrolled.ranges.len() && end == scrolled.in_view.len() {
+                end = end.saturating_sub(1);
+            }
+
+            let mut cell = Cell::new(SCROLLBAR_CHAR);
+            cell.set_style(self.style);
+            Some((start .. end, cell))
+        } else {
+            None
+        };
+
+        for (i, &(lineno, (range, line_width))) in scrolled.ranges[scrolled.in_view].iter().enumerate() {
+
+            if let Some(need_newline) = need_newline.take() {
+                drawer.goto_newline(need_newline)?;
+            }
+            need_newline = Some(clear_cell.as_ref());
+
+            // draw left border
+            if let Some(borders) = &borders {
+                for cell in borders.left {
+                    drawer.draw_cell(cell, false)?;
                 }
-                max_height -= 1;
+            }
 
-                if let Some(need_newline) = need_newline.take() {
-                    drawer.goto_newline(need_newline)?;
-                }
-                need_newline = Some(clear_cell.as_ref());
+            // draw the indent
+            for _ in 0 .. self.get_alignment_indent(area.width as _, line_width) {
+                drawer.draw_cell(&indent_cell, false)?;
+            }
 
-                // draw left border
-                if let Some(borders) = &borders {
-                    for cell in borders.left {
-                        drawer.draw_cell(cell, false)?;
-                    }
-                }
+            // draw the line
+            if let Some(pos) = self.render_line(lineno, self.lines[lineno][range.0 .. range.1].as_ref(), range, drawer, marker)? {
+                marker_pos = pos;
+            }
 
-                // draw the indent
-                for _ in 0 .. self.get_alignment_indent(area.width as _, line_width) {
-                    drawer.draw_cell(&indent_cell, false)?;
-                }
+            // draw the scrollbar
+            if let Some((scrollbar_range, cell)) = &scrollbar_range && scrollbar_range.contains(&i) {
+                drawer.clear_to_end_of_line(clear_cell.as_ref())?;
+                let pos = drawer.get_pos();
+                drawer.move_to((area.x + area.width, pos.1));
+                drawer.draw_cell(cell, false)?;
+            }
 
-                // draw the line
-                if let Some(pos) = self.render_line(lineno, line.as_ref(), range, drawer, marker)? {
-                    marker_pos = pos;
-                }
-
-                // draw right border
-                if let Some(borders) = &borders && !borders.right.is_empty()  {
-                    drawer.clear_to_end_of_line(clear_cell.as_ref())?;
-                    let pos = drawer.get_pos();
-                    drawer.move_to(((full_width - borders.right.len()) as _, pos.1));
-                    for cell in borders.right {
-                        drawer.draw_cell(cell, false)?;
-                    }
+            // draw right border
+            if let Some(borders) = &borders && !borders.right.is_empty()  {
+                drawer.clear_to_end_of_line(clear_cell.as_ref())?;
+                let pos = drawer.get_pos();
+                drawer.move_to(((full_width - borders.right.len()) as _, pos.1));
+                for cell in borders.right {
+                    drawer.draw_cell(cell, false)?;
                 }
             }
         }

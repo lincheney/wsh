@@ -17,6 +17,7 @@ use ratatui::{
 };
 mod backend;
 mod wrap;
+mod scroll;
 pub mod widget;
 pub mod status_bar;
 pub mod ansi;
