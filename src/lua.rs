@@ -119,6 +119,37 @@ fn time(_lua: &Lua, (): ()) -> LuaResult<f64> {
     Ok(SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64())
 }
 
+async fn lua_try(lua: Lua, (func, catch, finally): (LuaFunction, Option<LuaFunction>, Option<LuaFunction>)) -> LuaResult<LuaMultiValue> {
+    let mut result = func.call_async(()).await;
+
+    if let Some(catch) = catch {
+        result = match result {
+            Ok(x) => Ok(x),
+            Err(e) => {
+                let err = e.clone().into_lua(&lua).unwrap();
+                let catch_result: LuaResult<LuaValue> = catch.call_async(err).await;
+                match catch_result {
+                    Ok(_) => Ok(LuaMultiValue::new()),
+                    Err(new_err) if new_err.to_string() == e.to_string() => Err(e),
+                    Err(new_err) => Err(new_err.context(e)),
+                }
+            },
+        };
+    }
+
+
+    if let Some(finally) = finally {
+        let finally_result: LuaResult<()> = finally.call_async(()).await;
+        result = match (result, finally_result) {
+            (x, Ok(_)) => x,
+            (Ok(_), Err(e)) => Err(e),
+            (Err(e1), Err(e2)) => Err(e2.context(e1)),
+        };
+    }
+    result
+
+}
+
 pub async fn __laggy(_ui: Ui, lua: Lua, (): ()) -> Result<()> {
     let _ = tokio::task::spawn_blocking(move || {
         let _: Result<(), mlua::Error> = unsafe{ lua.exec_raw((), |_| {
@@ -151,6 +182,7 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_async_fn("get_cwd", get_cwd)?;
     ui.set_lua_async_fn("print", print)?;
     ui.get_lua_api()?.set("time", ui.lua.create_function(time)?)?;
+    ui.get_lua_api()?.set("try", ui.lua.create_async_function(lua_try)?)?;
     ui.set_lua_async_fn("__laggy", __laggy)?;
 
     keybind::init_lua(ui)?;

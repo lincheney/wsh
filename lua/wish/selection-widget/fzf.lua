@@ -51,24 +51,20 @@ function M.start(opts)
 
     if type(opts.source) == 'function' then
         wish.schedule(function()
-            local ok, err = xpcall(
+            wish.try(
                 function()
                     for lines in opts.source() do
                         M.add_lines(lines)
                     end
                 end,
+                nil,
                 function(err)
-                    wish.log.error(err)
-                    -- wish.log.debug(debug.traceback(err))
+                    M.add_lines(nil)
+                    if state then
+                        state.resume()
+                    end
                 end
             )
-            M.add_lines(nil)
-            if state then
-                state.resume()
-            end
-            if err then
-                error(err)
-            end
         end)
     elseif type(opts.source) == 'table' then
         M.add_lines(opts.source)
