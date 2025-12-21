@@ -81,12 +81,15 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Strea
 }
 
 async fn insert_completion(mut ui: Ui, _lua: Lua, val: Match) -> Result<()> {
-    {
+    let buffer = {
         let this = ui.unlocked.read();
-        let buffer = this.inner.borrow().await.buffer.get_contents().clone();
-        let (new_buffer, new_pos) = ui.shell.insert_completion(buffer, val.inner).await;
+        this.inner.borrow().await.buffer.get_contents().clone()
+    };
 
+    let (new_buffer, new_pos) = ui.shell.insert_completion(buffer, val.inner).await;
+    {
         // see if this can be done as an insert
+        let this = ui.unlocked.read();
         let mut ui = this.inner.borrow_mut().await;
         ui.buffer.insert_or_set(Some(new_buffer.as_ref()), Some(new_pos));
     }
