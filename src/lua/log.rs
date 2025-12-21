@@ -19,10 +19,27 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     let tbl = ui.lua.create_table()?;
     lua_api.set("log", &tbl)?;
 
-    tbl.set("debug", ui.lua.create_function(|_, val: LuaValue| { log::debug!("{}", LogValue(val)); Ok(()) })?)?;
-    tbl.set("info",  ui.lua.create_function(|_, val: LuaValue| {  log::info!("{}", LogValue(val)); Ok(()) })?)?;
-    tbl.set("warn",  ui.lua.create_function(|_, val: LuaValue| {  log::warn!("{}", LogValue(val)); Ok(()) })?)?;
-    tbl.set("error", ui.lua.create_function(|_, val: LuaValue| { log::error!("{}", LogValue(val)); Ok(()) })?)?;
+    macro_rules! make_logger {
+        ($name:ident) => (
+            make_logger!($name, $name)
+        );
+        ($name:ident, $loglevel:ident) => (
+            make_logger!($name, $loglevel, 0)
+        );
+        ($name:ident, $loglevel:ident, $lualevel:expr) => (
+            tbl.set(stringify!($name), ui.lua.create_function(|lua, val: LuaValue| {
+                let traceback = lua.traceback(None, 1 + $lualevel)?.display().to_string();
+                let line = traceback.lines().nth(1).unwrap().trim();
+                log::$loglevel!("{} {}", line, LogValue(val)); Ok(())
+            })?)?;
+        );
+    }
+
+    make_logger!(debug);
+    make_logger!(info);
+    make_logger!(warn);
+    make_logger!(error);
+    make_logger!(debug1, debug, 1);
 
     Ok(())
 }

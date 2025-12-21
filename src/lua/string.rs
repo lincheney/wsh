@@ -27,7 +27,7 @@ fn set(lua: &Lua, (string, replace, start, end): (LuaString, Option<LuaString>, 
     if let Some(range) = slice(&string, start, end) {
         let mut new = string.as_bytes()[..range.start].to_owned();
         if let Some(replace) = replace {
-            new.extend(replace.as_bytes());
+            new.extend(&replace.as_bytes());
         }
         new.extend(&string.as_bytes()[range.end..]);
         Ok(lua.create_string(new)?)

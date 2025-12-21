@@ -35,7 +35,7 @@ function wish.pprint(...)
     else
         val = table.concat(wish.iter{...}:map(function(k, v) return wish.repr(v) end):collect(), ' ')
     end
-    wish.log.debug(val)
+    wish.log.debug1(val)
 end
 
 function wish.async.spawn(...)

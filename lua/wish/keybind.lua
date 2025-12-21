@@ -7,7 +7,7 @@ local function cut_buffer(len)
 end
 
 wish.create_dynamic_var('CLIPBOARD', 'string', function()
-    return wish.cmd{args='wl-paste', foreground=false, stdout='piped'}.stdout:read()
+    return wish.async.spawn{args={'wl-paste'}, foreground=false, stdout='piped'}.stdout:read()
 end)
 
 wish.set_keymap('<bs>', function()
