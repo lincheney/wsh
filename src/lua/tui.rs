@@ -1,5 +1,4 @@
 use std::default::Default;
-use std::str::FromStr;
 use serde::{Deserialize, Deserializer, de};
 use anyhow::Result;
 use ratatui::{
@@ -10,17 +9,7 @@ use ratatui::{
 use mlua::{prelude::*};
 use crate::ui::{Ui, ThreadsafeUiInner};
 use crate::tui;
-
-#[derive(Debug, Copy, Clone)]
-pub struct SerdeWrap<T>(T);
-impl<'de, T: FromStr> Deserialize<'de> for SerdeWrap<T>
-    where <T as FromStr>::Err: std::fmt::Display
-{
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let data = String::deserialize(deserializer)?;
-        Ok(Self(T::from_str(&data).map_err(de::Error::custom)?))
-    }
-}
+use super::SerdeWrap;
 
 #[derive(Debug, Copy, Clone)]
 pub struct SerdeConstraint(Constraint);

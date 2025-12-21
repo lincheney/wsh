@@ -30,14 +30,14 @@ macro_rules! TokioActor {
             }
 
             pub struct [<$name Client>] {
-                queue: ::tokio::sync::mpsc::UnboundedSender<[<$name Msg>]>,
+                queue: ::std::sync::mpsc::Sender<[<$name Msg>]>,
                 inner: $name,
             }
 
             #[allow(dead_code)]
             impl [<$name Client>] {
-                pub fn new(inner: $name) -> (Self, ::tokio::sync::mpsc::UnboundedReceiver<[<$name Msg>]>) {
-                    let (sender, receiver) = ::tokio::sync::mpsc::unbounded_channel();
+                pub fn new(inner: $name) -> (Self, ::std::sync::mpsc::Receiver<[<$name Msg>]>) {
+                    let (sender, receiver) = ::std::sync::mpsc::channel();
                     (Self{ queue: sender, inner }, receiver)
                 }
 

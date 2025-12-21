@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ptr::NonNull;
 use std::ffi::{CString, CStr};
-use std::os::raw::{c_int};
+use std::os::raw::{c_int, c_long, c_char};
 use anyhow::Result;
 use crate::c_string_array::{CStringArray, CStrArray};
 use super::ZString;
@@ -11,7 +11,7 @@ fn pm_type(flags: c_int) -> c_int {
     flags & (zsh_sys::PM_SCALAR | zsh_sys::PM_INTEGER | zsh_sys::PM_EFLOAT | zsh_sys::PM_FFLOAT | zsh_sys::PM_ARRAY | zsh_sys::PM_HASHED) as c_int
 }
 
-pub struct Variable{
+pub(in crate::shell) struct Variable{
     value: zsh_sys::value,
     name_is_digit: bool,
 }
@@ -65,6 +65,27 @@ impl From<HashMap<BString, BString>> for Value {
     fn from(val: HashMap<BString, BString>) -> Self {
         Value::HashMap(val)
     }
+}
+
+fn try_hashtable_to_hashmap(table: zsh_sys::HashTable) -> Result<HashMap<BString, BString>> {
+    let mut hashmap = HashMap::new();
+    unsafe {
+        let keys: CStrArray = zsh_sys::paramvalarr(table, zsh_sys::SCANPM_WANTKEYS as c_int).into();
+        let values: CStrArray = zsh_sys::paramvalarr(table, zsh_sys::SCANPM_WANTVALS as c_int).into();
+
+        let keys = keys.iter().map(Some).chain(std::iter::repeat(None));
+        let values = values.iter().map(Some).chain(std::iter::repeat(None));
+
+        for (k, v) in keys.zip(values) {
+            match (k, v) {
+                (Some(k), Some(v)) => hashmap.insert(k.to_bytes().into(), v.to_bytes().into()),
+                (Some(k), None)    => hashmap.insert(k.to_bytes().into(), vec![].into()),
+                (None, Some(_))    => return Err(anyhow::anyhow!("hashmap has more values than keys")),
+                _ => break,
+            };
+        }
+    }
+    Ok(hashmap)
 }
 
 impl Variable {
@@ -184,26 +205,10 @@ impl Variable {
 
     pub fn try_as_hashmap(&mut self) -> Result<Option<HashMap<BString, BString>>> {
         if pm_type(self.param().node.flags) == zsh_sys::PM_HASHED as c_int && !self.name_is_digit {
-
-            let mut hashmap = HashMap::new();
-            unsafe {
-                let param = (*self.param().gsu.h).getfn.ok_or(anyhow::anyhow!("gsu.h.getfn is missing"))?(self.param());
-                let keys: CStrArray = zsh_sys::paramvalarr(param, zsh_sys::SCANPM_WANTKEYS as c_int).into();
-                let values: CStrArray = zsh_sys::paramvalarr(param, zsh_sys::SCANPM_WANTVALS as c_int).into();
-
-                let keys = keys.iter().map(Some).chain(std::iter::repeat(None));
-                let values = values.iter().map(Some).chain(std::iter::repeat(None));
-
-                for (k, v) in keys.zip(values) {
-                    match (k, v) {
-                        (Some(k), Some(v)) => hashmap.insert(k.to_bytes().into(), v.to_bytes().into()),
-                        (Some(k), None)    => hashmap.insert(k.to_bytes().into(), vec![].into()),
-                        (None, Some(_))    => return Err(anyhow::anyhow!("hashmap has more values than keys")),
-                        _ => break,
-                    };
-                }
-            }
-            Ok(Some(hashmap))
+            let table = unsafe{
+                (*self.param().gsu.h).getfn.ok_or(anyhow::anyhow!("gsu.h.getfn is missing"))?(self.param())
+            };
+            try_hashtable_to_hashmap(table).map(Some)
         } else {
             Ok(None)
         }
@@ -235,4 +240,192 @@ impl Variable {
         )
     }
 
+    pub fn create_dynamic<N: AsRef<BStr>, T: VariableGSU>(
+        name: N,
+        get: Box<dyn Send + Fn() -> T>,
+        set: Option<Box<dyn Send + Fn(T)>>,
+        unset: Option<Box<dyn Send + Fn(bool)>>,
+    ) -> Result<()>
+    {
+        let flag = T::FLAG | zsh_sys::PM_SPECIAL | zsh_sys::PM_REMOVABLE | zsh_sys::PM_LOCAL;
+        let gsu = CustomGSU { get, set, unset };
+        unsafe {
+            let c_name = CString::new(name.as_ref().to_vec()).unwrap();
+            let c_varname_ptr = c_name.as_ptr().cast_mut();
+            let param = zsh_sys::createparam(c_varname_ptr, flag as _);
+            (*param).level = zsh_sys::locallevel;
+            // stuff the actual gsu into the data field
+            (*param).u.data = Box::into_raw(Box::new(gsu)).cast();
+
+            if T::FLAG == zsh_sys::PM_SCALAR {
+                (*param).gsu.s = &raw const CUSTOM_SCALAR_GSU;
+            } else if T::FLAG == zsh_sys::PM_INTEGER {
+                (*param).gsu.i = &raw const CUSTOM_INTEGER_GSU;
+            } else if T::FLAG == zsh_sys::PM_ARRAY {
+                (*param).gsu.a = &raw const CUSTOM_ARRAY_GSU;
+            } else if T::FLAG == zsh_sys::PM_FFLOAT {
+                (*param).gsu.f = &raw const CUSTOM_FLOAT_GSU;
+            } else if T::FLAG == zsh_sys::PM_HASHED {
+                (*param).gsu.h = &raw const CUSTOM_HASH_GSU;
+            } else {
+                unreachable!();
+            }
+        }
+        Ok(())
+    }
+
+}
+
+pub struct CustomGSU<T> {
+    get: Box<dyn Send + Fn() -> T>,
+    set: Option<Box<dyn Send + Fn(T)>>,
+    unset: Option<Box<dyn Send + Fn(bool)>>,
+}
+
+static CUSTOM_SCALAR_GSU: zsh_sys::gsu_scalar = zsh_sys::gsu_scalar {
+    getfn: Some(custom_gsu_get::<BString>),
+    setfn: Some(custom_gsu_set::<BString>),
+    unsetfn: Some(custom_gsu_unset::<BString>),
+};
+static CUSTOM_INTEGER_GSU: zsh_sys::gsu_integer = zsh_sys::gsu_integer {
+    getfn: Some(custom_gsu_get::<c_long>),
+    setfn: Some(custom_gsu_set::<c_long>),
+    unsetfn: Some(custom_gsu_unset::<c_long>),
+};
+static CUSTOM_FLOAT_GSU: zsh_sys::gsu_float = zsh_sys::gsu_float {
+    getfn: Some(custom_gsu_get::<f64>),
+    setfn: Some(custom_gsu_set::<f64>),
+    unsetfn: Some(custom_gsu_unset::<f64>),
+};
+static CUSTOM_ARRAY_GSU: zsh_sys::gsu_array = zsh_sys::gsu_array {
+    getfn: Some(custom_gsu_get::<Vec<BString>>),
+    setfn: Some(custom_gsu_set::<Vec<BString>>),
+    unsetfn: Some(custom_gsu_unset::<Vec<BString>>),
+};
+static CUSTOM_HASH_GSU: zsh_sys::gsu_hash = zsh_sys::gsu_hash {
+    getfn: Some(custom_gsu_get::<HashMap<BString, BString>>),
+    setfn: Some(custom_gsu_set::<HashMap<BString, BString>>),
+    unsetfn: Some(custom_gsu_unset::<HashMap<BString, BString>>),
+};
+
+unsafe extern "C" fn custom_gsu_get<T: VariableGSU>(param: zsh_sys::Param) -> T::Type {
+    unsafe {
+        ((*((*param).u.data as *const CustomGSU<T>)).get)().into_raw()
+    }
+}
+unsafe extern "C" fn custom_gsu_set<T: VariableGSU>(param: zsh_sys::Param, value: T::Type) {
+    unsafe {
+        if let Some(set) = &(*((*param).u.data as *const CustomGSU<T>)).set {
+            set(T::from_raw(value));
+        }
+    }
+}
+unsafe extern "C" fn custom_gsu_unset<T: VariableGSU>(param: zsh_sys::Param, explicit: c_int) {
+    unsafe {
+        if let Some(unset) = &(*((*param).u.data as *const CustomGSU<T>)).unset {
+            unset(explicit > 0);
+            drop(Box::from_raw((*param).u.data));
+        }
+    }
+}
+
+pub trait VariableGSU {
+    const FLAG: u32;
+    type Type;
+
+    fn from_raw(value: Self::Type) -> Self;
+    fn into_raw(self) -> Self::Type;
+}
+
+impl VariableGSU for BString {
+    const FLAG: u32 = zsh_sys::PM_SCALAR;
+    type Type = *mut c_char;
+
+    fn from_raw(ptr: Self::Type) -> Self {
+        unsafe {
+            let mut len = 0;
+            zsh_sys::unmetafy(ptr, &raw mut len);
+            let value: &[u8] = std::slice::from_raw_parts(ptr.cast(), len as _);
+            zsh_sys::zsfree(ptr);
+            BStr::new(value).into()
+        }
+    }
+
+    fn into_raw(self) -> Self::Type {
+        super::metafy(&self)
+    }
+}
+
+impl VariableGSU for c_long {
+    const FLAG: u32 = zsh_sys::PM_INTEGER;
+    type Type = c_long;
+
+    fn from_raw(value: Self::Type) -> Self {
+        value
+    }
+    fn into_raw(self) -> Self::Type {
+        self
+    }
+}
+
+impl VariableGSU for f64 {
+    const FLAG: u32 = zsh_sys::PM_FFLOAT;
+    type Type = f64;
+
+    fn from_raw(value: Self::Type) -> Self {
+        value
+    }
+    fn into_raw(self) -> Self::Type {
+        self
+    }
+}
+
+impl VariableGSU for Vec<BString> {
+    const FLAG: u32 = zsh_sys::PM_ARRAY;
+    type Type = *mut *mut c_char;
+
+    fn from_raw(ptr: Self::Type) -> Self {
+        let value: CStringArray = ptr.into();
+        value.to_vec()
+    }
+    fn into_raw(self) -> Self::Type {
+        let value: CStringArray = self.into();
+        value.into_ptr()
+    }
+}
+
+impl VariableGSU for HashMap<BString, BString> {
+    const FLAG: u32 = zsh_sys::PM_HASHED;
+    type Type = zsh_sys::HashTable;
+
+    fn from_raw(ptr: Self::Type) -> Self {
+        let map = try_hashtable_to_hashmap(ptr);
+        unsafe {
+            zsh_sys::deleteparamtable(ptr);
+        }
+        map.unwrap()
+    }
+    fn into_raw(self) -> Self::Type {
+        unsafe {
+            // why 17???
+            let table = zsh_sys::newparamtable(17, std::ptr::null_mut());
+            let old_paramtab = zsh_sys::paramtab;
+            zsh_sys::paramtab = table;
+
+            let mut value = std::mem::MaybeUninit::<zsh_sys::value>::zeroed().assume_init();
+            value.end = -1;
+
+            for (k, v) in self {
+                let k = k.into_raw();
+                value.pm = zsh_sys::createparam(k, (zsh_sys::PM_SCALAR | zsh_sys::PM_UNSET) as _);
+                if value.pm.is_null() {
+                    value.pm = ((*zsh_sys::paramtab).getnode).unwrap()(zsh_sys::paramtab, k).cast();
+                }
+                zsh_sys::assignstrvalue(&raw mut value, v.into_raw(), 0);
+            }
+
+            zsh_sys::paramtab = old_paramtab;
+            table
+        }
+    }
 }

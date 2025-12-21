@@ -1,7 +1,8 @@
+use std::str::FromStr;
+use serde::{Deserialize, Deserializer, de};
 use bstr::BString;
 use std::io::Write;
 use mlua::prelude::*;
-use serde::{Deserialize};
 use anyhow::Result;
 use crate::ui::{Ui, ThreadsafeUiInner};
 use std::time::SystemTime;
@@ -21,6 +22,17 @@ mod functions;
 mod regex;
 pub use keybind::KeybindMapping;
 pub use events::{EventCallbacks, HasEventCallbacks};
+
+#[derive(Debug, Copy, Clone)]
+pub struct SerdeWrap<T>(T);
+impl<'de, T: FromStr> Deserialize<'de> for SerdeWrap<T>
+    where <T as FromStr>::Err: std::fmt::Display
+{
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let data = String::deserialize(deserializer)?;
+        Ok(Self(T::from_str(&data).map_err(de::Error::custom)?))
+    }
+}
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]

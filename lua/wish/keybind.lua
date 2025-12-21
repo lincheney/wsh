@@ -6,6 +6,10 @@ local function cut_buffer(len)
     wish.set_buffer('', len)
 end
 
+wish.create_dynamic_var('CLIPBOARD', 'string', function()
+    return wish.cmd{args='wl-paste', foreground=false, stdout='piped'}.stdout:read()
+end)
+
 wish.set_keymap('<bs>', function()
     local cursor = wish.get_cursor()
     if cursor > 0 then
@@ -207,7 +211,7 @@ wish.set_keymap('<a-a>', function()
     wish.set_cursor(0)
     wish.set_buffer('')
     wish.print('')
-    wish.accept_line()
+    -- wish.accept_line()
     require('wish/background-job').run_in_background(buffer)
 end)
 

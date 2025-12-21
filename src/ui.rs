@@ -22,7 +22,7 @@ use crate::tui::{
     MoveDown,
 };
 
-use crate::timed_lock::{RwLock, Mutex};
+use crate::timed_lock::{RwLock};
 use crate::shell::{ShellClient, KeybindValue};
 use crate::lua::{EventCallbacks, HasEventCallbacks};
 
@@ -85,7 +85,7 @@ crate::strong_weak_wrapper! {
         pub shell: Arc::<ShellClient> [WeakArc::<ShellClient>],
         pub lua: Arc::<Lua> [WeakArc::<Lua>],
         pub events: Arc::<ForkLock<'static, crate::event_stream::EventController>> [WeakArc::<ForkLock<'static, crate::event_stream::EventController>>],
-        pub has_foreground_process: Arc::<Mutex<()>> [WeakArc::<Mutex<()>>],
+        pub has_foreground_process: Arc::<tokio::sync::Mutex<()>> [WeakArc::<tokio::sync::Mutex<()>>],
         preparing_for_unhandled_output: Arc::<AtomicBool> [WeakArc::<AtomicBool>],
         threads: Arc::<ForkLock<'static, std::sync::Mutex<HashSet<nix::unistd::Pid>>>> [WeakArc::<ForkLock<'static, std::sync::Mutex<HashSet<nix::unistd::Pid>>>>],
     }

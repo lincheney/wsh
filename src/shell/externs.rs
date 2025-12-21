@@ -6,7 +6,7 @@ use crate::ui::{Ui};
 use crate::c_string_array;
 use std::os::raw::{c_char, c_int};
 use std::ptr::null_mut;
-use std::sync::{Arc, LazyLock, OnceLock, Mutex};
+use std::sync::{Arc, LazyLock, OnceLock, Mutex, mpsc};
 use std::ffi::CString;
 use anyhow::Result;
 use crate::shell::{Shell, ShellClient, ShellMsg, zsh};
@@ -14,7 +14,7 @@ use crate::fork_lock::{RawForkLock, ForkLock};
 
 static FORK_LOCK: RawForkLock = RawForkLock::new();
 
-type GlobalState = (Ui, Shell, Mutex<tokio::sync::mpsc::UnboundedReceiver<ShellMsg>>, tokio::runtime::Runtime);
+type GlobalState = (Ui, Shell, mpsc::Receiver<ShellMsg>, tokio::runtime::Runtime);
 static STATE: ForkLock<'static, Mutex<Option<Arc<GlobalState>>>> = FORK_LOCK.wrap(Mutex::new(None));
 
 fn try_get_state() -> Option<Arc<GlobalState>> {
@@ -76,7 +76,7 @@ fn get_or_init_state() -> Result<Arc<GlobalState>> {
             Ok((ui, shell, shell_queue))
         });
         let (ui, shell, shell_queue) = result?;
-        store.get_or_insert(Arc::new((ui, shell, Mutex::new(shell_queue), runtime)))
+        store.get_or_insert(Arc::new((ui, shell, shell_queue, runtime)))
     };
 
     Ok(state.clone())
@@ -85,7 +85,6 @@ fn get_or_init_state() -> Result<Arc<GlobalState>> {
 fn main() -> Result<Option<BString>> {
     let state = get_or_init_state()?;
     let (ui, shell, queue, runtime) = &*state;
-    let mut queue = queue.lock().unwrap();
 
     loop {
         if let Some(trampoline) = shell.trampoline.lock().unwrap().take() {
@@ -94,17 +93,17 @@ fn main() -> Result<Option<BString>> {
         shell.is_waiting.store(true, Ordering::Relaxed);
         // let signals run while we are waiting for the next cmd
         shell.unqueue_signals()?;
-        let msg = queue.blocking_recv();
+        let msg = queue.recv();
         shell.queue_signals();
         shell.is_waiting.store(false, Ordering::Relaxed);
 
         match msg {
-            Some(ShellMsg::accept_line_trampoline{line, returnvalue}) => {
+            Ok(ShellMsg::accept_line_trampoline{line, returnvalue}) => {
                 *shell.trampoline.lock().unwrap() = Some(returnvalue);
                 return Ok(line)
             },
-            Some(msg) => shell.handle_one_message(msg),
-            None => return Ok(None),
+            Ok(msg) => shell.handle_one_message(msg),
+            Err(_) => return Ok(None),
         }
 
         // sometimes zsh will trash zle without refreshing
@@ -116,6 +115,34 @@ fn main() -> Result<Option<BString>> {
             runtime.spawn(async move { ui.try_draw().await });
         }
     }
+}
+
+pub fn weak_main<F: 'static + Send + Future>(future: F) -> Result<F::Output> where F::Output: Send {
+    let state = get_or_init_state()?;
+    let (ui, shell, queue, runtime) = &*state;
+
+    let ui = ui.clone();
+    let handle = runtime.spawn(async move {
+        let result = future.await;
+        ui.shell.accept_line_trampoline(None).await;
+        result
+    });
+
+    loop {
+        shell.is_waiting.store(true, Ordering::Relaxed);
+        let msg = queue.recv();
+        shell.is_waiting.store(false, Ordering::Relaxed);
+
+        match msg {
+            Ok(ShellMsg::accept_line_trampoline{returnvalue, ..}) => {
+                returnvalue.send(()).unwrap();
+                break;
+            },
+            Ok(msg) => shell.handle_one_message(msg),
+            Err(_) => break,
+        }
+    }
+    Ok(runtime.block_on(handle)?)
 }
 
 unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _options: zsh_sys::Options, _func: c_int) -> c_int {

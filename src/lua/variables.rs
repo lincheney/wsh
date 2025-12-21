@@ -52,18 +52,85 @@ async fn export_var(ui: Ui, _lua: Lua, name: BString) -> Result<()> {
     Ok(())
 }
 
-async fn in_param_scope(ui: Ui, _lua: Lua, name: LuaFunction) -> Result<LuaValue> {
+async fn in_param_scope(ui: Ui, _lua: Lua, func: LuaFunction) -> Result<LuaValue> {
     ui.shell.startparamscope().await;
-    let result = name.call_async(()).await;
+    let result = func.call_async(()).await;
     ui.shell.endparamscope().await;
     Ok(result?)
 }
 
-async fn in_zle_param_scope(ui: Ui, _lua: Lua, name: LuaFunction) -> Result<LuaValue> {
+async fn in_zle_param_scope(ui: Ui, _lua: Lua, func: LuaFunction) -> Result<LuaValue> {
     ui.shell.start_zle_scope().await;
-    let result = name.call_async(()).await;
+    let result = func.call_async(()).await;
     ui.shell.end_zle_scope().await;
     Ok(result?)
+}
+
+#[derive(Debug, strum::EnumString)]
+#[allow(non_camel_case_types)]
+enum VarType {
+    string,
+    integer,
+    float,
+    array,
+    hashmap,
+}
+
+async fn create_dynamic_var(
+    ui: Ui,
+    lua: Lua,
+    (name, typ, get, set, unset): (BString, LuaValue, LuaFunction, Option<LuaFunction>, Option<LuaFunction>),
+) -> Result<()> {
+
+    macro_rules! make_dynamic_var {
+        ($func:ident) => (
+            ui.shell.clone().$func(
+                name,
+                Box::new(move || {
+                    match crate::shell::weak_main(get.call_async(())) {
+                        Ok(Ok(val)) => return val,
+                        Ok(Err(err)) => ::log::error!("{}", err),
+                        Err(err) => ::log::error!("{}", err),
+                    }
+                    Default::default()
+
+                }),
+                if let Some(set) = set {
+                    Some(Box::new(move |x| {
+                        let result: Result<LuaResult<LuaMultiValue>> = crate::shell::weak_main(set.call_async(x));
+                        match result {
+                            Ok(Ok(_)) => (),
+                            Ok(Err(err)) => ::log::error!("{}", err),
+                            Err(err) => ::log::error!("{}", err),
+                        }
+                    }))
+                } else {
+                    None
+                },
+                if let Some(unset) = unset {
+                    Some(Box::new(move |x| {
+                        let result: Result<LuaResult<LuaMultiValue>> = crate::shell::weak_main(unset.call_async(x));
+                        match result {
+                            Ok(Ok(_)) => (),
+                            Ok(Err(err)) => ::log::error!("{}", err),
+                            Err(err) => ::log::error!("{}", err),
+                        }
+                    }))
+                } else {
+                    None
+                },
+            )
+        )
+    }
+
+    let typ: super::SerdeWrap<VarType> = lua.from_value(typ)?;
+    match typ.0 {
+        VarType::string => make_dynamic_var!(create_dynamic_string_var).await,
+        VarType::integer => make_dynamic_var!(create_dynamic_integer_var).await,
+        VarType::float => make_dynamic_var!(create_dynamic_float_var).await,
+        VarType::array => make_dynamic_var!(create_dynamic_array_var).await,
+        VarType::hashmap => make_dynamic_var!(create_dynamic_hash_var).await,
+    }
 }
 
 pub fn init_lua(ui: &Ui) -> Result<()> {
@@ -74,6 +141,7 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_async_fn("export_var", export_var)?;
     ui.set_lua_async_fn("in_param_scope", in_param_scope)?;
     ui.set_lua_async_fn("in_zle_param_scope", in_zle_param_scope)?;
+    ui.set_lua_async_fn("create_dynamic_var", create_dynamic_var)?;
 
     Ok(())
 }
