@@ -1,6 +1,41 @@
 use std::ops::{Deref};
 use std::sync::{Mutex, Condvar, MutexGuard, atomic::{AtomicUsize, Ordering}};
 
+#[cfg(debug_assertions)]
+mod tracing {
+    use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    pub static MAP: Mutex<Option<HashMap<usize, String>>> = Mutex::new(None);
+
+    pub struct TraceKey(usize);
+
+    impl TraceKey {
+        pub fn new() -> Self {
+            let mut map = MAP.lock().unwrap();
+            let map = map.get_or_insert_default();
+            let key = map.len();
+            map.insert(key, std::backtrace::Backtrace::force_capture().to_string());
+            Self(key)
+        }
+    }
+
+    impl Drop for TraceKey {
+        fn drop(&mut self) {
+            let mut map = MAP.lock().unwrap();
+            map.as_mut().unwrap().remove(&self.0);
+        }
+    }
+
+    pub fn debug() {
+        if let Some(map) = &*MAP.lock().unwrap() {
+            for v in map.values() {
+                ::log::debug!("DEBUG(lesson)\t{}\t= {}", stringify!(v), v);
+            }
+        }
+    }
+}
+
 pub struct RawForkLock {
     counter: AtomicUsize,
     mutex: Mutex<()>,
@@ -9,6 +44,8 @@ pub struct RawForkLock {
 
 pub struct RawForkLockReadGuard<'a> {
     parent: &'a RawForkLock,
+    #[cfg(debug_assertions)]
+    _trace_key: tracing::TraceKey,
 }
 
 impl Drop for RawForkLockReadGuard<'_> {
@@ -71,10 +108,14 @@ impl RawForkLock {
             drop(lock);
         }
 
-        RawForkLockReadGuard{ parent: self }
+        RawForkLockReadGuard{
+            parent: self,
+            _trace_key: tracing::TraceKey::new(),
+        }
     }
 
     pub fn write(&self) -> RawForkLockWriteGuard<'_, '_> {
+        // tracing::debug();
         // always take the mutex first
         let mut lock = self.mutex.lock().unwrap();
         // indicate we want a write lock
