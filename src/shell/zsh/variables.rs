@@ -93,7 +93,7 @@ impl Variable {
         let bracks = 1;
         let name = name.as_ref();
         let mut c_varname_ptr = name.as_ptr().cast_mut();
-        let mut value = unsafe{ std::mem::MaybeUninit::<zsh_sys::value>::zeroed().assume_init() };
+        let mut value: zsh_sys::value = unsafe{ std::mem::MaybeUninit::zeroed().assume_init() };
         let ptr = unsafe{ zsh_sys::getvalue(
             &raw mut value,
             &raw mut c_varname_ptr,
@@ -411,7 +411,7 @@ impl VariableGSU for HashMap<BString, BString> {
             let old_paramtab = zsh_sys::paramtab;
             zsh_sys::paramtab = table;
 
-            let mut value = std::mem::MaybeUninit::<zsh_sys::value>::zeroed().assume_init();
+            let mut value: zsh_sys::value = std::mem::MaybeUninit::zeroed().assume_init();
             value.end = -1;
 
             for (k, v) in self {

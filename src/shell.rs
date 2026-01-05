@@ -230,10 +230,6 @@ crate::TokioActor! {
             unsafe{ zsh::histline }
         }
 
-        pub fn push_history(&self, string: BString) {
-            zsh::history::push_history(string.as_ref());
-        }
-
         pub fn add_pid(&self, pid: i32) {
             zsh::add_pid(pid);
         }

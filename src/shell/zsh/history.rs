@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use std::os::raw::*;
 use std::ptr::NonNull;
 use std::marker::PhantomData;
-use bstr::{BString, BStr};
+use bstr::{BString};
 
 #[derive(Debug)]
 pub struct Entry {
@@ -126,23 +126,4 @@ impl EntryPtr<'_> {
             Some(ptr)
         })
     }
-}
-
-pub fn push_history<'a>(string: &BStr) -> EntryPtr<'a> {
-    let flags = 0; // TODO
-    let string = unsafe{ CStr::from_ptr(super::metafy(string)) }.to_owned();
-
-    let ptr = unsafe{ zsh_sys::prepnexthistent() };
-    let hist = unsafe{ ptr.as_mut().unwrap() };
-    hist.histnum = unsafe{ hist.up.as_ref() }.map_or(0, |h| h.histnum) + 1;
-    hist.node.nam = string.into_raw();
-    hist.ftim = 0;
-    hist.node.flags = flags;
-
-    if flags & zsh_sys::HIST_TMPSTORE as i32 != 0 {
-        // uuhhhh what is this for?
-        unsafe{ zsh_sys::addhistnode(zsh_sys::histtab, hist.node.nam, ptr.cast()); }
-    }
-
-    EntryPtr::new(ptr).unwrap()
 }
