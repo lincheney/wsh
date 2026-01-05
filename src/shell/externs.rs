@@ -17,6 +17,11 @@ static FORK_LOCK: RawForkLock = RawForkLock::new();
 type GlobalState = (Ui, Shell, mpsc::Receiver<ShellMsg>, tokio::runtime::Runtime);
 static STATE: ForkLock<'static, Mutex<Option<Arc<GlobalState>>>> = FORK_LOCK.wrap(Mutex::new(None));
 
+pub fn with_runtime<T, F: FnMut(&tokio::runtime::Runtime) -> T>(mut f: F) -> Result<T> {
+    let state = get_or_init_state()?;
+    Ok(f(&state.3))
+}
+
 fn try_get_state() -> Option<Arc<GlobalState>> {
     let lock = STATE.read();
     let store = lock.lock().unwrap();

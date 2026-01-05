@@ -76,10 +76,13 @@ struct Process {
 
 impl Drop for Zpty {
     fn drop(&mut self) {
-        let name = std::mem::take(&mut self.name);
-        let shell = self.shell.clone();
-        tokio::task::spawn(async move {
-            shell.zpty_delete(name.into()).await
+        let _ = crate::shell::with_runtime(|runtime| {
+            let shell = self.shell.clone();
+            let name = std::mem::take(&mut self.name);
+            runtime.spawn(async move {
+                // tokio::task::spawn(async move {
+                shell.zpty_delete(name.into()).await
+            });
         });
     }
 }

@@ -28,7 +28,7 @@ pub use zsh::{
     ZptyOpts,
     Zpty,
 };
-pub use externs::weak_main;
+pub use externs::{weak_main, with_runtime};
 pub use externs::signals::{wait_for_pid};
 use variables::Variable;
 
