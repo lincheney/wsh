@@ -89,10 +89,10 @@ fn try_hashtable_to_hashmap(table: zsh_sys::HashTable) -> Result<HashMap<BString
 }
 
 impl Variable {
-    pub fn get<S: AsRef<BStr>>(name: S) -> Option<Self> {
+    pub fn get<S: AsRef<CStr>>(name: S) -> Option<Self> {
         let bracks = 1;
-        let c_name = CString::new(name.as_ref().to_vec()).unwrap();
-        let mut c_varname_ptr = c_name.as_ptr().cast_mut();
+        let name = name.as_ref();
+        let mut c_varname_ptr = name.as_ptr().cast_mut();
         let mut value = unsafe{ std::mem::MaybeUninit::<zsh_sys::value>::zeroed().assume_init() };
         let ptr = unsafe{ zsh_sys::getvalue(
             &raw mut value,
@@ -104,8 +104,7 @@ impl Variable {
         } else {
             Some(Self{
                 value,
-                name_is_digit: name
-                    .as_ref()
+                name_is_digit: BStr::new(name.to_bytes())
                     .utf8_chunks()
                     .flat_map(|chunk| chunk.valid().chars())
                     .all(|c| c.is_ascii_digit()),

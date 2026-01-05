@@ -265,7 +265,7 @@ crate::TokioActor! {
         }
 
         pub fn get_var(&self, name: BString) -> anyhow::Result<Option<variables::Value>> {
-            if let Some(mut v) = Variable::get(name) {
+            if let Some(mut v) = Variable::get(CString::new(name)?) {
                 Ok(Some(v.as_value()?))
             } else {
                 Ok(None)
@@ -297,7 +297,7 @@ crate::TokioActor! {
         }
 
         pub fn export_var(&self, name: BString) -> bool {
-            if let Some(var) = Variable::get(name) {
+            if let Ok(name) = CString::new(name) && let Some(var) = Variable::get(name) {
                 var.export();
                 true
             } else {
@@ -381,8 +381,8 @@ crate::TokioActor! {
 
         pub fn get_zle_buffer(&self) -> (BString, Option<i64>) {
             zsh::start_zle_scope();
-            let buffer = Variable::get("BUFFER").unwrap().as_bytes();
-            let cursor = Variable::get("CURSOR").unwrap().try_as_int();
+            let buffer = Variable::get(c"BUFFER").unwrap().as_bytes();
+            let cursor = Variable::get(c"CURSOR").unwrap().try_as_int();
             zsh::end_zle_scope();
             match cursor {
                 Ok(Some(cursor)) => (buffer, Some(cursor)),
@@ -444,6 +444,10 @@ crate::TokioActor! {
 
         pub fn unqueue_signals(&self) -> nix::Result<()> {
             zsh::unqueue_signals()
+        }
+
+        pub fn call_hook_func(&self, name: BString, args: Vec<BString>) -> Option<c_int> {
+            zsh::call_hook_func(CString::new(name).unwrap(), args.iter().map(|x| x.as_ref()))
         }
 
     }

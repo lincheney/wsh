@@ -103,7 +103,7 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
         }
 
         // get fd from $REPLY
-        let Some(mut fd) = variables::Variable::get("REPLY")
+        let Some(mut fd) = variables::Variable::get(c"REPLY")
             else { anyhow::bail!("could not get $REPLY") };
 
         let fd = if let Some(fd) = fd.try_as_int()? {
@@ -125,7 +125,7 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
         // bless
         // add a newline to help with parsing
         execstring("zpty_output=$'\\n'\"$(zpty & wait $!)\"", Default::default());
-        let Some(mut output) = variables::Variable::get("zpty_output")
+        let Some(mut output) = variables::Variable::get(c"zpty_output")
             else { anyhow::bail!("could not get $zpty_output") };
         let output = output.as_bytes();
 
@@ -200,7 +200,7 @@ pub fn get_prompt(prompt: Option<&BStr>, escaped: bool) -> Option<CString> {
     let prompt = if let Some(prompt) = prompt {
         CString::new(prompt.to_vec()).unwrap()
     } else {
-        let prompt = variables::Variable::get("PROMPT")?.as_bytes();
+        let prompt = variables::Variable::get(c"PROMPT")?.as_bytes();
         CString::new(prompt).unwrap()
     };
 
@@ -286,8 +286,8 @@ pub fn set_zle_buffer(buffer: BString, cursor: i64) {
 
 pub fn get_zle_buffer() -> (BString, Option<i64>) {
     start_zle_scope();
-    let buffer = Variable::get("BUFFER").unwrap().as_bytes();
-    let cursor = Variable::get("CURSOR").unwrap().try_as_int();
+    let buffer = Variable::get(c"BUFFER").unwrap().as_bytes();
+    let cursor = Variable::get(c"CURSOR").unwrap().try_as_int();
     end_zle_scope();
     match cursor {
         Ok(Some(cursor)) => (buffer, Some(cursor)),
@@ -377,5 +377,28 @@ pub fn unqueue_signals() -> nix::Result<()> {
 pub fn zistype(x: c_char, y: c_short) -> bool {
     unsafe {
         zsh_sys::typtab[x as usize] & y > 0
+    }
+}
+
+pub fn call_hook_func<'a, I: Iterator<Item=&'a BStr>>(name: CString, args: I) -> Option<c_int> {
+    unsafe {
+        if zsh_sys::getshfunc(name.as_ptr().cast_mut()).is_null() {
+            let mut name = name.clone().into_bytes();
+            name.push_str(zsh_sys::HOOK_SUFFIX);
+            if Variable::get(CStr::from_bytes_with_nul(&name).unwrap()).is_none() {
+                return None
+            }
+        }
+    }
+
+    let args = std::iter::once(metafy(name.to_bytes()).cast_const())
+        .chain(args.map(|x| metafy(x).cast_const()));
+
+    // convert args to a linked list
+    let args = linked_list::LinkedList::new_from_ptrs(args);
+
+    let mut list = args.as_linkroot();
+    unsafe {
+        Some(zsh_sys::callhookfunc(name.as_ptr().cast_mut(), &raw mut list, 1, null_mut()))
     }
 }
