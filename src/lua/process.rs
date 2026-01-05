@@ -65,6 +65,7 @@ impl UserData for CommandResult {
 struct Zpty {
     name: String,
     shell: Arc<crate::shell::ShellClient>,
+    dropped: Option<oneshot::Sender<()>>,
 }
 
 struct Process {
@@ -76,14 +77,9 @@ struct Process {
 
 impl Drop for Zpty {
     fn drop(&mut self) {
-        let _ = crate::shell::with_runtime(|runtime| {
-            let shell = self.shell.clone();
-            let name = std::mem::take(&mut self.name);
-            runtime.spawn(async move {
-                // tokio::task::spawn(async move {
-                shell.zpty_delete(name.into()).await
-            });
-        });
+        if let Some(dropped) = self.dropped.take() {
+            let _ = dropped.send(());
+        }
     }
 }
 
@@ -544,19 +540,24 @@ async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         is_tty_master: true,
     };
 
+    let dropped = oneshot::channel();
     let shell = ui.shell.clone();
+    let zpty_name = name.clone().into();
     let pid = zpty.pid;
     tokio::task::spawn(async move {
         let code = crate::shell::wait_for_pid(pid as _, &ui.shell).await.unwrap();
         // send the code out
         let _ = sender.send(Some(Ok(code as _)));
+
+        let _ = dropped.1.await;
+        ui.shell.zpty_delete(zpty_name).await
     });
 
     Ok(lua.pack_multi((
         Process{
             pid,
             result: CommandResult{ inner: receiver },
-            zpty: Some(Zpty{ shell, name }),
+            zpty: Some(Zpty{ shell, name, dropped: Some(dropped.0) }),
         },
         pty,
     ))?)
