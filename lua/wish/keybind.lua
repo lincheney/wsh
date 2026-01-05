@@ -212,6 +212,11 @@ wish.set_keymap('<a-a>', function()
     wish.set_buffer('')
     wish.print('')
     -- wish.accept_line()
+    wish.in_param_scope(function()
+        wish.unset_var('BUFFER')
+        wish.set_var('BUFFER', buffer)
+        wish.cmd[[print -S "$BUFFER"]]
+    end)
     require('wish/background-job').run_in_background(buffer)
 end)
 
