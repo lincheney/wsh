@@ -167,6 +167,7 @@ int histline;
 
 int selectkeymap(char *name, int fb);
 void initundo(void);
+void freeundo(void);
 typedef void* Keymap;
 Keymap curkeymap;
 Keymap localkeymap;

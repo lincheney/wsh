@@ -257,6 +257,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
             // e.g. when we were running a foreground process
             // so save it again now while we're good
             zsh::gettyinfo(&raw mut zsh::shttyinfo);
+            zsh::freeundo();
             zsh_sys::zleactive = 0;
 
             return match result {
