@@ -105,6 +105,30 @@ async fn get_cwd(ui: Ui, _lua: Lua, (): ()) -> Result<BString> {
     Ok(ui.shell.get_cwd().await)
 }
 
+async fn call_hook_func(mut ui: Ui, _lua: Lua, mut args: Vec<BString>) -> Result<Option<i32>> {
+    let arg0 = args.remove(0);
+
+    let foreground_lock = if !crate::is_forked() {
+        // this essentially locks ui
+        ui.events.read().pause().await;
+        ui.prepare_for_unhandled_output().await?;
+        Some(ui.has_foreground_process.lock().await)
+    } else {
+        None
+    };
+
+    let result = ui.shell.call_hook_func(arg0, args).await;
+
+    if foreground_lock.is_some() {
+        drop(foreground_lock);
+        ui.events.read().resume().await;
+        let result = ui.recover_from_unhandled_output().await;
+        ui.report_error(result).await;
+    }
+
+    Ok(result)
+}
+
 async fn print(mut ui: Ui, _lua: Lua, value: BString) -> Result<()> {
     let lock = ui.has_foreground_process.lock().await;
     ui.prepare_for_unhandled_output().await?;
@@ -180,6 +204,7 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_async_fn("redraw",  redraw)?;
     ui.set_lua_async_fn("exit", exit)?;
     ui.set_lua_async_fn("get_cwd", get_cwd)?;
+    ui.set_lua_async_fn("call_hook_func", call_hook_func)?;
     ui.set_lua_async_fn("print", print)?;
     ui.get_lua_api()?.set("time", ui.lua.create_function(time)?)?;
     ui.get_lua_api()?.set("try", ui.lua.create_async_function(lua_try)?)?;

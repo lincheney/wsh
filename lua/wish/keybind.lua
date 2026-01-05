@@ -208,15 +208,17 @@ end)
 wish.set_keymap('<a-a>', function()
     -- run in the background
     local buffer = wish.get_buffer()
+    wish.print('')
     wish.set_cursor(0)
     wish.set_buffer('')
-    wish.print('')
+    -- wish.redraw()
     -- wish.accept_line()
     wish.in_param_scope(function()
         wish.unset_var('BUFFER')
         wish.set_var('BUFFER', buffer)
-        wish.cmd[[print -S "$BUFFER"]]
+        wish.cmd{args=[[print -S "$BUFFER"]], foreground=false}.wait()
     end)
+    wish.call_hook_func{'preexec', buffer}
     require('wish/background-job').run_in_background(buffer)
 end)
 
