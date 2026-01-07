@@ -48,10 +48,12 @@ i wish i could have
 * [ ] var for last term cursor position
 * [ ] options system
 * [x] alias, history expansion
-* [ ] heredocs
+* [ ] complete command detection does not work with heredocs
 * [ ] selecting `print -s echo` in history is weird
 * [x] silence parse warnings
 * [ ] custom buffer rendering, ghost text etc
+* [ ] merged prompt and buffer
+* [ ] $POSTDISPLAY, $PREDISPLAY, $region_highlight
 * [x] fix segfault when letting zle exit by itself
 * [ ] ~~try switch to termion~~
 * [x] remove extra zle prompt after accept line
@@ -59,7 +61,7 @@ i wish i could have
 * [ ] calling exit within widget causes hang
 * [ ] magic space for completion
 * [ ] snippets?
-* [ ] job status reporting
+* [ ] capture job status reporting
 * [x] recursive keymaps
 * [ ] recursive keymaps in lua
 * [ ] fork safety
@@ -77,11 +79,11 @@ i wish i could have
     * [ ] is the ui init fork safe?
         * the lock is used on init and `wsh lua ...`
         * same as above, if someone takes the lock before fork, you get a hang
-    * [ ] is lua fork safe?
-        * uhhh not really, see hacks in `./src/externs/fork.rs`
-    * [ ] is `has_foreground_process` fork safe?
+    * [x] is lua fork safe?
+        * uhhh not really, see hacks in `./src/externs/fork.rs`, but those hacks may be good enough
+    * [x] is `has_foreground_process` fork safe?
         * i guess we don't care, it needs to remain locked in children anyway
-    * [ ] is crossterm fork safe?
+    * [x] is crossterm fork safe?
         * crossterm is not used for input, nor does the child need terminal input access so that's fine
         * crossterm has a lock around a static term settings variable,
             this can only be accessed via the `UiInner` so it depends on the fork safety of that
@@ -93,7 +95,12 @@ i wish i could have
         * seems to use tls for the handler, maybe its ok? dunno
 * [ ] control c style escape hatch
 * [ ] TMOUT
-* [ ] scrolling widgets
+* [x] scrolling widgets
 * [ ] horizontal widget layout
 * [ ] highlight colour system
+* [ ] make zle undo work
+* [x] make zle history work
+* [ ] vi mode
+* [x] can we make `zle -F` work
+* [ ] tmux widget backend
 * [ ]
