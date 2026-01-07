@@ -28,6 +28,16 @@ pub enum FdChange {
     Removed(RawFd),
 }
 
+// what on earth is this
+// zle -F registration events get sent over a queue so its async
+// however the hooks may modify itself (e.g. deregister itself)
+// so there is a gap between when the hook is updated in zsh
+// and the event is received over the queue where the hook
+// may be incorrectly run
+// instead we use this thing to have shared state
+// we could just have an Arc<Mutex<Option<_>>> (the Option for when the fd is deregistered)
+// but then when we call the hook and it modifies itself, we hit a deadlock on the mutex
+// so there is an inner Arc to allow it to be cloned *out* of the mutex just for that one call
 type SyncFdChangeHook = Arc<Mutex<Option<Arc<FdChangeHook>>>>;
 #[derive(Debug)]
 pub struct FdChangeHook {
