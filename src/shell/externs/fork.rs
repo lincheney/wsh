@@ -53,7 +53,7 @@ impl ForkState {
                 // i can take a lock on lua by acquiring a ref to the app data
                 ui.lua.set_app_data(());
                 // ui.lua.gc_stop();
-                Some((unsafe{ transmute(ui.lua.app_data_ref::<()>().unwrap()) }, ui.lua.clone()))
+                Some((unsafe{ transmute::<mlua::AppDataRef<'_, ()>, mlua::AppDataRef<'static, ()>>(ui.lua.app_data_ref::<()>().unwrap()) }, ui.lua.clone()))
             } else {
                 None
             }

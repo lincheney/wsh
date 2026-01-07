@@ -149,7 +149,7 @@ pub struct StyleOptions {
 
 impl StyleOptions {
     fn is_default(&self) -> bool {
-        return self.fg.is_none() &&
+        self.fg.is_none() &&
             self.bg.is_none() &&
             self.bold.is_none() &&
             self.dim.is_none() &&

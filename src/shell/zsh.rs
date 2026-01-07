@@ -368,7 +368,7 @@ pub fn unqueue_signals() -> nix::Result<()> {
             while zsh_sys::queue_front != zsh_sys::queue_rear { /* while signals in queue */
                 zsh_sys::queue_front = (zsh_sys::queue_front + 1) % MAX_QUEUE_SIZE;
                 let sigset = zsh_sys::signal_mask_queue[zsh_sys::queue_front as usize];
-                let sigset = signal::SigSet::from_sigset_t_unchecked(std::mem::transmute(sigset));
+                let sigset = signal::SigSet::from_sigset_t_unchecked(std::mem::transmute::<zsh_sys::__sigset_t, nix::libc::sigset_t>(sigset));
                 let mut oset = signal::SigSet::empty();
                 signal::sigprocmask(signal::SigmaskHow::SIG_SETMASK, Some(&sigset), Some(&mut oset))?;
                 zsh_sys::zhandler(zsh_sys::signal_queue[zsh_sys::queue_front as usize]);
@@ -390,9 +390,8 @@ pub fn call_hook_func<'a, I: Iterator<Item=&'a BStr>>(name: CString, args: I) ->
         if zsh_sys::getshfunc(name.as_ptr().cast_mut()).is_null() {
             let mut name = name.clone().into_bytes();
             name.push_str(zsh_sys::HOOK_SUFFIX);
-            if Variable::get(CStr::from_bytes_with_nul(&name).unwrap()).is_none() {
-                return None
-            }
+            // check if it exists
+            Variable::get(CStr::from_bytes_with_nul(&name).unwrap())?;
         }
     }
 

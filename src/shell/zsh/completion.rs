@@ -172,11 +172,9 @@ pub fn override_compadd() -> Result<()> {
 }
 
 pub fn restore_compadd() {
-    if let Some(mut compadd) = COMPADD_STATE.lock().unwrap().take() {
-        if !compadd.original.as_ref().is_null() {
-            super::add_builtin("compadd", compadd.original.into_inner());
-            compadd.original = unsafe{ UnsafeSend::new(null_mut()) };
-        }
+    if let Some(mut compadd) = COMPADD_STATE.lock().unwrap().take() && !compadd.original.as_ref().is_null() {
+        super::add_builtin("compadd", compadd.original.into_inner());
+        compadd.original = unsafe{ UnsafeSend::new(null_mut()) };
     }
 }
 

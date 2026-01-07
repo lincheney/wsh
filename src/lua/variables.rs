@@ -82,40 +82,31 @@ async fn create_dynamic_var(
     (name, typ, get, set, unset): (BString, LuaValue, LuaFunction, Option<LuaFunction>, Option<LuaFunction>),
 ) -> Result<()> {
 
+    macro_rules! make_dynamic_var_func {
+        (|$($arg:ident),*| $result:expr) => (
+            Box::new(move |$($arg),*| {
+                match crate::shell::shell_loop_oneshot($result) {
+                    Ok(Ok(val)) => return val,
+                    Ok(Err(err)) => ::log::error!("{}", err),
+                    Err(err) => ::log::error!("{}", err),
+                }
+                Default::default()
+            })
+        )
+    }
+
     macro_rules! make_dynamic_var {
         ($func:ident) => (
             ui.shell.clone().$func(
                 name,
-                Box::new(move || {
-                    match crate::shell::shell_loop_oneshot(get.call_async(())) {
-                        Ok(Ok(val)) => return val,
-                        Ok(Err(err)) => ::log::error!("{}", err),
-                        Err(err) => ::log::error!("{}", err),
-                    }
-                    Default::default()
-
-                }),
+                make_dynamic_var_func!(| | get.call_async(())),
                 if let Some(set) = set {
-                    Some(Box::new(move |x| {
-                        let result: Result<LuaResult<LuaMultiValue>> = crate::shell::shell_loop_oneshot(set.call_async(x));
-                        match result {
-                            Ok(Ok(_)) => (),
-                            Ok(Err(err)) => ::log::error!("{}", err),
-                            Err(err) => ::log::error!("{}", err),
-                        }
-                    }))
+                    Some(make_dynamic_var_func!(|x| set.call_async(x)))
                 } else {
                     None
                 },
                 if let Some(unset) = unset {
-                    Some(Box::new(move |x| {
-                        let result: Result<LuaResult<LuaMultiValue>> = crate::shell::shell_loop_oneshot(unset.call_async(x));
-                        match result {
-                            Ok(Ok(_)) => (),
-                            Ok(Err(err)) => ::log::error!("{}", err),
-                            Err(err) => ::log::error!("{}", err),
-                        }
-                    }))
+                    Some(make_dynamic_var_func!(|x| unset.call_async(x)))
                 } else {
                     None
                 },

@@ -1,4 +1,3 @@
-use std::sync::atomic::{Ordering};
 mod fork;
 pub(super) mod signals;
 use bstr::BString;
@@ -63,7 +62,7 @@ fn get_or_init_state() -> Result<Arc<GlobalState>> {
             ui.get().inner.read().await.activate()?;
             ui.start_cmd().await?;
 
-            if !crate::IS_FORKED.load(Ordering::Relaxed) {
+            if !crate::is_forked() {
                 // spawn a task to take care of keyboard input
                 {
                     let ui = ui.clone();
@@ -98,8 +97,7 @@ fn get_or_init_state() -> Result<Arc<GlobalState>> {
 }
 
 fn shell_loop() -> Result<Option<BString>> {
-    let state = get_or_init_state()?;
-    shell_loop_internal(&state, false)
+    shell_loop_internal(&*get_or_init_state()?, false)
 }
 
 pub fn shell_loop_oneshot<F: 'static + Send + Future<Output: Send>>(future: F) -> Result<F::Output> {
@@ -119,7 +117,7 @@ pub fn shell_loop_oneshot<F: 'static + Send + Future<Output: Send>>(future: F) -
 }
 
 fn shell_loop_internal(state: &GlobalState, zle: bool) -> Result<Option<BString>> {
-    let (ui, shell, queue, runtime) = &*state;
+    let (ui, shell, queue, runtime) = state;
 
     loop {
         if zle && let Some(trampoline) = shell.trampoline.lock().unwrap().take() {

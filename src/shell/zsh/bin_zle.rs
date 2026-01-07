@@ -179,10 +179,8 @@ pub fn override_zle() -> Result<()> {
 }
 
 pub fn restore_zle() {
-    if let Some(mut zle) = ZLE_STATE.lock().unwrap().take() {
-        if !zle.original.as_ref().is_null() {
-            super::add_builtin("zle", zle.original.into_inner());
-            zle.original = unsafe{ UnsafeSend::new(null_mut()) };
-        }
+    if let Some(mut zle) = ZLE_STATE.lock().unwrap().take() && !zle.original.as_ref().is_null() {
+        super::add_builtin("zle", zle.original.into_inner());
+        zle.original = unsafe{ UnsafeSend::new(null_mut()) };
     }
 }

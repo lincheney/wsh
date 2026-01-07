@@ -222,8 +222,8 @@ impl<T> Text<T> {
         self.lines.iter().flat_map(|line| super::wrap::wrap(line.as_ref(), width, initial_indent)).count()
     }
 
-    fn make_line_cells<'a, E, F: FnMut(usize, usize, Option<(&str, Style)>) -> Result<(), E>>(
-        &'a self,
+    fn make_line_cells<E, F: FnMut(usize, usize, Option<(&str, Style)>) -> Result<(), E>>(
+        &self,
         lineno: usize,
         line: &BStr,
         range: (usize, usize),
@@ -280,8 +280,8 @@ impl<T> Text<T> {
         }
     }
 
-    pub fn render_line<'a, W :Write, C: Canvas>(
-        &'a self,
+    pub fn render_line<W :Write, C: Canvas>(
+        &self,
         lineno: usize,
         line: &BStr,
         range: (usize, usize),
@@ -336,7 +336,7 @@ impl<T> Text<T> {
         let full_height = drawer.term_height() as usize;
         let mut area = Rect{ x: 0, y: 0, height: full_height as u16, width: full_width as u16 };
 
-        let borders = if let Some((ref block, ref mut buffer)) = block {
+        let borders = if let Some((block, ref mut buffer)) = block {
             // 3 lines in case you have borders
             buffer.resize(Rect{ height: 3, ..area });
             block.render_ref(buffer.area, buffer);
@@ -372,7 +372,7 @@ impl<T> Text<T> {
 
         // draw top border
         if let Some(borders) = &borders {
-            let height = max_height.min(borders.top.len() / full_width as usize);
+            let height = max_height.min(borders.top.len() / full_width);
             if height > 0 {
                 drawer.draw_lines(borders.top.chunks(full_width as _).take(height))?;
                 need_newline = Some(None);
@@ -486,7 +486,7 @@ impl<T: Clone> Text<T> {
 impl<T> From<&Text<T>> for Line<'_> {
     fn from(val: &Text<T>) -> Self {
         // only gets the first line
-        let Some(line) = val.lines.get(0)
+        let Some(line) = val.lines.first()
             else { return Default::default() };
 
         let line = line.lines().next().unwrap();

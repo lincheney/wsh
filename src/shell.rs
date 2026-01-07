@@ -29,7 +29,7 @@ pub use zsh::{
     ZptyOpts,
     Zpty,
 };
-pub use externs::{shell_loop_oneshot, with_runtime};
+pub use externs::{shell_loop_oneshot};
 pub use externs::signals::{wait_for_pid};
 use variables::Variable;
 

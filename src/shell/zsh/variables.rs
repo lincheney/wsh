@@ -321,9 +321,10 @@ unsafe extern "C" fn custom_gsu_set<T: VariableGSU>(param: zsh_sys::Param, value
 }
 unsafe extern "C" fn custom_gsu_unset<T: VariableGSU>(param: zsh_sys::Param, explicit: c_int) {
     unsafe {
-        if let Some(unset) = &(*((*param).u.data as *const CustomGSU<T>)).unset {
+        let ptr = ((*param).u.data as *mut CustomGSU<T>);
+        if let Some(unset) = &(*ptr).unset {
             unset(explicit > 0);
-            drop(Box::from_raw((*param).u.data));
+            drop(Box::from_raw(ptr));
         }
     }
 }
