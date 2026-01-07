@@ -108,33 +108,18 @@ async fn get_cwd(ui: Ui, _lua: Lua, (): ()) -> Result<BString> {
 async fn call_hook_func(mut ui: Ui, _lua: Lua, mut args: Vec<BString>) -> Result<Option<i32>> {
     let arg0 = args.remove(0);
 
-    let foreground_lock = if !crate::is_forked() {
-        // this essentially locks ui
-        ui.events.read().pause().await;
-        ui.prepare_for_unhandled_output().await?;
-        Some(ui.has_foreground_process.lock().await)
-    } else {
-        None
-    };
-
-    let result = ui.shell.call_hook_func(arg0, args).await;
-
-    if foreground_lock.is_some() {
-        drop(foreground_lock);
-        ui.events.read().resume().await;
-        let result = ui.recover_from_unhandled_output().await;
-        ui.report_error(result).await;
-    }
-
-    Ok(result)
+    let result = ui.freeze_if(true, true, async {
+        ui.shell.call_hook_func(arg0, args).await
+    }).await?;
+    ui.report_error(result.1).await;
+    Ok(result.0)
 }
 
 async fn print(mut ui: Ui, _lua: Lua, value: BString) -> Result<()> {
-    let lock = ui.has_foreground_process.lock().await;
-    ui.prepare_for_unhandled_output().await?;
-    ui.get().inner.borrow_mut().await.stdout.write_all(value.as_ref())?;
-    drop(lock);
-    ui.recover_from_unhandled_output().await?;
+    let result = ui.freeze_if(true, false, async {
+        ui.get().inner.borrow_mut().await.stdout.write_all(value.as_ref())
+    }).await?;
+    result.1?;
     ui.try_draw().await;
     Ok(())
 }

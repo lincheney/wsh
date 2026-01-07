@@ -190,6 +190,10 @@ struct thingy {
 };
 struct thingy thingies; // this is actually an array
 Thingy keybind(Keymap km, char *seq, char **strp);
+mod_export Thingy refthingy(Thingy th);
+void unrefthingy(Thingy th);
+mod_export Thingy lbindk, bindk;
+
 int insmode;
 mod_export int lastchar;
 mod_export int lastchar_wide;
@@ -227,5 +231,16 @@ int zlereadflags;
 char *lpromptbuf, *rpromptbuf;
 int trashedzle;
 
+typedef struct watch_fd *Watch_fd;
+struct watch_fd {
+    /* Function to call */
+    char *func;
+    /* Watched fd */
+    int fd;
+    /* 1 if func is called as a widget */
+    int widget;
+};
+Watch_fd watch_fds;
+int nwatch;		/* Number of fd's we are watching */
 void
-initundo(void);
+zlecallhook(char *name, char *arg);

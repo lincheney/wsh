@@ -17,6 +17,7 @@ mod widget;
 pub use widget::ZleWidget;
 pub mod history;
 pub mod completion;
+pub mod bin_zle;
 pub mod parser;
 pub use string::ZString;
 pub(crate) use bindings::*;
@@ -25,6 +26,10 @@ use variables::{Variable};
 pub static JOB: LazyLock<c_int> = LazyLock::new(|| unsafe{ zsh_sys::initjob() });
 
 // pub type HandlerFunc = unsafe extern "C" fn(name: *mut c_char, argv: *mut *mut c_char, options: *mut zsh_sys::options, func: c_int) -> c_int;
+
+pub fn opt_isset(opts: &zsh_sys::options, c: u8) -> bool {
+    opts.ind[c as usize] != 0
+}
 
 pub fn shell_quote(string: &CStr) -> BString {
     unsafe {

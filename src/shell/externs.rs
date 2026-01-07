@@ -47,7 +47,7 @@ fn get_or_init_state() -> Result<Arc<GlobalState>> {
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .on_thread_start(|| {
-                // try to make the main thread handle all threads
+                // try to make the main thread handle all signals
                 if let Err(err) = signals::disable_all_signals() {
                     // mmmm pretty bad
                     log::error!("{:?}", err);
@@ -71,6 +71,16 @@ fn get_or_init_state() -> Result<Arc<GlobalState>> {
                         let tty = std::fs::File::open("/dev/tty").unwrap();
                         crate::utils::set_nonblocking_fd(&tty).unwrap();
                         events.run(tty, ui).await.unwrap();
+                    });
+                }
+
+                // spawn a task to take care of watched fd
+                if let Some(mut fd_source) = zsh::bin_zle::take_fd_change_source() {
+                    let ui = ui.clone();
+                    tokio::task::spawn(async move {
+                        while let Some(change) = fd_source.recv().await {
+                            crate::zle_watch_fds::handle_fd_change(&ui, change).await;
+                        }
                     });
                 }
 
@@ -336,7 +346,7 @@ pub unsafe extern "C" fn enables_(module: zsh_sys::Module, enables: *mut *mut c_
 
 #[unsafe(no_mangle)]
 pub extern "C" fn boot_() -> c_int {
-    if let Err(err) = zsh::completion::override_compadd() {
+    if let Err(err) = zsh::completion::override_compadd().and(zsh::bin_zle::override_zle()) {
         eprintln!("{err}");
         1
     } else {
@@ -348,6 +358,7 @@ pub extern "C" fn boot_() -> c_int {
 #[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn cleanup_(module: zsh_sys::Module) -> c_int {
     zsh::completion::restore_compadd();
+    zsh::bin_zle::restore_zle();
     let module_features: *mut zsh_sys::features = unsafe{ &raw mut MODULE_FEATURES.0 };
     unsafe{ zsh_sys::setfeatureenables(module, module_features, null_mut()) }
 }

@@ -604,6 +604,39 @@ impl Ui {
         Ok(())
     }
 
+    pub async fn freeze_if<T, F: Future<Output = T>>(
+        &self,
+        condition: bool,
+        freeze_events: bool,
+        f: F,
+    ) -> Result<(T, Result<()>)> {
+
+        let mut lock = if condition && !crate::is_forked() {
+            // this essentially locks ui
+            if freeze_events {
+                self.events.read().pause().await;
+            }
+            self.prepare_for_unhandled_output().await?;
+            Some(self.has_foreground_process.lock().await)
+        } else {
+            None
+        };
+
+        let result = f.await;
+
+        if let Some(lock) = lock.take() {
+            drop(lock);
+            if freeze_events {
+                self.events.read().resume().await;
+            }
+            if let Err(e) = self.recover_from_unhandled_output().await {
+                return Ok((result, Err(e)))
+            }
+        }
+
+        Ok((result, Ok(())))
+    }
+
 }
 
 impl UiInner {

@@ -242,16 +242,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     tokio::spawn(async move {
 
         let mut result_sender = Some(result_sender);
-        let result: Result<_> = (async || {
-
-            let foreground_lock = if foreground && !crate::is_forked() {
-                // this essentially locks ui
-                ui.events.read().pause().await;
-                ui.prepare_for_unhandled_output().await?;
-                Some(ui.has_foreground_process.lock().await)
-            } else {
-                None
-            };
+        let result = ui.freeze_if(foreground, true, async {
 
             // prevent sigchld from running
             ui.shell.queue_signals().await;
@@ -266,21 +257,18 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
             let _ = result_sender.take().unwrap().send(Ok((pid, stdin, stdout, stderr)));
             let code = crate::shell::wait_for_pid(pid as _, &ui.shell).await.unwrap();
 
-            drop(foreground_lock);
             // ignore error
             let _ = sender.send(Some(Ok(code as _)));
 
             Ok(())
-        })().await;
+        }).await;
 
         let mut drawn = false;
-        if foreground {
-            ui.events.read().resume().await;
-            let result = ui.recover_from_unhandled_output().await;
-            drawn = ui.report_error(result).await || drawn;
+        if let Ok((_, Err(err))) = &result {
+            drawn = ui.report_error::<(), _>(Err(err)).await || drawn;
         }
 
-        if let Err(err) = result {
+        if let Err(err) = result.and_then(|r| r.0) {
             if let Some(result_sender) = result_sender {
                 let _ = result_sender.send(Err(err));
             } else {
@@ -380,16 +368,8 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
 
         let mut result_sender = Some(result_sender);
         let mut errors = [Ok(()), Ok(()), Ok(())];
-        let result: Result<_> = (async || {
 
-            let foreground_lock = if foreground && !crate::is_forked() {
-                // this essentially locks ui
-                ui.events.read().pause().await;
-                ui.prepare_for_unhandled_output().await?;
-                Some(ui.has_foreground_process.lock().await)
-            } else {
-                None
-            };
+        let result = ui.freeze_if(foreground, true, async {
 
             macro_rules! stdio_pipe {
                 ($name:ident, true) => (
@@ -468,27 +448,23 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
                 }
             }
 
-            drop(foreground_lock);
-
             // send the code out
             let _ = sender.send(Some(Ok(code as _)));
 
             Ok(())
-        })().await;
+        }).await;
 
         let mut drawn = false;
 
-        if foreground {
-            ui.events.read().resume().await;
-            let result = ui.recover_from_unhandled_output().await;
-            drawn = ui.report_error(result).await || drawn;
+        if let Ok((_, Err(err))) = &result {
+            drawn = ui.report_error::<(), _>(Err(err)).await || drawn;
         }
 
         for err in errors {
             drawn = ui.report_error(err).await || drawn;
         }
 
-        if let Err(err) = result {
+        if let Err(err) = result.and_then(|r| r.0) {
             if let Some(result_sender) = result_sender {
                 let _ = result_sender.send(Err(err));
             } else {

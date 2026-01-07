@@ -21,6 +21,7 @@ mod zsh;
 mod actor_macro;
 pub use zsh::{
     completion,
+    bin_zle,
     history,
     variables,
     functions::Function,
@@ -448,6 +449,10 @@ crate::TokioActor! {
 
         pub fn call_hook_func(&self, name: BString, args: Vec<BString>) -> Option<c_int> {
             zsh::call_hook_func(CString::new(name).unwrap(), args.iter().map(|x| x.as_ref()))
+        }
+
+        pub fn run_watch_fd(&self, hook: Arc<bin_zle::FdChangeHook>, fd: RawFd, error: Option<std::io::Error>) {
+            hook.run(self, fd, error);
         }
 
     }

@@ -1,9 +1,8 @@
 use crate::lua::{HasEventCallbacks};
 use anyhow::Result;
 use mlua::{prelude::*};
-use crate::ui::{Ui, ThreadsafeUiInner};
+use crate::ui::{Ui};
 use crate::shell::history::HistoryIndex;
-use bstr::*;
 
 fn entry_to_lua(entry: crate::shell::history::Entry, lua: &Lua) -> Result<LuaTable> {
     let t = lua.create_table_with_capacity(0, 4)?;
