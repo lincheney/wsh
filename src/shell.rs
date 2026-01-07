@@ -87,7 +87,6 @@ impl Shout {
 
 #[derive(Clone)]
 pub struct Shell {
-    is_waiting: Arc<std::sync::atomic::AtomicBool>,
     shout: Arc<Mutex<Option<Shout>>>,
     main_thread: std::thread::ThreadId,
     trampoline: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
@@ -96,7 +95,6 @@ pub struct Shell {
 impl std::default::Default for Shell {
     fn default() -> Self {
         Self {
-            is_waiting: Arc::default(),
             shout: Arc::default(),
             trampoline: Arc::default(),
             main_thread: std::thread::current().id(),

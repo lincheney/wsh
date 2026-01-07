@@ -105,12 +105,10 @@ fn main() -> Result<Option<BString>> {
         if let Some(trampoline) = shell.trampoline.lock().unwrap().take() {
             let _ = trampoline.send(());
         }
-        shell.is_waiting.store(true, Ordering::Relaxed);
         // let signals run while we are waiting for the next cmd
         shell.unqueue_signals()?;
         let msg = queue.recv();
         shell.queue_signals();
-        shell.is_waiting.store(false, Ordering::Relaxed);
 
         match msg {
             Ok(ShellMsg::accept_line_trampoline{line, returnvalue}) => {
@@ -144,11 +142,7 @@ pub fn weak_main<F: 'static + Send + Future>(future: F) -> Result<F::Output> whe
     });
 
     loop {
-        shell.is_waiting.store(true, Ordering::Relaxed);
-        let msg = queue.recv();
-        shell.is_waiting.store(false, Ordering::Relaxed);
-
-        match msg {
+        match queue.recv() {
             Ok(ShellMsg::accept_line_trampoline{returnvalue, ..}) => {
                 returnvalue.send(()).unwrap();
                 break;
