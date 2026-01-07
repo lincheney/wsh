@@ -223,6 +223,7 @@ struct ttyinfo {
 mod_export struct ttyinfo shttyinfo;
 mod_export void gettyinfo(struct ttyinfo *ti);
 
+int zlereadflags;
 char *lpromptbuf, *rpromptbuf;
 int trashedzle;
 
