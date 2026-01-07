@@ -97,12 +97,32 @@ fn get_or_init_state() -> Result<Arc<GlobalState>> {
     Ok(state.clone())
 }
 
-fn main() -> Result<Option<BString>> {
+fn shell_loop() -> Result<Option<BString>> {
     let state = get_or_init_state()?;
+    shell_loop_internal(&state, false)
+}
+
+pub fn shell_loop_oneshot<F: 'static + Send + Future<Output: Send>>(future: F) -> Result<F::Output> {
+    let state = get_or_init_state()?;
+    let (ui, _, _, runtime) = &*state;
+
+    let ui = ui.clone();
+    let handle = runtime.spawn(async move {
+        let result = future.await;
+        ui.shell.accept_line_trampoline(None).await;
+        result
+    });
+
+    shell_loop_internal(&state, false)?;
+
+    Ok(runtime.block_on(handle)?)
+}
+
+fn shell_loop_internal(state: &GlobalState, zle: bool) -> Result<Option<BString>> {
     let (ui, shell, queue, runtime) = &*state;
 
     loop {
-        if let Some(trampoline) = shell.trampoline.lock().unwrap().take() {
+        if zle && let Some(trampoline) = shell.trampoline.lock().unwrap().take() {
             let _ = trampoline.send(());
         }
         // let signals run while we are waiting for the next cmd
@@ -112,7 +132,11 @@ fn main() -> Result<Option<BString>> {
 
         match msg {
             Ok(ShellMsg::accept_line_trampoline{line, returnvalue}) => {
-                *shell.trampoline.lock().unwrap() = Some(returnvalue);
+                if zle {
+                    *shell.trampoline.lock().unwrap() = Some(returnvalue);
+                } else {
+                    returnvalue.send(()).unwrap();
+                }
                 return Ok(line)
             },
             Ok(msg) => shell.handle_one_message(msg),
@@ -121,7 +145,7 @@ fn main() -> Result<Option<BString>> {
 
         // sometimes zsh will trash zle without refreshing
         // redraw the ui
-        if runtime.block_on(ui.recover_from_unhandled_output()).unwrap() {
+        if zle && runtime.block_on(ui.recover_from_unhandled_output()).unwrap() {
             // draw LATER
             // drawing may use shell, so we need to run it later when the shell is running the loop
             let mut ui = ui.clone();
@@ -130,29 +154,6 @@ fn main() -> Result<Option<BString>> {
     }
 }
 
-pub fn weak_main<F: 'static + Send + Future>(future: F) -> Result<F::Output> where F::Output: Send {
-    let state = get_or_init_state()?;
-    let (ui, shell, queue, runtime) = &*state;
-
-    let ui = ui.clone();
-    let handle = runtime.spawn(async move {
-        let result = future.await;
-        ui.shell.accept_line_trampoline(None).await;
-        result
-    });
-
-    loop {
-        match queue.recv() {
-            Ok(ShellMsg::accept_line_trampoline{returnvalue, ..}) => {
-                returnvalue.send(()).unwrap();
-                break;
-            },
-            Ok(msg) => shell.handle_one_message(msg),
-            Err(_) => break,
-        }
-    }
-    Ok(runtime.block_on(handle)?)
-}
 
 unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _options: zsh_sys::Options, _func: c_int) -> c_int {
 
@@ -264,7 +265,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
             zsh::selectlocalmap(null_mut());
             zsh_sys::zleactive = 1;
 
-            let result = tokio::task::block_in_place(main);
+            let result = tokio::task::block_in_place(shell_loop);
 
             // zsh will reset the tty settings to its saved values
             // but it may have saved it at a bad time!

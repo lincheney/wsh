@@ -87,7 +87,7 @@ async fn create_dynamic_var(
             ui.shell.clone().$func(
                 name,
                 Box::new(move || {
-                    match crate::shell::weak_main(get.call_async(())) {
+                    match crate::shell::shell_loop_oneshot(get.call_async(())) {
                         Ok(Ok(val)) => return val,
                         Ok(Err(err)) => ::log::error!("{}", err),
                         Err(err) => ::log::error!("{}", err),
@@ -97,7 +97,7 @@ async fn create_dynamic_var(
                 }),
                 if let Some(set) = set {
                     Some(Box::new(move |x| {
-                        let result: Result<LuaResult<LuaMultiValue>> = crate::shell::weak_main(set.call_async(x));
+                        let result: Result<LuaResult<LuaMultiValue>> = crate::shell::shell_loop_oneshot(set.call_async(x));
                         match result {
                             Ok(Ok(_)) => (),
                             Ok(Err(err)) => ::log::error!("{}", err),
@@ -109,7 +109,7 @@ async fn create_dynamic_var(
                 },
                 if let Some(unset) = unset {
                     Some(Box::new(move |x| {
-                        let result: Result<LuaResult<LuaMultiValue>> = crate::shell::weak_main(unset.call_async(x));
+                        let result: Result<LuaResult<LuaMultiValue>> = crate::shell::shell_loop_oneshot(unset.call_async(x));
                         match result {
                             Ok(Ok(_)) => (),
                             Ok(Err(err)) => ::log::error!("{}", err),
