@@ -351,6 +351,10 @@ crate::TokioActor! {
             Variable::create_dynamic(&name, get, set, unset)
         }
 
+        pub fn goto_history(&self, index: history::HistoryIndex, skipdups: bool) {
+            history::History::goto(index, skipdups)
+        }
+
         pub fn expandhistory(&self, buffer: BString) -> Option<BString> {
             let cursor = buffer.len() as i64 + 1;
             self.set_zle_buffer(buffer, cursor);

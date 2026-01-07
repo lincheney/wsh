@@ -48,20 +48,12 @@ function show_history(widget, filter, data)
 end
 
 function M.history_up()
-    local current = wish.get_history_index()
-    local entry = wish.get_prev_history(current)
-    if entry and current ~= entry.histnum then
-        wish.goto_history(entry.histnum)
-    end
+    wish.goto_history_relative(-1)
     show_history(SELECTION.default, false, HISTORY_MENU)
 end
 
 function M.history_down()
-    local current = wish.get_history_index()
-    local entry = wish.get_next_history(current)
-    if not entry or current ~= entry.histnum then
-        wish.goto_history(entry and entry.histnum or current + 1)
-    end
+    wish.goto_history_relative(1)
     show_history(SELECTION.default, false, HISTORY_MENU)
 end
 

@@ -38,12 +38,26 @@ pub struct EntryPtr<'a> {
     _marker: PhantomData<&'a ()>,
 }
 
+#[derive(Debug, Copy, Clone)]
+pub enum HistoryIndex {
+    Absolute(i32),
+    Relative(i32),
+}
+
 pub struct History<'a> {
     ring: Option<EntryPtr<'a>>,
     _shell: &'a crate::shell::Shell,
 }
 
 impl<'a> History<'a> {
+    pub fn goto(index: HistoryIndex, skipdups: bool) {
+        // no idea what the return value means
+        match index {
+            HistoryIndex::Absolute(index) => unsafe{ super::zle_goto_hist(index, 0, skipdups.into()) },
+            HistoryIndex::Relative(index) => unsafe{ super::zle_goto_hist(super::histline, index, skipdups.into()) },
+        };
+    }
+
     pub fn get(shell: &'a crate::shell::Shell) -> Self {
         Self{
             ring: EntryPtr::new(unsafe{ zsh_sys::hist_ring }),

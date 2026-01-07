@@ -161,6 +161,7 @@ mod_export int invalidate_list(void);
 mod_export int showinglist;
 
 int expandhistory();
+int zle_goto_hist(int ev, int n, int skipdups);
 
 void set_histno(void* pm, long x);
 int histline;

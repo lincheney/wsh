@@ -2,6 +2,7 @@ use crate::lua::{HasEventCallbacks};
 use anyhow::Result;
 use mlua::{prelude::*};
 use crate::ui::{Ui, ThreadsafeUiInner};
+use crate::shell::history::HistoryIndex;
 use bstr::*;
 
 fn entry_to_lua(entry: crate::shell::history::Entry, lua: &Lua) -> Result<LuaTable> {
@@ -32,70 +33,47 @@ async fn get_history_index(ui: Ui, _lua: Lua, _val: ()) -> Result<usize> {
     Ok(ui.shell.get_histline().await as _)
 }
 
-async fn get_next_history(ui: Ui, lua: Lua, val: usize) -> Result<Option<LuaTable>> {
-    // get the next highest one
+async fn goto_history_internal(ui: Ui, index: HistoryIndex) {
+    let changed = {
+        let shell = &ui.shell;
+        let ui = ui.unlocked.read();
 
-    ui.shell.do_run(move |shell| {
-        let history = crate::shell::history::History::get(shell);
-        if let Some(entry) = history.closest_to((val+1) as _, std::cmp::Ordering::Greater) {
-            entry_to_lua(entry.as_entry(), &lua).map(Some)
-        } else {
-            Ok(None)
-        }
-    }).await
-}
+        let mut ui = ui.inner.write().await;
+        let buffer = ui.buffer.get_contents();
+        let cursor = ui.buffer.get_cursor();
 
-async fn get_prev_history(ui: Ui, lua: Lua, val: usize) -> Result<Option<LuaTable>> {
-    ui.shell.do_run(move |shell| {
-        let history = crate::shell::history::History::get(shell);
-        // get the next lowest one
-        if let Some(entry) = history.closest_to((val.saturating_sub(1)) as _, std::cmp::Ordering::Less) {
-            Ok(Some(entry_to_lua(entry.as_entry(), &lua)?))
-        } else {
-            Ok(None)
-        }
-    }).await
-}
+        shell.set_zle_buffer(buffer.clone(), cursor as _).await;
+        shell.goto_history(index, false).await;
 
-async fn goto_history(ui: Ui, _lua: Lua, val: usize) -> Result<Option<usize>> {
-    let current = ui.shell.get_histline().await;
-    let result = ui.shell.do_run(move |shell| {
-        let mut history = crate::shell::history::History::get(shell);
-        let latest = history.first().map(|entry| entry.histnum());
+        let (new_buffer, new_cursor) = shell.get_zle_buffer().await;
+        let new_cursor = new_cursor.unwrap_or(new_buffer.len() as _) as _;
+        let new_buffer = (new_buffer != *buffer).then_some(new_buffer);
+        let new_cursor = (new_cursor != cursor).then_some(new_cursor);
+        ui.buffer.insert_or_set(new_buffer.as_ref().map(|x| x.as_ref()), new_cursor);
 
-        history.set_histline(val as _)
-            .map(|entry| (latest, entry.histnum(), entry.as_entry().text))
-    }).await;
-
-    if let Some((latest, histnum, text)) = result {
-        {
-            let ui = ui.unlocked.read();
-            let mut ui = ui.inner.borrow_mut().await;
-            if Some(histnum) == latest {
-                // restore history if off history
-                ui.buffer.restore();
-            } else {
-                // save the buffer if moving to another history
-                if Some(current.into()) == latest {
-                    ui.buffer.save();
-                }
-                ui.buffer.set(Some(text.as_bytes()), Some(text.len()));
-            }
-        }
+        new_buffer.is_some()
+    };
+    if changed {
         ui.trigger_buffer_change_callbacks(()).await;
-        Ok(Some(histnum as _))
-    } else {
-        Ok(None)
     }
+}
+
+async fn goto_history(ui: Ui, _lua: Lua, val: i32) -> Result<()> {
+    goto_history_internal(ui, HistoryIndex::Absolute(val)).await;
+    Ok(())
+}
+
+async fn goto_history_relative(ui: Ui, _lua: Lua, val: i32) -> Result<()> {
+    goto_history_internal(ui, HistoryIndex::Relative(val)).await;
+    Ok(())
 }
 
 pub fn init_lua(ui: &Ui) -> Result<()> {
 
     ui.set_lua_async_fn("get_history", get_history)?;
     ui.set_lua_async_fn("get_history_index", get_history_index)?;
-    ui.set_lua_async_fn("get_next_history", get_next_history)?;
-    ui.set_lua_async_fn("get_prev_history", get_prev_history)?;
     ui.set_lua_async_fn("goto_history", goto_history)?;
+    ui.set_lua_async_fn("goto_history_relative", goto_history_relative)?;
 
     Ok(())
 }
