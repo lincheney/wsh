@@ -104,9 +104,10 @@ impl GlobalState {
             // redraw the ui
             if zle && self.runtime.block_on(self.ui.recover_from_unhandled_output()).unwrap() {
                 // draw LATER
-                // drawing may use shell, so we need to run it later when the shell is running the loop
-                let mut ui = self.ui.clone();
-                self.runtime.spawn(async move { ui.try_draw().await });
+                self.ui.queue_draw();
+                // // drawing may use shell, so we need to run it later when the shell is running the loop
+                // let mut ui = self.ui.clone();
+                // self.runtime.spawn(async move { ui.try_draw().await });
             }
         }
     }
