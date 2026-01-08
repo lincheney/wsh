@@ -123,13 +123,8 @@ impl<'a> ZleWidget<'a> {
     }
 
     pub(crate) fn exec_and_get_output<'c, I: Iterator<Item=&'c BStr> + ExactSizeIterator>(&mut self, opts: Option<WidgetArgs>, args: I) -> Result<(BString, c_int)> {
-        let mut shout = self.shell.shout.lock().unwrap();
-        let shout = if let Some(shout) = &mut *shout {
-            shout
-        } else {
-            shout.get_or_insert(crate::shell::Shout::new()?)
-        };
-        shout.capture(|| Self::exec_with_ptr(self.ptr, opts, args))
+        let sink = &mut *self.shell.sink.lock().unwrap();
+        Ok(super::capture_shout(sink, || Self::exec_with_ptr(self.ptr, opts, args)))
     }
 
 }

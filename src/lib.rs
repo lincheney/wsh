@@ -13,6 +13,7 @@ mod timed_lock;
 mod signals;
 mod logging;
 mod async_runtime;
+mod canceller;
 #[macro_use]
 mod utils;
 

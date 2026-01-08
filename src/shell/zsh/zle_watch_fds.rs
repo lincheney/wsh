@@ -12,15 +12,13 @@ pub async fn handle_fd_change(ui: &crate::ui::Ui, fd_change: FdChange) -> Result
                     let ui = ui.clone();
                     tokio::task::spawn(async move {
                         loop {
-                            tokio::select!(
-                                guard = reader.readable() => {
-                                    let result = ui.freeze_if(true, true, FdChangeHook::run_locked(&hook, &ui.shell, fd, guard.err())).await;
-                                    if matches!(result, Ok((false, _))) {
-                                        break
-                                    }
-                                },
-                                _ = &mut canceller => break, // cancelled
-                            );
+                            let Some(guard) = canceller.run(reader.readable()).await
+                                else { break };
+
+                            let result = ui.freeze_if(true, true, FdChangeHook::run_locked(&hook, &ui.shell, fd, guard.err())).await;
+                            if matches!(result, Ok((false, _))) {
+                                break
+                            }
                         }
                     });
                 },

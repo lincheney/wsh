@@ -1,7 +1,6 @@
 use nix::sys::signal;
 use std::sync::{LazyLock};
 use std::os::fd::{RawFd};
-use std::io::Read;
 use std::ffi::{CString, CStr};
 use std::os::raw::*;
 use std::default::Default;
@@ -322,35 +321,26 @@ pub fn set_error_verbosity(verbosity: ErrorVerbosity) -> ErrorVerbosity {
 }
 
 pub fn capture_shout<T, F: FnOnce() -> T>(
-    reader: &mut std::io::PipeReader,
-    writer: std::ptr::NonNull<nix::libc::FILE>,
+    sink: &mut super::file_stream::Sink,
     f: F,
 ) -> (BString, T) {
 
-    let result;
     unsafe {
-        let old_shout = zsh_sys::shout;
         let old_trashedzle = bindings::trashedzle;
-        zsh_sys::shout = writer.as_ptr().cast();
         bindings::trashedzle = 1;
-        result = f();
-        nix::libc::fflush(zsh_sys::shout.cast());
+        let result = {
+            sink.clear().unwrap();
+            let _file = sink.override_shout();
+            f()
+        };
         bindings::trashedzle = old_trashedzle;
-        zsh_sys::shout = old_shout;
-    }
 
-    let mut buffer = BString::new(vec![]);
-    let mut buf = [0; 1024];
-    while let Ok(n) = reader.read(&mut buf) {
-        let buf = &buf[..n];
-        buffer.extend(if n < buf.len() {
-            // probably the end so trim it
-            buf.trim_end()
-        } else {
-            buf
-        });
+        // read the data out
+        let state = super::externs::STATE.read();
+        let buffer = state.as_ref().unwrap().runtime.block_on(async { sink.read() }).unwrap();
+
+        (buffer, result)
     }
-    (buffer, result)
 }
 
 pub fn queue_signals() {

@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use tokio::sync::{mpsc};
-use std::os::fd::AsRawFd;
 use anyhow::Result;
 use std::any::Any;
 use std::io::{Write};
@@ -46,7 +45,7 @@ impl Shell {
         let (sender, receiver) = std::sync::mpsc::channel();
 
         let shell = ShellInternal {
-            shout: Arc::default(),
+            sink: Arc::new(Mutex::new(file_stream::Sink::new().unwrap())),
             main_thread: std::thread::current().id(),
         };
         let client = ShellClient {
@@ -101,36 +100,6 @@ impl<'a> KeybindValue<'a> {
 }
 
 
-struct Shout {
-    reader: std::io::PipeReader,
-    #[allow(dead_code)]
-    writer: std::io::PipeWriter,
-    writer_ptr: NonNull<nix::libc::FILE>,
-}
-unsafe impl Send for Shout {}
-
-impl Shout {
-    fn new() -> Result<Self> {
-        let (reader, writer) = std::io::pipe()?;
-        let writer_ptr = unsafe{ nix::libc::fdopen(writer.as_raw_fd(), c"w".as_ptr()) };
-        let Some(writer_ptr) = NonNull::new(writer_ptr)
-        else {
-            return Err(std::io::Error::last_os_error())?;
-        };
-
-        crate::utils::set_nonblocking_fd(&reader)?;
-        Ok(Shout {
-            reader,
-            writer,
-            writer_ptr,
-        })
-    }
-
-    fn capture<T, F: FnOnce() -> T>(&mut self, f: F) -> Result<(BString, T)> {
-        Ok(zsh::capture_shout(&mut self.reader, self.writer_ptr, f))
-    }
-}
-
 pub fn remove_invisible_chars(string: &CStr) -> std::borrow::Cow<'_, CStr> {
     let bytes = string.to_bytes();
     if bytes.contains(&(zsh::Inpar as _)) || bytes.contains(&(zsh::Outpar as _)) || bytes.contains(&(zsh::Meta as _)) {
@@ -150,7 +119,7 @@ pub fn control_c() -> nix::Result<()> {
 
 #[derive(Clone)]
 pub struct ShellInternal {
-    shout: Arc<Mutex<Option<Shout>>>,
+    sink: Arc<Mutex<file_stream::Sink>>,
     main_thread: std::thread::ThreadId,
 }
 
@@ -227,14 +196,9 @@ crate::TokioActor! {
         }
 
         pub fn get_completions(&self, line: BString, sender: mpsc::UnboundedSender<Vec<zsh::completion::Match>>) -> Result<BString> {
-            let mut shout = self.shout.lock().unwrap();
-            let shout = if let Some(shout) = &mut *shout {
-                shout
-            } else {
-                shout.get_or_insert(Shout::new()?)
-            };
             // this may block for a long time
-            let (msg, _) = shout.capture(|| zsh::completion::get_completions(line, sender))?;
+            let sink = &mut *self.sink.lock().unwrap();
+            let (msg, _) = zsh::capture_shout(sink, || zsh::completion::get_completions(line, sender));
             Ok(msg)
         }
 

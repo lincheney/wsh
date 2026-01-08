@@ -3,12 +3,13 @@ use std::collections::hash_map::Entry;
 use std::io::{Write, Cursor};
 use std::os::fd::RawFd;
 use crate::unsafe_send::UnsafeSend;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc};
 use anyhow::Result;
 use std::sync::{Arc, Mutex};
 use std::ffi::{CString, CStr};
 use std::os::raw::*;
 use std::ptr::{null_mut};
+use crate::canceller;
 
 static ZLE_FD_SOURCE: Mutex<Option<mpsc::UnboundedReceiver<FdChange>>> = Mutex::new(None);
 
@@ -17,14 +18,13 @@ struct ZleState {
     original: UnsafeSend<zsh_sys::Builtin>,
     // sink to send fds
     fd_sink: Option<mpsc::UnboundedSender<FdChange>>,
-    fd_mapping: HashMap<RawFd, (SyncFdChangeHook, oneshot::Sender<()>)>,
+    fd_mapping: HashMap<RawFd, (SyncFdChangeHook, canceller::Canceller)>,
 }
 
 static ZLE_STATE: Mutex<Option<ZleState>> = Mutex::new(None);
 
-#[derive(Debug)]
 pub enum FdChange {
-    Added(RawFd, SyncFdChangeHook, oneshot::Receiver<()>),
+    Added(RawFd, SyncFdChangeHook, canceller::Cancellable),
     Removed(RawFd),
 }
 
@@ -122,9 +122,9 @@ unsafe extern "C" fn zle_handlerfunc(nam: *mut c_char, argv: *mut *mut c_char, o
                         None
                     },
                     Entry::Vacant(entry) => {
-                        let (sender, receiver) = oneshot::channel();
-                        let hook = entry.insert((Arc::new(Mutex::new(hook)), sender));
-                        Some(FdChange::Added(fd, hook.0.clone(), receiver))
+                        let (canceller, cancellable) = canceller::new();
+                        let hook = entry.insert((Arc::new(Mutex::new(hook)), canceller));
+                        Some(FdChange::Added(fd, hook.0.clone(), cancellable))
                     },
                 }
 

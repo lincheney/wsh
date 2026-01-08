@@ -13,13 +13,13 @@ use crate::fork_lock::{RawForkLock, ForkLock};
 
 static FORK_LOCK: RawForkLock = RawForkLock::new();
 
-struct GlobalState {
+pub struct GlobalState {
     ui: Ui,
     shell: Shell,
-    runtime: tokio::runtime::Runtime,
+    pub runtime: tokio::runtime::Runtime,
     first_draw: AtomicBool,
 }
-static STATE: ForkLock<'static, Option<GlobalState>> = FORK_LOCK.wrap(None);
+pub(super) static STATE: ForkLock<'static, Option<GlobalState>> = FORK_LOCK.wrap(None);
 static ORIGINAL_ZLE_ENTRY_PTR: OnceLock<zsh_sys::ZleEntryPoint> = OnceLock::new();
 static IS_RUNNING: Mutex<()> = Mutex::new(());
 
@@ -29,29 +29,30 @@ impl GlobalState {
         fork::ForkState::init();
 
         let runtime = crate::async_runtime::init()?;
-        let (shell, shell_client) = Shell::make();
-        let (events, event_ctrl) = crate::event_stream::EventStream::new();
-        let ui = Ui::new(&FORK_LOCK, event_ctrl, shell_client)?;
+        let result: Result<_> = runtime.block_on(async {
+            let (events, event_ctrl) = crate::event_stream::EventStream::new();
+            let (shell, shell_client) = Shell::make();
+            let ui = Ui::new(&FORK_LOCK, event_ctrl, shell_client)?;
 
-        if !crate::is_forked() {
-            let result: Result<()> = runtime.block_on(async {
+            if !crate::is_forked() {
                 events.spawn(&ui);
                 crate::signals::init()?;
                 zsh::zle_watch_fds::init(&ui);
                 ui.init_lua()?;
                 ui.get().inner.read().await.activate()?;
-                Ok(())
-            });
-            result?;
 
-            // overrides
-            zsh::completion::override_compadd()?;
-            zsh::bin_zle::override_zle()?;
-            unsafe {
-                let _ = ORIGINAL_ZLE_ENTRY_PTR.set(zsh_sys::zle_entry_ptr);
-                zsh_sys::zle_entry_ptr = Some(zle_entry_ptr_override);
+                // overrides
+                zsh::completion::override_compadd()?;
+                zsh::bin_zle::override_zle()?;
+                unsafe {
+                    let _ = ORIGINAL_ZLE_ENTRY_PTR.set(zsh_sys::zle_entry_ptr);
+                    zsh_sys::zle_entry_ptr = Some(zle_entry_ptr_override);
+                }
             }
-        }
+
+            Ok((ui, shell))
+        });
+        let (ui, shell) = result?;
 
         Ok(Self {
             ui,
