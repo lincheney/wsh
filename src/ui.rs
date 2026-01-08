@@ -216,11 +216,9 @@ impl Ui {
     }
 
     pub async fn show_error_message(&mut self, msg: String) {
-        {
-            let this = self.get();
-            let mut ui = this.inner.borrow_mut().await;
-            ui.tui.add_error_message(msg);
-        }
+        let this = self.get();
+        let mut ui = this.inner.borrow_mut().await;
+        ui.tui.add_error_message(msg);
         self.queue_draw();
     }
 
