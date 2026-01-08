@@ -266,7 +266,7 @@ static mut MODULE_FEATURES: LazyLock<Features> = LazyLock::new(|| {
         zsh_sys::builtin{
             node: zsh_sys::hashnode{
                 next: null_mut(),
-                nam: c"wsh".as_ptr() as _,
+                nam: c"wsh".as_ptr().cast_mut(),
                 // CString::new("wsh").unwrap().into_raw(),
                 flags: 0,
             },

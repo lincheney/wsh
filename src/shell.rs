@@ -74,7 +74,7 @@ impl Shell {
     }
 
     pub fn handle_one_message(&self, msg: ShellMsg) {
-        self.inner.handle_one_message(msg)
+        self.inner.handle_one_message(msg);
     }
 }
 
@@ -349,7 +349,7 @@ crate::TokioActor! {
         }
 
         pub fn goto_history(&self, index: history::HistoryIndex, skipdups: bool) {
-            history::History::goto(index, skipdups)
+            history::History::goto(index, skipdups);
         }
 
         pub fn expandhistory(&self, buffer: BString) -> Option<BString> {

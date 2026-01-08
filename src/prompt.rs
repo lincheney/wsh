@@ -21,7 +21,7 @@ impl Prompt {
             .unwrap();
         Self{
             default,
-            inner: Default::default(),
+            inner: CString::default(),
             width: 0,
             height: 0,
             dirty: true,

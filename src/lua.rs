@@ -44,11 +44,11 @@ struct RedrawOptions {
     all: bool,
 }
 
-async fn get_cursor(ui: Ui, _lua: Lua, _: ()) -> Result<usize> {
+async fn get_cursor(ui: Ui, _lua: Lua, (): ()) -> Result<usize> {
     Ok(ui.get().inner.borrow().await.buffer.get_cursor())
 }
 
-async fn get_buffer(ui: Ui, lua: Lua, _: ()) -> Result<mlua::String> {
+async fn get_buffer(ui: Ui, lua: Lua, (): ()) -> Result<mlua::String> {
     Ok(lua.create_string(ui.get().inner.borrow().await.buffer.get_contents())?)
 }
 

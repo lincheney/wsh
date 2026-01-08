@@ -271,12 +271,12 @@ impl<T> Text<T> {
     }
 
     pub fn make_default_style_cell(&self) -> Option<Cell> {
-        if self.style != Style::default() {
+        if self.style == Style::default() {
+            None
+        } else {
             let mut cell = Cell::new("");
             cell.set_style(self.style);
             Some(cell)
-        } else {
-            None
         }
     }
 
@@ -316,10 +316,10 @@ impl<T> Text<T> {
         }
     }
 
-    pub fn render<'a, W :Write, C: Canvas>(
+    pub fn render<W :Write, C: Canvas>(
         &self,
         drawer: &mut Drawer<W, C>,
-        mut block: Option<(&Block<'a>, &mut Buffer)>,
+        mut block: Option<(&Block<'_>, &mut Buffer)>,
         marker: Option<(usize, usize)>,
         max_height: Option<(usize, Scroll)>,
 
@@ -487,7 +487,7 @@ impl<T> From<&Text<T>> for Line<'_> {
     fn from(val: &Text<T>) -> Self {
         // only gets the first line
         let Some(line) = val.lines.first()
-            else { return Default::default() };
+            else { return Line::default() };
 
         let line = line.lines().next().unwrap();
         let mut spans = vec![];

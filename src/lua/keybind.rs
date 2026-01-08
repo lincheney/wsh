@@ -91,7 +91,7 @@ async fn add_keymap_layer(ui: Ui, _lua: Lua, _val: ()) -> Result<usize> {
     let mut ui = ui.inner.borrow_mut().await;
     ui.keybind_layer_counter += 1;
     let id = ui.keybind_layer_counter;
-    ui.keybinds.push(KeybindMapping{id, inner: Default::default()});
+    ui.keybinds.push(KeybindMapping{id, inner: HashMap::default()});
     Ok(id)
 }
 

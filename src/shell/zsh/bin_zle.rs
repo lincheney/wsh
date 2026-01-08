@@ -65,7 +65,7 @@ impl FdChangeHook {
     pub fn run(&self, _shell: &crate::shell::ShellInternal, fd: RawFd, error: Option<std::io::Error>) {
         // this is way in excess of what we need
         let mut cursor = Cursor::new([0; 128]);
-        write!(cursor, "{}", fd).unwrap();
+        write!(cursor, "{fd}").unwrap();
         let fdbuf = cursor.into_inner();
         let fdstr = CStr::from_bytes_until_nul(&fdbuf).unwrap();
 

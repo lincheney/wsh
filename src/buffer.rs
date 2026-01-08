@@ -38,7 +38,7 @@ impl Buffer {
     }
 
     pub fn add_highlight(&mut self, hl: HighlightedRange<usize>) {
-        self.contents.add_highlight(hl)
+        self.contents.add_highlight(hl);
     }
 
     pub fn clear_highlights(&mut self) {

@@ -162,8 +162,8 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
         while nix::unistd::write(borrowed, b"\n")? != 1 { }
 
         Ok(Zpty{
-            fd,
             pid,
+            fd,
             name,
         })
 
