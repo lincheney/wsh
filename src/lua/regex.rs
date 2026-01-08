@@ -63,7 +63,7 @@ impl UserData for Regex {
 
 fn regex(_lua: &Lua, string: String) -> LuaResult<Regex> {
     let regex = regex::bytes::Regex::new(&string);
-    let regex = regex.map_err(|e| mlua::Error::RuntimeError(format!("{e}")))?;
+    let regex = regex.map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
     Ok(Regex{ inner: regex, full: None })
 }
 

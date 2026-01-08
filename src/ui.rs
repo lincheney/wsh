@@ -360,7 +360,7 @@ impl Ui {
         self.lua.create_function(move |lua, value| {
             let ui = weak.try_upgrade()?;
             func(&ui, lua, value)
-                .map_err(|e| mlua::Error::RuntimeError(format!("{e}")))
+                .map_err(|e| mlua::Error::RuntimeError(e.to_string()))
         })
     }
 
@@ -389,7 +389,7 @@ impl Ui {
             async move {
                 let ui = weak.try_upgrade()?;
                 func(ui, lua, value).await
-                    .map_err(|e| mlua::Error::RuntimeError(format!("{e}")))
+                    .map_err(|e| mlua::Error::RuntimeError(e.to_string()))
             }
         })
     }

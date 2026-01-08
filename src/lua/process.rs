@@ -47,7 +47,7 @@ impl CommandResult {
         match self.inner.wait_for(|x| x.is_some()).await {
             Ok(x) => match x.as_ref().unwrap() {
                 Ok(x) => Ok(*x),
-                Err(e) => Err(LuaError::RuntimeError(format!("{e}"))),
+                Err(e) => Err(LuaError::RuntimeError(e.to_string())),
             },
             Err(_) => Ok(i32::MAX),
         }
@@ -102,7 +102,7 @@ impl UserData for Process {
             if proc.result.inner.borrow().is_none() {
                 let signal: Signal = lua.from_value(signal)?;
                 let pid = nix::unistd::Pid::from_raw(proc.pid as _);
-                nix::sys::signal::kill(pid, signal.0).map_err(|e| LuaError::RuntimeError(format!("{e}")))
+                nix::sys::signal::kill(pid, signal.0).map_err(|e| LuaError::RuntimeError(e.to_string()))
             } else {
                 Ok(())
             }

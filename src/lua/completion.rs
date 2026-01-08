@@ -29,7 +29,7 @@ impl UserData for Stream {
             if stream.inner.lock().await.is_closed() {
                 Ok(())
             } else {
-                crate::shell::control_c().map_err(|e| mlua::Error::RuntimeError(format!("{e}")))
+                crate::shell::control_c().map_err(|e| mlua::Error::RuntimeError(e.to_string()))
             }
         });
     }

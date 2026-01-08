@@ -154,7 +154,7 @@ impl Parser {
 
     fn add_buffer(&mut self) {
         if !self.buffer.is_empty() {
-            self.add_str(format!("{}", self.buffer));
+            self.add_str(self.buffer.to_string());
             self.buffer.clear();
         }
     }
