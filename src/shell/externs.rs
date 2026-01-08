@@ -4,7 +4,7 @@ use crate::ui::{Ui};
 use crate::c_string_array;
 use std::os::raw::{c_char, c_int};
 use std::ptr::null_mut;
-use std::sync::{LazyLock, OnceLock, Mutex};
+use std::sync::{LazyLock, OnceLock, Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::ffi::CString;
 use anyhow::Result;
@@ -19,7 +19,7 @@ pub struct GlobalState {
     pub runtime: tokio::runtime::Runtime,
     first_draw: AtomicBool,
 }
-pub(super) static STATE: ForkLock<'static, Option<GlobalState>> = FORK_LOCK.wrap(None);
+pub(super) static STATE: ForkLock<'static, Option<Arc<GlobalState>>> = FORK_LOCK.wrap(None);
 static ORIGINAL_ZLE_ENTRY_PTR: OnceLock<zsh_sys::ZleEntryPoint> = OnceLock::new();
 static IS_RUNNING: Mutex<()> = Mutex::new(());
 
@@ -34,16 +34,16 @@ impl GlobalState {
             let (shell, shell_client) = Shell::make();
             let ui = Ui::new(&FORK_LOCK, event_ctrl, shell_client)?;
 
+            zsh::completion::override_compadd()?;
+            crate::signals::init()?;
+
             if !crate::is_forked() {
                 events.spawn(&ui);
-                crate::signals::init()?;
-                zsh::zle_watch_fds::init(&ui);
                 ui.init_lua()?;
                 ui.get().inner.read().await.activate()?;
-
-                // overrides
-                zsh::completion::override_compadd()?;
                 zsh::bin_zle::override_zle()?;
+                zsh::zle_watch_fds::init(&ui);
+
                 unsafe {
                     let _ = ORIGINAL_ZLE_ENTRY_PTR.set(zsh_sys::zle_entry_ptr);
                     zsh_sys::zle_entry_ptr = Some(zle_entry_ptr_override);
@@ -60,6 +60,10 @@ impl GlobalState {
             runtime,
             first_draw: false.into(),
         })
+    }
+
+    fn get() -> Result<Arc<Self>> {
+        STATE.read().clone().ok_or_else(|| anyhow::anyhow!("wish is not running"))
     }
 
     fn shell_loop(&self) -> Result<Option<BString>> {
@@ -118,9 +122,7 @@ impl Drop for GlobalState {
 
 
 pub fn run_with_shell<F: 'static + Send + Future<Output: Send>>(future: F) -> Result<F::Output> {
-    let state = STATE.read();
-    let state = state.as_ref().ok_or_else(|| anyhow::anyhow!("wish is not running"))?;
-    state.shell_loop_oneshot(future)
+    GlobalState::get()?.shell_loop_oneshot(future)
 }
 
 unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _options: zsh_sys::Options, _func: c_int) -> c_int {
@@ -130,11 +132,10 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
         Some(b"lua") => {
             let result: Result<()> = tokio::task::block_in_place(|| {
 
-                let state = STATE.read();
-                let state = state.as_ref().ok_or_else(|| anyhow::anyhow!("wish is not running"))?;
-                state.runtime.block_on(async move {
-                    state.ui.lua.load(argv.get(1).map_or(b"" as _, |s| s.as_slice())).exec_async().await
-                })?;
+                let state = GlobalState::get()?;
+                state.runtime.block_on(
+                    state.ui.lua.load(argv.get(1).map_or(b"" as _, |s| s.as_slice())).exec_async()
+                )?;
 
                 Ok(())
             });
@@ -163,7 +164,7 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
 unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_list_tag) -> *mut c_char {
     // this is the real entrypoint
 
-    if let Some(state) = STATE.read().as_ref() {
+    if let Ok(state) = GlobalState::get() {
         #[allow(static_mut_refs)]
         unsafe {
             if cmd == zsh_sys::ZLE_CMD_READ as _ && let Ok(_lock) = IS_RUNNING.try_lock() {
@@ -294,7 +295,7 @@ static mut MODULE_FEATURES: LazyLock<Features> = LazyLock::new(|| {
 pub extern "C" fn setup_() -> c_int {
     match GlobalState::new() {
         Ok(state) => {
-            *STATE.write() = Some(state);
+            *STATE.write() = Some(Arc::new(state));
             0
         },
         Err(err) => {

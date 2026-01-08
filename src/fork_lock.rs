@@ -3,7 +3,7 @@ use std::cell::UnsafeCell;
 use std::sync::{Mutex, Condvar, MutexGuard, atomic::{AtomicUsize, Ordering}};
 
 #[cfg(debug_assertions)]
-mod tracing {
+pub mod tracing {
     use std::collections::HashMap;
     use std::sync::Mutex;
 
