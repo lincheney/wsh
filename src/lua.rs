@@ -81,7 +81,7 @@ async fn accept_line(mut ui: Ui, _lua: Lua, (): ()) -> Result<bool> {
     ui.accept_line().await
 }
 
-async fn redraw(mut ui: Ui, lua: Lua, val: Option<LuaValue>) -> Result<()> {
+async fn redraw(ui: Ui, lua: Lua, val: Option<LuaValue>) -> Result<()> {
     if let Some(val) = val {
         let val: RedrawOptions = lua.from_value(val)?;
         let ui = ui.get();
@@ -93,7 +93,8 @@ async fn redraw(mut ui: Ui, lua: Lua, val: Option<LuaValue>) -> Result<()> {
         if val.status_bar { ui.status_bar.dirty = true; }
     }
 
-    ui.draw().await
+    ui.queue_draw();
+    Ok(())
 }
 
 async fn exit(ui: Ui, _lua: Lua, code: Option<i32>) -> Result<()> {

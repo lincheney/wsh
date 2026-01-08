@@ -80,7 +80,7 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Strea
     Ok(Stream{inner: Arc::new(Mutex::new(receiver))})
 }
 
-async fn insert_completion(mut ui: Ui, _lua: Lua, val: Match) -> Result<()> {
+async fn insert_completion(ui: Ui, _lua: Lua, val: Match) -> Result<()> {
     let buffer = {
         let this = ui.unlocked.read();
         this.inner.borrow().await.buffer.get_contents().clone()
@@ -95,7 +95,7 @@ async fn insert_completion(mut ui: Ui, _lua: Lua, val: Match) -> Result<()> {
     }
 
     ui.trigger_buffer_change_callbacks(()).await;
-    ui.draw().await?;
+    ui.queue_draw();
     Ok(())
 }
 

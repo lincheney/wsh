@@ -88,6 +88,7 @@ crate::strong_weak_wrapper! {
         pub has_foreground_process: Arc::<tokio::sync::Mutex<()>> [WeakArc::<tokio::sync::Mutex<()>>],
         preparing_for_unhandled_output: Arc::<AtomicBool> [WeakArc::<AtomicBool>],
         threads: Arc::<ForkLock<'static, std::sync::Mutex<HashSet<nix::unistd::Pid>>>> [WeakArc::<ForkLock<'static, std::sync::Mutex<HashSet<nix::unistd::Pid>>>>],
+        is_drawing: Arc::<AtomicBool> [WeakArc::<AtomicBool>],
     }
 }
 
@@ -131,6 +132,7 @@ impl Ui {
             has_foreground_process: Default::default(),
             preparing_for_unhandled_output: Default::default(),
             threads: Arc::new(lock.wrap(std::sync::Mutex::new(HashSet::new()))),
+            is_drawing: Arc::new(false.into()),
         };
 
         Ok(ui)
@@ -150,15 +152,19 @@ impl Ui {
         self.draw().await
     }
 
+    pub fn queue_draw(&self) {
+        if !crate::is_forked() && !self.is_drawing.swap(true, Ordering::AcqRel) {
+            self.events.read().queue_draw();
+        }
+    }
+
     pub async fn draw(&mut self) -> Result<()> {
-        // do NOT render ui elements if there is a foreground process
-        if crate::is_forked() {
+        if self.preparing_for_unhandled_output.load(Ordering::Relaxed) {
+            // the shell will draw it later
             return Ok(())
         }
 
-        if self.preparing_for_unhandled_output.load(Ordering::Relaxed) {
-            return Ok(())
-        }
+        self.is_drawing.store(false, Ordering::Release);
 
         let this = &*self.unlocked.read();
         let mut ui = this.inner.borrow_mut().await;
@@ -188,7 +194,7 @@ impl Ui {
         let mut ui = self.clone();
         tokio::task::spawn(async move {
             if !ui.report_error(result).await && draw {
-                ui.try_draw().await;
+                ui.queue_draw();
             }
         });
     }
@@ -215,10 +221,7 @@ impl Ui {
             let mut ui = this.inner.borrow_mut().await;
             ui.tui.add_error_message(msg);
         }
-
-        if let Err(err) = self.draw().await {
-            log::error!("{:?}", err);
-        }
+        self.queue_draw();
     }
 
     pub async fn handle_event(&mut self, event: Event, event_buffer: BString) -> Result<bool> {
@@ -539,9 +542,7 @@ impl Ui {
                     if buffer.is_some() {
                         self.trigger_buffer_change_callbacks(()).await;
                     }
-                    if let Err(e) = self.draw().await {
-                        return Some(KeybindOutput::Value(Err(e)))
-                    }
+                    self.queue_draw();
                 }
 
                 // this widget may have called accept-line somewhere inside
@@ -569,7 +570,7 @@ impl Ui {
                     ui.buffer.insert_at_cursor(c.encode_utf8(&mut buf).as_bytes());
                 }
                 self.trigger_buffer_change_callbacks(()).await;
-                self.draw().await?;
+                self.queue_draw();
             },
 
             Event::Key(KeyEvent{ key: Key::Enter, modifiers }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {

@@ -11,6 +11,7 @@ enum InputMessage {
     Pause(oneshot::Sender<()>),
     Resume(oneshot::Sender<()>),
     Exit(i32, Option<oneshot::Sender<()>>),
+    Draw,
 }
 
 #[derive(Clone)]
@@ -40,6 +41,10 @@ impl EventController {
         } else {
             None
         }
+    }
+
+    pub fn queue_draw(&self) {
+        let _ = self.queue.send(InputMessage::Draw);
     }
 
     pub async fn exit(&self, code: i32) {
@@ -119,28 +124,31 @@ impl EventStream {
         };
 
         // process events
-        let _x: tokio::task::JoinHandle<Result<()>> = tokio::task::spawn(async move {
-            loop {
-                tokio::select!(
-                    item = event_receiver.recv() => {
-                        let Some((event, event_buffer)) = item else { return Ok(()) };
-                        if !ui.handle_event(event, event_buffer).await? {
-                            return Ok(())
-                        }
-                    },
+        {
+            let mut ui = ui.clone();
+            let _x: tokio::task::JoinHandle<Result<()>> = tokio::task::spawn(async move {
+                loop {
+                    tokio::select!(
+                        item = event_receiver.recv() => {
+                            let Some((event, event_buffer)) = item else { return Ok(()) };
+                            if !ui.handle_event(event, event_buffer).await? {
+                                return Ok(())
+                            }
+                        },
 
-                    mut result = is_paused.changed() => loop {
-                        match result {
-                            Err(_) => return Ok(()),
-                            Ok(()) => if !*is_paused.borrow_and_update() {
-                                break;
-                            },
-                        }
-                        result = is_paused.changed().await;
-                    },
-                );
-            }
-        });
+                        mut result = is_paused.changed() => loop {
+                            match result {
+                                Err(_) => return Ok(()),
+                                Ok(()) => if !*is_paused.borrow_and_update() {
+                                    break;
+                                },
+                            }
+                            result = is_paused.changed().await;
+                        },
+                    );
+                }
+            });
+        }
 
         // read messages
         loop {
@@ -167,6 +175,9 @@ impl EventStream {
                 InputMessage::Resume(result) => {
                     pauser.send(false)?;
                     let _ = result.send(());
+                },
+                InputMessage::Draw => {
+                    ui.try_draw().await;
                 },
             }
         }
