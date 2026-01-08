@@ -36,12 +36,8 @@ macro_rules! TokioActor {
 
             #[allow(dead_code)]
             impl [<$name Client>] {
-                pub fn new(inner: $name) -> (Self, ::std::sync::mpsc::Receiver<[<$name Msg>]>) {
-                    let (sender, receiver) = ::std::sync::mpsc::channel();
-                    (Self{ queue: sender, inner }, receiver)
-                }
 
-                pub async fn do_run<T: 'static + Send, F: 'static + Sync + Send + Fn(&Shell) -> T>(&self, func: F) -> T {
+                pub async fn do_run<T: 'static + Send, F: 'static + Sync + Send + Fn(&$name) -> T>(&self, func: F) -> T {
                     *self.run(Box::new(move |shell| Box::new(func(shell)))).await.downcast().unwrap()
                 }
 

@@ -26,7 +26,7 @@ extern "C" fn postfork() {
 }
 
 impl ForkState {
-    pub fn setup() {
+    pub fn init() {
         unsafe {
             nix::libc::pthread_atfork(Some(prefork), Some(postfork), Some(postfork));
         }
@@ -41,19 +41,18 @@ impl ForkState {
         let fork_lock = super::FORK_LOCK.write();
 
         let lua = {
-            let ui = super::STATE.read_with_lock(&fork_lock);
-            if let Some(state) = ui.lock().unwrap().as_ref() {
-                let (ui, shell, _, _) = &**state;
+            let state = super::STATE.read_with_lock(&fork_lock);
+            if let Some(state) = state.as_ref() {
                 let tid = std::thread::current().id();
-                if shell.main_thread != tid {
+                if state.shell.get_main_thread() != tid {
                     // shell is not locked == we are forking for some unknown reason
                     return None
                 }
 
                 // i can take a lock on lua by acquiring a ref to the app data
-                ui.lua.set_app_data(());
+                state.ui.lua.set_app_data(());
                 // ui.lua.gc_stop();
-                Some((unsafe{ transmute::<mlua::AppDataRef<'_, ()>, mlua::AppDataRef<'static, ()>>(ui.lua.app_data_ref::<()>().unwrap()) }, ui.lua.clone()))
+                Some((unsafe{ transmute::<mlua::AppDataRef<'_, ()>, mlua::AppDataRef<'static, ()>>(state.ui.lua.app_data_ref::<()>().unwrap()) }, state.ui.lua.clone()))
             } else {
                 None
             }

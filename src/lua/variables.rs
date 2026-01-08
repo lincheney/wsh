@@ -85,7 +85,7 @@ async fn create_dynamic_var(
     macro_rules! make_dynamic_var_func {
         (|$($arg:ident),*| $result:expr) => (
             Box::new(move |$($arg),*| {
-                match crate::shell::shell_loop_oneshot($result) {
+                match crate::shell::run_with_shell($result) {
                     Ok(Ok(val)) => return val,
                     Ok(Err(err)) => ::log::error!("{}", err),
                     Err(err) => ::log::error!("{}", err),

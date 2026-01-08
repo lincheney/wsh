@@ -22,7 +22,7 @@ static IMMORTAL_ACCEPT_LINE: OnceLock<Widget> = OnceLock::new();
 
 pub struct ZleWidget<'a> {
     ptr: NonNull<bindings::thingy>,
-    pub shell: &'a crate::shell::Shell,
+    pub shell: &'a crate::shell::ShellInternal,
 }
 
 unsafe impl Send for ZleWidget<'_> {}
@@ -43,7 +43,7 @@ impl Default for WidgetArgs {
 }
 
 impl<'a> ZleWidget<'a> {
-    pub fn new(ptr: NonNull<bindings::thingy>, shell: &'a crate::shell::Shell) -> Self {
+    pub fn new(ptr: NonNull<bindings::thingy>, shell: &'a crate::shell::ShellInternal) -> Self {
         let w = Self{ptr, shell};
 
         if w.is_internal() && let Some(widget) = w.widget() {

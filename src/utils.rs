@@ -1,5 +1,6 @@
 use anyhow::Result;
 use std::os::fd::AsRawFd;
+pub mod bounded_queue;
 #[macro_use]
 pub mod strong_weak_wrapper;
 

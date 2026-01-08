@@ -14,6 +14,7 @@ mod linked_list;
 pub mod variables;
 pub mod functions;
 mod widget;
+pub mod zle_watch_fds;
 pub use widget::ZleWidget;
 pub mod history;
 pub mod completion;

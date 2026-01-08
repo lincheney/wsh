@@ -46,7 +46,7 @@ pub enum HistoryIndex {
 
 pub struct History<'a> {
     ring: Option<EntryPtr<'a>>,
-    _shell: &'a crate::shell::Shell,
+    _shell: &'a crate::shell::ShellInternal,
 }
 
 impl<'a> History<'a> {
@@ -58,7 +58,7 @@ impl<'a> History<'a> {
         };
     }
 
-    pub fn get(shell: &'a crate::shell::Shell) -> Self {
+    pub fn get(shell: &'a crate::shell::ShellInternal) -> Self {
         Self{
             ring: EntryPtr::new(unsafe{ zsh_sys::hist_ring }),
             _shell: shell,

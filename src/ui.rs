@@ -133,8 +133,6 @@ impl Ui {
             threads: Arc::new(lock.wrap(std::sync::Mutex::new(HashSet::new()))),
         };
 
-        ui.init_lua()?;
-
         Ok(ui)
     }
 
@@ -394,7 +392,7 @@ impl Ui {
         })
     }
 
-    fn init_lua(&self) -> Result<()> {
+    pub fn init_lua(&self) -> Result<()> {
         crate::lua::init_lua(self)?;
 
         self.lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;

@@ -1,157 +1,126 @@
 mod fork;
-pub(super) mod signals;
 use bstr::BString;
 use crate::ui::{Ui};
 use crate::c_string_array;
 use std::os::raw::{c_char, c_int};
 use std::ptr::null_mut;
-use std::sync::{Arc, LazyLock, OnceLock, Mutex, mpsc};
+use std::sync::{LazyLock, OnceLock, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::ffi::CString;
 use anyhow::Result;
-use crate::shell::{Shell, ShellClient, ShellMsg, zsh};
+use crate::shell::{Shell, ShellMsg, zsh};
 use crate::fork_lock::{RawForkLock, ForkLock};
 
 static FORK_LOCK: RawForkLock = RawForkLock::new();
 
-type GlobalState = (Ui, Shell, mpsc::Receiver<ShellMsg>, tokio::runtime::Runtime);
-static STATE: ForkLock<'static, Mutex<Option<Arc<GlobalState>>>> = FORK_LOCK.wrap(Mutex::new(None));
-
-pub fn with_runtime<T, F: FnMut(&tokio::runtime::Runtime) -> T>(mut f: F) -> Result<T> {
-    let state = get_or_init_state()?;
-    Ok(f(&state.3))
+struct GlobalState {
+    ui: Ui,
+    shell: Shell,
+    runtime: tokio::runtime::Runtime,
+    first_draw: AtomicBool,
 }
+static STATE: ForkLock<'static, Option<GlobalState>> = FORK_LOCK.wrap(None);
+static ORIGINAL_ZLE_ENTRY_PTR: OnceLock<zsh_sys::ZleEntryPoint> = OnceLock::new();
+static IS_RUNNING: Mutex<()> = Mutex::new(());
 
-fn try_get_state() -> Option<Arc<GlobalState>> {
-    let lock = STATE.read();
-    let store = lock.lock().unwrap();
-    store.clone()
-}
+impl GlobalState {
+    fn new() -> Result<Self> {
+        crate::logging::init();
+        fork::ForkState::init();
 
-fn get_or_init_state() -> Result<Arc<GlobalState>> {
+        let runtime = crate::async_runtime::init()?;
+        let (shell, shell_client) = Shell::make();
+        let (events, event_ctrl) = crate::event_stream::EventStream::new();
+        let ui = Ui::new(&FORK_LOCK, event_ctrl, shell_client)?;
 
-    let lock = STATE.read();
-    let mut store = lock.lock().unwrap();
-    let store = &mut *store;
+        if !crate::is_forked() {
+            let result: Result<()> = runtime.block_on(async {
+                events.spawn(&ui);
+                crate::signals::init()?;
+                zsh::zle_watch_fds::init(&ui);
+                ui.init_lua()?;
+                ui.get().inner.read().await.activate()?;
+                Ok(())
+            });
+            result?;
 
-    let state = if let Some(state) = store {
-        state
-    } else {
-        let log_file = Box::new(std::fs::File::create("/tmp/wish.log").expect("Can't create log file"));
-        env_logger::Builder::from_default_env()
-            .target(env_logger::Target::Pipe(log_file))
-            .format_source_path(true)
-            .format_timestamp_millis()
-            .init();
+            // overrides
+            zsh::completion::override_compadd()?;
+            zsh::bin_zle::override_zle()?;
+            unsafe {
+                let _ = ORIGINAL_ZLE_ENTRY_PTR.set(zsh_sys::zle_entry_ptr);
+                zsh_sys::zle_entry_ptr = Some(zle_entry_ptr_override);
+            }
+        }
 
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .on_thread_start(|| {
-                // try to make the main thread handle all signals
-                if let Err(err) = signals::disable_all_signals() {
-                    // mmmm pretty bad
-                    log::error!("{:?}", err);
-                }
-            })
-            .build()?;
+        Ok(Self {
+            ui,
+            shell,
+            runtime,
+            first_draw: false.into(),
+        })
+    }
 
-        let shell = Shell::default();
-        let result: Result<_> = runtime.block_on(async {
-            let (events, event_ctrl) = crate::event_stream::EventStream::new();
-            let (shell_client, shell_queue) = ShellClient::new(shell.clone());
-            let mut ui = Ui::new(&FORK_LOCK, event_ctrl, shell_client)?;
-            ui.get().inner.read().await.activate()?;
-            ui.start_cmd().await?;
+    fn shell_loop(&self) -> Result<Option<BString>> {
+        self.shell_loop_internal(true)
+    }
 
-            if !crate::is_forked() {
-                // spawn a task to take care of keyboard input
-                {
-                    let ui = ui.clone();
-                    tokio::task::spawn(async move {
-                        let tty = std::fs::File::open("/dev/tty").unwrap();
-                        crate::utils::set_nonblocking_fd(&tty).unwrap();
-                        events.run(tty, ui).await.unwrap();
-                    });
-                }
+    fn shell_loop_oneshot<F: 'static + Send + Future<Output: Send>>(&self, future: F) -> Result<F::Output> {
+        let ui = self.ui.clone();
+        let handle = self.runtime.spawn(async move {
+            let result = future.await;
+            ui.shell.accept_line_trampoline(None).await;
+            result
+        });
+        self.shell_loop_internal(false)?;
+        Ok(self.runtime.block_on(handle)?)
+    }
 
-                // spawn a task to take care of watched fd
-                if let Some(mut fd_source) = zsh::bin_zle::take_fd_change_source() {
-                    let ui = ui.clone();
-                    tokio::task::spawn(async move {
-                        while let Some(change) = fd_source.recv().await {
-                            crate::zle_watch_fds::handle_fd_change(&ui, change).await;
-                        }
-                    });
-                }
-
-                // spawn tasks to take care of signals
-                signals::setup()?;
+    fn shell_loop_internal(&self, zle: bool) -> Result<Option<BString>> {
+        loop {
+            if zle && let Some(trampoline) = self.shell.trampoline.lock().unwrap().take() {
+                let _ = trampoline.send(());
             }
 
-            Ok((ui, shell, shell_queue))
-        });
-        let (ui, shell, shell_queue) = result?;
-        store.get_or_insert(Arc::new((ui, shell, shell_queue, runtime)))
-    };
+            match self.shell.recv_from_queue()? {
+                Ok(ShellMsg::accept_line_trampoline{line, returnvalue}) => {
+                    if zle {
+                        *self.shell.trampoline.lock().unwrap() = Some(returnvalue);
+                    } else {
+                        returnvalue.send(()).unwrap();
+                    }
+                    return Ok(line)
+                },
+                Ok(msg) => self.shell.handle_one_message(msg),
+                Err(_) => return Ok(None),
+            }
 
-    Ok(state.clone())
+            // sometimes zsh will trash zle without refreshing
+            // redraw the ui
+            if zle && self.runtime.block_on(self.ui.recover_from_unhandled_output()).unwrap() {
+                // draw LATER
+                // drawing may use shell, so we need to run it later when the shell is running the loop
+                let mut ui = self.ui.clone();
+                self.runtime.spawn(async move { ui.try_draw().await });
+            }
+        }
+    }
+
 }
 
-fn shell_loop() -> Result<Option<BString>> {
-    shell_loop_internal(&*get_or_init_state()?, false)
-}
-
-pub fn shell_loop_oneshot<F: 'static + Send + Future<Output: Send>>(future: F) -> Result<F::Output> {
-    let state = get_or_init_state()?;
-    let (ui, _, _, runtime) = &*state;
-
-    let ui = ui.clone();
-    let handle = runtime.spawn(async move {
-        let result = future.await;
-        ui.shell.accept_line_trampoline(None).await;
-        result
-    });
-
-    shell_loop_internal(&state, false)?;
-
-    Ok(runtime.block_on(handle)?)
-}
-
-fn shell_loop_internal(state: &GlobalState, zle: bool) -> Result<Option<BString>> {
-    let (ui, shell, queue, runtime) = state;
-
-    loop {
-        if zle && let Some(trampoline) = shell.trampoline.lock().unwrap().take() {
-            let _ = trampoline.send(());
-        }
-        // let signals run while we are waiting for the next cmd
-        shell.unqueue_signals()?;
-        let msg = queue.recv();
-        shell.queue_signals();
-
-        match msg {
-            Ok(ShellMsg::accept_line_trampoline{line, returnvalue}) => {
-                if zle {
-                    *shell.trampoline.lock().unwrap() = Some(returnvalue);
-                } else {
-                    returnvalue.send(()).unwrap();
-                }
-                return Ok(line)
-            },
-            Ok(msg) => shell.handle_one_message(msg),
-            Err(_) => return Ok(None),
-        }
-
-        // sometimes zsh will trash zle without refreshing
-        // redraw the ui
-        if zle && runtime.block_on(ui.recover_from_unhandled_output()).unwrap() {
-            // draw LATER
-            // drawing may use shell, so we need to run it later when the shell is running the loop
-            let mut ui = ui.clone();
-            runtime.spawn(async move { ui.try_draw().await });
-        }
+impl Drop for GlobalState {
+    fn drop(&mut self) {
+        zsh::completion::restore_compadd();
+        zsh::bin_zle::restore_zle();
     }
 }
 
+
+pub fn run_with_shell<F: 'static + Send + Future<Output: Send>>(future: F) -> Result<F::Output> {
+    let state = STATE.read();
+    let state = state.as_ref().ok_or_else(|| anyhow::anyhow!("wish is not running"))?;
+    state.shell_loop_oneshot(future)
+}
 
 unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _options: zsh_sys::Options, _func: c_int) -> c_int {
 
@@ -160,12 +129,10 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
         Some(b"lua") => {
             let result: Result<()> = tokio::task::block_in_place(|| {
 
-                let state = get_or_init_state()?;
-                let ui = state.0.clone();
-                let runtime = &state.3;
-
-                runtime.block_on(async move {
-                    ui.lua.load(argv.get(1).map_or(b"" as _, |s| s.as_slice())).exec_async().await
+                let state = STATE.read();
+                let state = state.as_ref().ok_or_else(|| anyhow::anyhow!("wish is not running"))?;
+                state.runtime.block_on(async move {
+                    state.ui.lua.load(argv.get(1).map_or(b"" as _, |s| s.as_slice())).exec_async().await
                 })?;
 
                 Ok(())
@@ -189,6 +156,94 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
         },
     }
 }
+
+#[unsafe(no_mangle)]
+#[allow(clippy::missing_safety_doc)]
+unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_list_tag) -> *mut c_char {
+    // this is the real entrypoint
+
+    if let Some(state) = STATE.read().as_ref() {
+        #[allow(static_mut_refs)]
+        unsafe {
+            if cmd == zsh_sys::ZLE_CMD_READ as _ && let Ok(_lock) = IS_RUNNING.try_lock() {
+
+                // lp = va_arg(ap, char **);
+                // rp = va_arg(ap, char **);
+                // flags = va_arg(ap, int);
+                // context = va_arg(ap, int);
+                // is these even right????
+                let flags_ptr = (*ap).reg_save_area.add((*ap).gp_offset as usize + std::mem::size_of::<*mut *mut c_char>() * 2);
+
+                let mut keymap = [b'm', b'a', b'i', b'n', 0];
+                zsh::done = 0;
+                zsh::lpromptbuf = crate::EMPTY_STR.as_ptr().cast_mut();
+                zsh::rpromptbuf = crate::EMPTY_STR.as_ptr().cast_mut();
+                zsh::zlereadflags = *(flags_ptr as *const c_int);
+                zsh::histline = zsh_sys::curhist as _;
+                zsh::selectkeymap(keymap.as_mut_ptr().cast(), 1);
+                zsh::initundo();
+                zsh::selectlocalmap(null_mut());
+                zsh_sys::zleactive = 1;
+
+                // this is the only thread we should ever run this func
+                if !state.first_draw.load(Ordering::Relaxed) {
+                    let _ = state.runtime.block_on(state.ui.clone().start_cmd());
+                    state.first_draw.store(true, Ordering::Relaxed);
+                }
+
+                let result = tokio::task::block_in_place(|| state.shell_loop());
+
+                // zsh will reset the tty settings to its saved values
+                // but it may have saved it at a bad time!
+                // e.g. when we were running a foreground process
+                // so save it again now while we're good
+                zsh::gettyinfo(&raw mut zsh::shttyinfo);
+                zsh::freeundo();
+                zsh_sys::zleactive = 0;
+
+                return match result {
+                    Ok(Some(mut string)) => {
+                        // MUST have a newline here
+                        string.push(b'\n');
+                        CString::new(string).unwrap().into_raw()
+                    },
+                    Ok(None) => {
+                        // TODO quit
+                        null_mut()
+                    },
+                    Err(err) => {
+                        log::error!("{:?}", err);
+                        null_mut()
+                    },
+                }
+
+            } else if cmd == zsh_sys::ZLE_CMD_TRASH as _ {
+                // something is probably going to print (error msgs etc) to the terminal
+                if let Ok(_lock) = state.ui.has_foreground_process.try_lock() {
+                    state.runtime.block_on(state.ui.prepare_for_unhandled_output()).unwrap();
+                }
+                return null_mut()
+
+            } else if cmd == zsh_sys::ZLE_CMD_REFRESH as _ {
+                // redraw the ui
+                if state.runtime.block_on(state.ui.recover_from_unhandled_output()).unwrap() {
+                    let mut ui = state.ui.clone();
+                    state.runtime.block_on(ui.try_draw());
+                }
+                return null_mut()
+
+            }
+        }
+    }
+
+    if let Some(Some(func)) = ORIGINAL_ZLE_ENTRY_PTR.get() {
+        unsafe { func(cmd, ap) }
+    } else {
+        // uhhhh wtf
+        null_mut()
+    }
+}
+
 
 #[derive(Debug)]
 struct Features(zsh_sys::features);
@@ -234,129 +289,55 @@ static mut MODULE_FEATURES: LazyLock<Features> = LazyLock::new(|| {
     })
 });
 
-static ORIGINAL_ZLE_ENTRY_PTR: OnceLock<zsh_sys::ZleEntryPoint> = OnceLock::new();
-static IS_RUNNING: Mutex<()> = Mutex::new(());
-
-#[unsafe(no_mangle)]
-#[allow(clippy::missing_safety_doc)]
-unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_list_tag) -> *mut c_char {
-    // this is the real entrypoint
-    #[allow(static_mut_refs)]
-    unsafe {
-        if cmd == zsh_sys::ZLE_CMD_READ as _ && let Ok(_lock) = IS_RUNNING.try_lock() {
-
-            // lp = va_arg(ap, char **);
-            // rp = va_arg(ap, char **);
-            // flags = va_arg(ap, int);
-            // context = va_arg(ap, int);
-            // is these even right????
-            let flags_ptr = (*ap).reg_save_area.add((*ap).gp_offset as usize + std::mem::size_of::<*mut *mut c_char>() * 2);
-
-            let mut keymap = [b'm', b'a', b'i', b'n', 0];
-            zsh::done = 0;
-            zsh::lpromptbuf = crate::EMPTY_STR.as_ptr().cast_mut();
-            zsh::rpromptbuf = crate::EMPTY_STR.as_ptr().cast_mut();
-            zsh::zlereadflags = *(flags_ptr as *const c_int);
-            zsh::histline = zsh_sys::curhist as _;
-            zsh::selectkeymap(keymap.as_mut_ptr().cast(), 1);
-            zsh::initundo();
-            zsh::selectlocalmap(null_mut());
-            zsh_sys::zleactive = 1;
-
-            let result = tokio::task::block_in_place(shell_loop);
-
-            // zsh will reset the tty settings to its saved values
-            // but it may have saved it at a bad time!
-            // e.g. when we were running a foreground process
-            // so save it again now while we're good
-            zsh::gettyinfo(&raw mut zsh::shttyinfo);
-            zsh::freeundo();
-            zsh_sys::zleactive = 0;
-
-            return match result {
-                Ok(Some(mut string)) => {
-                    // MUST have a newline here
-                    string.push(b'\n');
-                    CString::new(string).unwrap().into_raw()
-                },
-                Ok(None) => {
-                    // TODO quit
-                    null_mut()
-                },
-                Err(err) => {
-                    log::error!("{:?}", err);
-                    null_mut()
-                },
-            }
-
-        } else if cmd == zsh_sys::ZLE_CMD_TRASH as _ && let Some(state) = try_get_state() {
-            // something is probably going to print (error msgs etc) to the terminal
-            let (ui, _, _, runtime) = &*state;
-            if let Ok(_lock) = ui.has_foreground_process.try_lock() {
-                runtime.block_on(ui.prepare_for_unhandled_output()).unwrap();
-            }
-            return null_mut()
-
-        } else if cmd == zsh_sys::ZLE_CMD_REFRESH as _ && let Some(state) = try_get_state() {
-            // redraw the ui
-            let mut ui = state.0.clone();
-            let runtime = &state.3;
-            if runtime.block_on(ui.recover_from_unhandled_output()).unwrap() {
-                runtime.block_on(ui.try_draw());
-            }
-            return null_mut()
-
-        }
-
-        ORIGINAL_ZLE_ENTRY_PTR.get().unwrap().unwrap()(cmd, ap)
-    }
-}
-
 #[unsafe(no_mangle)]
 pub extern "C" fn setup_() -> c_int {
-    unsafe{
-        fork::ForkState::setup();
-        ORIGINAL_ZLE_ENTRY_PTR.get_or_init(|| zsh_sys::zle_entry_ptr);
-        zsh_sys::zle_entry_ptr = Some(zle_entry_ptr_override);
+    match GlobalState::new() {
+        Ok(state) => {
+            *STATE.write() = Some(state);
+            0
+        },
+        Err(err) => {
+            eprintln!("{err}");
+            1
+        },
     }
-    0
 }
 
 #[unsafe(no_mangle)]
 #[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn features_(module: zsh_sys::Module, features: *mut *mut *mut c_char) -> c_int {
-    let module_features: *mut zsh_sys::features = unsafe{ &raw mut MODULE_FEATURES.0 };
-    unsafe{ *features = zsh_sys::featuresarray(module, module_features); }
+    unsafe {
+        let module_features = &raw mut MODULE_FEATURES.0;
+        *features = zsh_sys::featuresarray(module, module_features);
+    }
     0
 }
 
 #[unsafe(no_mangle)]
 #[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn enables_(module: zsh_sys::Module, enables: *mut *mut c_int) -> c_int {
-    let module_features: *mut zsh_sys::features = unsafe{ &raw mut MODULE_FEATURES.0 };
-    unsafe{ zsh_sys::handlefeatures(module, module_features, enables) }
+    unsafe {
+        let module_features = &raw mut MODULE_FEATURES.0;
+        zsh_sys::handlefeatures(module, module_features, enables)
+    }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn boot_() -> c_int {
-    if let Err(err) = zsh::completion::override_compadd().and(zsh::bin_zle::override_zle()) {
-        eprintln!("{err}");
-        1
-    } else {
-        0
-    }
+    0
 }
 
 #[unsafe(no_mangle)]
 #[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn cleanup_(module: zsh_sys::Module) -> c_int {
-    zsh::completion::restore_compadd();
-    zsh::bin_zle::restore_zle();
-    let module_features: *mut zsh_sys::features = unsafe{ &raw mut MODULE_FEATURES.0 };
-    unsafe{ zsh_sys::setfeatureenables(module, module_features, null_mut()) }
+    unsafe {
+        let module_features = &raw mut MODULE_FEATURES.0;
+        zsh_sys::setfeatureenables(module, module_features, null_mut())
+    }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn finish_() -> c_int {
+    STATE.write().take();
     0
 }

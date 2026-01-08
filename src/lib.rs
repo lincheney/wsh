@@ -10,7 +10,9 @@ mod lua;
 mod keybind;
 mod unsafe_send;
 mod timed_lock;
-mod zle_watch_fds;
+mod signals;
+mod logging;
+mod async_runtime;
 #[macro_use]
 mod utils;
 

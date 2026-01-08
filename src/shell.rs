@@ -11,7 +11,7 @@ use std::ffi::{CString, CStr};
 use std::default::Default;
 use std::sync::{Arc};
 use std::ptr::null_mut;
-use std::sync::Mutex;
+use std::sync::{Mutex};
 use bstr::{BStr, BString, ByteSlice, ByteVec};
 
 mod externs;
@@ -29,9 +29,55 @@ pub use zsh::{
     ZptyOpts,
     Zpty,
 };
-pub use externs::{shell_loop_oneshot};
-pub use externs::signals::{wait_for_pid};
+pub use externs::{run_with_shell};
 use variables::Variable;
+
+pub struct Shell {
+    inner: ShellInternal,
+    trampoline: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+    queue: std::sync::mpsc::Receiver<ShellMsg>,
+}
+
+pub type ShellMsg = ShellInternalMsg;
+pub type ShellClient = ShellInternalClient;
+
+impl Shell {
+    pub fn make() -> (Self, ShellClient) {
+        let (sender, receiver) = std::sync::mpsc::channel();
+
+        let shell = ShellInternal {
+            shout: Arc::default(),
+            main_thread: std::thread::current().id(),
+        };
+        let client = ShellClient {
+            inner: shell.clone(),
+            queue: sender,
+        };
+        let shell = Shell {
+            inner: shell.clone(),
+            trampoline: Arc::default(),
+            queue: receiver,
+        };
+
+        (shell, client)
+    }
+
+    pub fn get_main_thread(&self) -> std::thread::ThreadId {
+        self.inner.main_thread
+    }
+
+    pub fn recv_from_queue(&self) -> Result<Result<ShellMsg, std::sync::mpsc::RecvError>> {
+        // let signals run while we are waiting for the next cmd
+        self.inner.unqueue_signals()?;
+        let msg = self.queue.recv();
+        self.inner.queue_signals();
+        Ok(msg)
+    }
+
+    pub fn handle_one_message(&self, msg: ShellMsg) {
+        self.inner.handle_one_message(msg)
+    }
+}
 
 pub enum KeybindValue<'a> {
     String(BString),
@@ -39,7 +85,7 @@ pub enum KeybindValue<'a> {
 }
 
 impl<'a> KeybindValue<'a> {
-    pub fn find(shell: &'a Shell, key: &BStr) -> Option<Self> {
+    pub fn find(shell: &'a ShellInternal, key: &BStr) -> Option<Self> {
         let mut strp: *mut c_char = std::ptr::null_mut();
         let key = zsh::metafy(key.into());
 
@@ -85,24 +131,6 @@ impl Shout {
     }
 }
 
-#[derive(Clone)]
-pub struct Shell {
-    shout: Arc<Mutex<Option<Shout>>>,
-    main_thread: std::thread::ThreadId,
-    trampoline: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
-}
-
-impl std::default::Default for Shell {
-    fn default() -> Self {
-        Self {
-            shout: Arc::default(),
-            trampoline: Arc::default(),
-            main_thread: std::thread::current().id(),
-        }
-    }
-}
-
-
 pub fn remove_invisible_chars(string: &CStr) -> std::borrow::Cow<'_, CStr> {
     let bytes = string.to_bytes();
     if bytes.contains(&(zsh::Inpar as _)) || bytes.contains(&(zsh::Outpar as _)) || bytes.contains(&(zsh::Meta as _)) {
@@ -120,10 +148,16 @@ pub fn control_c() -> nix::Result<()> {
     nix::sys::signal::kill(nix::unistd::Pid::from_raw(0), nix::sys::signal::Signal::SIGINT)
 }
 
-crate::TokioActor! {
-    impl Shell {
+#[derive(Clone)]
+pub struct ShellInternal {
+    shout: Arc<Mutex<Option<Shout>>>,
+    main_thread: std::thread::ThreadId,
+}
 
-        pub fn run(&self, func: Box<dyn Send + Fn(&Shell) -> Box<dyn Any + Send>>) -> Box<dyn Any + Send> {
+crate::TokioActor! {
+    impl ShellInternal {
+
+        pub fn run(&self, func: Box<dyn Send + Fn(&ShellInternal) -> Box<dyn Any + Send>>) -> Box<dyn Any + Send> {
             func(self)
         }
 

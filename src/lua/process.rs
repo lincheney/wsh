@@ -64,7 +64,6 @@ impl UserData for CommandResult {
 
 struct Zpty {
     name: String,
-    shell: Arc<crate::shell::ShellClient>,
     dropped: Option<oneshot::Sender<()>>,
 }
 
@@ -255,7 +254,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
             let stdout = proc.stdout.take().map(|s| ReadableFile(Some(BufReader::new(s))));
             let stderr = proc.stderr.take().map(|s| ReadableFile(Some(BufReader::new(s))));
             let _ = result_sender.take().unwrap().send(Ok((pid, stdin, stdout, stderr)));
-            let code = crate::shell::wait_for_pid(pid as _, &ui.shell).await.unwrap();
+            let code = crate::signals::wait_for_pid(pid as _, &ui.shell).await.unwrap();
 
             // ignore error
             let _ = sender.send(Some(Ok(code as _)));
@@ -435,7 +434,7 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
                     // send streams back to caller
                     let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
 
-                    crate::shell::wait_for_pid(pid as _, &ui.shell).await.unwrap() as _
+                    crate::signals::wait_for_pid(pid as _, &ui.shell).await.unwrap() as _
                 },
             };
 
@@ -517,11 +516,10 @@ async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     };
 
     let dropped = oneshot::channel();
-    let shell = ui.shell.clone();
     let zpty_name = name.clone().into();
     let pid = zpty.pid;
     tokio::task::spawn(async move {
-        let code = crate::shell::wait_for_pid(pid as _, &ui.shell).await.unwrap();
+        let code = crate::signals::wait_for_pid(pid as _, &ui.shell).await.unwrap();
         // send the code out
         let _ = sender.send(Some(Ok(code as _)));
 
@@ -533,7 +531,7 @@ async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         Process{
             pid,
             result: CommandResult{ inner: receiver },
-            zpty: Some(Zpty{ shell, name, dropped: Some(dropped.0) }),
+            zpty: Some(Zpty{ name, dropped: Some(dropped.0) }),
         },
         pty,
     ))?)

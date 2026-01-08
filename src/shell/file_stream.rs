@@ -9,7 +9,7 @@ unsafe extern "C" {
     static mut stderr: *mut nix::libc::FILE;
 }
 
-struct Sink {
+pub struct Sink {
     reader: Option<pipe::Receiver>,
     #[allow(dead_code)]
     writer: pipe::Sender,

@@ -79,7 +79,8 @@ pub async fn wait_for_pid(pid: i32, shell: &crate::shell::ShellClient) -> Option
     }
 }
 
-pub fn setup() -> Result<()> {
+pub fn init() -> Result<()> {
+    // spawn tasks to take care of signals
     let (reader, writer) = std::io::pipe()?;
     crate::utils::set_nonblocking_fd(&writer)?;
     crate::utils::set_nonblocking_fd(&reader)?;

@@ -172,4 +172,14 @@ impl EventStream {
         }
 
     }
+
+    pub fn spawn(self, ui: &crate::ui::Ui) {
+        // spawn a task to take care of keyboard input
+        let ui = ui.clone();
+        tokio::task::spawn(async move {
+            let tty = std::fs::File::open("/dev/tty").unwrap();
+            crate::utils::set_nonblocking_fd(&tty).unwrap();
+            self.run(tty, ui).await.unwrap();
+        });
+    }
 }
