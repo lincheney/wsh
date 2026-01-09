@@ -5,17 +5,19 @@ use std::sync::{Mutex, Condvar, MutexGuard, atomic::{AtomicUsize, Ordering}};
 #[cfg(debug_assertions)]
 pub mod tracing {
     use std::collections::HashMap;
-    use std::sync::Mutex;
+    use std::sync::LazyLock;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
     pub static MAP: Mutex<Option<HashMap<usize, String>>> = Mutex::new(None);
 
     pub struct TraceKey(usize);
 
     impl TraceKey {
         pub fn new() -> Self {
+            let key = COUNTER.fetch_add(1, Ordering::AcqRel);
             let mut map = MAP.lock().unwrap();
             let map = map.get_or_insert_default();
-            let key = map.len();
             map.insert(key, std::backtrace::Backtrace::force_capture().to_string());
             Self(key)
         }
