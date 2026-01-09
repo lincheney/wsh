@@ -6,7 +6,7 @@ pub struct Mutex<T>(tokio::sync::Mutex<T>);
 #[derive(Default)]
 pub struct RwLock<T>(tokio::sync::RwLock<T>);
 
-const DEFAULT_DURATION: Duration = Duration::from_millis(1000);
+pub const DEFAULT_DURATION: Duration = Duration::from_millis(1000);
 
 fn block_on<F: Future>(future: F) -> F::Output {
     if let Ok(handle) = tokio::runtime::Handle::try_current() {

@@ -103,7 +103,18 @@ impl RawForkLock {
                 // remove ourselves while we wait
                 self.remove_reader();
                 // wait until writer releases the lock
-                lock = self.condvar.wait_while(lock, |()| self.has_writer()).unwrap();
+                let result = self.condvar.wait_timeout_while(
+                    lock,
+                    crate::timed_lock::DEFAULT_DURATION,
+                    |()| self.has_writer(),
+                ).unwrap();
+
+                if result.1.timed_out() {
+                    panic!("timed out waiting for fork lock read");
+                }
+
+                lock = result.0;
+
                 // add ourselves back in
                 self.counter.fetch_add(2, Ordering::AcqRel);
             }
@@ -126,7 +137,18 @@ impl RawForkLock {
         if value > 1 {
             // there are readers in there first
             // wait until readers release the lock
-            lock = self.condvar.wait_while(lock, |()| self.counter.load(Ordering::Acquire) > 1).unwrap();
+            let result = self.condvar.wait_timeout_while(
+                lock,
+                crate::timed_lock::DEFAULT_DURATION,
+                |()| self.counter.load(Ordering::Acquire) > 1,
+            ).unwrap();
+
+            if result.1.timed_out() {
+                tracing::debug();
+                panic!("timed out waiting for fork lock write");
+            }
+
+            lock = result.0;
         }
 
         RawForkLockWriteGuard{ parent: self, lock }
