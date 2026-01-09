@@ -43,13 +43,13 @@ pub struct HighlightedRange<T> {
 impl<T> HighlightedRange<T> {
     fn shift(&mut self, range: Range<usize>, new_end: usize) {
         if range.end <= self.start {
-            self.start = self.start + new_end - range.end;
+            self.start = self.start.saturating_add(new_end) - range.end;
         } else if range.start <= self.start {
             self.start = new_end;
         }
 
         if range.end < self.end {
-            self.end = self.end + new_end - range.end;
+            self.end = self.end.saturating_add(new_end) - range.end;
         } else if range.start < self.end {
             self.end = new_end;
         }

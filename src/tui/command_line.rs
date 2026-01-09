@@ -73,14 +73,14 @@ impl CommandLine<'_> {
         self.draw_end_pos = (0, 0);
     }
 
-    pub async fn refresh_display_string(&mut self, name: &str, namespace: usize) -> Option<BString> {
+    pub async fn refresh_display_string(&mut self, name: &str, pos: usize, namespace: usize) -> Option<BString> {
         let text = self.shell.get_var_as_string(name.into(), true).await.unwrap();
         self.buffer.clear_highlights_in_namespace(namespace);
         if let Some(text) = &text && !text.is_empty() {
             self.buffer.add_highlight(HighlightedRange {
                 lineno: 0,
-                start: 0,
-                end: 0,
+                start: pos,
+                end: pos,
                 inner: Highlight {
                     style: Default::default(),
                     blend: true,
@@ -105,10 +105,10 @@ impl CommandLine<'_> {
         }
 
         if self.predisplay_dirty {
-            self.refresh_display_string("PREDISPLAY", PREDISPLAY_NS).await;
+            self.refresh_display_string("PREDISPLAY", PREDISPLAY_NS, 0).await;
         }
         if self.postdisplay_dirty {
-            self.refresh_display_string("POSTDISPLAY", POSTDISPLAY_NS).await;
+            self.refresh_display_string("POSTDISPLAY", POSTDISPLAY_NS, usize::MAX).await;
         }
 
         // self.predisplay.get_size(area.width, new_prompt_size.0);
@@ -147,8 +147,8 @@ impl CommandLine<'_> {
             // also record where is the cursor
             let cursor = self.buffer.cursor_byte_pos();
             let mut cursor_coord = drawer.get_pos();
-            self.buffer.render(drawer, Some(|drawer: &mut Drawer<W, C>, lineno, _start, end| {
-                if end == cursor && lineno == 0 {
+            self.buffer.render(drawer, Some(|drawer: &mut Drawer<W, C>, lineno, start, end| {
+                if end == cursor && start != end && lineno == 0 {
                     cursor_coord = drawer.get_pos();
                 }
             }))?;
