@@ -68,7 +68,7 @@ impl EventStream {
         )
     }
 
-    pub async fn run<T: Read+AsRawFd+Send+Sync+'static>(mut self, file: T, mut ui: crate::ui::Ui) -> anyhow::Result<i32> {
+    pub async fn run<T: Read+AsRawFd+Send+Sync+'static>(mut self, file: T, ui: crate::ui::Ui) -> anyhow::Result<i32> {
         let (event_sender, mut event_receiver) = mpsc::unbounded_channel();
         let (pauser, mut is_paused) = watch::channel(false);
         let (position_sender, mut position_receiver) = mpsc::unbounded_channel::<oneshot::Sender<_>>();

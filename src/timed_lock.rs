@@ -7,7 +7,7 @@ pub struct Mutex<T>(tokio::sync::Mutex<T>);
 pub struct RwLock<T> {
     inner: tokio::sync::RwLock<T>,
     #[cfg(debug_assertions)]
-    debug: std::sync::Mutex<String>,
+    debug: std::sync::Mutex<(&'static str, String)>,
 }
 
 pub const DEFAULT_DURATION: Duration = Duration::from_millis(1000);
@@ -52,13 +52,19 @@ impl<T> RwLock<T> {
         Self{
             inner: tokio::sync::RwLock::new(inner),
             #[cfg(debug_assertions)]
-            debug: std::sync::Mutex::new("".into()),
+            debug: std::sync::Mutex::new(("", "".into())),
         }
     }
 
     #[cfg(debug_assertions)]
-    fn record_debug(&self, name: &str) {
-        *self.debug.lock().unwrap() = format!("{}: {}", name, std::backtrace::Backtrace::force_capture());
+    fn record_debug(&self, name: &'static str) {
+        *self.debug.lock().unwrap() = (name, std::backtrace::Backtrace::force_capture().to_string());
+    }
+
+    #[cfg(debug_assertions)]
+    fn print_debug(&self) {
+        let (typ, bt) = &*self.debug.lock().unwrap();
+        ::log::debug!("DEBUG(freda) \t{}\t= {}", typ, bt);
     }
 
     pub async fn read(&self) -> tokio::sync::RwLockReadGuard<'_, T> {
@@ -77,8 +83,7 @@ impl<T> RwLock<T> {
                 x
             },
             e => {
-                #[cfg(debug_assertions)]
-                ::log::debug!("DEBUG(uneven)\t{}\t= {}", stringify!(self.debug), self.debug.lock().unwrap());
+                self.print_debug();
                 e.unwrap()
             },
         }
@@ -92,8 +97,7 @@ impl<T> RwLock<T> {
                 x
             },
             e => {
-                #[cfg(debug_assertions)]
-                ::log::debug!("DEBUG(freda) \t{}\t= {}", stringify!(self.debug), self.debug.lock().unwrap());
+                self.print_debug();
                 e.unwrap()
             },
         }
