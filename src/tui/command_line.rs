@@ -148,7 +148,7 @@ impl CommandLine<'_> {
             let cursor = self.buffer.cursor_byte_pos();
             let mut cursor_coord = drawer.get_pos();
             self.buffer.render(drawer, Some(|drawer: &mut Drawer<W, C>, lineno, start, end| {
-                if end == cursor && start != end && lineno == 0 {
+                if end == cursor && lineno == 0 {
                     cursor_coord = drawer.get_pos();
                 }
             }))?;
