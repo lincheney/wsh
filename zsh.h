@@ -244,3 +244,6 @@ Watch_fd watch_fds;
 int nwatch;		/* Number of fd's we are watching */
 void
 zlecallhook(char *name, char *arg);
+
+void
+free_prepostdisplay(void);

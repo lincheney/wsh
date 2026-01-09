@@ -181,6 +181,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                 zsh::done = 0;
                 zsh::lpromptbuf = crate::EMPTY_STR.as_ptr().cast_mut();
                 zsh::rpromptbuf = crate::EMPTY_STR.as_ptr().cast_mut();
+                zsh::free_prepostdisplay();
                 zsh::zlereadflags = *(flags_ptr as *const c_int);
                 zsh::histline = zsh_sys::curhist as _;
                 zsh::selectkeymap(keymap.as_mut_ptr().cast(), 1);
