@@ -6,6 +6,7 @@ local history = nil
 
 wish.add_event_callback('accept_line', function()
     history = nil
+    wish.clear_buf_highlights(NAMESPACE)
 end)
 
 wish.add_event_callback('buffer_change', function()
