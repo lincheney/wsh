@@ -61,7 +61,7 @@ impl CommandLine<'_> {
     }
 
     pub fn get_height(&self) -> usize {
-        self.draw_end_pos.1 as usize
+        self.draw_end_pos.1 as usize + 1
     }
 
     pub fn reset(&mut self) {
@@ -99,11 +99,6 @@ impl CommandLine<'_> {
         }
         let new_prompt_size = self.prompt.get_size();
 
-        // if the prompt width has changed, we redraw buffer as it may wrap differently
-        if new_prompt_size.0 != old_prompt_size.0 {
-            self.buffer.dirty = true;
-        }
-
         if self.predisplay_dirty {
             self.refresh_display_string("PREDISPLAY", PREDISPLAY_NS, 0).await;
         }
@@ -111,17 +106,10 @@ impl CommandLine<'_> {
             self.refresh_display_string("POSTDISPLAY", POSTDISPLAY_NS, usize::MAX).await;
         }
 
-        // self.predisplay.get_size(area.width, new_prompt_size.0);
-
-        if !self.buffer.dirty && new_prompt_size.1 != old_prompt_size.1 {
-            self.cursor_coord.1 = self.cursor_coord.1.saturating_sub(old_prompt_size.1) + new_prompt_size.1;
-            self.draw_end_pos.1 = self.draw_end_pos.1.saturating_sub(old_prompt_size.1) + new_prompt_size.1;
-        }
-
-        if self.buffer.dirty {
+        if self.buffer.dirty || new_prompt_size != old_prompt_size {
             let (width, height) = self.buffer.get_size(area.width as _, new_prompt_size.0 as _);
-            // there is up 1 overlapping line
-            self.draw_end_pos = (width as _, height.saturating_sub(1) as u16 + new_prompt_size.1);
+            // there is 1 overlapping line
+            self.draw_end_pos = (width as _, (height as u16 + new_prompt_size.1).saturating_sub(2));
         }
     }
 

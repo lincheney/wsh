@@ -221,7 +221,7 @@ impl<T> Text<T> {
     }
 
     pub fn get_size(&self, width: usize, initial_indent: usize) -> (usize, usize) {
-        let mut pos = (0, 0);
+        let mut pos = (initial_indent, 0);
 
         for (lineno, line) in self.lines.iter().enumerate() {
             let highlights = self.highlights.iter().filter(|h| h.lineno == lineno);
