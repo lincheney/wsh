@@ -5,7 +5,7 @@ use std::sync::{Mutex, Condvar, MutexGuard, atomic::{AtomicUsize, Ordering}};
 #[cfg(debug_assertions)]
 pub mod tracing {
     use std::collections::HashMap;
-    use std::sync::LazyLock;
+    use std::sync::{Mutex};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     static COUNTER: AtomicUsize = AtomicUsize::new(0);

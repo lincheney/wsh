@@ -87,7 +87,7 @@ async fn redraw(ui: Ui, lua: Lua, val: Option<LuaValue>) -> Result<()> {
         let ui = ui.get();
         let mut ui = ui.inner.borrow_mut().await;
         if val.all { ui.dirty = true; }
-        if val.prompt { ui.prompt.dirty = true; }
+        if val.prompt { ui.cmdline.prompt.dirty = true; }
         if val.buffer { ui.buffer.dirty = true; }
         if val.messages { ui.tui.dirty = true; }
         if val.status_bar { ui.status_bar.dirty = true; }

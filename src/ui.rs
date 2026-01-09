@@ -44,13 +44,13 @@ enum KeybindOutput {
 
 pub struct UiInner {
     pub tui: crate::tui::Tui,
+    pub cmdline: crate::tui::command_line::CommandLineState,
 
     pub dirty: bool,
     pub keybinds: Vec<crate::lua::KeybindMapping>,
     pub keybind_layer_counter: usize,
 
     pub buffer: crate::buffer::Buffer,
-    pub prompt: crate::prompt::Prompt,
     pub status_bar: crate::tui::status_bar::StatusBar,
 
     pub stdout: std::io::Stdout,
@@ -107,8 +107,8 @@ impl Ui {
         let mut ui = UiInner{
             dirty: true,
             tui: Default::default(),
+            cmdline: Default::default(),
             buffer: crate::buffer::Buffer::new(),
-            prompt: crate::prompt::Prompt::new(None),
             status_bar: Default::default(),
             keybinds: Default::default(),
             keybind_layer_counter: Default::default(),
@@ -170,17 +170,16 @@ impl Ui {
         let mut ui = this.inner.borrow_mut().await;
         let ui = &mut *ui;
 
-        if !(ui.dirty || ui.buffer.dirty || ui.prompt.dirty || ui.tui.dirty || ui.status_bar.dirty) {
+        if !(ui.dirty || ui.buffer.dirty || ui.tui.dirty || ui.status_bar.dirty) {
             return Ok(())
         }
 
         ui.size = crossterm::terminal::size()?;
+        let cmdline = ui.cmdline.into_command_line(&self.shell, &mut ui.buffer);
         ui.tui.draw(
             &mut ui.stdout,
             ui.size,
-            &self.shell,
-            &mut ui.prompt,
-            &mut ui.buffer,
+            cmdline,
             &mut ui.status_bar,
             ui.dirty,
         ).await?;
@@ -693,7 +692,7 @@ impl UiInner {
         self.deactivate()?;
         self.dirty = true;
         // move to last line of buffer
-        let y_offset = self.buffer.draw_end_pos.1 - self.buffer.cursor_coord.1;
+        let y_offset = self.cmdline.y_offset_to_end();
         execute!(
             self.stdout,
             BeginSynchronizedUpdate,

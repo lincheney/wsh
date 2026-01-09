@@ -15,14 +15,15 @@ use ratatui::{
     style::*,
     buffer::Buffer,
 };
-mod backend;
+mod drawer;
 mod wrap;
 mod scroll;
 pub mod widget;
+pub mod command_line;
 pub mod status_bar;
 pub mod ansi;
 pub mod text;
-pub use backend::{Drawer, Canvas};
+pub use drawer::{Drawer, Canvas};
 
 pub struct MoveUp(pub u16);
 impl crossterm::Command for MoveUp {
@@ -230,9 +231,9 @@ impl Tui {
             let mut writer = Cursor::new(&mut string);
             // always start with a reset
             writer.write_all(b"\x1b[0m").unwrap();
-            let mut canvas = backend::DummyCanvas::default();
+            let mut canvas = drawer::DummyCanvas::default();
             canvas.size = (width, u16::MAX);
-            let mut drawer = backend::Drawer::new(&mut canvas, &mut writer, (0, 0));
+            let mut drawer = drawer::Drawer::new(&mut canvas, &mut writer, (0, 0));
             let mut border_buffer = Buffer::default();
 
             widget.render(&mut drawer, &mut border_buffer, None).unwrap();
@@ -262,19 +263,23 @@ impl Tui {
         &mut self,
         writer: &mut W,
         (width, height): (u16, u16),
-        shell: &crate::shell::ShellClient,
-        prompt: &mut crate::prompt::Prompt,
-        buffer: &mut crate::buffer::Buffer,
+        mut cmdline: command_line::CommandLine<'_>,
         status_bar: &mut status_bar::StatusBar,
-        clear: bool,
+        mut clear: bool,
     ) -> Result<()> {
 
-        let mut dirty = clear;
+        // take up at most 2/3 of the screen
+        let max_height = (height * 2 / 3).max(1);
+        // redraw all if dimensions have changed
+        if max_height != self.max_height || width != self.buffer.area.width {
+            self.max_height = max_height;
+            clear = true;
+        }
+
         if clear {
             self.reset();
-            buffer.cursor_coord = (0, 0);
-            buffer.draw_end_pos = (0, 0);
-            status_bar.dirty = true;
+            cmdline.reset();
+            status_bar.reset();
             queue!(
                 writer,
                 cursor::MoveToColumn(0),
@@ -282,57 +287,49 @@ impl Tui {
             )?;
         }
 
-        // take up at most 2/3 of the screen
-        let max_height = (height * 2 / 3).max(1);
-        // reset all if dimensions have changed
-        if max_height != self.max_height || width != self.buffer.area.width {
-            self.max_height = max_height;
-            dirty = true;
-        }
-
         // resize buffers
         let area = Rect{x: 0, y: 0, width, height: self.max_height};
         self.buffer.resize(area);
 
         // quit early if nothing is dirty
-        if !dirty && !prompt.dirty && !buffer.dirty && !self.dirty && !status_bar.dirty {
+        if !clear && !cmdline.is_dirty() && !self.dirty && !status_bar.dirty {
             return Ok(())
         }
 
         // old heights
-        let mut old_buffer_height = (prompt.height + buffer.draw_end_pos.1) as usize;
+        let mut old_cmdline_height = cmdline.get_height();
         let mut old_widgets_height = self.widgets.get_height() as usize;
         let mut old_status_bar_height = status_bar.inner.as_ref().map_or(0, |w| w.line_count) as usize;
         if clear {
-            old_buffer_height = 0;
+            old_cmdline_height = 0;
             old_widgets_height = 0;
             old_status_bar_height = 0;
         }
 
-        let old_height = old_buffer_height + old_widgets_height + old_status_bar_height;
+        let old_height = old_cmdline_height + old_widgets_height + old_status_bar_height;
 
         // refresh the widgets etc
-        if status_bar.dirty {
-            status_bar.refresh(area);
+        if cmdline.is_dirty() {
+            cmdline.refresh(area).await;
         }
         if self.dirty {
             self.widgets.refresh(Rect{ height: max_height.saturating_sub(status_bar.get_height()), ..area });
         }
-        if prompt.dirty {
-            prompt.refresh_prompt(shell, area.width).await;
+        if status_bar.dirty {
+            status_bar.refresh(area);
         }
 
         // new heights
-        let new_buffer_height = prompt.height as usize + buffer.get_height_for_width(area.width as _, prompt.width as _).max(1) - 1;
-        let new_status_bar_height = status_bar.get_height() as usize;
+        let new_cmdline_height = cmdline.get_height();
         let new_widgets_height = self.widgets.get_height() as usize;
-        let new_height = new_buffer_height + new_widgets_height + new_status_bar_height;
+        let new_status_bar_height = status_bar.get_height() as usize;
+        let new_height = new_cmdline_height + new_widgets_height + new_status_bar_height;
 
-        let mut drawer = backend::Drawer::new(&mut self.buffer, writer, buffer.cursor_coord);
+        let mut drawer = drawer::Drawer::new(&mut self.buffer, writer, cmdline.cursor_coord);
         queue!(drawer.writer, crossterm::terminal::BeginSynchronizedUpdate)?;
         drawer.reset_colours()?;
 
-        if (self.prev_status_bar_position < new_buffer_height + new_widgets_height) || old_status_bar_height > new_status_bar_height {
+        if (self.prev_status_bar_position < new_cmdline_height + new_widgets_height) || old_status_bar_height > new_status_bar_height {
             if !clear && old_status_bar_height > 0 {
                 // we don't know where exactly the status bar is,
                 // but it possibly overlaps with the new drawing area
@@ -342,7 +339,7 @@ impl Tui {
                 // it now needs to be redrawn
                 status_bar.dirty = true;
             }
-            self.prev_status_bar_position = self.prev_status_bar_position.max(new_buffer_height + new_widgets_height);
+            self.prev_status_bar_position = self.prev_status_bar_position.max(new_cmdline_height + new_widgets_height);
         }
 
         // allocate more height
@@ -352,33 +349,23 @@ impl Tui {
             status_bar.dirty = true;
         }
 
-        // redraw the prompt
-        if dirty || prompt.dirty {
-            // move back to top of drawing area and redraw
-            drawer.move_to((0, 0));
-            drawer.write_raw(prompt.as_bytes(), (prompt.width, prompt.height - 1))?;
-        }
-
-        // redraw the buffer
-        if dirty || buffer.dirty {
-            // draw buffer starting from end of prompt
-            drawer.move_to((prompt.width, prompt.height - 1));
-            buffer.render(&mut drawer)?;
-        }
+        // move back to top of drawing area
+        drawer.move_to((0, 0));
+        cmdline.render(&mut drawer, clear)?;
 
         // redraw the widgets
-        // if buffer height has changed then the widgets get repositioned
-        if (dirty || self.dirty || old_buffer_height != new_buffer_height) && new_widgets_height > 0 {
+        // if cmdline height has changed then the widgets get repositioned
+        if (clear || self.dirty || old_cmdline_height != new_cmdline_height) && new_widgets_height > 0 {
             // go to next line after end of buffer
-            drawer.move_to(buffer.draw_end_pos);
+            drawer.move_to(cmdline.draw_end_pos);
             drawer.goto_newline(None)?;
             self.widgets.render(&mut drawer, &mut self.border_buffer, Rect{ height: new_widgets_height as u16, ..area})?;
         }
 
         // the prompt/buffer/widgets used to be bigger, so clear the extra bits
-        let trailing_height = (old_buffer_height + old_widgets_height).saturating_sub(new_buffer_height + new_widgets_height);
+        let trailing_height = (old_cmdline_height + old_widgets_height).saturating_sub(new_cmdline_height + new_widgets_height);
         if trailing_height > 0 {
-            drawer.move_to((area.width, (new_buffer_height + new_widgets_height - 1) as _));
+            drawer.move_to((area.width, (new_cmdline_height + new_widgets_height - 1) as _));
             for _ in 0 .. trailing_height {
                 drawer.goto_newline(None)?;
             }
@@ -386,9 +373,9 @@ impl Tui {
         }
 
         // go back to the cursor
-        drawer.move_to_pos(buffer.cursor_coord)?;
+        drawer.move_to_pos(cmdline.cursor_coord)?;
 
-        if new_status_bar_height > 0 && (dirty || status_bar.dirty) && let Some(widget) = &status_bar.inner {
+        if new_status_bar_height > 0 && (clear || status_bar.dirty) && let Some(widget) = &status_bar.inner {
             // save cursor position so we can go back to it
             queue!(drawer.writer, cursor::SavePosition)?;
 
@@ -415,8 +402,7 @@ impl Tui {
         execute!(writer, crossterm::terminal::EndSynchronizedUpdate)?;
 
         self.dirty = false;
-        prompt.dirty = false;
-        buffer.dirty = false;
+        cmdline.set_is_dirty(false);
         status_bar.dirty = false;
         Ok(())
     }

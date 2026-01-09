@@ -119,9 +119,8 @@ impl Widget {
         self.inner.render(
             drawer,
             self.block.as_ref().map(|block| (block, buffer)),
-            None,
             max_height.map(|w| (w, super::text::Scroll{ show_scrollbar: true, position: super::scroll::ScrollPosition::StickyBottom } )),
-        ).map(|_| ())
+        )
     }
 
     pub(super) fn get_height_for_width(&self, mut area: Rect) -> u16 {
@@ -141,7 +140,7 @@ impl Widget {
             area = inner;
         }
 
-        height = height.max(self.inner.get_height_for_width(area.width as _, 0) as _);
+        height = height.max(self.inner.get_size(area.width as _, 0).1 as _);
 
         if self.border_show_empty || height > 0 {
             height += border_height;

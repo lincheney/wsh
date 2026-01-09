@@ -18,8 +18,9 @@ impl Wrapper<'_> {
         if self.width > self.max_width {
             // wrap
             self.width = width;
-            self.prev_range = (self.prev_range.1, new_end);
-            Some((self.prev_range, old_width))
+            let old_range = self.prev_range;
+            self.prev_range = (old_range.1, new_end);
+            Some((old_range, old_width))
         } else {
             None
         }

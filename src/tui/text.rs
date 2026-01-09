@@ -218,8 +218,15 @@ impl<T> Text<T> {
         self.dirty = true;
     }
 
-    pub fn get_height_for_width(&self, width: usize, initial_indent: usize) -> usize {
-        self.lines.iter().flat_map(|line| super::wrap::wrap(line.as_ref(), width, initial_indent)).count()
+    pub fn get_size(&self, width: usize, initial_indent: usize) -> (usize, usize) {
+        let last = self.lines.iter()
+            .flat_map(|line| super::wrap::wrap(line.as_ref(), width, initial_indent))
+            .enumerate()
+            .last();
+        match last {
+            Some((i, (_, w))) => (w, i + 1),
+            None => (0, 0),
+        }
     }
 
     fn make_line_cells<E, F: FnMut(usize, usize, Option<(&str, Style)>) -> Result<(), E>>(
@@ -280,18 +287,17 @@ impl<T> Text<T> {
         }
     }
 
-    pub fn render_line<W :Write, C: Canvas>(
+    pub fn render_line<W :Write, C: Canvas, F: FnMut(&mut Drawer<W, C>, usize, usize, usize)>(
         &self,
         lineno: usize,
         line: &BStr,
         range: (usize, usize),
         drawer: &mut Drawer<W, C>,
-        marker: Option<(usize, usize)>,
-    ) -> std::io::Result<Option<(u16, u16)>> {
+        mut callback: Option<F>,
+    ) -> std::io::Result<()> {
 
-        let mut marker_pos = None;
         let mut cell = Cell::EMPTY;
-        self.make_line_cells(lineno, line, range, |_start, end, data| {
+        self.make_line_cells(lineno, line, range, |start, end, data| {
             let result = if let Some((symbol, style)) = data {
                 cell.reset();
                 cell.set_symbol(symbol);
@@ -300,12 +306,11 @@ impl<T> Text<T> {
             } else {
                 Ok(())
             };
-            if Some((lineno, end)) == marker {
-                marker_pos = Some(drawer.get_pos());
+            if let Some(callback) = &mut callback {
+                callback(drawer, lineno, start, end);
             }
             result
-        })?;
-        Ok(marker_pos)
+        })
     }
 
     pub fn get_alignment_indent(&self, max_width: usize, line_width: usize) -> usize {
@@ -319,11 +324,19 @@ impl<T> Text<T> {
     pub fn render<W :Write, C: Canvas>(
         &self,
         drawer: &mut Drawer<W, C>,
-        mut block: Option<(&Block<'_>, &mut Buffer)>,
-        marker: Option<(usize, usize)>,
+        block: Option<(&Block<'_>, &mut Buffer)>,
         max_height: Option<(usize, Scroll)>,
+    ) -> std::io::Result<()> {
+        self.render_with_callback::<W, C, fn(&mut Drawer<W, C>, usize, usize, usize)>(drawer, block, max_height, None)
+    }
 
-    ) -> std::io::Result<(u16, u16)> {
+    pub fn render_with_callback<W :Write, C: Canvas, F: FnMut(&mut Drawer<W, C>, usize, usize, usize)>(
+        &self,
+        drawer: &mut Drawer<W, C>,
+        mut block: Option<(&Block<'_>, &mut Buffer)>,
+        max_height: Option<(usize, Scroll)>,
+        mut callback: Option<F>,
+    ) -> std::io::Result<()> {
 
         struct Borders<'a> {
             top: &'a [Cell],
@@ -355,7 +368,6 @@ impl<T> Text<T> {
             None
         };
 
-        let mut marker_pos = drawer.get_pos();
         let (max_height, scroll) = if let Some((max_height, scroll)) = max_height {
             (max_height, scroll)
         } else {
@@ -424,9 +436,13 @@ impl<T> Text<T> {
             }
 
             // draw the line
-            if let Some(pos) = self.render_line(lineno, self.lines[lineno][range.0 .. range.1].as_ref(), range, drawer, marker)? {
-                marker_pos = pos;
-            }
+            self.render_line(
+                lineno,
+                self.lines[lineno][range.0 .. range.1].as_ref(),
+                range,
+                drawer,
+                callback.as_mut(),
+            )?;
 
             // draw the scrollbar
             if let Some((scrollbar_range, cell)) = &scrollbar_range && scrollbar_range.contains(&i) {
@@ -461,7 +477,7 @@ impl<T> Text<T> {
 
         drawer.clear_to_end_of_line(need_newline.unwrap_or(None))?;
 
-        Ok(marker_pos)
+        Ok(())
     }
 
 }

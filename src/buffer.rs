@@ -23,8 +23,6 @@ pub struct Buffer {
     saved_cursor: usize,
 
     pub dirty: bool,
-    pub draw_end_pos: (u16, u16),
-    pub cursor_coord: (u16, u16),
     pub highlight_counter: usize,
     pub height: usize,
 }
@@ -49,8 +47,8 @@ impl Buffer {
         self.contents.retain_highlights(func);
     }
 
-    pub fn get_height_for_width(&self, width: usize, initial_indent: usize) -> usize {
-        self.contents.get_height_for_width(width, initial_indent)
+    pub fn get_size(&self, width: usize, initial_indent: usize) -> (usize, usize) {
+        self.contents.get_size(width, initial_indent)
     }
 
     fn get_len(&mut self) -> usize {
@@ -186,7 +184,6 @@ impl Buffer {
         self.history_index = 0;
         self.height = 0;
         self.cursor = 0;
-        self.cursor_coord = (0, 0);
         self.saved_contents.clear();
         self.saved_cursor = 0;
         self.dirty = true;
@@ -204,11 +201,12 @@ impl Buffer {
         self.byte_pos(self.cursor)
     }
 
-    pub fn render<W: Write, C: Canvas>(&mut self, drawer: &mut Drawer<W, C>) -> std::io::Result<()> {
-        let cursor = self.cursor_byte_pos();
-        self.cursor_coord = self.contents.render(drawer, None, Some((0, cursor)), None)?;
-        self.draw_end_pos = drawer.get_pos();
-        Ok(())
+    pub fn render<W :Write, C: Canvas, F: FnMut(&mut Drawer<W, C>, usize, usize, usize)>(
+        &self,
+        drawer: &mut Drawer<W, C>,
+        callback: Option<F>,
+    ) -> std::io::Result<()> {
+        self.contents.render_with_callback(drawer, None, None, callback)
     }
 
 }
