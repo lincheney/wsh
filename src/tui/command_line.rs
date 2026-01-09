@@ -89,7 +89,8 @@ impl CommandLine<'_> {
         let mut prompt_end = self.prompt.get_size();
         if prompt_end.0 >= drawer.term_width() {
             // wrap to next line
-            prompt_end = (0, prompt_end.1 + 1);
+        } else {
+            prompt_end.1 -= 1;
         }
 
         // redraw the prompt
