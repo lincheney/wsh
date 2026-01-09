@@ -177,7 +177,9 @@ impl EventStream {
                     let _ = result.send(());
                 },
                 InputMessage::Draw => {
-                    ui.try_draw().await;
+                    // run in another thread so we don't block cursor requests etc
+                    let mut ui = ui.clone();
+                    tokio::task::spawn(async move { ui.try_draw().await });
                 },
             }
         }

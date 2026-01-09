@@ -473,7 +473,7 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
         }
 
         if foreground && ! drawn {
-            ui.try_draw().await;
+            ui.queue_draw();
         }
 
     });
