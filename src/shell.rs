@@ -265,6 +265,14 @@ crate::TokioActor! {
             }
         }
 
+        pub fn get_var_as_string(&self, name: BString) -> anyhow::Result<Option<BString>> {
+            if let Some(mut v) = Variable::get(CString::new(name)?) {
+                Ok(Some(v.as_bytes()))
+            } else {
+                Ok(None)
+            }
+        }
+
         pub fn startparamscope(&self) {
             unsafe{ zsh_sys::startparamscope() }
         }

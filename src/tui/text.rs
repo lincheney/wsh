@@ -1,16 +1,16 @@
-use std::io::{Write, Cursor};
+use std::io::{Write};
 use std::ops::Range;
 use bstr::{BStr, BString, ByteVec, ByteSlice};
 use unicode_width::UnicodeWidthStr;
-use ratatui::style::{Style, Color};
+use ratatui::style::{Style};
 use ratatui::text::{Line, Span};
 use ratatui::layout::{Alignment, Rect};
 use ratatui::widgets::{Block, WidgetRef};
 use ratatui::buffer::{Buffer, Cell};
 use crate::tui::{Drawer, Canvas};
+use super::wrap::WrapToken;
 
 pub(super) const TAB_WIDTH: usize = 4;
-const ESCAPE_STYLE: Style = Style::new().fg(Color::Gray);
 const SCROLLBAR_CHAR: &str = "▕";
 
 #[derive(Debug, Clone)]
@@ -18,6 +18,7 @@ pub struct Highlight<T> {
     pub style: Style,
     pub blend: bool,
     pub namespace: T,
+    pub virtual_text: Option<String>,
 }
 
 impl<T: Default> From<Style> for Highlight<T> {
@@ -26,6 +27,7 @@ impl<T: Default> From<Style> for Highlight<T> {
             style,
             blend: true,
             namespace: T::default(),
+            virtual_text: None,
         }
     }
 }
@@ -56,7 +58,7 @@ impl<T> HighlightedRange<T> {
     }
 
     fn is_empty(&self) -> bool {
-        self.start == self.end
+        self.start == self.end && self.inner.virtual_text.is_none()
     }
 
     pub fn namespace(&self) -> &T {
@@ -65,7 +67,7 @@ impl<T> HighlightedRange<T> {
 }
 
 
-fn merge_highlights<'a, T: 'a, I: Iterator<Item=&'a Highlight<T>>>(init: Style, iter: I) -> Style {
+pub fn merge_highlights<'a, T: 'a, I: Iterator<Item=&'a Highlight<T>>>(init: Style, iter: I) -> Style {
     let mut style = init;
     for h in iter {
         if !h.blend {
@@ -219,62 +221,26 @@ impl<T> Text<T> {
     }
 
     pub fn get_size(&self, width: usize, initial_indent: usize) -> (usize, usize) {
-        let last = self.lines.iter()
-            .flat_map(|line| super::wrap::wrap(line.as_ref(), width, initial_indent))
-            .enumerate()
-            .last();
-        match last {
-            Some((i, (_, w))) => (w, i + 1),
-            None => (0, 0),
-        }
-    }
+        let mut pos = (0, 0);
 
-    fn make_line_cells<E, F: FnMut(usize, usize, Option<(&str, Style)>) -> Result<(), E>>(
-        &self,
-        lineno: usize,
-        line: &BStr,
-        range: (usize, usize),
-        mut callback: F,
-    ) -> Result<(), E> {
-
-        let mut style = self.style;
-        for (start, end, c) in line[range.0 .. range.1].grapheme_indices() {
-            let start = start + range.0;
-            let end = end + range.0;
-
-            if self.highlights.iter().any(|h| h.lineno == lineno && (h.start == start || h.end == start)) {
-                let highlights = self.highlights.iter()
-                    .filter(|h| h.lineno == lineno && h.start <= start && start < h.end)
-                    .map(|h| &h.inner);
-                style = merge_highlights(self.style, highlights);
-            }
-
-            if c == "\n" {
-                // do nothing
-                callback(start, end, None)?;
-            } else if c == "\t" {
-                for _ in 0 .. TAB_WIDTH {
-                    callback(start, end, Some((" ", style)))?;
+        for (lineno, line) in self.lines.iter().enumerate() {
+            let highlights = self.highlights.iter().filter(|h| h.lineno == lineno);
+            super::wrap::wrap(line.as_ref(), highlights, None, width, initial_indent, |_, _, token, _| {
+                match token {
+                    WrapToken::LineBreak => {
+                        pos = (0, pos.1 + 1);
+                    },
+                    WrapToken::String(s) => {
+                        pos.0 += s.width();
+                    },
                 }
-            } else if c.width() > 0 && c != "\u{FFFD}" {
-                callback(start, end, Some((c, style)))?;
-            } else {
-                // invalid
-                let style = style.patch(ESCAPE_STYLE);
-                let mut cursor = Cursor::new([0; 64]);
-                for c in line[start..end].iter() {
-                    cursor.set_position(0);
-                    write!(cursor, "<u{c:04x}>").unwrap();
-                    let buf = &cursor.get_ref()[..cursor.position() as usize];
-                    for c in buf {
-                        let c = [*c];
-                        let c = std::str::from_utf8(&c).unwrap();
-                        callback(start, end, Some((c, style)))?;
-                    }
-                }
-            }
+            });
         }
-        Ok(())
+
+        if pos != (0, 0) {
+            pos.1 += 1;
+        }
+        pos
     }
 
     pub fn make_default_style_cell(&self) -> Option<Cell> {
@@ -285,32 +251,6 @@ impl<T> Text<T> {
             cell.set_style(self.style);
             Some(cell)
         }
-    }
-
-    pub fn render_line<W :Write, C: Canvas, F: FnMut(&mut Drawer<W, C>, usize, usize, usize)>(
-        &self,
-        lineno: usize,
-        line: &BStr,
-        range: (usize, usize),
-        drawer: &mut Drawer<W, C>,
-        mut callback: Option<F>,
-    ) -> std::io::Result<()> {
-
-        let mut cell = Cell::EMPTY;
-        self.make_line_cells(lineno, line, range, |start, end, data| {
-            let result = if let Some((symbol, style)) = data {
-                cell.reset();
-                cell.set_symbol(symbol);
-                cell.set_style(style);
-                drawer.draw_cell(&cell, false)
-            } else {
-                Ok(())
-            };
-            if let Some(callback) = &mut callback {
-                callback(drawer, lineno, start, end);
-            }
-            result
-        })
     }
 
     pub fn get_alignment_indent(&self, max_width: usize, line_width: usize) -> usize {
@@ -349,6 +289,7 @@ impl<T> Text<T> {
         let full_height = drawer.term_height() as usize;
         let mut area = Rect{ x: 0, y: 0, height: full_height as u16, width: full_width as u16 };
 
+        // setup the borders
         let borders = if let Some((block, ref mut buffer)) = block {
             // 3 lines in case you have borders
             buffer.resize(Rect{ height: 3, ..area });
@@ -394,18 +335,26 @@ impl<T> Text<T> {
 
         let initial = drawer.get_pos().0 as usize % full_width;
         let max_lines = max_height.saturating_sub(border_bottom_height);
-        let scrolled = super::scroll::wrap(&self.lines, area.width as usize, max_lines, initial, scroll.position);
-        max_height -= scrolled.in_view.len();
+        let scrolled = super::scroll::wrap(
+            &self.lines,
+            &self.highlights,
+            Some(self.style),
+            area.width as usize,
+            max_lines,
+            initial,
+            scroll.position,
+        );
+        max_height -= scrolled.range.len();
 
         let scrollbar_range = if scroll.show_scrollbar {
             area.width -= 1;
 
-            let mut start = scrolled.in_view.start * scrolled.in_view.len() / scrolled.ranges.len().max(1);
-            if scrolled.in_view.start > 0 && start == 0 {
+            let mut start = scrolled.range.start * scrolled.range.len() / scrolled.total_line_count.max(1);
+            if scrolled.range.start > 0 && start == 0 {
                 start = 1;
             }
-            let mut end = scrolled.in_view.end * scrolled.in_view.len() / scrolled.ranges.len().max(1);
-            if scrolled.in_view.end < scrolled.ranges.len() && end == scrolled.in_view.len() {
+            let mut end = scrolled.range.end * scrolled.range.len() / scrolled.total_line_count.max(1);
+            if scrolled.range.end < scrolled.total_line_count && end == scrolled.range.len() {
                 end = end.saturating_sub(1);
             }
 
@@ -416,7 +365,7 @@ impl<T> Text<T> {
             None
         };
 
-        for (i, &(lineno, (range, line_width))) in scrolled.ranges[scrolled.in_view].iter().enumerate() {
+        for (i, line) in scrolled.lines().enumerate() {
 
             if let Some(need_newline) = need_newline.take() {
                 drawer.goto_newline(need_newline)?;
@@ -430,19 +379,31 @@ impl<T> Text<T> {
                 }
             }
 
+            let line_width = line.iter()
+                .map(|token| if let WrapToken::String(str) = &token.inner {
+                    str.width()
+                } else {
+                    0
+                }).sum();
+
             // draw the indent
             for _ in 0 .. self.get_alignment_indent(area.width as _, line_width) {
                 drawer.draw_cell(&indent_cell, false)?;
             }
 
             // draw the line
-            self.render_line(
-                lineno,
-                self.lines[lineno][range.0 .. range.1].as_ref(),
-                range,
-                drawer,
-                callback.as_mut(),
-            )?;
+            let mut cell = Cell::EMPTY;
+            for token in line.iter() {
+                if let WrapToken::String(symbol) = &token.inner {
+                    cell.reset();
+                    cell.set_symbol(&symbol);
+                    cell.set_style(token.style.unwrap());
+                    drawer.draw_cell(&cell, false)?;
+                }
+                if let Some(callback) = &mut callback {
+                    callback(drawer, token.lineno, token.start, token.end);
+                }
+            }
 
             // draw the scrollbar
             if let Some((scrollbar_range, cell)) = &scrollbar_range && scrollbar_range.contains(&i) {
@@ -509,18 +470,19 @@ impl<T> From<&Text<T>> for Line<'_> {
         let mut spans = vec![];
         let mut prev_style = Style::new();
         let mut string = String::new();
-        let _: Result<(), ()> = val.make_line_cells(0, line.as_ref(), (0, line.len()), |_, _, cell| {
-            if let Some((str, style)) = cell {
-                if style != prev_style {
-                    if !string.is_empty() {
-                        let new_string = std::mem::take(&mut string);
-                        spans.push(Span::styled(new_string, prev_style));
-                    }
-                    prev_style = style;
+        let highlights = val.highlights.iter().filter(|hl| hl.lineno == 0);
+        super::wrap::wrap(line.into(), highlights, Some(val.style), usize::MAX, 0, |_, _, token, style| {
+            let WrapToken::String(str) = token
+                else { return };
+            let style = style.unwrap();
+            if style != prev_style {
+                if !string.is_empty() {
+                    let new_string = std::mem::take(&mut string);
+                    spans.push(Span::styled(new_string, prev_style));
                 }
-                string.push_str(str);
+                prev_style = style;
             }
-            Ok(())
+            string.push_str(&str);
         });
         if !string.is_empty() {
             spans.push(Span::styled(string, prev_style));

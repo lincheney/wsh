@@ -201,11 +201,7 @@ fn parse_text_parts(parts: TextParts, text: &mut tui::text::Text) {
                 None
             } else {
                 let style: tui::widget::StyleOptions = part.style.style.into();
-                Some(tui::text::Highlight{
-                    style: style.as_style(),
-                    namespace: (),
-                    blend: true,
-                })
+                Some(style.as_style().into())
             };
 
             if let Some(string) = part.text {
@@ -231,11 +227,7 @@ fn parse_text_parts(parts: TextParts, text: &mut tui::text::Text) {
                         None
                     } else {
                         let style: tui::widget::StyleOptions = part.style.style.into();
-                        Some(tui::text::Highlight{
-                            style: style.as_style(),
-                            namespace: (),
-                            blend: true,
-                        })
+                        Some(style.as_style().into())
                     };
 
                     for (i, string) in string.split('\n').enumerate() {
@@ -367,6 +359,7 @@ struct BufferHighlight {
     finish: usize,
     #[serde(flatten)]
     style: BufferStyleOptions,
+    virtual_text: Option<String>,
     namespace: Option<usize>,
 }
 
@@ -384,6 +377,7 @@ async fn add_buf_highlight(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
         inner: tui::text::Highlight{
             style: style.as_style(),
             namespace: hl.namespace.unwrap_or(0),
+            virtual_text: hl.virtual_text,
             blend,
         },
     });

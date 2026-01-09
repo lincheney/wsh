@@ -180,11 +180,7 @@ impl Tui {
         let mut widget = widget::Widget::default();
         widget.inner.clear();
         for line in message.split('\n') {
-            widget.inner.push_line(line.into(), Some(text::Highlight{
-                style: Style::new().fg(Color::Red),
-                namespace: (),
-                blend: true,
-            }));
+            widget.inner.push_line(line.into(), Some(Style::new().fg(Color::Red).into()));
         }
         self.add(widget.into())
     }

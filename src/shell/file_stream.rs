@@ -101,7 +101,6 @@ impl Sink {
                 },
                 sender = flushable.recv(), if allow_flush => {
                     flush_notifier = sender;
-                ::log::debug!("DEBUG(select)\t{}\t= {:?}", stringify!(123), 123);
                     if flush_notifier.is_some() {
                         allow_flush = true;
                         // flush as requested
@@ -114,11 +113,9 @@ impl Sink {
 
             loop {
                 let mut buf = [0; BUF_SIZE];
-                ::log::debug!("DEBUG(idiot) \t{}\t= {:?}", stringify!(123), 123);
                 // Try to read data, this may still fail with `WouldBlock`
                 // if the readiness event is a false positive.
                 let x = reader.read(&mut buf);
-                ::log::debug!("DEBUG(duvets)\t{}\t= {:?}", stringify!(x), x);
                 match x {
                     Ok(n) => if queue.send(Ok((n, buf))).is_err() {
                         return
