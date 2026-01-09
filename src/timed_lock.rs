@@ -4,7 +4,11 @@ use std::time::Duration;
 #[derive(Default)]
 pub struct Mutex<T>(tokio::sync::Mutex<T>);
 #[derive(Default)]
-pub struct RwLock<T>(tokio::sync::RwLock<T>);
+pub struct RwLock<T> {
+    inner: tokio::sync::RwLock<T>,
+    #[cfg(debug_assertions)]
+    debug: std::sync::Mutex<String>,
+}
 
 pub const DEFAULT_DURATION: Duration = Duration::from_millis(1000);
 
@@ -45,7 +49,16 @@ impl<T> Mutex<T> {
 
 impl<T> RwLock<T> {
     pub fn new(inner: T) -> Self {
-        Self(tokio::sync::RwLock::new(inner))
+        Self{
+            inner: tokio::sync::RwLock::new(inner),
+            #[cfg(debug_assertions)]
+            debug: std::sync::Mutex::new("".into()),
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn record_debug(&self, name: &str) {
+        *self.debug.lock().unwrap() = format!("{}: {}", name, std::backtrace::Backtrace::force_capture());
     }
 
     pub async fn read(&self) -> tokio::sync::RwLockReadGuard<'_, T> {
@@ -57,11 +70,33 @@ impl<T> RwLock<T> {
     }
 
     pub async fn read_within(&self, duration: Duration) -> tokio::sync::RwLockReadGuard<'_, T> {
-        timeout(duration, self.0.read()).await.unwrap()
+        match timeout(duration, self.inner.read()).await {
+            Ok(x) => {
+                #[cfg(debug_assertions)]
+                self.record_debug("read");
+                x
+            },
+            e => {
+                #[cfg(debug_assertions)]
+                ::log::debug!("DEBUG(uneven)\t{}\t= {}", stringify!(self.debug), self.debug.lock().unwrap());
+                e.unwrap()
+            },
+        }
     }
 
     pub async fn write_within(&self, duration: Duration) -> tokio::sync::RwLockWriteGuard<'_, T> {
-        timeout(duration, self.0.write()).await.unwrap()
+        match timeout(duration, self.inner.write()).await {
+            Ok(x) => {
+                #[cfg(debug_assertions)]
+                self.record_debug("write");
+                x
+            },
+            e => {
+                #[cfg(debug_assertions)]
+                ::log::debug!("DEBUG(freda) \t{}\t= {}", stringify!(self.debug), self.debug.lock().unwrap());
+                e.unwrap()
+            },
+        }
     }
 
     pub fn blocking_write(&self) -> tokio::sync::RwLockWriteGuard<'_, T> {
