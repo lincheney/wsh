@@ -53,7 +53,9 @@ i wish i could have
 * [x] silence parse warnings
 * [ ] custom buffer rendering, ghost text etc
 * [x] merged prompt and buffer
-* [ ] $POSTDISPLAY, $PREDISPLAY, $region_highlight
+* [x] $POSTDISPLAY, $PREDISPLAY
+* [ ] $region_highlight
+* [ ] autosuggestions
 * [x] fix segfault when letting zle exit by itself
 * [ ] ~~try switch to termion~~
 * [x] remove extra zle prompt after accept line

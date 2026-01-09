@@ -43,7 +43,15 @@ end)
 wish.set_keymap('<c-a>',   function() wish.set_cursor(0) end)
 wish.set_keymap('<home>',  function() wish.set_cursor(0) end)
 wish.set_keymap('<c-e>',   function() wish.set_cursor(wish.str.len(wish.get_buffer())) end)
-wish.set_keymap('<end>',   function() wish.set_cursor(wish.str.len(wish.get_buffer())) end)
+wish.set_keymap('<end>',   function()
+    local cursor = wish.get_cursor()
+    local buflen = wish.str.len(wish.get_buffer())
+    if cursor == buflen then
+        require('wish/autosuggestions').accept_suggestion()
+    else
+        wish.set_cursor(buflen)
+    end
+end)
 wish.set_keymap('<left>',  function() wish.set_cursor(math.max(0, wish.get_cursor() - 1)) end)
 wish.set_keymap('<right>', function() wish.set_cursor(wish.get_cursor() + 1) end)
 

@@ -37,10 +37,12 @@ impl Buffer {
 
     pub fn add_highlight(&mut self, hl: HighlightedRange<usize>) {
         self.contents.add_highlight(hl);
+        self.dirty = true;
     }
 
     pub fn clear_highlights(&mut self) {
         self.contents.clear_highlights();
+        self.dirty = true;
     }
 
     pub fn clear_highlights_in_namespace(&mut self, namespace: usize) {
@@ -49,6 +51,7 @@ impl Buffer {
 
     pub fn retain_highlights<F: Fn(&HighlightedRange<usize>) -> bool>(&mut self, func: F) {
         self.contents.retain_highlights(func);
+        self.dirty = true;
     }
 
     pub fn get_size(&self, width: usize, initial_indent: usize) -> (usize, usize) {

@@ -367,9 +367,8 @@ struct BufferHighlight {
 async fn add_buf_highlight(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
     let ui = ui.get();
     let hl: BufferHighlight = lua.from_value(val)?;
-    let style: BufferStyleOptions = hl.style;
-    let blend = !style.no_blend;
-    let style: tui::widget::StyleOptions = style.inner.into();
+    let blend = !hl.style.no_blend;
+    let style: tui::widget::StyleOptions = hl.style.inner.into();
 
     ui.inner.borrow_mut().await.buffer.add_highlight(tui::text::HighlightedRange{
         lineno: 0,
