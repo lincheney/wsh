@@ -52,7 +52,7 @@ i wish i could have
 * [ ] selecting `print -s echo` in history is weird
 * [x] silence parse warnings
 * [ ] custom buffer rendering, ghost text etc
-* [ ] merged prompt and buffer
+* [x] merged prompt and buffer
 * [ ] $POSTDISPLAY, $PREDISPLAY, $region_highlight
 * [x] fix segfault when letting zle exit by itself
 * [ ] ~~try switch to termion~~

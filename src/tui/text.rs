@@ -18,7 +18,7 @@ pub struct Highlight<T> {
     pub style: Style,
     pub blend: bool,
     pub namespace: T,
-    pub virtual_text: Option<String>,
+    pub virtual_text: Option<BString>,
 }
 
 impl<T: Default> From<Style> for Highlight<T> {

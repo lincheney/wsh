@@ -257,20 +257,32 @@ crate::TokioActor! {
             None
         }
 
-        pub fn get_var(&self, name: BString) -> anyhow::Result<Option<variables::Value>> {
-            if let Some(mut v) = Variable::get(CString::new(name)?) {
-                Ok(Some(v.as_value()?))
+        pub fn get_var(&self, name: BString, zle: bool) -> anyhow::Result<Option<variables::Value>> {
+            let name = CString::new(name)?;
+            if zle {
+                self.start_zle_scope();
+            }
+            let result = if let Some(mut v) = Variable::get(name) {
+                v.as_value().map(Some)
             } else {
                 Ok(None)
+            };
+            if zle {
+                self.end_zle_scope();
             }
+            result
         }
 
-        pub fn get_var_as_string(&self, name: BString) -> anyhow::Result<Option<BString>> {
-            if let Some(mut v) = Variable::get(CString::new(name)?) {
-                Ok(Some(v.as_bytes()))
-            } else {
-                Ok(None)
+        pub fn get_var_as_string(&self, name: BString, zle: bool) -> anyhow::Result<Option<BString>> {
+            let name = CString::new(name)?;
+            if zle {
+                self.start_zle_scope();
             }
+            let result = Variable::get(name).map(|mut v| v.as_bytes());
+            if zle {
+                self.end_zle_scope();
+            }
+            Ok(result)
         }
 
         pub fn startparamscope(&self) {

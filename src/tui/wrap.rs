@@ -89,9 +89,8 @@ pub fn wrap<
     let handle_virtual_text = |hl: &'a HighlightedRange<T>, start, mut pos, callback: &mut F| {
         if let Some(text) = &hl.inner.virtual_text {
             let style = init_style.map(|s| merge_highlights(s, [&hl.inner].into_iter()));
-            let text = BStr::new(text.as_str());
             for (s, e, grapheme) in text.grapheme_indices() {
-                pos = wrap_grapheme(s, e, grapheme, text, style, max_width, pos, |_, _, token, style| {
+                pos = wrap_grapheme(s, e, grapheme, text.as_ref(), style, max_width, pos, |_, _, token, style| {
                     callback(start, start, token, style);
                 });
             }

@@ -533,14 +533,15 @@ impl Ui {
                         ui.tui.add_zle_message(output.as_ref());
                     }
                     ui.buffer.insert_or_set(buffer.as_ref().map(|x| x.as_ref()), cursor);
+                    // anything could have happened, so trigger a redraw
+                    ui.dirty = true;
                 }
 
-                if buffer.is_some() || cursor.is_some() || output.is_some() {
-                    if buffer.is_some() {
-                        self.trigger_buffer_change_callbacks(()).await;
-                    }
-                    self.queue_draw();
+                if buffer.is_some() {
+                    self.trigger_buffer_change_callbacks(()).await;
                 }
+                // anything could have happened, so trigger a redraw
+                self.queue_draw();
 
                 // this widget may have called accept-line somewhere inside
                 if accept_line {

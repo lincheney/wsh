@@ -1,3 +1,4 @@
+use bstr::BString;
 use std::default::Default;
 use serde::{Deserialize, Deserializer, de};
 use anyhow::Result;
@@ -359,7 +360,7 @@ struct BufferHighlight {
     finish: usize,
     #[serde(flatten)]
     style: BufferStyleOptions,
-    virtual_text: Option<String>,
+    virtual_text: Option<BString>,
     namespace: Option<usize>,
 }
 
@@ -389,7 +390,7 @@ async fn clear_buf_highlights(ui: Ui, _lua: Lua, namespace: Option<usize>) -> Re
     let ui = ui.get();
     let mut ui = ui.inner.borrow_mut().await;
     if let Some(namespace) = namespace {
-        ui.buffer.retain_highlights(|h| *h.namespace() != namespace);
+        ui.buffer.clear_highlights_in_namespace(namespace);
     } else {
         ui.buffer.clear_highlights();
     }

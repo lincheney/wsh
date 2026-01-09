@@ -5,8 +5,8 @@ use anyhow::Result;
 use mlua::prelude::*;
 use crate::shell::variables;
 
-async fn get_var(ui: Ui, lua: Lua, name: BString) -> Result<LuaValue> {
-    let val = match ui.shell.get_var(name).await? {
+async fn get_var(ui: Ui, lua: Lua, (name, zle): (BString, Option<bool>)) -> Result<LuaValue> {
+    let val = match ui.shell.get_var(name, zle.unwrap_or(false)).await? {
         Some(variables::Value::String(val)) => val.into_lua(&lua)?,
         Some(variables::Value::Array(val)) => val.into_lua(&lua)?,
         Some(variables::Value::HashMap(val)) => val.into_lua(&lua)?,

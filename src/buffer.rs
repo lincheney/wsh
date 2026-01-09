@@ -43,6 +43,10 @@ impl Buffer {
         self.contents.clear_highlights();
     }
 
+    pub fn clear_highlights_in_namespace(&mut self, namespace: usize) {
+        self.retain_highlights(|h| *h.namespace() != namespace);
+    }
+
     pub fn retain_highlights<F: Fn(&HighlightedRange<usize>) -> bool>(&mut self, func: F) {
         self.contents.retain_highlights(func);
     }
