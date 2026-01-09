@@ -47,7 +47,7 @@ pub fn wrap<'a, T>(
     init_style: Option<Style>,
     max_width: usize,
     max_height: usize,
-    initial_indent: usize,
+    mut initial_indent: usize,
     scroll: ScrollPosition,
 ) -> Scrolled<'a> {
 
@@ -85,6 +85,7 @@ pub fn wrap<'a, T>(
                 }
             },
         );
+        initial_indent = 0;
 
         tokens.push(ScrollWrapToken {
             lineno: i,

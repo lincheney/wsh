@@ -220,7 +220,7 @@ impl<T> Text<T> {
         self.dirty = true;
     }
 
-    pub fn get_size(&self, width: usize, initial_indent: usize) -> (usize, usize) {
+    pub fn get_size(&self, width: usize, mut initial_indent: usize) -> (usize, usize) {
         let mut pos = (initial_indent, 0);
 
         for (lineno, line) in self.lines.iter().enumerate() {
@@ -235,6 +235,11 @@ impl<T> Text<T> {
                     },
                 }
             });
+            initial_indent = 0;
+
+            if lineno != self.lines.len() - 1 {
+                pos = (0, pos.1 + 1);
+            }
         }
 
         if pos != (0, 0) {
