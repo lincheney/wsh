@@ -346,8 +346,7 @@ pub fn capture_shout<T, F: FnOnce() -> T>(
         bindings::trashedzle = old_trashedzle;
 
         // read the data out
-        let state = super::externs::STATE.read();
-        let buffer = state.as_ref().unwrap().runtime.block_on(async { sink.read() }).unwrap();
+        let buffer = sink.read().unwrap();
 
         (buffer, result)
     }
