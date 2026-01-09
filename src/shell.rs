@@ -214,8 +214,8 @@ crate::TokioActor! {
             zsh::get_prompt(prompt.as_ref().map(|p| p.as_ref()), escaped)
         }
 
-        pub fn get_prompt_size(&self, prompt: CString) -> (usize, usize) {
-            let (width, height) = zsh::get_prompt_size(&prompt);
+        pub fn get_prompt_size(&self, prompt: CString, term_width: Option<c_long>) -> (usize, usize) {
+            let (width, height) = zsh::get_prompt_size(&prompt, term_width);
             (width as _, height as _)
         }
 

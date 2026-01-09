@@ -21,7 +21,7 @@ impl Prompt {
         let prompt = shell.get_prompt(None, true).await.unwrap_or_else(|| FALLBACK_PROMPT.into());
         self.inner = crate::shell::remove_invisible_chars(&prompt).into();
 
-        let size = shell.get_prompt_size(prompt.clone()).await;
+        let size = shell.get_prompt_size(prompt.clone(), Some(width as _)).await;
         self.width = size.0 as _;
         self.height = size.1 as _;
     }

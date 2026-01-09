@@ -221,12 +221,22 @@ pub fn get_prompt(prompt: Option<&BStr>, escaped: bool) -> Option<CString> {
     }
 }
 
-pub fn get_prompt_size(prompt: &CStr) -> (c_int, c_int) {
+pub fn get_prompt_size(prompt: &CStr, term_width: Option<c_long>) -> (c_int, c_int) {
     let mut width = 0;
     let mut height = 0;
     let overflow = 0;
+    let mut old_term_width = None;
     unsafe {
+        if let Some(term_width) = term_width && term_width != zsh_sys::zterm_columns {
+            old_term_width = Some(zsh_sys::zterm_columns);
+            zsh_sys::zterm_columns = term_width;
+        }
+
         zsh_sys::countprompt(prompt.as_ptr().cast_mut(), &raw mut width, &raw mut height, overflow);
+
+        if let Some(old_term_width) = old_term_width {
+            zsh_sys::zterm_columns = old_term_width;
+        }
     }
     (width, height)
 }
