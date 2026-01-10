@@ -14,7 +14,7 @@ pub const DEFAULT_DURATION: Duration = Duration::from_millis(1000);
 
 fn block_on<F: Future>(future: F) -> F::Output {
     if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        handle.block_on(future)
+        tokio::task::block_in_place(|| handle.block_on(future))
     } else {
         tokio::runtime::Builder::new_current_thread()
             .enable_time()

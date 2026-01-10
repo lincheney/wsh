@@ -31,14 +31,19 @@ impl EventController {
         self.pauser.unpause();
     }
 
-    pub async fn get_cursor_position(&self) -> Result<(usize, usize)> {
+    pub fn get_cursor_position(&self) -> impl Future<Output=Result<(usize, usize)>> + use<> {
+        // this returns an async block instead of being an async fn
+        // so that you can await it without holding on to the &self reference
         let (sender, receiver) = oneshot::channel();
-        self.position_queue.send(sender)?;
-        crossterm::execute!(
-            std::io::stdout(),
-            crossterm::style::Print("\x1b[6n"),
-        )?;
-        Ok(receiver.await?)
+        let result = self.position_queue.send(sender);
+        async move {
+            result?;
+            crossterm::execute!(
+                std::io::stdout(),
+                crossterm::style::Print("\x1b[6n"),
+            )?;
+            Ok(receiver.await?)
+        }
     }
 
     pub fn queue_draw(&self) {

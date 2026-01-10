@@ -29,7 +29,7 @@ pub use zsh::{
     Zpty,
 };
 pub use externs::{run_with_shell};
-use variables::Variable;
+pub use variables::Variable;
 
 pub struct Shell {
     inner: ShellInternal,
@@ -115,6 +115,10 @@ pub fn remove_invisible_chars(string: &CStr) -> std::borrow::Cow<'_, CStr> {
 
 pub fn control_c() -> nix::Result<()> {
     nix::sys::signal::kill(nix::unistd::Pid::from_raw(0), nix::sys::signal::Signal::SIGINT)
+}
+
+pub fn get_var(_shell: &ShellInternal, string: &CStr) -> Option<Variable> {
+    Variable::get(string)
 }
 
 #[derive(Clone)]

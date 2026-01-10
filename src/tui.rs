@@ -152,11 +152,15 @@ pub struct Tui {
     buffer: Buffer,
     border_buffer: Buffer,
     prev_status_bar_position: usize,
-    max_height: u16,
+    pub max_height: u16,
     pub dirty: bool,
 }
 
 impl Tui {
+
+    pub fn get_size(&self) -> (u16, u16) {
+        (self.buffer.area.width, self.buffer.area.height)
+    }
 
     pub fn add(&mut self, mut widget: WidgetWrapper) -> (usize, &mut WidgetWrapper) {
         let id = self.counter;
@@ -255,22 +259,14 @@ impl Tui {
         self.dirty = true;
     }
 
-    pub async fn draw<W: Write>(
+    pub fn draw<W: Write>(
         &mut self,
         writer: &mut W,
         (width, height): (u16, u16),
         mut cmdline: command_line::CommandLine<'_>,
         status_bar: &mut status_bar::StatusBar,
-        mut clear: bool,
+        clear: bool,
     ) -> Result<()> {
-
-        // take up at most 2/3 of the screen
-        let max_height = (height * 2 / 3).max(1);
-        // redraw all if dimensions have changed
-        if max_height != self.max_height || width != self.buffer.area.width {
-            self.max_height = max_height;
-            clear = true;
-        }
 
         if clear {
             self.reset();
@@ -284,7 +280,7 @@ impl Tui {
         }
 
         // resize buffers
-        let area = Rect{x: 0, y: 0, width, height: self.max_height};
+        let area = Rect{x: 0, y: 0, width, height};
         self.buffer.resize(area);
 
         // quit early if nothing is dirty
@@ -306,10 +302,10 @@ impl Tui {
 
         // refresh the widgets etc
         if cmdline.is_dirty() {
-            cmdline.refresh(area).await;
+            cmdline.refresh(area);
         }
         if self.dirty {
-            self.widgets.refresh(Rect{ height: max_height.saturating_sub(status_bar.get_height()), ..area });
+            self.widgets.refresh(Rect{ height: height.saturating_sub(status_bar.get_height()), ..area });
         }
         if status_bar.dirty {
             status_bar.refresh(area);

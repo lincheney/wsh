@@ -8,7 +8,7 @@ use ratatui::{
     style::*,
 };
 use mlua::{prelude::*};
-use crate::ui::{Ui, ThreadsafeUiInner};
+use crate::ui::{Ui};
 use crate::tui;
 use super::SerdeWrap;
 
@@ -305,7 +305,7 @@ async fn set_message(ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
     let options: Option<WidgetOptions> = lua.from_value(val)?;
 
     let ui = ui.get();
-    let tui = &mut ui.inner.borrow_mut().tui;
+    let tui = &mut ui.borrow_mut().tui;
     let (id, widget): (_, &mut tui::WidgetWrapper) = match options.as_ref().and_then(|o| o.options.id).map(|id| (id, tui.get_mut(id))) {
         Some((id, Some(widget))) => (id, widget),
         None => {
@@ -328,7 +328,7 @@ async fn set_message(ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
 
 async fn clear_messages(ui: Ui, _lua: Lua, all: bool) -> Result<()> {
     let ui = ui.get();
-    let tui = &mut ui.inner.borrow_mut().tui;
+    let tui = &mut ui.borrow_mut().tui;
     if all {
         tui.clear_all();
     } else {
@@ -339,12 +339,12 @@ async fn clear_messages(ui: Ui, _lua: Lua, all: bool) -> Result<()> {
 
 async fn check_message(ui: Ui, _lua: Lua, id: usize) -> Result<bool> {
     let ui = ui.get();
-    Ok(ui.inner.borrow().tui.get_index(id).is_some())
+    Ok(ui.borrow().tui.get_index(id).is_some())
 }
 
 async fn remove_message(ui: Ui, _lua: Lua, id: usize) -> Result<()> {
     let ui = ui.get();
-    let tui = &mut ui.inner.borrow_mut().tui;
+    let tui = &mut ui.borrow_mut().tui;
     if tui.remove(id).is_some() {
         tui.dirty = true;
         Ok(())
@@ -370,7 +370,7 @@ async fn add_buf_highlight(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
     let blend = !hl.style.no_blend;
     let style: tui::widget::StyleOptions = hl.style.inner.into();
 
-    ui.inner.borrow_mut().buffer.add_highlight(tui::text::HighlightedRange{
+    ui.borrow_mut().buffer.add_highlight(tui::text::HighlightedRange{
         lineno: 0,
         start: hl.start,
         end: hl.finish,
@@ -387,7 +387,7 @@ async fn add_buf_highlight(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
 
 async fn clear_buf_highlights(ui: Ui, _lua: Lua, namespace: Option<usize>) -> Result<()> {
     let ui = ui.get();
-    let mut ui = ui.inner.borrow_mut();
+    let mut ui = ui.borrow_mut();
     if let Some(namespace) = namespace {
         ui.buffer.clear_highlights_in_namespace(namespace);
     } else {
@@ -398,7 +398,7 @@ async fn clear_buf_highlights(ui: Ui, _lua: Lua, namespace: Option<usize>) -> Re
 
 async fn add_buf_highlight_namespace(ui: Ui, _lua: Lua, _val: ()) -> Result<usize> {
     let ui = ui.get();
-    let mut ui = ui.inner.borrow_mut();
+    let mut ui = ui.borrow_mut();
     ui.buffer.highlight_counter += 1;
     Ok(ui.buffer.highlight_counter)
 }
@@ -407,7 +407,7 @@ async fn set_ansi_message(ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
     let ui = ui.get();
     let options: Option<AnsiWidgetOptions> = lua.from_value(val)?;
 
-    let tui = &mut ui.inner.borrow_mut().tui;
+    let tui = &mut ui.borrow_mut().tui;
     let (id, widget): (_, &mut tui::WidgetWrapper) = match options.as_ref().and_then(|o| o.options.id).map(|id| (id, tui.get_mut(id))) {
         Some((id, Some(widget))) => (id, widget),
         None => {
@@ -426,7 +426,7 @@ async fn set_ansi_message(ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
 
 async fn feed_ansi_message(ui: Ui, _lua: Lua, (id, value): (usize, LuaString)) -> Result<()> {
     let ui = ui.get();
-    let tui = &mut ui.inner.borrow_mut().tui;
+    let tui = &mut ui.borrow_mut().tui;
 
     match tui.get_mut(id) {
         Some(tui::WidgetWrapper::Ansi(parser)) => {
@@ -440,7 +440,7 @@ async fn feed_ansi_message(ui: Ui, _lua: Lua, (id, value): (usize, LuaString)) -
 
 async fn clear_ansi_message(ui: Ui, _lua: Lua, id: usize) -> Result<()> {
     let ui = ui.get();
-    let tui = &mut ui.inner.borrow_mut().tui;
+    let tui = &mut ui.borrow_mut().tui;
 
     match tui.get_mut(id) {
         Some(tui::WidgetWrapper::Ansi(parser)) => {
@@ -454,7 +454,7 @@ async fn clear_ansi_message(ui: Ui, _lua: Lua, id: usize) -> Result<()> {
 
 async fn message_to_ansi_string(ui: Ui, _lua: Lua, (id, width): (usize, Option<u16>)) -> Result<mlua::BString> {
     let ui = ui.get();
-    let tui = &ui.inner.borrow().tui;
+    let tui = &ui.borrow().tui;
 
     match tui.render_to_string(id, width) {
         None => anyhow::bail!("can't find widget with id {}", id),
@@ -465,7 +465,7 @@ async fn message_to_ansi_string(ui: Ui, _lua: Lua, (id, width): (usize, Option<u
 async fn set_status_bar(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
     let ui = ui.get();
     let options: Option<WidgetOptions> = lua.from_value(val)?;
-    let mut ui = ui.inner.borrow_mut();
+    let mut ui = ui.borrow_mut();
     if let Some(options) = options {
         let widget = ui.status_bar.inner.get_or_insert_default();
         if let Some(text) = options.text {

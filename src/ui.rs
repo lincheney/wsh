@@ -58,24 +58,19 @@ pub struct UiInner {
     size: (u16, u16),
 }
 
-pub trait ThreadsafeUiInner {
-    fn borrow(&self) -> tokio::sync::RwLockReadGuard<'_, UiInner>;
-    fn borrow_mut(&self) -> tokio::sync::RwLockWriteGuard<'_, UiInner>;
-}
-
-impl ThreadsafeUiInner for RwLock<UiInner> {
-    fn borrow(&self) -> tokio::sync::RwLockReadGuard<'_, UiInner> {
-        self.blocking_read()
-    }
-
-    fn borrow_mut(&self) -> tokio::sync::RwLockWriteGuard<'_, UiInner> {
-        self.blocking_write()
-    }
-}
-
 pub struct UnlockedUi {
     pub inner: RwLock<UiInner>,
     pub event_callbacks: std::sync::Mutex<EventCallbacks> ,
+}
+
+impl UnlockedUi {
+    pub fn borrow(&self) -> tokio::sync::RwLockReadGuard<'_, UiInner> {
+        self.inner.blocking_read()
+    }
+
+    pub fn borrow_mut(&self) -> tokio::sync::RwLockWriteGuard<'_, UiInner> {
+        self.inner.blocking_write()
+    }
 }
 
 
@@ -166,25 +161,53 @@ impl Ui {
 
         self.is_drawing.store(false, Ordering::Release);
 
-        let this = &*self.unlocked.read();
-        let mut ui = this.inner.borrow_mut();
-        let ui = &mut *ui;
+        let refresh_shell_vars;
+        let width;
+        let height;
+        {
+            let this = self.unlocked.read();
+            let mut ui = this.borrow_mut();
 
-        if !(ui.dirty || ui.buffer.dirty || ui.tui.dirty || ui.status_bar.dirty) {
-            return Ok(())
+            ui.size = crossterm::terminal::size()?;
+            (width, height) = ui.size;
+
+            // take up at most 2/3 of the screen
+            let height = (height * 2 / 3).max(1);
+            // redraw all if dimensions have changed
+            if height != ui.tui.max_height || width != ui.tui.get_size().1 {
+                ui.tui.max_height = height;
+                ui.dirty = true;
+            }
+
+            if !(ui.dirty || ui.buffer.dirty || ui.tui.dirty || ui.status_bar.dirty) {
+                return Ok(())
+            }
+            refresh_shell_vars = ui.dirty || ui.cmdline.is_dirty();
         }
 
-        ui.size = crossterm::terminal::size()?;
-        let cmdline = ui.cmdline.into_command_line(&self.shell, &mut ui.buffer);
-        ui.tui.draw(
-            &mut ui.stdout,
-            ui.size,
-            cmdline,
-            &mut ui.status_bar,
-            ui.dirty,
-        ).await?;
+        let shell_vars = if refresh_shell_vars {
+            Some(crate::tui::command_line::CommandLineState::get_shell_vars(&*self.shell, width).await)
+        } else {
+            None
+        };
 
-        ui.dirty = false;
+        {
+            let this = self.unlocked.read();
+            let ui = &mut *this.borrow_mut();
+            if let Some(shell_vars) = shell_vars {
+                ui.cmdline.shell_vars = shell_vars;
+            }
+            let cmdline = ui.cmdline.into_command_line(&mut ui.buffer);
+            ui.tui.draw(
+                &mut ui.stdout,
+                (width, height),
+                cmdline,
+                &mut ui.status_bar,
+                ui.dirty,
+            )?;
+            ui.dirty = false;
+        }
+
         Ok(())
     }
 
@@ -216,7 +239,7 @@ impl Ui {
 
     pub async fn show_error_message(&mut self, msg: String) {
         let this = self.get();
-        let mut ui = this.inner.borrow_mut();
+        let mut ui = this.borrow_mut();
         ui.tui.add_error_message(msg);
         self.queue_draw();
     }
@@ -236,7 +259,7 @@ impl Ui {
     pub async fn pre_accept_line(&self) -> Result<()> {
         {
             let this = &*self.unlocked.read();
-            let mut ui = this.inner.borrow_mut();
+            let mut ui = this.borrow_mut();
 
             ui.tui.clear_non_persistent();
 
@@ -253,7 +276,7 @@ impl Ui {
         // we're going go to end up with janky output
         // how do we solve this?
         if !crate::is_forked() && !self.preparing_for_unhandled_output.swap(true, Ordering::Relaxed) {
-            self.unlocked.read().inner.borrow_mut().prepare_for_unhandled_output()?;
+            self.unlocked.read().borrow_mut().prepare_for_unhandled_output()?;
             flag = true;
         }
         Ok(flag)
@@ -270,18 +293,26 @@ impl Ui {
                 return Ok(false)
             }
 
-            let this = self.unlocked.read();
-            let mut ui = this.inner.borrow_mut().await;
-            ui.activate()?;
+            {
+                let this = self.unlocked.read();
+                let ui = this.borrow();
+                ui.activate()?;
+            }
 
             // move down one line if not at start of line
-            let cursor = self.events.read().get_cursor_position().await.unwrap_or((0, 0));
-            if cursor.0 != 0 {
-                ui.size = crossterm::terminal::size()?;
-                queue!(ui.stdout, style::Print("\r\n"))?;
+            let cursor = self.events.read().get_cursor_position();
+            let cursor = cursor.await.unwrap_or((0, 0));
+
+            {
+                let this = self.unlocked.read();
+                let mut ui = this.borrow_mut();
+                if cursor.0 != 0 {
+                    ui.size = crossterm::terminal::size()?;
+                    queue!(ui.stdout, style::Print("\r\n"))?;
+                }
+                execute!(ui.stdout, style::ResetColor)?;
+                ui.dirty = true;
             }
-            execute!(ui.stdout, style::ResetColor)?;
-            ui.dirty = true;
         }
         Ok(flag)
     }
@@ -289,7 +320,7 @@ impl Ui {
     pub async fn post_accept_line(&self) -> Result<()> {
         {
             let this = &*self.unlocked.read();
-            let mut ui = this.inner.borrow_mut();
+            let mut ui = this.borrow_mut();
             ui.reset();
         }
         self.events.read().unpause();
@@ -305,7 +336,7 @@ impl Ui {
         let buffer = {
             let buffer = {
                 let this = self.get();
-                let ui = this.inner.borrow();
+                let ui = this.borrow();
                 ui.buffer.get_contents().clone()
             };
             let (complete, _tokens) = self.shell.parse(buffer.clone(), Default::default()).await;
@@ -331,7 +362,7 @@ impl Ui {
             self.start_cmd().await?;
 
         } else {
-            self.get().inner.borrow_mut().buffer.insert_at_cursor(b"\n");
+            self.get().borrow_mut().buffer.insert_at_cursor(b"\n");
             self.trigger_buffer_change_callbacks(()).await;
             self.draw().await?;
         }
@@ -458,7 +489,7 @@ impl Ui {
 
     async fn handle_key_simple(&mut self, event: KeyEvent, buf: &BStr) -> Option<KeybindOutput> {
         // look for a lua callback
-        let callback = self.get().inner.borrow().keybinds
+        let callback = self.get().borrow().keybinds
             .iter()
             .rev()
             .find_map(|k| k.inner.get(&(event.key, event.modifiers)))
@@ -528,7 +559,7 @@ impl Ui {
             Value::Widget{buffer, cursor, output, accept_line} => {
                 {
                     let this = self.get();
-                    let mut ui = this.inner.borrow_mut();
+                    let mut ui = this.borrow_mut();
 
                     // check for any output e.g. zle -M
                     if let Some(output) = &output {
@@ -565,8 +596,8 @@ impl Ui {
             Event::Key(KeyEvent{ key: Key::Char(c), modifiers }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
                 {
                     let mut buf = [0; 4];
-                    let this = &*self.get();
-                    let mut ui = this.inner.borrow_mut();
+                    let this = self.get();
+                    let mut ui = this.borrow_mut();
                     ui.buffer.insert_at_cursor(c.encode_utf8(&mut buf).as_bytes());
                 }
                 self.trigger_buffer_change_callbacks(()).await;

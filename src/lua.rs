@@ -4,7 +4,7 @@ use bstr::BString;
 use std::io::Write;
 use mlua::prelude::*;
 use anyhow::Result;
-use crate::ui::{Ui, ThreadsafeUiInner};
+use crate::ui::{Ui};
 use std::time::SystemTime;
 
 mod keybind;
@@ -38,6 +38,8 @@ impl<'de, T: FromStr> Deserialize<'de> for SerdeWrap<T>
 #[serde(default)]
 struct RedrawOptions {
     prompt: bool,
+    postdisplay: bool,
+    predisplay: bool,
     buffer: bool,
     messages: bool,
     status_bar: bool,
@@ -45,33 +47,33 @@ struct RedrawOptions {
 }
 
 async fn get_cursor(ui: Ui, _lua: Lua, (): ()) -> Result<usize> {
-    Ok(ui.get().inner.borrow().buffer.get_cursor())
+    Ok(ui.get().borrow().buffer.get_cursor())
 }
 
 async fn get_buffer(ui: Ui, lua: Lua, (): ()) -> Result<mlua::String> {
-    Ok(lua.create_string(ui.get().inner.borrow().buffer.get_contents())?)
+    Ok(lua.create_string(ui.get().borrow().buffer.get_contents())?)
 }
 
 async fn set_cursor(ui: Ui, _lua: Lua, val: usize) -> Result<()> {
-    ui.get().inner.borrow_mut().buffer.set_cursor(val);
+    ui.get().borrow_mut().buffer.set_cursor(val);
     Ok(())
 }
 
 async fn set_buffer(ui: Ui, _lua: Lua, (val, len): (mlua::String, Option<usize>)) -> Result<()> {
-    ui.get().inner.borrow_mut().buffer.splice_at_cursor(&val.as_bytes(), len);
+    ui.get().borrow_mut().buffer.splice_at_cursor(&val.as_bytes(), len);
     ui.trigger_buffer_change_callbacks(()).await;
     Ok(())
 }
 
 async fn undo_buffer(ui: Ui, _lua: Lua, (): ()) -> Result<()> {
-    if ui.get().inner.borrow_mut().buffer.move_in_history(false) {
+    if ui.get().borrow_mut().buffer.move_in_history(false) {
         ui.trigger_buffer_change_callbacks(()).await;
     }
     Ok(())
 }
 
 async fn redo_buffer(ui: Ui, _lua: Lua, (): ()) -> Result<()> {
-    if ui.get().inner.borrow_mut().buffer.move_in_history(true) {
+    if ui.get().borrow_mut().buffer.move_in_history(true) {
         ui.trigger_buffer_change_callbacks(()).await;
     }
     Ok(())
@@ -85,9 +87,11 @@ async fn redraw(ui: Ui, lua: Lua, val: Option<LuaValue>) -> Result<()> {
     if let Some(val) = val {
         let val: RedrawOptions = lua.from_value(val)?;
         let ui = ui.get();
-        let mut ui = ui.inner.borrow_mut();
+        let mut ui = ui.borrow_mut();
         if val.all { ui.dirty = true; }
-        if val.prompt { ui.cmdline.prompt.dirty = true; }
+        if val.prompt { ui.cmdline.prompt_dirty = true; }
+        if val.predisplay { ui.cmdline.predisplay_dirty = true; }
+        if val.postdisplay { ui.cmdline.postdisplay_dirty = true; }
         if val.buffer { ui.buffer.dirty = true; }
         if val.messages { ui.tui.dirty = true; }
         if val.status_bar { ui.status_bar.dirty = true; }
@@ -118,7 +122,7 @@ async fn call_hook_func(mut ui: Ui, _lua: Lua, mut args: Vec<BString>) -> Result
 
 async fn print(mut ui: Ui, _lua: Lua, value: BString) -> Result<()> {
     let result = ui.freeze_if(true, false, async {
-        ui.get().inner.borrow_mut().stdout.write_all(value.as_ref())
+        ui.get().borrow_mut().stdout.write_all(value.as_ref())
     }).await?;
     result.1?;
     ui.try_draw().await;
@@ -163,7 +167,7 @@ async fn lua_try(lua: Lua, (func, catch, finally): (LuaFunction, Option<LuaFunct
 pub async fn __laggy(_ui: Ui, lua: Lua, (): ()) -> Result<()> {
     let _ = tokio::task::spawn_blocking(move || {
         let _: Result<(), mlua::Error> = unsafe{ lua.exec_raw((), |_| {
-            // let lock = ui.inner.borrow_mut();
+            // let lock = ui.borrow_mut();
             tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current().block_on(async {
                     for i in 0..2 {

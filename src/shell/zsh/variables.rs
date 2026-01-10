@@ -11,7 +11,7 @@ fn pm_type(flags: c_int) -> c_int {
     flags & (zsh_sys::PM_SCALAR | zsh_sys::PM_INTEGER | zsh_sys::PM_EFLOAT | zsh_sys::PM_FFLOAT | zsh_sys::PM_ARRAY | zsh_sys::PM_HASHED) as c_int
 }
 
-pub(in crate::shell) struct Variable{
+pub struct Variable{
     value: zsh_sys::value,
     name_is_digit: bool,
 }
@@ -89,7 +89,7 @@ fn try_hashtable_to_hashmap(table: zsh_sys::HashTable) -> Result<HashMap<BString
 }
 
 impl Variable {
-    pub fn get<S: AsRef<CStr>>(name: S) -> Option<Self> {
+    pub(in crate::shell) fn get<S: AsRef<CStr>>(name: S) -> Option<Self> {
         let bracks = 1;
         let name = name.as_ref();
         let mut c_varname_ptr = name.as_ptr().cast_mut();
@@ -112,7 +112,7 @@ impl Variable {
         }
     }
 
-    pub fn set(name: &[u8], value: Value, local: bool) -> Result<()> {
+    pub(in crate::shell) fn set(name: &[u8], value: Value, local: bool) -> Result<()> {
         let c_name = CString::new(name).unwrap();
         let name = c_name.as_ptr().cast_mut();
         let param = match value {
@@ -155,12 +155,12 @@ impl Variable {
 
     }
 
-    pub fn unset(name: &[u8]) {
+    pub(in crate::shell) fn unset(name: &[u8]) {
         let c_name = CString::new(name).unwrap();
         unsafe{ zsh_sys::unsetparam(c_name.as_ptr().cast_mut()); }
     }
 
-    pub fn export(&self) {
+    pub(in crate::shell) fn export(&self) {
         unsafe{ zsh_sys::export_param(self.value.pm) }
     }
 
@@ -239,7 +239,7 @@ impl Variable {
         )
     }
 
-    pub fn create_dynamic<N: AsRef<BStr>, T: VariableGSU>(
+    pub(in crate::shell) fn create_dynamic<N: AsRef<BStr>, T: VariableGSU>(
         name: N,
         get: Box<dyn Send + Fn() -> T>,
         set: Option<Box<dyn Send + Fn(T)>>,
