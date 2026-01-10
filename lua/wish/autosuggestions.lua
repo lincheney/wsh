@@ -35,7 +35,7 @@ wish.add_event_callback('buffer_change', function()
         wish.add_buf_highlight{
             start = math.pow(2, 32) - 1,
             finish = math.pow(2, 32) - 1,
-            fg = 'grey',
+            dim = true,
             virtual_text = suffix,
             namespace = NAMESPACE,
         }
