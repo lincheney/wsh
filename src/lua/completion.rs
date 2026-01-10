@@ -48,7 +48,7 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Strea
     let val = if let Some(val) = val {
         val.into()
     } else {
-        ui.get().inner.borrow().await.buffer.get_contents().clone()
+        ui.get().inner.borrow().buffer.get_contents().clone()
     };
 
     let (sender, receiver) = mpsc::unbounded_channel();
@@ -64,7 +64,7 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Strea
                 // ui.activate();
                 if !msg.is_empty() {
                     let this = ui.unlocked.read();
-                    let mut ui = this.inner.borrow_mut().await;
+                    let mut ui = this.inner.borrow_mut();
                     ui.tui.add_zle_message(msg.as_ref());
                 }
             },
@@ -83,14 +83,14 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Strea
 async fn insert_completion(ui: Ui, _lua: Lua, val: Match) -> Result<()> {
     let buffer = {
         let this = ui.unlocked.read();
-        this.inner.borrow().await.buffer.get_contents().clone()
+        this.inner.borrow().buffer.get_contents().clone()
     };
 
     let (new_buffer, new_pos) = ui.shell.insert_completion(buffer, val.inner).await;
     {
         // see if this can be done as an insert
         let this = ui.unlocked.read();
-        let mut ui = this.inner.borrow_mut().await;
+        let mut ui = this.inner.borrow_mut();
         ui.buffer.insert_or_set(Some(new_buffer.as_ref()), Some(new_pos));
     }
 

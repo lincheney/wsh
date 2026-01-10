@@ -34,21 +34,26 @@ async fn get_history_index(ui: Ui, _lua: Lua, _val: ()) -> Result<usize> {
 
 async fn goto_history_internal(ui: Ui, index: HistoryIndex) {
     let changed = {
-        let shell = &ui.shell;
-        let ui = ui.unlocked.read();
 
-        let mut ui = ui.inner.write().await;
-        let buffer = ui.buffer.get_contents();
-        let cursor = ui.buffer.get_cursor();
+        let (buffer, cursor) = {
+            let ui = ui.unlocked.read();
+            let ui = ui.inner.blocking_read();
+            (ui.buffer.get_contents().clone(), ui.buffer.get_cursor())
+        };
 
-        shell.set_zle_buffer(buffer.clone(), cursor as _).await;
-        shell.goto_history(index, false).await;
+        ui.shell.set_zle_buffer(buffer.clone(), cursor as _).await;
+        ui.shell.goto_history(index, false).await;
 
-        let (new_buffer, new_cursor) = shell.get_zle_buffer().await;
+        let (new_buffer, new_cursor) = ui.shell.get_zle_buffer().await;
         let new_cursor = new_cursor.unwrap_or(new_buffer.len() as _) as _;
         let new_buffer = (new_buffer != *buffer).then_some(new_buffer);
         let new_cursor = (new_cursor != cursor).then_some(new_cursor);
-        ui.buffer.insert_or_set(new_buffer.as_ref().map(|x| x.as_ref()), new_cursor);
+
+        if new_buffer.is_some() || new_cursor.is_some() {
+            let ui = ui.get();
+            let mut ui = ui.inner.blocking_write();
+            ui.buffer.insert_or_set(new_buffer.as_ref().map(|x| x.as_ref()), new_cursor);
+        }
 
         new_buffer.is_some()
     };

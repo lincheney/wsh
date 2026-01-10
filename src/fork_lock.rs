@@ -1,3 +1,4 @@
+use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::cell::UnsafeCell;
 use std::sync::{Mutex, Condvar, MutexGuard, atomic::{AtomicUsize, Ordering}};
@@ -172,6 +173,7 @@ pub struct ForkLockReadGuard<'a, T> {
     #[allow(dead_code)]
     guard: RawForkLockReadGuard<'a>,
     inner: &'a T,
+    _phantom: PhantomData<*const usize>,
 }
 
 pub struct ForkLockWriteGuard<'a, 'b, T> {
@@ -183,7 +185,7 @@ pub struct ForkLockWriteGuard<'a, 'b, T> {
 impl<'a, T> ForkLock<'a, T> {
     pub fn read(&self) -> ForkLockReadGuard<'_, T> {
         let guard = self.lock.read();
-        ForkLockReadGuard{ guard, inner: unsafe{ &*self.inner.get() } }
+        ForkLockReadGuard{ guard, inner: unsafe{ &*self.inner.get() }, _phantom: PhantomData }
     }
 
     pub fn read_with_lock(&self, lock: &'a RawForkLockWriteGuard) -> &T {

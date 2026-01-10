@@ -103,8 +103,16 @@ impl<T> RwLock<T> {
         }
     }
 
+    pub fn blocking_read(&self) -> tokio::sync::RwLockReadGuard<'_, T> {
+        self.blocking_read_within(DEFAULT_DURATION)
+    }
+
     pub fn blocking_write(&self) -> tokio::sync::RwLockWriteGuard<'_, T> {
         self.blocking_write_within(DEFAULT_DURATION)
+    }
+
+    pub fn blocking_read_within(&self, duration: Duration) -> tokio::sync::RwLockReadGuard<'_, T> {
+        block_on(self.read_within(duration))
     }
 
     pub fn blocking_write_within(&self, duration: Duration) -> tokio::sync::RwLockWriteGuard<'_, T> {

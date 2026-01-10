@@ -59,17 +59,17 @@ pub struct UiInner {
 }
 
 pub trait ThreadsafeUiInner {
-    async fn borrow(&self) -> tokio::sync::RwLockReadGuard<'_, UiInner>;
-    async fn borrow_mut(&self) -> tokio::sync::RwLockWriteGuard<'_, UiInner>;
+    fn borrow(&self) -> tokio::sync::RwLockReadGuard<'_, UiInner>;
+    fn borrow_mut(&self) -> tokio::sync::RwLockWriteGuard<'_, UiInner>;
 }
 
 impl ThreadsafeUiInner for RwLock<UiInner> {
-    async fn borrow(&self) -> tokio::sync::RwLockReadGuard<'_, UiInner> {
-        self.read().await
+    fn borrow(&self) -> tokio::sync::RwLockReadGuard<'_, UiInner> {
+        self.blocking_read()
     }
 
-    async fn borrow_mut(&self) -> tokio::sync::RwLockWriteGuard<'_, UiInner> {
-        self.write().await
+    fn borrow_mut(&self) -> tokio::sync::RwLockWriteGuard<'_, UiInner> {
+        self.blocking_write()
     }
 }
 
@@ -167,7 +167,7 @@ impl Ui {
         self.is_drawing.store(false, Ordering::Release);
 
         let this = &*self.unlocked.read();
-        let mut ui = this.inner.borrow_mut().await;
+        let mut ui = this.inner.borrow_mut();
         let ui = &mut *ui;
 
         if !(ui.dirty || ui.buffer.dirty || ui.tui.dirty || ui.status_bar.dirty) {
@@ -191,11 +191,11 @@ impl Ui {
     pub async fn call_lua_fn<T: IntoLuaMulti + mlua::MaybeSend + 'static>(&self, draw: bool, callback: mlua::Function, arg: T) {
         let result = callback.call_async::<LuaValue>(arg).await;
         let mut ui = self.clone();
-        tokio::task::spawn(async move {
+        // tokio::task::spawn(async move {
             if !ui.report_error(result).await && draw {
                 ui.queue_draw();
             }
-        });
+        // });
     }
 
     pub async fn report_error<T, E: std::fmt::Display>(&mut self, result: std::result::Result<T, E>) -> bool {
@@ -216,7 +216,7 @@ impl Ui {
 
     pub async fn show_error_message(&mut self, msg: String) {
         let this = self.get();
-        let mut ui = this.inner.borrow_mut().await;
+        let mut ui = this.inner.borrow_mut();
         ui.tui.add_error_message(msg);
         self.queue_draw();
     }
@@ -236,13 +236,13 @@ impl Ui {
     pub async fn pre_accept_line(&self) -> Result<()> {
         {
             let this = &*self.unlocked.read();
-            let mut ui = this.inner.borrow_mut().await;
+            let mut ui = this.inner.borrow_mut();
 
             ui.tui.clear_non_persistent();
 
             // TODO handle errors here properly
         }
-        self.events.read().pause().await;
+        self.events.read().pause();
         self.prepare_for_unhandled_output().await?;
         Ok(())
     }
@@ -253,7 +253,7 @@ impl Ui {
         // we're going go to end up with janky output
         // how do we solve this?
         if !crate::is_forked() && !self.preparing_for_unhandled_output.swap(true, Ordering::Relaxed) {
-            self.unlocked.read().inner.borrow_mut().await.prepare_for_unhandled_output()?;
+            self.unlocked.read().inner.borrow_mut().prepare_for_unhandled_output()?;
             flag = true;
         }
         Ok(flag)
@@ -289,10 +289,10 @@ impl Ui {
     pub async fn post_accept_line(&self) -> Result<()> {
         {
             let this = &*self.unlocked.read();
-            let mut ui = this.inner.borrow_mut().await;
+            let mut ui = this.inner.borrow_mut();
             ui.reset();
         }
-        self.events.read().resume().await;
+        self.events.read().unpause();
         self.recover_from_unhandled_output().await?;
         Ok(())
     }
@@ -303,12 +303,14 @@ impl Ui {
         }
 
         let buffer = {
-            let this = self.get();
-            let ui = this.inner.borrow().await;
-            let buffer = ui.buffer.get_contents();
+            let buffer = {
+                let this = self.get();
+                let ui = this.inner.borrow();
+                ui.buffer.get_contents().clone()
+            };
             let (complete, _tokens) = self.shell.parse(buffer.clone(), Default::default()).await;
             if complete {
-                Some(buffer.clone())
+                Some(buffer)
             } else {
                 None
             }
@@ -329,7 +331,7 @@ impl Ui {
             self.start_cmd().await?;
 
         } else {
-            self.get().inner.borrow_mut().await.buffer.insert_at_cursor(b"\n");
+            self.get().inner.borrow_mut().buffer.insert_at_cursor(b"\n");
             self.trigger_buffer_change_callbacks(()).await;
             self.draw().await?;
         }
@@ -447,7 +449,7 @@ impl Ui {
         }
 
         // TODO we still have a mapping
-        // let mut ui = self.inner.borrow_mut().await;
+        // let mut ui = self.inner.borrow_mut();
         // ui.buffer.insert_at_cursor(string.as_ref());
         // return Some(Ok(true))
 
@@ -456,7 +458,7 @@ impl Ui {
 
     async fn handle_key_simple(&mut self, event: KeyEvent, buf: &BStr) -> Option<KeybindOutput> {
         // look for a lua callback
-        let callback = self.get().inner.borrow().await.keybinds
+        let callback = self.get().inner.borrow().keybinds
             .iter()
             .rev()
             .find_map(|k| k.inner.get(&(event.key, event.modifiers)))
@@ -526,7 +528,7 @@ impl Ui {
             Value::Widget{buffer, cursor, output, accept_line} => {
                 {
                     let this = self.get();
-                    let mut ui = this.inner.borrow_mut().await;
+                    let mut ui = this.inner.borrow_mut();
 
                     // check for any output e.g. zle -M
                     if let Some(output) = &output {
@@ -564,7 +566,7 @@ impl Ui {
                 {
                     let mut buf = [0; 4];
                     let this = &*self.get();
-                    let mut ui = this.inner.borrow_mut().await;
+                    let mut ui = this.inner.borrow_mut();
                     ui.buffer.insert_at_cursor(c.encode_utf8(&mut buf).as_bytes());
                 }
                 self.trigger_buffer_change_callbacks(()).await;
@@ -611,7 +613,8 @@ impl Ui {
         let mut lock = if condition && !crate::is_forked() {
             // this essentially locks ui
             if freeze_events {
-                self.events.read().pause().await;
+                self.events.read().pause();
+                // self.events.read().pause().await;
             }
             self.prepare_for_unhandled_output().await?;
             Some(self.has_foreground_process.lock().await)
@@ -624,7 +627,7 @@ impl Ui {
         if let Some(lock) = lock.take() {
             drop(lock);
             if freeze_events {
-                self.events.read().resume().await;
+                self.events.read().unpause();
             }
             if let Err(e) = self.recover_from_unhandled_output().await {
                 return Ok((result, Err(e)))

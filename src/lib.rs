@@ -13,6 +13,7 @@ mod signals;
 mod logging;
 mod async_runtime;
 mod canceller;
+mod pauser;
 #[macro_use]
 mod utils;
 
