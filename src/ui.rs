@@ -153,7 +153,7 @@ impl Ui {
         }
     }
 
-    pub async fn draw(&mut self) -> Result<()> {
+    pub async fn draw(&self) -> Result<()> {
         if self.preparing_for_unhandled_output.load(Ordering::Relaxed) {
             // the shell will draw it later
             return Ok(())
@@ -229,7 +229,7 @@ impl Ui {
         }
     }
 
-    pub async fn try_draw(&mut self) {
+    pub async fn try_draw(&self) {
         if let Err(err) = self.draw().await {
             log::error!("{:?}", err);
         }
@@ -350,6 +350,8 @@ impl Ui {
             self.trigger_accept_line_callbacks(()).await;
             {
                 let lock = self.has_foreground_process.lock().await;
+                // last draw
+                self.try_draw().await;
                 self.pre_accept_line().await?;
                 // acceptline doesn't actually accept the line right now
                 // only when we return control to zle using the trampoline

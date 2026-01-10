@@ -120,7 +120,7 @@ async fn call_hook_func(mut ui: Ui, _lua: Lua, mut args: Vec<BString>) -> Result
     Ok(result.0)
 }
 
-async fn print(mut ui: Ui, _lua: Lua, value: BString) -> Result<()> {
+async fn print(ui: Ui, _lua: Lua, value: BString) -> Result<()> {
     let result = ui.freeze_if(true, false, async {
         ui.get().borrow_mut().stdout.write_all(value.as_ref())
     }).await?;
