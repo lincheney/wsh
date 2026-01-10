@@ -160,17 +160,29 @@ impl Ui {
         }
 
         self.is_drawing.store(false, Ordering::Release);
+        let (width, height) = crossterm::terminal::size()?;
 
-        let refresh_shell_vars;
-        let width;
-        let height;
+        fn draw_internal(ui: &mut UiInner, shell_vars: Option<crate::tui::command_line::ShellVars>) -> Result<()> {
+            if let Some(shell_vars) = shell_vars {
+                ui.cmdline.shell_vars = shell_vars;
+            }
+            let cmdline = ui.cmdline.into_command_line(&mut ui.buffer);
+            ui.tui.draw(
+                &mut ui.stdout,
+                ui.size,
+                cmdline,
+                &mut ui.status_bar,
+                ui.dirty,
+            )?;
+            ui.dirty = false;
+            Ok(())
+        }
+
         {
             let this = self.unlocked.read();
-            let mut ui = this.borrow_mut();
+            let ui = &mut *this.borrow_mut();
 
-            ui.size = crossterm::terminal::size()?;
-            (width, height) = ui.size;
-
+            ui.size = (width, height);
             // take up at most 2/3 of the screen
             let height = (height * 2 / 3).max(1);
             // redraw all if dimensions have changed
@@ -182,33 +194,19 @@ impl Ui {
             if !(ui.dirty || ui.buffer.dirty || ui.tui.dirty || ui.status_bar.dirty) {
                 return Ok(())
             }
-            refresh_shell_vars = ui.dirty || ui.cmdline.is_dirty();
-        }
 
-        let shell_vars = if refresh_shell_vars {
-            Some(crate::tui::command_line::CommandLineState::get_shell_vars(&*self.shell, width).await)
-        } else {
-            None
-        };
-
-        {
-            let this = self.unlocked.read();
-            let ui = &mut *this.borrow_mut();
-            if let Some(shell_vars) = shell_vars {
-                ui.cmdline.shell_vars = shell_vars;
+            if !(ui.dirty || ui.cmdline.is_dirty()) {
+                // don't need the shell vars, draw immediately
+                return draw_internal(ui, None)
             }
-            let cmdline = ui.cmdline.into_command_line(&mut ui.buffer);
-            ui.tui.draw(
-                &mut ui.stdout,
-                (width, height),
-                cmdline,
-                &mut ui.status_bar,
-                ui.dirty,
-            )?;
-            ui.dirty = false;
         }
 
-        Ok(())
+        // get the shell vars then reacquire the ui
+        let shell_vars = crate::tui::command_line::CommandLineState::get_shell_vars(&*self.shell, width).await;
+
+        let this = self.unlocked.read();
+        let ui = &mut *this.borrow_mut();
+        draw_internal(ui, Some(shell_vars))
     }
 
     pub async fn call_lua_fn<T: IntoLuaMulti + mlua::MaybeSend + 'static>(&self, draw: bool, callback: mlua::Function, arg: T) {
