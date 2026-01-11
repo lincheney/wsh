@@ -645,7 +645,6 @@ impl Ui {
             // this essentially locks ui
             if freeze_events {
                 self.events.read().pause();
-                // self.events.read().pause().await;
             }
             self.prepare_for_unhandled_output().await?;
             Some(self.has_foreground_process.lock().await)

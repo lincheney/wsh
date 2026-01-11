@@ -5,15 +5,14 @@
 use std::sync::{Mutex, Arc, atomic::{Ordering}};
 use std::mem::transmute;
 use parking_lot::lock_api::RawMutex;
+use crate::unsafe_send::UnsafeSend;
 
 #[allow(dead_code)]
 pub struct ForkState {
     pid: u32,
-    fork_lock: Option<crate::fork_lock::RawForkLockWriteGuard<'static, 'static>>,
-    lua: Option<(mlua::AppDataRef<'static, ()>, Arc<mlua::Lua>)>,
+    fork_lock: Option<UnsafeSend<crate::fork_lock::RawForkLockWriteGuard<'static, 'static>>>,
+    lua: Option<(UnsafeSend<mlua::AppDataRef<'static, ()>>, Arc<mlua::Lua>)>,
 }
-unsafe impl Sync for ForkState {}
-unsafe impl Send for ForkState {}
 
 static FORK_STATE: Mutex<Option<ForkState>> = Mutex::new(None);
 
@@ -50,9 +49,16 @@ impl ForkState {
                 }
 
                 // i can take a lock on lua by acquiring a ref to the app data
+                // then i just have to hold on to it as the ref holds the lock guard
                 state.ui.lua.set_app_data(());
                 // ui.lua.gc_stop();
-                Some((unsafe{ transmute::<mlua::AppDataRef<'_, ()>, mlua::AppDataRef<'static, ()>>(state.ui.lua.app_data_ref::<()>().unwrap()) }, state.ui.lua.clone()))
+                let app_data = state.ui.lua.app_data_ref().unwrap();
+                Some((
+                    unsafe {
+                        UnsafeSend::new(transmute::<mlua::AppDataRef<'_, ()>, mlua::AppDataRef<'static, ()>>(app_data))
+                    },
+                    state.ui.lua.clone(),
+                ))
             } else {
                 None
             }
@@ -60,7 +66,7 @@ impl ForkState {
 
         Some(Self {
             pid: std::process::id(),
-            fork_lock: Some(fork_lock),
+            fork_lock: Some(unsafe{ UnsafeSend::new(fork_lock) }),
             lua,
         })
     }
@@ -79,7 +85,7 @@ impl Drop for ForkState {
                 // reset the lock if in the child
                 // we need to do this since all the other threads waiting on the lock
                 // are now gone
-                fork_lock.reset();
+                fork_lock.as_ref().reset();
             }
         }
 
@@ -109,7 +115,7 @@ impl Drop for ForkState {
                 }
                 let lua: Arc<FakeLua> = unsafe{ transmute(lua.clone()) };
                 while lua.raw.is_locked() {
-                    unsafe{
+                    unsafe {
                         lua.raw.raw().unlock();
                     }
                 }
