@@ -7,3 +7,13 @@ pub fn init() {
         .format_timestamp_millis()
         .init();
 }
+
+pub fn log_if_err<T, E: std::fmt::Debug>(result: Result<T, E>) -> Option<T> {
+    match result {
+        Ok(x) => Some(x),
+        Err(e) => {
+            log::error!("{e:?}");
+            None
+        },
+    }
+}

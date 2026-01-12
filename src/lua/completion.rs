@@ -43,7 +43,7 @@ impl UserData for Match {
     }
 }
 
-async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Stream> {
+async fn get_completions(mut ui: Ui, _lua: Lua, val: Option<String>) -> Result<Stream> {
 
     let val = if let Some(val) = val {
         val.into()
@@ -61,7 +61,6 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Strea
         match ui.shell.get_completions(val, sender).await {
             Ok(msg) => {
                 ui.remove_thread(tid);
-                // ui.activate();
                 if !msg.is_empty() {
                     let this = ui.unlocked.read();
                     let mut ui = this.borrow_mut();
@@ -69,10 +68,7 @@ async fn get_completions(ui: Ui, _lua: Lua, val: Option<String>) -> Result<Strea
                 }
             },
             err => {
-                let mut ui = ui.clone();
-                tokio::task::spawn(async move {
-                    ui.report_error(err).await;
-                });
+                ui.report_error(err).await;
             },
         }
     });

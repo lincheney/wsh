@@ -231,7 +231,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
             } else if cmd == zsh_sys::ZLE_CMD_REFRESH as _ {
                 // redraw the ui
                 if state.runtime.block_on(state.ui.recover_from_unhandled_output()).unwrap() {
-                    state.runtime.block_on(state.ui.clone().try_draw());
+                    crate::log_if_err(state.runtime.block_on(state.ui.clone().draw()));
                 }
                 return null_mut()
 

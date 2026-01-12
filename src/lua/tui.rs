@@ -338,8 +338,7 @@ async fn clear_messages(ui: Ui, _lua: Lua, all: bool) -> Result<()> {
 }
 
 async fn check_message(ui: Ui, _lua: Lua, id: usize) -> Result<bool> {
-    let ui = ui.get();
-    Ok(ui.borrow().tui.get_index(id).is_some())
+    Ok(ui.get().borrow().tui.get_index(id).is_some())
 }
 
 async fn remove_message(ui: Ui, _lua: Lua, id: usize) -> Result<()> {

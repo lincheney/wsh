@@ -17,6 +17,9 @@ mod pauser;
 #[macro_use]
 mod utils;
 
+pub use logging::log_if_err;
+pub use async_runtime::spawn_and_log;
+
 use std::sync::atomic::{AtomicBool, Ordering};
 static IS_FORKED: AtomicBool = AtomicBool::new(false);
 static EMPTY_STR: &std::ffi::CStr = c"";

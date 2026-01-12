@@ -212,11 +212,9 @@ impl Ui {
     pub async fn call_lua_fn<T: IntoLuaMulti + mlua::MaybeSend + 'static>(&self, draw: bool, callback: mlua::Function, arg: T) {
         let result = callback.call_async::<LuaValue>(arg).await;
         let mut ui = self.clone();
-        // tokio::task::spawn(async move {
-            if !ui.report_error(result).await && draw {
-                ui.queue_draw();
-            }
-        // });
+        if !ui.report_error(result).await && draw {
+            ui.queue_draw();
+        }
     }
 
     pub async fn report_error<T, E: std::fmt::Display>(&mut self, result: std::result::Result<T, E>) -> bool {
@@ -226,12 +224,6 @@ impl Ui {
             true
         } else {
             false
-        }
-    }
-
-    pub async fn try_draw(&self) {
-        if let Err(err) = self.draw().await {
-            log::error!("{:?}", err);
         }
     }
 
@@ -351,7 +343,7 @@ impl Ui {
             {
                 let lock = self.has_foreground_process.lock().await;
                 // last draw
-                self.try_draw().await;
+                crate::log_if_err(self.draw().await);
                 self.pre_accept_line().await?;
                 // acceptline doesn't actually accept the line right now
                 // only when we return control to zle using the trampoline
@@ -639,7 +631,7 @@ impl Ui {
         condition: bool,
         freeze_events: bool,
         f: F,
-    ) -> Result<(T, Result<()>)> {
+    ) -> Result<T> {
 
         let mut lock = if condition && !crate::is_forked() {
             // this essentially locks ui
@@ -659,12 +651,10 @@ impl Ui {
             if freeze_events {
                 self.events.read().unpause();
             }
-            if let Err(e) = self.recover_from_unhandled_output().await {
-                return Ok((result, Err(e)))
-            }
+            crate::log_if_err(self.recover_from_unhandled_output().await);
         }
 
-        Ok((result, Ok(())))
+        Ok(result)
     }
 
 }

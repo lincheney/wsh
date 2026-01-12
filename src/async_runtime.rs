@@ -10,3 +10,12 @@ pub fn init() -> std::io::Result<tokio::runtime::Runtime> {
         })
         .build()
 }
+
+pub fn spawn_and_log<F, T, E>(future: F) -> tokio::task::JoinHandle<()> where
+    F: Future<Output = Result<T, E>> + Send + 'static,
+    E: std::fmt::Debug,
+{
+    tokio::task::spawn(async move {
+        crate::log_if_err(future.await);
+    })
+}

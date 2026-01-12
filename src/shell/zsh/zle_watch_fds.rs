@@ -16,14 +16,15 @@ pub async fn handle_fd_change(ui: &crate::ui::Ui, fd_change: FdChange) -> Result
                                 else { break };
 
                             let result = ui.freeze_if(true, true, FdChangeHook::run_locked(&hook, &ui.shell, fd, guard.err())).await;
-                            if matches!(result, Ok((false, _))) {
+                            let result = crate::log_if_err(result);
+                            if result == Some(false) {
                                 break
                             }
                         }
                     });
                 },
                 Err(err) => {
-                    ui.freeze_if(true, true, FdChangeHook::run_locked(&hook, &ui.shell, fd, Some(err))).await?.1?;
+                    ui.freeze_if(true, true, FdChangeHook::run_locked(&hook, &ui.shell, fd, Some(err))).await?;
                 },
             }
         },

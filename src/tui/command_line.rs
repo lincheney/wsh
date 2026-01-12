@@ -79,6 +79,7 @@ pub struct CommandLine<'a> {
     buffer: &'a mut Buffer,
 }
 
+crate::impl_deref_helper!(self: CommandLine<'a>, self.parent => CommandLineState);
 crate::impl_deref_helper!(self: CommandLine<'a>, mut self.parent => CommandLineState);
 
 impl CommandLine<'_> {

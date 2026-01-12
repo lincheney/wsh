@@ -181,6 +181,7 @@ pub struct ForkLockWriteGuard<'a, 'b, T> {
     guard: RawForkLockWriteGuard<'a, 'b>,
     inner: &'b mut T,
 }
+crate::impl_deref_helper!(self: ForkLockWriteGuard<'a, 'b, T>, self.inner => T);
 crate::impl_deref_helper!(self: ForkLockWriteGuard<'a, 'b, T>, mut self.inner => T);
 
 impl<'a, T> ForkLock<'a, T> {

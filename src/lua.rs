@@ -110,22 +110,18 @@ async fn get_cwd(ui: Ui, _lua: Lua, (): ()) -> Result<BString> {
     Ok(ui.shell.get_cwd().await)
 }
 
-async fn call_hook_func(mut ui: Ui, _lua: Lua, mut args: Vec<BString>) -> Result<Option<i32>> {
+async fn call_hook_func(ui: Ui, _lua: Lua, mut args: Vec<BString>) -> Result<Option<i32>> {
     let arg0 = args.remove(0);
-
-    let result = ui.freeze_if(true, true, async {
+    ui.freeze_if(true, true, async {
         ui.shell.call_hook_func(arg0, args).await
-    }).await?;
-    ui.report_error(result.1).await;
-    Ok(result.0)
+    }).await
 }
 
 async fn print(ui: Ui, _lua: Lua, value: BString) -> Result<()> {
-    let result = ui.freeze_if(true, false, async {
+    ui.freeze_if(true, false, async {
         ui.get().borrow_mut().stdout.write_all(value.as_ref())
-    }).await?;
-    result.1?;
-    ui.try_draw().await;
+    }).await??;
+    crate::log_if_err(ui.draw().await);
     Ok(())
 }
 

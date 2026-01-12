@@ -85,41 +85,39 @@ impl EventStream {
     pub async fn run<T: Read+AsRawFd+Send+Sync+'static>(mut self, file: T, mut ui: crate::ui::Ui) -> anyhow::Result<i32> {
 
         // read events
-        let _x: tokio::task::JoinHandle<Result<()>> = {
-            let mut reader = AsyncFd::new(file)?;
-            let mut parser = parser::Parser::new();
-            let mut pausable = self.pausable.clone();
+        let mut reader = AsyncFd::new(file)?;
+        let mut parser = parser::Parser::new();
+        let mut pausable = self.pausable.clone();
 
-            tokio::task::spawn(async move {
-                let mut buf = [0; 1024];
-                loop {
-                    let Some(guard) = pausable.run(reader.readable()).await
-                        else { continue };
-                    guard?.clear_ready();
-                    match reader.get_mut().read(&mut buf) {
-                        Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => (),
-                        Ok(0) => return Ok(()),
-                        Err(err) => return Err(err)?,
+        crate::spawn_and_log::<_, _, anyhow::Error>(async move {
+            let mut buf = [0; 1024];
+            loop {
+                let Some(guard) = pausable.run(reader.readable()).await
+                    else { continue };
+                guard?.clear_ready();
+                match reader.get_mut().read(&mut buf) {
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => (),
+                    Ok(0) => return Ok(()),
+                    Err(err) => return Err(err)?,
 
-                        Ok(n) => {
-                            parser.feed(&buf[..n]);
-                            for (event, event_buffer) in parser.iter() {
-                                match event {
-                                    parser::Event::CursorPosition{x, y} => {
-                                        if let Ok(sender) = self.position_queue.try_recv() {
-                                            let _ = sender.send((x, y));
-                                        }
-                                    },
-                                    _ => {
-                                        let _ = self.queue_sender.send(Message::Event(event, event_buffer));
-                                    },
-                                }
+                    Ok(n) => {
+                        parser.feed(&buf[..n]);
+                        for (event, event_buffer) in parser.iter() {
+                            match event {
+                                parser::Event::CursorPosition{x, y} => {
+                                    if let Ok(sender) = self.position_queue.try_recv() {
+                                        let _ = sender.send((x, y));
+                                    }
+                                },
+                                _ => {
+                                    let _ = self.queue_sender.send(Message::Event(event, event_buffer));
+                                },
                             }
-                        },
-                    }
+                        }
+                    },
                 }
-            })
-        };
+            }
+        });
 
         // process events
         loop {
@@ -132,7 +130,7 @@ impl EventStream {
                     }
                 },
                 Some(Message::Draw) => {
-                    ui.try_draw().await;
+                    crate::log_if_err(ui.draw().await);
                 },
                 Some(Message::Exit(code)) => return Ok(code),
                 None => return Ok(1),
@@ -144,10 +142,10 @@ impl EventStream {
     pub fn spawn(self, ui: &crate::ui::Ui) {
         // spawn a task to take care of keyboard input
         let ui = ui.clone();
-        tokio::task::spawn(async move {
-            let tty = std::fs::File::open("/dev/tty").unwrap();
-            crate::utils::set_nonblocking_fd(&tty).unwrap();
-            self.run(tty, ui).await.unwrap();
+        crate::spawn_and_log(async move {
+            let tty = std::fs::File::open("/dev/tty")?;
+            crate::utils::set_nonblocking_fd(&tty)?;
+            self.run(tty, ui).await
         });
     }
 }
