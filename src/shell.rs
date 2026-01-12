@@ -23,6 +23,7 @@ pub use zsh::{
     bin_zle,
     history,
     variables,
+    signals,
     functions::Function,
     parser::{Token},
     ZptyOpts,
@@ -231,34 +232,16 @@ crate::TokioActor! {
             unsafe{ zsh::histline }
         }
 
-        pub fn add_pid(&self, pid: i32) {
-            zsh::add_pid(pid);
-        }
+        // pub fn add_pid(&self, pid: i32) {
+            // zsh::add_pid(pid);
+        // }
 
         pub fn find_process_status(&self, pid: i32, pop_if_done: bool) -> Option<c_int> {
-            unsafe{
-                let job = zsh_sys::jobtab.add(*zsh::JOB as usize);
-                let mut prev: *mut zsh_sys::process = null_mut();
-                let mut proc = (*job).auxprocs;
-                while let Some(p) = proc.as_ref() {
-                    // found it
-                    if p.pid == pid {
-                        let status = p.status;
-                        if pop_if_done && status >= 0 {
-                            if prev.is_null() {
-                                (*job).auxprocs = p.next;
-                            } else {
-                                (*prev).next = p.next;
-                            }
-                            zsh_sys::zfree(proc.cast(), std::mem::size_of::<zsh_sys::process>() as _);
-                        }
-                        return Some(status);
-                    }
-                    prev = proc;
-                    proc = p.next;
-                }
-            }
-            None
+            zsh::find_process_status(pid, pop_if_done)
+        }
+
+        pub fn check_pid_status(&self, pid: i32) -> Option<c_int> {
+            signals::check_pid_status(pid)
         }
 
         pub fn get_var(&self, name: BString, zle: bool) -> anyhow::Result<Option<variables::Value>> {

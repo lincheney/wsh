@@ -35,7 +35,7 @@ impl GlobalState {
             let ui = Ui::new(&FORK_LOCK, event_ctrl, shell_client)?;
 
             zsh::completion::override_compadd()?;
-            crate::signals::init()?;
+            zsh::signals::init()?;
 
             if !crate::is_forked() {
                 events.spawn(&ui);
@@ -144,6 +144,10 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
             } else {
                 0
             }
+        },
+
+        Some(b".invoke-sigchld-handler") => {
+            zsh::signals::invoke_sigchld_handler()
         },
 
         Some(_) => {

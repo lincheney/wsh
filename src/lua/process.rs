@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::default::Default;
 use std::os::fd::{RawFd, AsRawFd, IntoRawFd, FromRawFd};
 use std::fs::File;
+use std::io::{Read, Write};
 use anyhow::{Result, Context};
 use mlua::{prelude::*, UserData, UserDataMethods};
 use tokio::io::{
@@ -234,30 +235,58 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         || matches!(args.stdout, Stdio::inherit)
         || matches!(args.stderr, Stdio::inherit)
     );
+    // use a pipe to notify the child we are ready
+    // ie that we have gotten the pid and registered it with zsh
+    // we have to do this because zsh will drop waitpid results
+    // if it doesn't recognise the pid
+    let (mut sync_read, mut sync_write) = std::io::pipe()?;
+    unsafe {
+        command.pre_exec(move || {
+            let pid = std::process::id();
+            let buf = pid.to_le_bytes();
+            sync_write.write(&buf)?;
+            sync_write.write(b" ")?;
+            Ok(())
+        });
+    }
 
     let (result_sender, result_receiver) = oneshot::channel();
     let (sender, receiver) = watch::channel(None);
 
     tokio::task::spawn(async move {
 
+        let (pid_sender, pid_receiver) = oneshot::channel();
+        tokio::task::spawn_blocking(move || {
+            let mut buf = [0; _];
+            if crate::log_if_err(sync_read.read(&mut buf)).is_some() {
+                let pid = u32::from_le_bytes(buf);
+                let pid_waiter = crate::shell::signals::register_pid(pid as _, true);
+                let _ = pid_sender.send((pid, pid_waiter));
+            }
+        });
+
         let mut result_sender = Some(result_sender);
         let result: Result<Result<_>> = ui.freeze_if(foreground, true, async {
 
-            // prevent sigchld from running
-            ui.shell.queue_signals().await;
             let mut proc = command.spawn()?;
-            let pid = proc.id().unwrap();
-            ui.shell.add_pid(pid as _).await;
-            ui.shell.unqueue_signals().await?;
+            match pid_receiver.await {
+                Ok((pid, pid_waiter)) => {
+                    ::log::debug!("DEBUG(repair)\t{}\t= {:?}", stringify!(pid), pid);
+                    let stdin  = proc.stdin.take().map(|s| WriteableFile(Some(BufWriter::new(s))));
+                    let stdout = proc.stdout.take().map(|s| ReadableFile(Some(BufReader::new(s))));
+                    let stderr = proc.stderr.take().map(|s| ReadableFile(Some(BufReader::new(s))));
 
-            let stdin  = proc.stdin.take().map(|s| WriteableFile(Some(BufWriter::new(s))));
-            let stdout = proc.stdout.take().map(|s| ReadableFile(Some(BufReader::new(s))));
-            let stderr = proc.stderr.take().map(|s| ReadableFile(Some(BufReader::new(s))));
-            let _ = result_sender.take().unwrap().send(Ok((pid, stdin, stdout, stderr)));
-            let code = crate::signals::wait_for_pid(pid as _, &ui.shell).await.unwrap();
+                    let _ = result_sender.take().unwrap().send(Ok((pid, stdin, stdout, stderr)));
+                    let code = pid_waiter.await.unwrap_or(-1);
 
-            // ignore error
-            let _ = sender.send(Some(Ok(code as _)));
+                    // ignore error
+                    let _ = sender.send(Some(Ok(code as _)));
+                },
+                Err(err) => {
+                    // uhhh the process is probably dead?
+                    let _ = result_sender.take().unwrap().send(Err(anyhow::anyhow!("Failed to start process: {err}")));
+                },
+            }
 
             Ok(())
         }).await;
@@ -426,11 +455,14 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
                     // fork it now to get the pid
                     let redirections = streams.iter().flatten().map(|s| (s.fd, s.replacement)).collect();
                     let pid = ui.shell.exec_subshell(cmd, false, redirections).await? as _;
-
                     // send streams back to caller
                     let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
-
-                    crate::signals::wait_for_pid(pid as _, &ui.shell).await.unwrap() as _
+                    // get the status
+                    let pid_waiter = crate::shell::signals::register_pid(pid as _, false);
+                    match ui.shell.check_pid_status(pid as _).await {
+                        None | Some(-1) => pid_waiter.await.unwrap_or(-1) as _,
+                        Some(code) => code as _,
+                    }
                 },
             };
 
@@ -511,7 +543,12 @@ async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let zpty_name = name.clone().into();
     let pid = zpty.pid;
     tokio::task::spawn(async move {
-        let code = crate::signals::wait_for_pid(pid as _, &ui.shell).await.unwrap();
+        // get the status
+        let pid_waiter = crate::shell::signals::register_pid(pid as _, false);
+        let code = match ui.shell.check_pid_status(pid as _).await {
+            None | Some(-1) => pid_waiter.await.unwrap_or(-1),
+            Some(code) => code,
+        };
         // send the code out
         let _ = sender.send(Some(Ok(code as _)));
 

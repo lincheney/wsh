@@ -16,7 +16,7 @@ pub static FUNCTIONS: LazyLock<UnsafeSend<zsh_sys::HashTable>> = LazyLock::new(|
     }
 });
 
-pub struct Function(UnsafeSend<zsh_sys::shfunc>);
+pub struct Function(pub(super) UnsafeSend<zsh_sys::shfunc>);
 
 impl Function {
     pub fn new(code: &BStr) -> Result<Self> {

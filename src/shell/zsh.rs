@@ -12,6 +12,7 @@ mod bindings;
 mod linked_list;
 pub mod variables;
 pub mod functions;
+pub mod signals;
 mod widget;
 pub mod zle_watch_fds;
 pub use widget::ZleWidget;
@@ -184,6 +185,32 @@ pub fn add_pid(pid: i32) {
         zsh_sys::addproc(pid, null_mut(), aux, bgtime, -1, -1);
         zsh_sys::thisjob = oldjob;
     }
+}
+
+pub fn find_process_status(pid: i32, pop_if_done: bool) -> Option<c_int> {
+     unsafe{
+        let job = zsh_sys::jobtab.add(*JOB as usize);
+        let mut prev: *mut zsh_sys::process = null_mut();
+        let mut proc = (*job).auxprocs;
+        while let Some(p) = proc.as_ref() {
+            // found it
+            if p.pid == pid {
+                let status = p.status;
+                if pop_if_done && status >= 0 {
+                    if prev.is_null() {
+                        (*job).auxprocs = p.next;
+                    } else {
+                        (*prev).next = p.next;
+                    }
+                    zsh_sys::zfree(proc.cast(), std::mem::size_of::<zsh_sys::process>() as _);
+                }
+                return Some(status);
+            }
+            prev = proc;
+            proc = p.next;
+        }
+    }
+    None
 }
 
 pub fn get_return_code() -> c_long {

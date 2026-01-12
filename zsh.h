@@ -34,7 +34,8 @@
 
 #include <stdint.h>
 #include <unistd.h>
-typedef size_t LinkList;
+typedef void* LinkList;
+typedef void* Eprog;
 typedef uint32_t mode_t;
 
 mod_export static unsigned char Meta = ((char) 0x83);
@@ -247,3 +248,7 @@ zlecallhook(char *name, char *arg);
 
 void
 free_prepostdisplay(void);
+
+// because zsh_sys defines this as an array but i need a pointer
+mod_export int *sigtrapped;
+mod_export Eprog *siglists;

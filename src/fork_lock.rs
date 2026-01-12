@@ -182,7 +182,7 @@ pub struct ForkLockWriteGuard<'a, 'b, T> {
     inner: &'b mut T,
 }
 crate::impl_deref_helper!(self: ForkLockWriteGuard<'a, 'b, T>, self.inner => T);
-crate::impl_deref_helper!(self: ForkLockWriteGuard<'a, 'b, T>, mut self.inner => T);
+crate::impl_deref_helper!(mut self: ForkLockWriteGuard<'a, 'b, T>, self.inner => T);
 
 impl<'a, T> ForkLock<'a, T> {
     pub fn read(&self) -> ForkLockReadGuard<'_, T> {
