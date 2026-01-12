@@ -4,9 +4,9 @@ use std::time::SystemTime;
 use std::str::FromStr;
 use std::collections::HashMap;
 use std::default::Default;
-use std::os::fd::{RawFd, AsRawFd, IntoRawFd, FromRawFd};
+use std::os::fd::{RawFd, AsRawFd, IntoRawFd, FromRawFd, OwnedFd};
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{Read, Write, PipeWriter, PipeReader};
 use anyhow::{Result, Context};
 use mlua::{prelude::*, UserData, UserDataMethods};
 use tokio::io::{
@@ -239,13 +239,19 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     // ie that we have gotten the pid and registered it with zsh
     // we have to do this because zsh will drop waitpid results
     // if it doesn't recognise the pid
-    let (mut sync_read, mut sync_write) = std::io::pipe()?;
+    let (mut pid_read, mut pid_write) = std::io::pipe()?;
+    let (mut sync_pid_read, mut sync_pid_write) = std::io::pipe()?;
+    let sync_pid_write_fd = sync_pid_write.as_raw_fd();
     unsafe {
         command.pre_exec(move || {
+            // need to drop this here
+            drop(OwnedFd::from_raw_fd(sync_pid_write_fd));
             let pid = std::process::id();
             let buf = pid.to_le_bytes();
-            sync_write.write_all(&buf)?;
-            sync_write.write_all(b" ")?;
+            // send the pid over
+            pid_write.write_all(&buf)?;
+            // wait for the ack before continuing
+            let _ = sync_pid_read.read(&mut [0]);
             Ok(())
         });
     }
@@ -258,11 +264,15 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         let (pid_sender, pid_receiver) = oneshot::channel();
         tokio::task::spawn_blocking(move || {
             let mut buf = [0; _];
-            if crate::log_if_err(sync_read.read(&mut buf)).is_some() {
+            if crate::log_if_err(pid_read.read(&mut buf)).is_some() {
+                // get the pid
                 let pid = u32::from_le_bytes(buf);
                 let pid_waiter = crate::shell::signals::register_pid(pid as _, true);
                 let _ = pid_sender.send((pid, pid_waiter));
+                // send the ack
+                crate::log_if_err(sync_pid_write.write_all(b" "));
             }
+            drop(sync_pid_write);
         });
 
         let mut result_sender = Some(result_sender);
