@@ -23,11 +23,11 @@ impl PidSet {
 
 pub struct PidTable {
     read: AtomicPtr<PidSet>,
-    write: Mutex<(PidSet, Vec<Box<PidSet>>)>,
+    write: Mutex<(PidSet, Vec<PidSet>)>,
 }
 
 pub struct WriteGuard<'a> {
-    guard: MutexGuard<'a, (PidSet, Vec<Box<PidSet>>)>,
+    guard: MutexGuard<'a, (PidSet, Vec<PidSet>)>,
     table: &'a PidTable,
 }
 impl Drop for WriteGuard<'_> {
@@ -35,14 +35,15 @@ impl Drop for WriteGuard<'_> {
         // free old sets; get the last one so that the iterator is consumed
         let available = self.guard.1.extract_if(.., |set| !set.is_borrowed()).last().unwrap_or_default();
 
-        let new = std::mem::replace(&mut self.guard.0, *available);
+        let new = std::mem::replace(&mut self.guard.0, available);
         let new = Box::into_raw(Box::new(new));
         let old = self.table.read.swap(new, Ordering::AcqRel);
 
         if !old.is_null() {
             let old = unsafe{ Box::from_raw(old) };
             if old.is_borrowed() {
-                self.guard.1.push(old);
+                // borrowed, free it later
+                self.guard.1.push(*old);
             } else if self.guard.0.inner.capacity() < old.inner.capacity() {
                 // use old as it is bigger
                 self.guard.0 = *old;
@@ -89,11 +90,8 @@ impl PidTable {
     // this is lock free
     pub fn get(&self) -> Option<ReadGuard<'_>> {
         let ptr = self.read.load(Ordering::Acquire);
-        if ptr.is_null() {
-            None
-        } else {
-            Some(ReadGuard::new(unsafe{ &*ptr }))
-        }
+        let pid_set = unsafe{ ptr.as_ref()? };
+        Some(ReadGuard::new(pid_set))
     }
 
     pub fn get_mut(&self) -> WriteGuard<'_> {

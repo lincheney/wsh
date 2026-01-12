@@ -244,8 +244,8 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         command.pre_exec(move || {
             let pid = std::process::id();
             let buf = pid.to_le_bytes();
-            sync_write.write(&buf)?;
-            sync_write.write(b" ")?;
+            sync_write.write_all(&buf)?;
+            sync_write.write_all(b" ")?;
             Ok(())
         });
     }
@@ -271,7 +271,6 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
             let mut proc = command.spawn()?;
             match pid_receiver.await {
                 Ok((pid, pid_waiter)) => {
-                    ::log::debug!("DEBUG(repair)\t{}\t= {:?}", stringify!(pid), pid);
                     let stdin  = proc.stdin.take().map(|s| WriteableFile(Some(BufWriter::new(s))));
                     let stdout = proc.stdout.take().map(|s| ReadableFile(Some(BufReader::new(s))));
                     let stderr = proc.stderr.take().map(|s| ReadableFile(Some(BufReader::new(s))));

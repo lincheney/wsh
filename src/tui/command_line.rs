@@ -34,7 +34,7 @@ pub struct CommandLineState {
 }
 
 impl CommandLineState {
-    pub fn into_command_line<'a>(
+    pub fn make_command_line<'a>(
         &'a mut self,
         buffer: &'a mut Buffer,
     ) -> CommandLine<'a> {

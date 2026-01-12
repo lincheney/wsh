@@ -401,7 +401,7 @@ impl<T> Text<T> {
             for token in line.iter() {
                 if let WrapToken::String(symbol) = &token.inner {
                     cell.reset();
-                    cell.set_symbol(&symbol);
+                    cell.set_symbol(symbol);
                     cell.set_style(token.style.unwrap());
                     drawer.draw_cell(&cell, false)?;
                 }

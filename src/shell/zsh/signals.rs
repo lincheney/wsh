@@ -1,6 +1,5 @@
 use tokio::sync::{oneshot};
 use std::collections::HashMap;
-use std::ptr::null_mut;
 use anyhow::Result;
 use nix::sys::signal;
 use std::os::fd::{IntoRawFd, BorrowedFd};
@@ -9,6 +8,24 @@ use std::io::{PipeReader};
 use std::sync::{Mutex, atomic::{AtomicI32, Ordering}};
 use tokio::io::AsyncReadExt;
 mod pidset;
+
+// how the heck does this work
+//
+// i can't just wrap zhandler in the sigchld handler
+// ... because zsh might not actually do any waitpid() !
+// this is due to queueing
+// the handler will actually be run at some arbitrary point
+// additionally statuses for any pids not already in the jobtab are dropped
+//
+// what does this do
+// we extend the signal trap array to accommodate some fake signals
+// we install a trap on a fake signal
+// we install a sigchld handler that redirects it to our fake signal
+// zhandler() has no special handling for the fake signal so all it does is run our trap
+// either immediately or even later when it is queued
+// either way we know when our trap is run, it is being run for real (not queued)
+// before zhandler() we stick any additional pids into the jobtab that we need
+// and after zhandler() we loop over the jobtab for any statuses that have updated
 
 const SIGTRAPPED_COUNT: usize = 1024;
 const CUSTOM_SIGCHLD: usize = SIGTRAPPED_COUNT - 1;
@@ -30,24 +47,39 @@ extern "C" fn sigchld_handler(_sig: c_int) {
     }
 }
 
-fn jobtab_iter<'a>() -> impl Iterator<Item=(*mut zsh_sys::job, bool, &'a mut zsh_sys::process, *mut zsh_sys::process)> {
+fn jobtab_retain_iter<'a, F: FnMut(&'a zsh_sys::process) -> bool>(mut callback: F) -> impl Iterator<Item=&'a zsh_sys::process> {
     unsafe {
-        (1 ..= zsh_sys::maxjob)
+        let mut jobtab_iter = (1 ..= zsh_sys::maxjob)
             .flat_map(|i| {
                 let jobtab = zsh_sys::jobtab.add(i as _);
-                [(jobtab, false), (jobtab, true)]
-            }).flat_map(|(jobtab, aux)| {
-                let mut proc = if aux { (*jobtab).auxprocs } else { (*jobtab).procs };
-                let mut prev: *mut zsh_sys::process = null_mut();
-                std::iter::from_fn(move || {
-                    let p = proc.as_mut()?;
-                    let oldprev = prev;
-                    prev = proc;
-                    proc = p.next;
-                    Some((jobtab, aux, p, oldprev))
-                })
-            })
+                [&mut (*jobtab).procs, &mut (*jobtab).auxprocs]
+            });
+        let mut retain = false;
+        let mut proc: *mut *mut zsh_sys::process = std::ptr::null_mut();
+
+        std::iter::from_fn(move || {
+            if !proc.is_null() {
+                // goto to the next ptr
+                if retain {
+                    proc = &raw mut (**proc).next;
+                } else {
+                    // except if we delete, in which case assign the next pointer to prev
+                    let old = *proc;
+                    *proc = (**proc).next;
+                    zsh_sys::zfree(old.cast(), std::mem::size_of::<zsh_sys::process>() as _);
+                }
+            }
+            while proc.is_null() || (*proc).is_null() {
+                proc = jobtab_iter.next()?;
+            }
+            retain = callback(&**proc);
+            Some(&**proc)
+        })
     }
+}
+
+fn jobtab_iter<'a>() -> impl Iterator<Item=&'a zsh_sys::process> {
+    jobtab_retain_iter(|_| true)
 }
 
 pub fn invoke_sigchld_handler() -> c_int {
@@ -59,9 +91,9 @@ pub fn invoke_sigchld_handler() -> c_int {
         // register any pids we are interested in
         if let Some(pids) = pidset::PID_TABLE.get() && !pids.is_empty() {
             super::queue_signals();
-            for (&pid, (status, _)) in pids.iter() {
+            for (&pid, (status, add)) in pids.iter() {
                 // register these pids
-                if status.load(Ordering::Relaxed) < 0 && jobtab_iter().any(|(_, _, proc, _)| proc.pid == pid) {
+                if *add && status.load(Ordering::Relaxed) < 0 && !jobtab_iter().any(|proc| proc.pid == pid) {
                     super::add_pid(pid);
                 }
             }
@@ -79,24 +111,18 @@ pub fn invoke_sigchld_handler() -> c_int {
         if let Some(pids) = pidset::PID_TABLE.get() && !pids.is_empty() {
             super::queue_signals();
             let mut found = false;
-            for (jobtab, aux, proc, prev) in jobtab_iter() {
+            jobtab_retain_iter(|proc| {
                 // found one
                 if proc.status >= 0 && let Some((status, added)) = pids.get(&proc.pid) {
                     found = true;
                     status.store(proc.status, std::sync::atomic::Ordering::Release);
                     // pop it off
                     if *added {
-                        if !prev.is_null() {
-                            (*prev).next = proc.next;
-                        } else if aux {
-                            (*jobtab).auxprocs = proc.next;
-                        } else {
-                            (*jobtab).procs = proc.next;
-                        }
+                        return false
                     }
-                    zsh_sys::zfree(proc as *mut _ as *mut _, std::mem::size_of::<zsh_sys::process>() as _);
                 }
-            }
+                true
+            }).for_each(drop);
             super::unqueue_signals().unwrap();
 
             // notify that we found something
@@ -123,12 +149,7 @@ pub fn register_pid(pid: pidset::Pid, add_to_jobtab: bool) -> oneshot::Receiver<
 }
 
 pub(in crate::shell) fn check_pid_status(pid: pidset::Pid) -> Option<i32> {
-    for (_, _, proc, _) in jobtab_iter() {
-        if proc.pid == pid {
-            return Some(proc.status)
-        }
-    }
-    None
+    jobtab_iter().find(|proc| proc.pid == pid).map(|proc| proc.status)
 }
 
 async fn sigchld_safe_handler(reader: PipeReader) -> Result<()> {

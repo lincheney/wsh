@@ -169,7 +169,7 @@ impl Ui {
             if let Some(shell_vars) = shell_vars {
                 ui.cmdline.shell_vars = shell_vars;
             }
-            let cmdline = ui.cmdline.into_command_line(&mut ui.buffer);
+            let cmdline = ui.cmdline.make_command_line(&mut ui.buffer);
             ui.tui.draw(
                 &mut ui.stdout,
                 ui.size,
@@ -205,7 +205,7 @@ impl Ui {
         }
 
         // get the shell vars then reacquire the ui
-        let shell_vars = crate::tui::command_line::CommandLineState::get_shell_vars(&*self.shell, width).await;
+        let shell_vars = crate::tui::command_line::CommandLineState::get_shell_vars(&self.shell, width).await;
 
         let this = self.unlocked.read();
         let ui = &mut *this.borrow_mut();
