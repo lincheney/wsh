@@ -238,7 +238,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let (result_sender, result_receiver) = oneshot::channel();
     let (sender, receiver) = watch::channel(None);
 
-    tokio::spawn(async move {
+    tokio::task::spawn(async move {
 
         let mut result_sender = Some(result_sender);
         let result: Result<Result<_>> = ui.freeze_if(foreground, true, async {

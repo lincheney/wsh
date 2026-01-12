@@ -1,7 +1,7 @@
 use bstr::{BStr, BString};
 use std::time::Duration;
 use std::future::Future;
-use std::sync::{Arc, Weak as WeakArc, atomic::{AtomicBool, Ordering}};
+use std::sync::{Arc, Weak as WeakArc, atomic::{AtomicUsize, AtomicBool, Ordering}};
 use std::collections::HashSet;
 use std::default::Default;
 use mlua::prelude::*;
@@ -25,6 +25,9 @@ use crate::tui::{
 use crate::timed_lock::{RwLock};
 use crate::shell::{ShellClient, KeybindValue};
 use crate::lua::{EventCallbacks, HasEventCallbacks};
+
+const UNHANDLED_OUTPUT: usize = 1;
+const UI_FROZEN: usize = UNHANDLED_OUTPUT | 2;
 
 fn lua_error<T>(msg: &str) -> Result<T, mlua::Error> {
     Err(mlua::Error::RuntimeError(msg.to_string()))
@@ -81,7 +84,7 @@ crate::strong_weak_wrapper! {
         pub lua: Arc::<Lua> [WeakArc::<Lua>],
         pub events: Arc::<ForkLock<'static, crate::event_stream::EventController>> [WeakArc::<ForkLock<'static, crate::event_stream::EventController>>],
         pub has_foreground_process: Arc::<tokio::sync::Mutex<()>> [WeakArc::<tokio::sync::Mutex<()>>],
-        preparing_for_unhandled_output: Arc::<AtomicBool> [WeakArc::<AtomicBool>],
+        preparing_for_unhandled_output: Arc::<AtomicUsize> [WeakArc::<AtomicUsize>],
         threads: Arc::<ForkLock<'static, std::sync::Mutex<HashSet<nix::unistd::Pid>>>> [WeakArc::<ForkLock<'static, std::sync::Mutex<HashSet<nix::unistd::Pid>>>>],
         is_drawing: Arc::<AtomicBool> [WeakArc::<AtomicBool>],
     }
@@ -154,7 +157,7 @@ impl Ui {
     }
 
     pub async fn draw(&self) -> Result<()> {
-        if self.preparing_for_unhandled_output.load(Ordering::Relaxed) {
+        if self.preparing_for_unhandled_output.load(Ordering::Relaxed) != 0 {
             // the shell will draw it later
             return Ok(())
         }
@@ -256,32 +259,33 @@ impl Ui {
             // TODO handle errors here properly
         }
         self.events.read().pause();
-        self.prepare_for_unhandled_output().await?;
+        self.prepare_for_unhandled_output(None).await?;
         Ok(())
     }
 
-    pub async fn prepare_for_unhandled_output(&self) -> Result<bool> {
-        let mut flag = false;
+    pub async fn prepare_for_unhandled_output(&self, flag: Option<usize>) -> Result<bool> {
         // TODO if forked and trashed, zsh will NOT recover
         // we're going go to end up with janky output
         // how do we solve this?
-        if !crate::is_forked() && !self.preparing_for_unhandled_output.swap(true, Ordering::Relaxed) {
+        if !crate::is_forked() && self.preparing_for_unhandled_output.fetch_or(flag.unwrap_or(UNHANDLED_OUTPUT), Ordering::Relaxed) == 0 {
             self.unlocked.read().borrow_mut().prepare_for_unhandled_output()?;
-            flag = true;
+            Ok(true)
+        } else {
+            Ok(false)
         }
-        Ok(flag)
     }
 
-    pub async fn recover_from_unhandled_output(&self) -> Result<bool> {
-        let flag = self.preparing_for_unhandled_output.swap(false, Ordering::Relaxed);
-
-        if flag {
-            if self.has_foreground_process.try_lock().is_err() {
-                // foreground process, can't recover yet
-                // reset it back
-                self.preparing_for_unhandled_output.store(true, Ordering::Relaxed);
-                return Ok(false)
-            }
+    pub async fn recover_from_unhandled_output(&self, flag: Option<usize>) -> Result<bool> {
+        let flag = flag.unwrap_or(UNHANDLED_OUTPUT);
+        let old_flag = self.preparing_for_unhandled_output.fetch_and(!flag, Ordering::Relaxed);
+        if old_flag == 0 {
+            Ok(false)
+        } else if old_flag & !flag != 0 || self.has_foreground_process.try_lock().is_err() {
+            // foreground process, can't recover yet
+            // reset it back
+            self.preparing_for_unhandled_output.store(old_flag, Ordering::Relaxed);
+            Ok(false)
+        } else {
 
             {
                 let this = self.unlocked.read();
@@ -291,20 +295,18 @@ impl Ui {
 
             // move down one line if not at start of line
             let cursor = self.events.read().get_cursor_position();
-            let cursor = cursor.await.unwrap_or((0, 0));
+            let cursor = tokio::time::timeout(crate::timed_lock::DEFAULT_DURATION, cursor).await.unwrap().unwrap_or((0, 0));
 
-            {
-                let this = self.unlocked.read();
-                let mut ui = this.borrow_mut();
-                if cursor.0 != 0 {
-                    ui.size = crossterm::terminal::size()?;
-                    queue!(ui.stdout, style::Print("\r\n"))?;
-                }
-                execute!(ui.stdout, style::ResetColor)?;
-                ui.dirty = true;
+            let this = self.unlocked.read();
+            let mut ui = this.borrow_mut();
+            if cursor.0 != 0 {
+                ui.size = crossterm::terminal::size()?;
+                queue!(ui.stdout, style::Print("\r\n"))?;
             }
+            execute!(ui.stdout, style::ResetColor)?;
+            ui.dirty = true;
+            Ok(true)
         }
-        Ok(flag)
     }
 
     pub async fn post_accept_line(&self) -> Result<()> {
@@ -314,7 +316,7 @@ impl Ui {
             ui.reset();
         }
         self.events.read().unpause();
-        self.recover_from_unhandled_output().await?;
+        self.recover_from_unhandled_output(None).await?;
         Ok(())
     }
 
@@ -638,7 +640,7 @@ impl Ui {
             if freeze_events {
                 self.events.read().pause();
             }
-            self.prepare_for_unhandled_output().await?;
+            self.prepare_for_unhandled_output(Some(UI_FROZEN)).await?;
             Some(self.has_foreground_process.lock().await)
         } else {
             None
@@ -651,7 +653,7 @@ impl Ui {
             if freeze_events {
                 self.events.read().unpause();
             }
-            crate::log_if_err(self.recover_from_unhandled_output().await);
+            crate::log_if_err(self.recover_from_unhandled_output(Some(UI_FROZEN)).await);
         }
 
         Ok(result)
