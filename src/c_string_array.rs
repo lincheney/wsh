@@ -10,6 +10,7 @@ pub struct CStrArray {
 pub struct CStringArray {
     inner: CStrArray,
 }
+crate::impl_deref_helper!(self: CStringArray, &self.inner => CStrArray);
 
 impl CStrArray {
     pub fn iter_ptr(&self) -> impl Iterator<Item=*mut c_char> {
@@ -60,13 +61,6 @@ impl CStringArray {
 
     pub fn from_iter<'a, I: Iterator<Item=&'a BStr> + ExactSizeIterator>(iter: I) -> Self {
         Self{ inner: CStrArray::from_iter(iter) }
-    }
-}
-
-impl std::ops::Deref for CStringArray {
-    type Target = CStrArray;
-    fn deref(&self) -> &Self::Target {
-        &self.inner
     }
 }
 

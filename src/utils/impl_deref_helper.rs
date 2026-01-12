@@ -1,0 +1,19 @@
+#[macro_export]
+macro_rules! impl_deref_helper {
+    ($arg:ident: $struct:ident $(< $($generics:tt),* >)?, $inner:expr => $type:ty) => (
+        impl$(<$($generics),*>)? ::std::ops::Deref for $struct $(<$($generics),*>)? {
+            type Target = $type;
+            fn deref(&$arg) -> &Self::Target {
+                $inner
+            }
+        }
+    );
+    ($arg:ident: $struct:ident $(< $($generics:tt),* >)?, mut $inner:expr => $type:ty) => (
+        crate::impl_deref_helper!($arg: $struct $(<$($generics),*>)?, $inner => $type);
+        impl$(<$($generics),*>)? ::std::ops::DerefMut for $struct $(<$($generics),*>)? {
+            fn deref_mut(&mut $arg) -> &mut $type {
+                $inner
+            }
+        }
+    );
+}

@@ -1,5 +1,4 @@
 use std::marker::PhantomData;
-use std::ops::{Deref, DerefMut};
 use std::cell::UnsafeCell;
 use std::sync::{Mutex, Condvar, MutexGuard, atomic::{AtomicUsize, Ordering}};
 
@@ -175,12 +174,14 @@ pub struct ForkLockReadGuard<'a, T> {
     inner: &'a T,
     _phantom: PhantomData<*const usize>,
 }
+crate::impl_deref_helper!(self: ForkLockReadGuard<'a, T>, self.inner => T);
 
 pub struct ForkLockWriteGuard<'a, 'b, T> {
     #[allow(dead_code)]
     guard: RawForkLockWriteGuard<'a, 'b>,
     inner: &'b mut T,
 }
+crate::impl_deref_helper!(self: ForkLockWriteGuard<'a, 'b, T>, mut self.inner => T);
 
 impl<'a, T> ForkLock<'a, T> {
     pub fn read(&self) -> ForkLockReadGuard<'_, T> {
@@ -196,25 +197,5 @@ impl<'a, T> ForkLock<'a, T> {
     pub fn write(&self) -> ForkLockWriteGuard<'_, '_, T> {
         let guard = self.lock.write();
         ForkLockWriteGuard{ guard, inner: unsafe{ &mut *self.inner.get() } }
-    }
-}
-
-impl<T> Deref for ForkLockReadGuard<'_, T> {
-    type Target = T;
-    fn deref(&self) -> &Self::Target {
-        self.inner
-    }
-}
-
-impl<T> Deref for ForkLockWriteGuard<'_, '_, T> {
-    type Target = T;
-    fn deref(&self) -> &Self::Target {
-        self.inner
-    }
-}
-
-impl<T> DerefMut for ForkLockWriteGuard<'_, '_, T> {
-    fn deref_mut(&mut self) -> &mut T {
-        self.inner
     }
 }

@@ -1,7 +1,6 @@
 use std::ffi::CStr;
 use super::text::{HighlightedRange, Highlight};
 use bstr::BString;
-use std::ops::{Deref, DerefMut};
 use std::io::{Write};
 use crate::tui::{Drawer, Canvas};
 use crate::buffer::Buffer;
@@ -79,6 +78,8 @@ pub struct CommandLine<'a> {
     parent: &'a mut CommandLineState,
     buffer: &'a mut Buffer,
 }
+
+crate::impl_deref_helper!(self: CommandLine<'a>, mut self.parent => CommandLineState);
 
 impl CommandLine<'_> {
 
@@ -171,17 +172,4 @@ impl CommandLine<'_> {
         Ok(())
     }
 
-}
-
-impl Deref for CommandLine<'_> {
-    type Target = CommandLineState;
-    fn deref(&self) -> &Self::Target {
-        self.parent
-    }
-}
-
-impl DerefMut for CommandLine<'_> {
-    fn deref_mut(&mut self) -> &mut CommandLineState {
-        self.parent
-    }
 }

@@ -3,6 +3,8 @@ use std::os::fd::AsRawFd;
 pub mod bounded_queue;
 #[macro_use]
 pub mod strong_weak_wrapper;
+#[macro_use]
+pub mod impl_deref_helper;
 
 pub fn set_nonblocking_fd<R: AsRawFd>(file: &R) -> Result<()> {
     let raw_fd = file.as_raw_fd();

@@ -306,7 +306,7 @@ async fn set_message(ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
 
     let ui = ui.get();
     let tui = &mut ui.borrow_mut().tui;
-    let (id, widget): (_, &mut tui::WidgetWrapper) = match options.as_ref().and_then(|o| o.options.id).map(|id| (id, tui.get_mut(id))) {
+    let (id, widget) = match options.as_ref().and_then(|o| o.options.id).map(|id| (id, tui.get_mut(id))) {
         Some((id, Some(widget))) => (id, widget),
         None => {
             let widget = tui::widget::Widget::default();
