@@ -1,7 +1,7 @@
 mod fork;
 use bstr::BString;
 use crate::ui::{Ui};
-use crate::c_string_array;
+use crate::c_string_array::CStrArray;
 use std::os::raw::{c_char, c_int};
 use std::ptr::null_mut;
 use std::sync::{LazyLock, OnceLock, Arc, Mutex};
@@ -125,14 +125,15 @@ pub fn run_with_shell<F: 'static + Send + Future<Output: Send>>(future: F) -> Re
 
 unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _options: zsh_sys::Options, _func: c_int) -> c_int {
 
-    let argv = c_string_array::CStrArray::from(argv).to_vec();
-    match argv.first().map(|s| s.as_slice()) {
+    let argv = unsafe{ CStrArray::from_raw(argv as _) };
+    let mut iter = argv.iter().map(|s| s.to_bytes());
+    match iter.next() {
         Some(b"lua") => {
             let result: Result<()> = tokio::task::block_in_place(|| {
 
                 let state = GlobalState::get()?;
                 state.runtime.block_on(
-                    state.ui.lua.load(argv.get(1).map_or(b"" as _, |s| s.as_slice())).exec_async()
+                    state.ui.lua.load(iter.next().unwrap_or(b"" as _)).exec_async()
                 )?;
 
                 Ok(())

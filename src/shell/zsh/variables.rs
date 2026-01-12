@@ -70,8 +70,8 @@ impl From<HashMap<BString, BString>> for Value {
 fn try_hashtable_to_hashmap(table: zsh_sys::HashTable) -> Result<HashMap<BString, BString>> {
     let mut hashmap = HashMap::new();
     unsafe {
-        let keys: CStrArray = zsh_sys::paramvalarr(table, zsh_sys::SCANPM_WANTKEYS as c_int).into();
-        let values: CStrArray = zsh_sys::paramvalarr(table, zsh_sys::SCANPM_WANTVALS as c_int).into();
+        let keys = CStrArray::from_raw(zsh_sys::paramvalarr(table, zsh_sys::SCANPM_WANTKEYS as c_int) as _);
+        let values = CStrArray::from_raw(zsh_sys::paramvalarr(table, zsh_sys::SCANPM_WANTVALS as c_int) as _);
 
         let keys = keys.iter().map(Some).chain(std::iter::repeat(None));
         let values = values.iter().map(Some).chain(std::iter::repeat(None));
@@ -117,13 +117,15 @@ impl Variable {
         let name = c_name.as_ptr().cast_mut();
         let param = match value {
             Value::HashMap(value) => {
-                let value: Vec<BString> = value.into_iter().flat_map(|(k, v)| [k, v]).collect();
-                let value: CStringArray = value.into();
-                unsafe{ zsh_sys::sethparam(name, value.into_ptr()) }
+                let value: CStringArray = value.into_iter()
+                    .flat_map(|(k, v)| [k, v])
+                    .map(|x| CString::new(x).unwrap())
+                    .collect();
+                unsafe{ zsh_sys::sethparam(name, value.into_raw()) }
             },
             Value::Array(value) => {
-                let value: CStringArray = value.into();
-                unsafe{ zsh_sys::setaparam(name, value.into_ptr()) }
+                let value: CStringArray = value.into_iter().map(|x| CString::new(x).unwrap()).collect();
+                unsafe{ zsh_sys::setaparam(name, value.into_raw()) }
             },
             Value::Float(value) => {
                 let value = zsh_sys::mnumber{
@@ -195,8 +197,8 @@ impl Variable {
 
     pub fn try_as_array(&mut self) -> Option<Vec<BString>> {
         if self.value.isarr != 0 {
-            let array: CStrArray = unsafe{ zsh_sys::getarrvalue(&raw mut self.value) }.into();
-            Some(array.to_vec())
+            let array = unsafe{ CStrArray::from_raw(zsh_sys::getarrvalue(&raw mut self.value) as _) };
+            Some(array.iter().map(|x| x.to_owned().into_bytes().into()).collect())
         } else {
             None
         }
@@ -385,12 +387,11 @@ impl VariableGSU for Vec<BString> {
     type Type = *mut *mut c_char;
 
     fn from_raw(ptr: Self::Type) -> Self {
-        let value: CStringArray = ptr.into();
-        value.to_vec()
+        unsafe{ CStringArray::from_raw(ptr) }.into_iter().map(|x| x.into_bytes().into()).collect()
     }
+
     fn into_raw(self) -> Self::Type {
-        let value: CStringArray = self.into();
-        value.into_ptr()
+        self.into_iter().map(|x| CString::new(x).unwrap()).collect::<CStringArray>().into_raw()
     }
 }
 

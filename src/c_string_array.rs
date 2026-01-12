@@ -1,104 +1,81 @@
-use bstr::BStr;
-use std::ffi::{CStr};
+use std::ffi::{CStr, CString};
+use std::ptr::null_mut;
 use std::os::raw::{c_char};
-use bstr::BString;
 
-pub struct CStrArray {
-    pub ptr: *mut *mut c_char,
+fn iter_until_null(ptr: *mut *mut c_char) -> impl Iterator<Item=*mut *mut c_char> {
+    (0..)
+        .map(move |i| unsafe{ ptr.add(i) })
+        .take_while(|&x| !x.is_null() && !unsafe{ *x }.is_null())
 }
 
 pub struct CStringArray {
-    inner: CStrArray,
-}
-crate::impl_deref_helper!(self: CStringArray, &self.inner => CStrArray);
-
-impl CStrArray {
-    pub fn iter_ptr(&self) -> impl Iterator<Item=*mut c_char> {
-        let mut ptr = self.ptr;
-        std::iter::from_fn(move || {
-            if ptr.is_null() {
-                return None
-            }
-
-            let value = unsafe{ *ptr };
-            if value.is_null() {
-                None
-            } else {
-                ptr = unsafe{ ptr.offset(1) };
-                Some(value)
-            }
-        })
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item=&CStr> {
-        self.iter_ptr().map(|ptr| unsafe{ CStr::from_ptr(ptr) })
-    }
-
-    pub fn to_vec(&self) -> Vec<BString> {
-        self.iter().map(|s| s.to_bytes().to_owned()).map(BString::new).collect()
-    }
-
-    pub fn from_iter<'a, I: Iterator<Item=&'a BStr> + ExactSizeIterator>(iter: I) -> Self {
-        unsafe {
-            let len = iter.len();
-            let ptr: *mut *mut c_char = zsh_sys::zalloc(std::mem::size_of::<*mut c_char>() * (len + 1)).cast();
-            for (i, string) in iter.enumerate() {
-                *ptr.add(i) = zsh_sys::ztrduppfx(string.as_ptr().cast(), string.len() as _);
-            }
-            *ptr.add(len) = std::ptr::null_mut();
-            ptr.into()
-        }
-    }
+    inner: *mut *mut c_char,
+    start: *mut *mut c_char,
 }
 
 impl CStringArray {
-    pub fn into_ptr(self) -> *mut *mut c_char {
-        let ptr = self.ptr;
-        // leak it
+    pub unsafe fn from_raw(ptr: *mut *mut c_char) -> Self {
+        Self{ inner: ptr, start: ptr }
+    }
+
+    pub fn as_ptr(&self) -> *mut *mut c_char {
+        self.inner
+    }
+
+    pub fn into_raw(self) -> *mut *mut c_char {
+        let ptr = self.as_ptr();
         std::mem::forget(self);
         ptr
     }
 
-    pub fn from_iter<'a, I: Iterator<Item=&'a BStr> + ExactSizeIterator>(iter: I) -> Self {
-        Self{ inner: CStrArray::from_iter(iter) }
+    pub fn into_iter(mut self) -> impl Iterator<Item=CString> {
+        iter_until_null(self.inner)
+            .map(move |ptr| unsafe {
+                // keep self alive while we have this iter
+                let x = &mut self;
+                let s = CString::from_raw((*ptr).cast());
+                x.start = ptr.add(1);
+                *ptr = null_mut();
+                s
+            })
     }
 }
 
 impl Drop for CStringArray {
     fn drop(&mut self) {
-        let mut len = 0;
-        unsafe{
-            for ptr in self.iter_ptr() {
-                zsh_sys::zsfree(ptr);
-                len += 1;
+        unsafe {
+            for ptr in iter_until_null(self.start) {
+                drop(CString::from_raw(*ptr));
             }
-            if !self.ptr.is_null() {
-                zsh_sys::zfree(self.ptr.cast(), len);
-            }
+            drop(Box::from_raw(self.inner));
         }
     }
 }
 
-impl From<*mut *mut c_char> for CStrArray {
-    fn from(ptr: *mut *mut c_char) -> Self {
-        Self{ ptr }
+impl FromIterator<CString> for CStringArray {
+    fn from_iter<I: IntoIterator<Item=CString>>(iter: I) -> Self {
+        let mut vec: Vec<*mut c_char> = iter.into_iter().map(|x| x.into_raw()).collect();
+        vec.push(null_mut());
+        unsafe{ Self::from_raw(Box::leak(vec.into_boxed_slice()) as *mut _ as _) }
     }
 }
 
-impl From<CStrArray> for CStringArray {
-    fn from(inner: CStrArray) -> Self {
-        Self{ inner }
+pub struct CStrArray {
+    inner: *const *const c_char,
+}
+
+impl CStrArray {
+    pub unsafe fn from_raw(ptr: *const *const c_char) -> Self {
+        Self{ inner: ptr }
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item=&CStr> {
+        iter_until_null(self.inner as _).map(|x| unsafe{ CStr::from_ptr((*x).cast_const()) })
     }
 }
 
-impl From<*mut *mut c_char> for CStringArray {
-    fn from(ptr: *mut *mut c_char) -> Self {
-        Self{ inner: ptr.into() }
-    }
-}
-
-impl From<Vec<BString>> for CStringArray {
-    fn from(vec: Vec<BString>) -> Self {
-        CStringArray::from_iter(vec.iter().map(|x| x.as_ref()))
+impl std::fmt::Debug for CStrArray {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        f.debug_list().entries(self.iter()).finish()
     }
 }

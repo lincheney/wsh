@@ -1,7 +1,6 @@
 use bstr::BString;
 use anyhow::Result;
-use std::ffi::{CStr};
-use bstr::BStr;
+use std::ffi::{CStr, CString};
 use crate::c_string_array::{CStringArray};
 use std::os::raw::{c_int};
 use std::sync::{OnceLock};
@@ -96,7 +95,7 @@ impl<'a> ZleWidget<'a> {
         unsafe{ CStr::from_ptr(self.ptr.as_ref().nam) }
     }
 
-    pub(crate) fn exec_with_ptr<'c, I: Iterator<Item=&'c BStr> + ExactSizeIterator>(
+    pub(crate) fn exec_with_ptr<I: Iterator<Item=CString> + ExactSizeIterator>(
         ptr: NonNull<bindings::thingy>,
         opts: Option<WidgetArgs>,
         args: I,
@@ -107,7 +106,7 @@ impl<'a> ZleWidget<'a> {
         let args_ptr = if args.len() == 0 {
             &raw mut null
         } else {
-            CStringArray::from_iter(args).ptr
+            args.collect::<CStringArray>().as_ptr()
         };
 
         unsafe {
@@ -118,11 +117,11 @@ impl<'a> ZleWidget<'a> {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn exec<'c, I: Iterator<Item=&'c BStr> + ExactSizeIterator>(&self, opts: Option<WidgetArgs>, args: I) -> c_int {
+    pub(crate) fn exec<I: Iterator<Item=CString> + ExactSizeIterator>(&self, opts: Option<WidgetArgs>, args: I) -> c_int {
         Self::exec_with_ptr(self.ptr, opts, args)
     }
 
-    pub(crate) fn exec_and_get_output<'c, I: Iterator<Item=&'c BStr> + ExactSizeIterator>(&mut self, opts: Option<WidgetArgs>, args: I) -> Result<(BString, c_int)> {
+    pub(crate) fn exec_and_get_output<I: Iterator<Item=CString> + ExactSizeIterator>(&mut self, opts: Option<WidgetArgs>, args: I) -> Result<(BString, c_int)> {
         let sink = &mut *self.shell.sink.lock().unwrap();
         Ok(super::capture_shout(sink, || Self::exec_with_ptr(self.ptr, opts, args)))
     }

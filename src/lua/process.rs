@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::default::Default;
 use std::os::fd::{RawFd, AsRawFd, IntoRawFd, FromRawFd, OwnedFd};
 use std::fs::File;
-use std::io::{Read, Write, PipeWriter, PipeReader};
+use std::io::{Read, Write};
 use anyhow::{Result, Context};
 use mlua::{prelude::*, UserData, UserDataMethods};
 use tokio::io::{
