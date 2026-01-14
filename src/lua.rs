@@ -46,15 +46,15 @@ struct RedrawOptions {
     all: bool,
 }
 
-async fn get_cursor(ui: Ui, _lua: Lua, (): ()) -> Result<usize> {
+fn get_cursor(ui: &Ui, _lua: &Lua, (): ()) -> Result<usize> {
     Ok(ui.get().borrow().buffer.get_cursor())
 }
 
-async fn get_buffer(ui: Ui, lua: Lua, (): ()) -> Result<mlua::String> {
+fn get_buffer(ui: &Ui, lua: &Lua, (): ()) -> Result<mlua::String> {
     Ok(lua.create_string(ui.get().borrow().buffer.get_contents())?)
 }
 
-async fn set_cursor(ui: Ui, _lua: Lua, val: usize) -> Result<()> {
+fn set_cursor(ui: &Ui, _lua: &Lua, val: usize) -> Result<()> {
     ui.get().borrow_mut().buffer.set_cursor(val);
     Ok(())
 }
@@ -101,8 +101,8 @@ async fn redraw(ui: Ui, lua: Lua, val: Option<LuaValue>) -> Result<()> {
     Ok(())
 }
 
-async fn exit(ui: Ui, _lua: Lua, code: Option<i32>) -> Result<()> {
-    tokio::runtime::Handle::current().block_on(ui.events.read().exit(code.unwrap_or(0)));
+fn exit(ui: &Ui, _lua: &Lua, code: Option<i32>) -> Result<()> {
+    ui.events.read().exit(code.unwrap_or(0));
     Ok(())
 }
 
@@ -180,15 +180,15 @@ pub async fn __laggy(_ui: Ui, lua: Lua, (): ()) -> Result<()> {
 
 pub fn init_lua(ui: &Ui) -> Result<()> {
 
-    ui.set_lua_async_fn("get_cursor", get_cursor)?;
-    ui.set_lua_async_fn("get_buffer", get_buffer)?;
-    ui.set_lua_async_fn("set_cursor", set_cursor)?;
+    ui.set_lua_fn("get_cursor", get_cursor)?;
+    ui.set_lua_fn("get_buffer", get_buffer)?;
+    ui.set_lua_fn("set_cursor", set_cursor)?;
     ui.set_lua_async_fn("set_buffer", set_buffer)?;
     ui.set_lua_async_fn("undo_buffer", undo_buffer)?;
     ui.set_lua_async_fn("redo_buffer", redo_buffer)?;
     ui.set_lua_async_fn("accept_line", accept_line)?;
     ui.set_lua_async_fn("redraw",  redraw)?;
-    ui.set_lua_async_fn("exit", exit)?;
+    ui.set_lua_fn("exit", exit)?;
     ui.set_lua_async_fn("get_cwd", get_cwd)?;
     ui.set_lua_async_fn("call_hook_func", call_hook_func)?;
     ui.set_lua_async_fn("print", print)?;

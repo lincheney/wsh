@@ -50,7 +50,7 @@ impl EventController {
         let _ = self.queue.send(Message::Draw);
     }
 
-    pub async fn exit(&self, code: i32) {
+    pub fn exit(&self, code: i32) {
         let _ = self.queue.send(Message::Exit(code));
     }
 }
