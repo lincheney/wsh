@@ -16,8 +16,16 @@ crate::impl_deref_helper!(self: PidSet, &self.inner => PidHashMap);
 crate::impl_deref_helper!(mut self: PidSet, &mut self.inner => PidHashMap);
 
 impl PidSet {
-    fn is_borrowed(&self) -> bool {
-        self.borrows.load(Ordering::Acquire) > 0
+    fn borrow_exclusively(&self) -> bool {
+        self.borrows.fetch_or(1, Ordering::SeqCst) <= 1
+    }
+
+    fn borrow(&self) {
+        self.borrows.fetch_add(2, Ordering::SeqCst);
+    }
+
+    fn unborrow(&self) {
+        self.borrows.fetch_sub(2, Ordering::AcqRel);
     }
 }
 
@@ -33,15 +41,15 @@ pub struct WriteGuard<'a> {
 impl Drop for WriteGuard<'_> {
     fn drop(&mut self) {
         // free old sets; get the last one so that the iterator is consumed
-        let available = self.guard.1.extract_if(.., |set| !set.is_borrowed()).last().unwrap_or_default();
+        let available = self.guard.1.extract_if(.., |set| set.borrow_exclusively()).last().unwrap_or_default();
 
         let new = std::mem::replace(&mut self.guard.0, available);
         let new = Box::into_raw(Box::new(new));
-        let old = self.table.read.swap(new, Ordering::AcqRel);
+        let old = self.table.read.swap(new, Ordering::SeqCst);
 
         if !old.is_null() {
             let old = unsafe{ Box::from_raw(old) };
-            if old.is_borrowed() {
+            if !old.borrow_exclusively() {
                 // borrowed, free it later
                 self.guard.1.push(*old);
             } else if self.guard.0.inner.capacity() < old.inner.capacity() {
@@ -54,6 +62,7 @@ impl Drop for WriteGuard<'_> {
         let new = unsafe{ &*new };
         self.guard.0.inner.clear();
         self.guard.0.inner.extend(new.inner.iter().map(|x| (*x.0, x.1.clone())));
+        self.guard.0.borrows.store(0, Ordering::Release);
     }
 }
 crate::impl_deref_helper!(self: WriteGuard<'a>, &self.guard.0 => PidSet);
@@ -64,13 +73,13 @@ pub struct ReadGuard<'a> {
 }
 impl<'a> ReadGuard<'a> {
     fn new(inner: &'a PidSet) -> Self {
-        inner.borrows.fetch_add(1, Ordering::AcqRel);
+        inner.borrow();
         Self{ inner }
     }
 }
 impl Drop for ReadGuard<'_> {
     fn drop(&mut self) {
-        self.inner.borrows.fetch_sub(1, Ordering::AcqRel);
+        self.inner.unborrow();
     }
 }
 crate::impl_deref_helper!(self: ReadGuard<'a>, &self.inner => PidSet);
@@ -89,7 +98,7 @@ pub static PID_TABLE: PidTable = PidTable {
 impl PidTable {
     // this is lock free
     pub fn get(&self) -> Option<ReadGuard<'_>> {
-        let ptr = self.read.load(Ordering::Acquire);
+        let ptr = self.read.load(Ordering::SeqCst);
         let pid_set = unsafe{ ptr.as_ref()? };
         Some(ReadGuard::new(pid_set))
     }
