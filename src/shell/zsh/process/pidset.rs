@@ -1,11 +1,9 @@
 use std::ptr::null_mut;
 use std::sync::{Arc, Mutex, MutexGuard, atomic::{AtomicI32, AtomicUsize, AtomicPtr, Ordering}};
-use std::collections::HashMap;
-use std::hash::{BuildHasherDefault, DefaultHasher};
 
 pub type Pid = i32;
 
-type PidHashMap = HashMap<Pid, (Arc<AtomicI32>, bool), BuildHasherDefault<DefaultHasher>>;
+type PidHashMap = crate::utils::ConstHashMap<Pid, (Arc<AtomicI32>, bool)>;
 
 #[derive(Default)]
 pub struct PidSet {
@@ -94,7 +92,7 @@ pub static PID_TABLE: PidTable = PidTable {
     read: AtomicPtr::new(null_mut()),
     write: Mutex::new((
         PidSet {
-            inner: HashMap::with_hasher(BuildHasherDefault::new()),
+            inner: crate::utils::ConstHashMap::new(),
             borrows: AtomicUsize::new(0),
         },
         Vec::new(),

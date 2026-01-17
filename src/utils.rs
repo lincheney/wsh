@@ -1,6 +1,8 @@
 use anyhow::Result;
 use std::os::fd::AsRawFd;
-pub mod bounded_queue;
+
+mod const_hash_map;
+pub use const_hash_map::ConstHashMap;
 #[macro_use]
 pub mod strong_weak_wrapper;
 #[macro_use]
