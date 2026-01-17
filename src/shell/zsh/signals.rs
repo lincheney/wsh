@@ -2,6 +2,7 @@ use anyhow::Result;
 use nix::sys::signal;
 use std::os::raw::{c_int};
 use std::sync::atomic::{AtomicI32, Ordering};
+use tokio::io::AsyncReadExt;
 
 // how the heck does this work
 //
@@ -95,6 +96,29 @@ fn hook_signal(signal: signal::Signal) -> Result<()> {
     }
 
     Ok(())
+}
+
+pub(super) fn self_pipe<C, F, T, E>(callback: C) -> Result<std::io::PipeWriter>
+where
+    C: Fn() -> F + Send + 'static,
+    F: Future<Output = Result<T, E>> + Send + 'static,
+    E: std::error::Error + Send + Sync + 'static,
+{
+    let (reader, writer) = std::io::pipe()?;
+    crate::utils::set_nonblocking_fd(&writer)?;
+    crate::utils::set_nonblocking_fd(&reader)?;
+
+    // spawn a reader task
+    let mut reader = tokio::net::unix::pipe::Receiver::from_owned_fd(reader.into())?;
+    crate::spawn_and_log::<_, (), anyhow::Error>(async move {
+        let mut buf = [0];
+        loop {
+            reader.read_exact(&mut buf).await?;
+            callback().await?;
+        }
+    });
+
+    Ok(writer)
 }
 
 pub fn init() -> Result<()> {

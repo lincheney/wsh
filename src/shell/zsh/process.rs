@@ -4,9 +4,7 @@ use anyhow::Result;
 use nix::sys::signal;
 use std::os::fd::{IntoRawFd, BorrowedFd};
 use std::os::raw::{c_int};
-use std::io::{PipeReader};
 use std::sync::{Mutex, atomic::{AtomicI32, Ordering}};
-use tokio::io::AsyncReadExt;
 mod pidset;
 
 static CHILD_PIPE: AtomicI32 = AtomicI32::new(-1);
@@ -58,22 +56,6 @@ pub fn register_pid(pid: pidset::Pid, add_to_jobtab: bool) -> oneshot::Receiver<
 
 pub(in crate::shell) fn check_pid_status(pid: pidset::Pid) -> Option<i32> {
     jobtab_iter().find(|proc| proc.pid == pid).map(|proc| proc.status)
-}
-
-async fn sigchld_safe_handler(reader: PipeReader) -> Result<()> {
-    let mut reader = tokio::net::unix::pipe::Receiver::from_owned_fd(reader.into()).unwrap();
-    let mut buf = [0];
-    loop {
-        reader.read_exact(&mut buf).await?;
-        if let Some(pid_map) = &mut *PID_MAP.lock().unwrap() {
-            // check for pids that are done
-            pidset::PID_TABLE.extract_finished_pids(|pid, status| {
-                if let Some(sender) = pid_map.remove(&pid) {
-                    let _ = sender.send(status);
-                }
-            });
-        }
-    }
 }
 
 pub(super) fn sighandler() -> c_int {
@@ -130,14 +112,21 @@ pub(super) fn sighandler() -> c_int {
 }
 
 pub(super) fn init() -> Result<()> {
-    let (reader, writer) = std::io::pipe()?;
-    crate::utils::set_nonblocking_fd(&writer)?;
-    crate::utils::set_nonblocking_fd(&reader)?;
+    // spawn a reader task
+    let writer = super::signals::self_pipe::<_, _, _, std::convert::Infallible>(|| async {
+        if let Some(pid_map) = &mut *PID_MAP.lock().unwrap() {
+            // check for pids that are done
+            pidset::PID_TABLE.extract_finished_pids(|pid, status| {
+                if let Some(sender) = pid_map.remove(&pid) {
+                    let _ = sender.send(status);
+                }
+            });
+        }
+        Ok(())
+    })?;
 
     // set the writer for the handler to use
     CHILD_PIPE.store(writer.into_raw_fd(), Ordering::Release);
-    // spawn a reader task
-    crate::spawn_and_log(sigchld_safe_handler(reader));
 
     Ok(())
 }
