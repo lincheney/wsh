@@ -355,7 +355,9 @@ impl Ui {
                 self.pre_accept_line().await?;
                 // acceptline doesn't actually accept the line right now
                 // only when we return control to zle using the trampoline
-                self.shell.accept_line_trampoline(Some(buffer)).await;
+                if self.shell.do_accept_line_trampoline(Some(buffer)).await.is_err() {
+                    return Ok(false)
+                }
                 drop(lock);
             }
             self.post_accept_line().await?;

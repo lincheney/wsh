@@ -86,11 +86,11 @@ impl GlobalState {
         let ui = self.ui.clone();
         let handle = self.runtime.spawn(async move {
             let result = future.await;
-            ui.shell.accept_line_trampoline(None).await;
-            result
+            ui.shell.do_accept_line_trampoline(None).await?;
+            Ok(result)
         });
         self.shell_loop_internal(false)?;
-        Ok(self.runtime.block_on(handle)?)
+        self.runtime.block_on(handle)?
     }
 
     fn shell_loop_internal(&self, zle: bool) -> Result<Option<BString>> {
