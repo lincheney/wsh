@@ -237,6 +237,12 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                 }
                 return null_mut()
 
+            } else if cmd == zsh_sys::ZLE_CMD_RESET_PROMPT as _ {
+                // redraw the prompt
+                state.ui.get().borrow_mut().cmdline.prompt_dirty = true;
+                state.ui.queue_draw();
+                return null_mut()
+
             }
         }
     }
