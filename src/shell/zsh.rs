@@ -13,6 +13,7 @@ mod linked_list;
 pub mod variables;
 pub mod functions;
 pub mod signals;
+pub mod process;
 mod widget;
 pub mod zle_watch_fds;
 pub use widget::ZleWidget;
@@ -21,7 +22,7 @@ pub mod completion;
 pub mod bin_zle;
 pub mod parser;
 pub use string::ZString;
-pub(crate) use bindings::*;
+pub(super) use bindings::*;
 use variables::{Variable};
 
 pub static JOB: LazyLock<c_int> = LazyLock::new(|| unsafe{ zsh_sys::initjob() });

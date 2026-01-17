@@ -23,7 +23,7 @@ pub use zsh::{
     bin_zle,
     history,
     variables,
-    signals,
+    process,
     functions::Function,
     parser::{Token},
     ZptyOpts,
@@ -241,7 +241,7 @@ crate::TokioActor! {
         }
 
         pub fn check_pid_status(&self, pid: i32) -> Option<c_int> {
-            signals::check_pid_status(pid)
+            zsh::process::check_pid_status(pid)
         }
 
         pub fn get_var(&self, name: BString, zle: bool) -> anyhow::Result<Option<variables::Value>> {

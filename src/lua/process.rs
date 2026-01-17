@@ -267,7 +267,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
             if crate::log_if_err(pid_read.read(&mut buf)).is_some() {
                 // get the pid
                 let pid = u32::from_le_bytes(buf);
-                let pid_waiter = crate::shell::signals::register_pid(pid as _, true);
+                let pid_waiter = crate::shell::process::register_pid(pid as _, true);
                 let _ = pid_sender.send((pid, pid_waiter));
                 // send the ack
                 crate::log_if_err(sync_pid_write.write_all(b" "));
@@ -467,7 +467,7 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
                     // send streams back to caller
                     let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
                     // get the status
-                    let pid_waiter = crate::shell::signals::register_pid(pid as _, false);
+                    let pid_waiter = crate::shell::process::register_pid(pid as _, false);
                     match ui.shell.check_pid_status(pid as _).await {
                         None | Some(-1) => pid_waiter.await.unwrap_or(-1) as _,
                         Some(code) => code as _,
@@ -553,7 +553,7 @@ async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let pid = zpty.pid;
     tokio::task::spawn(async move {
         // get the status
-        let pid_waiter = crate::shell::signals::register_pid(pid as _, false);
+        let pid_waiter = crate::shell::process::register_pid(pid as _, false);
         let code = match ui.shell.check_pid_status(pid as _).await {
             None | Some(-1) => pid_waiter.await.unwrap_or(-1),
             Some(code) => code,

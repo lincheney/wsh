@@ -1,13 +1,7 @@
-use tokio::sync::{oneshot};
-use std::collections::HashMap;
 use anyhow::Result;
 use nix::sys::signal;
-use std::os::fd::{IntoRawFd, BorrowedFd};
 use std::os::raw::{c_int};
-use std::io::{PipeReader};
-use std::sync::{Mutex, atomic::{AtomicI32, Ordering}};
-use tokio::io::AsyncReadExt;
-mod pidset;
+use std::sync::atomic::{AtomicI32, Ordering};
 
 // how the heck does this work
 //
@@ -27,147 +21,56 @@ mod pidset;
 // before zhandler() we stick any additional pids into the jobtab that we need
 // and after zhandler() we loop over the jobtab for any statuses that have updated
 
-const SIGTRAPPED_COUNT: usize = 1024;
-const CUSTOM_SIGCHLD: usize = SIGTRAPPED_COUNT - 1;
-static CHILD_PIPE: AtomicI32 = AtomicI32::new(-1);
-pub static PID_MAP: Mutex<Option<HashMap<pidset::Pid, oneshot::Sender<i32>>>> = Mutex::new(None);
+const SIGTRAPPED_COUNT: c_int = 1024;
+static TRAP_QUEUING_ENABLED: AtomicI32 = AtomicI32::new(0);
 
-extern "C" fn sigchld_handler(_sig: c_int) {
+fn convert_to_custom_signal(sig: c_int) -> c_int {
+    sig + SIGTRAPPED_COUNT / 2
+}
+
+fn convert_from_custom_signal(sig: c_int) -> c_int {
+    sig - SIGTRAPPED_COUNT / 2
+}
+
+extern "C" fn sighandler(sig: c_int) {
     // this *should* run in the main thread
     #[allow(static_mut_refs)]
     unsafe {
         // allow our trap to run
         // is this safe? trap queuing is only used for pid waiting
         // we just run a builtin so should be ok
+
         let trap_queueing_enabled = zsh_sys::trap_queueing_enabled;
-        zsh_sys::trap_queueing_enabled = 0;
+        if trap_queueing_enabled > 0 {
+            TRAP_QUEUING_ENABLED.store(trap_queueing_enabled, Ordering::Release);
+            zsh_sys::trap_queueing_enabled = 0;
+        }
         // this should call our trap
-        zsh_sys::zhandler(CUSTOM_SIGCHLD as _);
+        zsh_sys::zhandler(convert_to_custom_signal(sig));
         zsh_sys::trap_queueing_enabled = trap_queueing_enabled;
     }
 }
 
-fn jobtab_retain_iter<'a, F: FnMut(&'a zsh_sys::process) -> bool>(mut callback: F) -> impl Iterator<Item=&'a zsh_sys::process> {
-    unsafe {
-        let mut jobtab_iter = (1 ..= zsh_sys::maxjob)
-            .flat_map(|i| {
-                let jobtab = zsh_sys::jobtab.add(i as _);
-                [&mut (*jobtab).procs, &mut (*jobtab).auxprocs]
-            });
-        let mut retain = false;
-        let mut proc: *mut *mut zsh_sys::process = std::ptr::null_mut();
+pub fn invoke_signal_handler(arg: Option<&[u8]>) -> c_int {
+    let Some(arg) = arg
+        else { return 1 };
+    let Ok(arg) = std::str::from_utf8(arg)
+        else { return 1 };
+    let Ok(signal) = arg.parse::<c_int>()
+        else { return 1 };
+    let signal = convert_from_custom_signal(signal);
 
-        std::iter::from_fn(move || {
-            if !proc.is_null() {
-                // goto to the next ptr
-                if retain {
-                    proc = &raw mut (**proc).next;
-                } else {
-                    // except if we delete, in which case assign the next pointer to prev
-                    let old = *proc;
-                    *proc = (**proc).next;
-                    zsh_sys::zfree(old.cast(), std::mem::size_of::<zsh_sys::process>() as _);
-                }
-            }
-            while proc.is_null() || (*proc).is_null() {
-                proc = jobtab_iter.next()?;
-            }
-            retain = callback(&**proc);
-            Some(&**proc)
-        })
-    }
-}
-
-fn jobtab_iter<'a>() -> impl Iterator<Item=&'a zsh_sys::process> {
-    jobtab_retain_iter(|_| true)
-}
-
-pub fn invoke_sigchld_handler() -> c_int {
     #[allow(static_mut_refs)]
     unsafe {
-        // call it for real
         debug_assert_eq!(zsh_sys::queueing_enabled, 0);
+        zsh_sys::trap_queueing_enabled = TRAP_QUEUING_ENABLED.load(Ordering::Acquire);
+    }
 
-        // register any pids we are interested in
-        if let Some(pids) = pidset::PID_TABLE.get() && !pids.is_empty() {
-            super::queue_signals();
-            for (&pid, (status, add)) in pids.iter() {
-                // register these pids
-                if *add && status.load(Ordering::Relaxed) < 0 && !jobtab_iter().any(|proc| proc.pid == pid) {
-                    super::add_pid(pid);
-                }
-            }
-            super::unqueue_signals().unwrap();
-        }
-
-
-        // reset thisjob so it doesn't go off reporting job statuses for foreground jobs
-        let thisjob = zsh_sys::thisjob;
-        zsh_sys::thisjob = 1;
-        zsh_sys::zhandler(signal::Signal::SIGCHLD as _);
-        zsh_sys::thisjob = thisjob;
-
-        // check for our pids
-        if let Some(pids) = pidset::PID_TABLE.get() && !pids.is_empty() {
-            super::queue_signals();
-            let mut found = false;
-            jobtab_retain_iter(|proc| {
-                // found one
-                if proc.status >= 0 && let Some((status, added)) = pids.get(&proc.pid) {
-                    found = true;
-                    status.store(proc.status, std::sync::atomic::Ordering::Release);
-                    // pop it off
-                    if *added {
-                        return false
-                    }
-                }
-                true
-            }).for_each(drop);
-            super::unqueue_signals().unwrap();
-
-            // notify that we found something
-            if found {
-                let pipe = CHILD_PIPE.load(Ordering::Acquire);
-                if pipe != -1 {
-                    nix::unistd::write(BorrowedFd::borrow_raw(pipe), b"0").unwrap();
-                }
-            }
-
-        }
-
-        0
+    match signal.try_into() {
+        Ok(signal::Signal::SIGCHLD) => super::process::sighandler(),
+        _ => 1, // unknown
     }
 }
-
-pub fn register_pid(pid: pidset::Pid, add_to_jobtab: bool) -> oneshot::Receiver<i32> {
-    let mut pid_map = PID_MAP.lock().unwrap();
-    let pid_map = pid_map.get_or_insert_default();
-    let (sender, receiver) = oneshot::channel();
-    pid_map.insert(pid, sender);
-    pidset::PID_TABLE.register_pid(pid, add_to_jobtab);
-    receiver
-}
-
-pub(in crate::shell) fn check_pid_status(pid: pidset::Pid) -> Option<i32> {
-    jobtab_iter().find(|proc| proc.pid == pid).map(|proc| proc.status)
-}
-
-async fn sigchld_safe_handler(reader: PipeReader) -> Result<()> {
-    let mut reader = tokio::net::unix::pipe::Receiver::from_owned_fd(reader.into()).unwrap();
-    let mut buf = [0];
-    loop {
-        reader.read_exact(&mut buf).await?;
-        if let Some(pid_map) = &mut *PID_MAP.lock().unwrap() {
-            // check for pids that are done
-            pidset::PID_TABLE.extract_finished_pids(|pid, status| {
-                if let Some(sender) = pid_map.remove(&pid) {
-                    let _ = sender.send(status);
-                }
-            });
-        }
-    }
-}
-
 
 fn resize_array<T: Copy + Default>(dst: &mut *mut T, old_len: usize, new_len: usize) {
     let mut new = vec![T::default(); new_len];
@@ -175,38 +78,39 @@ fn resize_array<T: Copy + Default>(dst: &mut *mut T, old_len: usize, new_len: us
     *dst = Box::into_raw(new.into_boxed_slice()).cast();
 }
 
-pub fn init() -> Result<()> {
-    let (reader, writer) = std::io::pipe()?;
-    crate::utils::set_nonblocking_fd(&writer)?;
-    crate::utils::set_nonblocking_fd(&reader)?;
+fn hook_signal(signal: signal::Signal) -> Result<()> {
+    unsafe {
+        // set the sighandler
+        let handler = signal::SigHandler::Handler(sighandler);
+        let action = signal::SigAction::new(handler, signal::SaFlags::empty(), signal::SigSet::empty());
+        signal::sigaction(signal, &action)?;
 
+        // now set the trap
+        let signal = convert_to_custom_signal(signal as _);
+        let script = format!("\\builtin wsh .invoke-signal-handler {}", signal);
+        let func = super::functions::Function::new(script.as_str().into())?;
+        let eprog = func.0.as_ref().funcdef;
+        (&mut *eprog).nref += 1;
+        zsh_sys::settrap(signal, eprog, zsh_sys::ZSIG_TRAPPED as _);
+    }
+
+    Ok(())
+}
+
+pub fn init() -> Result<()> {
     #[allow(static_mut_refs)]
     unsafe {
         let trapcount = (zsh_sys::SIGCOUNT + 3 + nix::libc::SIGRTMAX() as u32 - nix::libc::SIGRTMIN() as u32 + 1) as usize;
 
         // make extra space so we can stuff our own "custom" signals
-        debug_assert!(SIGTRAPPED_COUNT > trapcount);
-        resize_array(&mut super::sigtrapped, trapcount, SIGTRAPPED_COUNT);
-        debug_assert!(SIGTRAPPED_COUNT > trapcount);
-        resize_array(&mut super::siglists, trapcount, SIGTRAPPED_COUNT);
-
-        // now set a trap for sigchld
-        let script = b"\\builtin wsh .invoke-sigchld-handler";
-        let func = super::functions::Function::new(script.into())?;
-        let eprog = func.0.as_ref().funcdef;
-        (&mut *eprog).nref += 1;
-        zsh_sys::settrap(CUSTOM_SIGCHLD as _, eprog, zsh_sys::ZSIG_TRAPPED as _);
-
-        // set the sighandler
-        let handler = signal::SigHandler::Handler(sigchld_handler);
-        let action = signal::SigAction::new(handler, signal::SaFlags::empty(), signal::SigSet::empty());
-        signal::sigaction(signal::Signal::SIGCHLD, &action)?;
+        debug_assert!(SIGTRAPPED_COUNT as usize > trapcount * 2);
+        resize_array(&mut super::sigtrapped, trapcount, SIGTRAPPED_COUNT as usize);
+        debug_assert!(SIGTRAPPED_COUNT as usize > trapcount * 2);
+        resize_array(&mut super::siglists, trapcount, SIGTRAPPED_COUNT as usize);
     }
 
-    // set the writer for the handler to use
-    CHILD_PIPE.store(writer.into_raw_fd(), Ordering::Release);
-    // spawn a reader task
-    crate::spawn_and_log(sigchld_safe_handler(reader));
+    super::process::init()?;
+    hook_signal(signal::Signal::SIGCHLD)?;
 
     Ok(())
 }

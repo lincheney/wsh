@@ -60,8 +60,7 @@ impl Drop for WriteGuard<'_> {
 
         // since i have the lock, its ok for me to just read from the raw ptr, nobody else can free it
         let new = unsafe{ &*new };
-        self.guard.0.inner.clear();
-        self.guard.0.inner.extend(new.inner.iter().map(|x| (*x.0, x.1.clone())));
+        self.guard.0.inner.clone_from(&new.inner);
         self.guard.0.borrows.store(0, Ordering::Release);
     }
 }

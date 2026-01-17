@@ -147,8 +147,8 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
             }
         },
 
-        Some(b".invoke-sigchld-handler") => {
-            zsh::signals::invoke_sigchld_handler()
+        Some(b".invoke-signal-handler") => {
+            zsh::signals::invoke_signal_handler(iter.next())
         },
 
         Some(_) => {

@@ -1,0 +1,143 @@
+use tokio::sync::{oneshot};
+use std::collections::HashMap;
+use anyhow::Result;
+use nix::sys::signal;
+use std::os::fd::{IntoRawFd, BorrowedFd};
+use std::os::raw::{c_int};
+use std::io::{PipeReader};
+use std::sync::{Mutex, atomic::{AtomicI32, Ordering}};
+use tokio::io::AsyncReadExt;
+mod pidset;
+
+static CHILD_PIPE: AtomicI32 = AtomicI32::new(-1);
+pub static PID_MAP: Mutex<Option<HashMap<pidset::Pid, oneshot::Sender<i32>>>> = Mutex::new(None);
+
+fn jobtab_retain_iter<'a, F: FnMut(&'a zsh_sys::process) -> bool>(mut callback: F) -> impl Iterator<Item=&'a zsh_sys::process> {
+    unsafe {
+        let mut jobtab_iter = (1 ..= zsh_sys::maxjob)
+            .flat_map(|i| {
+                let jobtab = zsh_sys::jobtab.add(i as _);
+                [&mut (*jobtab).procs, &mut (*jobtab).auxprocs]
+            });
+        let mut retain = false;
+        let mut proc: *mut *mut zsh_sys::process = std::ptr::null_mut();
+
+        std::iter::from_fn(move || {
+            if !proc.is_null() {
+                // goto to the next ptr
+                if retain {
+                    proc = &raw mut (**proc).next;
+                } else {
+                    // except if we delete, in which case assign the next pointer to prev
+                    let old = *proc;
+                    *proc = (**proc).next;
+                    zsh_sys::zfree(old.cast(), std::mem::size_of::<zsh_sys::process>() as _);
+                }
+            }
+            while proc.is_null() || (*proc).is_null() {
+                proc = jobtab_iter.next()?;
+            }
+            retain = callback(&**proc);
+            Some(&**proc)
+        })
+    }
+}
+
+fn jobtab_iter<'a>() -> impl Iterator<Item=&'a zsh_sys::process> {
+    jobtab_retain_iter(|_| true)
+}
+
+pub fn register_pid(pid: pidset::Pid, add_to_jobtab: bool) -> oneshot::Receiver<i32> {
+    let mut pid_map = PID_MAP.lock().unwrap();
+    let pid_map = pid_map.get_or_insert_default();
+    let (sender, receiver) = oneshot::channel();
+    pid_map.insert(pid, sender);
+    pidset::PID_TABLE.register_pid(pid, add_to_jobtab);
+    receiver
+}
+
+pub(in crate::shell) fn check_pid_status(pid: pidset::Pid) -> Option<i32> {
+    jobtab_iter().find(|proc| proc.pid == pid).map(|proc| proc.status)
+}
+
+async fn sigchld_safe_handler(reader: PipeReader) -> Result<()> {
+    let mut reader = tokio::net::unix::pipe::Receiver::from_owned_fd(reader.into()).unwrap();
+    let mut buf = [0];
+    loop {
+        reader.read_exact(&mut buf).await?;
+        if let Some(pid_map) = &mut *PID_MAP.lock().unwrap() {
+            // check for pids that are done
+            pidset::PID_TABLE.extract_finished_pids(|pid, status| {
+                if let Some(sender) = pid_map.remove(&pid) {
+                    let _ = sender.send(status);
+                }
+            });
+        }
+    }
+}
+
+pub(super) fn sighandler() -> c_int {
+    #[allow(static_mut_refs)]
+    unsafe {
+        // register any pids we are interested in
+        if let Some(pids) = pidset::PID_TABLE.get() && !pids.is_empty() {
+            super::queue_signals();
+            for (&pid, (status, add)) in pids.iter() {
+                // register these pids
+                if *add && status.load(Ordering::Relaxed) < 0 && !jobtab_iter().any(|proc| proc.pid == pid) {
+                    super::add_pid(pid);
+                }
+            }
+            super::unqueue_signals().unwrap();
+        }
+
+        // reset thisjob so it doesn't go off reporting job statuses for foreground jobs
+        let thisjob = zsh_sys::thisjob;
+        zsh_sys::thisjob = 1;
+        zsh_sys::zhandler(signal::Signal::SIGCHLD as _);
+        zsh_sys::thisjob = thisjob;
+
+        // check for our pids
+        if let Some(pids) = pidset::PID_TABLE.get() && !pids.is_empty() {
+            super::queue_signals();
+            let mut found = false;
+            jobtab_retain_iter(|proc| {
+                // found one
+                if proc.status >= 0 && let Some((status, added)) = pids.get(&proc.pid) {
+                    found = true;
+                    status.store(proc.status, std::sync::atomic::Ordering::Release);
+                    // pop it off
+                    if *added {
+                        return false
+                    }
+                }
+                true
+            }).for_each(drop);
+            super::unqueue_signals().unwrap();
+
+            // notify that we found something
+            if found {
+                let pipe = CHILD_PIPE.load(Ordering::Acquire);
+                if pipe != -1 {
+                    nix::unistd::write(BorrowedFd::borrow_raw(pipe), b"0").unwrap();
+                }
+            }
+
+        }
+
+        0
+    }
+}
+
+pub(super) fn init() -> Result<()> {
+    let (reader, writer) = std::io::pipe()?;
+    crate::utils::set_nonblocking_fd(&writer)?;
+    crate::utils::set_nonblocking_fd(&reader)?;
+
+    // set the writer for the handler to use
+    CHILD_PIPE.store(writer.into_raw_fd(), Ordering::Release);
+    // spawn a reader task
+    crate::spawn_and_log(sigchld_safe_handler(reader));
+
+    Ok(())
+}
