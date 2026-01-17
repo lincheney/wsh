@@ -144,7 +144,7 @@ impl Ui {
         self.lua.globals().get("wish")
     }
 
-    pub async fn start_cmd(&mut self) -> Result<()> {
+    pub async fn start_cmd(&self) -> Result<()> {
         self.trigger_precmd_callbacks(()).await;
         self.draw().await
     }

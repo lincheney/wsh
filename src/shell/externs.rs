@@ -13,13 +13,13 @@ use crate::fork_lock::{RawForkLock, ForkLock};
 
 static FORK_LOCK: RawForkLock = RawForkLock::new();
 
-pub struct GlobalState {
+struct GlobalState {
     ui: Ui,
     shell: Shell,
     pub runtime: tokio::runtime::Runtime,
-    first_draw: AtomicBool,
+    first_drawn: AtomicBool,
 }
-pub(super) static STATE: ForkLock<'static, Option<Arc<GlobalState>>> = FORK_LOCK.wrap(None);
+static STATE: ForkLock<'static, Option<Arc<GlobalState>>> = FORK_LOCK.wrap(None);
 static ORIGINAL_ZLE_ENTRY_PTR: OnceLock<zsh_sys::ZleEntryPoint> = OnceLock::new();
 static IS_RUNNING: Mutex<()> = Mutex::new(());
 
@@ -58,7 +58,7 @@ impl GlobalState {
             ui,
             shell,
             runtime,
-            first_draw: false.into(),
+            first_drawn: false.into(),
         })
     }
 
@@ -197,9 +197,15 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                 zsh_sys::zleactive = 1;
 
                 // this is the only thread we should ever run this func
-                if !state.first_draw.load(Ordering::Relaxed) {
-                    let _ = state.runtime.block_on(state.ui.clone().start_cmd());
-                    state.first_draw.store(true, Ordering::Relaxed);
+                if !state.first_drawn.load(Ordering::Relaxed) {
+                    crate::log_if_err::<_, anyhow::Error>(state.runtime.block_on(async {
+                        if let Some(size) = zsh::signals::sigwinch::get_term_size() {
+                            state.ui.handle_window_resize(size.0, size.1).await?;
+                        }
+                        state.ui.start_cmd().await?;
+                        Ok(())
+                    }));
+                    state.first_drawn.store(true, Ordering::Relaxed);
                 }
 
                 let result = tokio::task::block_in_place(|| state.shell_loop());
