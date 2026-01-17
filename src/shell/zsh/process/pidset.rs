@@ -17,11 +17,11 @@ crate::impl_deref_helper!(mut self: PidSet, &mut self.inner => PidHashMap);
 
 impl PidSet {
     fn borrow_exclusively(&self) -> bool {
-        self.borrows.fetch_or(1, Ordering::SeqCst) <= 1
+        self.borrows.fetch_or(1, Ordering::AcqRel) <= 1
     }
 
-    fn borrow(&self) {
-        self.borrows.fetch_add(2, Ordering::SeqCst);
+    fn borrow(&self) -> bool {
+        self.borrows.fetch_add(2, Ordering::AcqRel) % 2 != 1
     }
 
     fn unborrow(&self) {
@@ -45,7 +45,7 @@ impl Drop for WriteGuard<'_> {
 
         let new = std::mem::replace(&mut self.guard.0, available);
         let new = Box::into_raw(Box::new(new));
-        let old = self.table.read.swap(new, Ordering::SeqCst);
+        let old = self.table.read.swap(new, Ordering::AcqRel);
 
         if !old.is_null() {
             let old = unsafe{ Box::from_raw(old) };
@@ -71,9 +71,16 @@ pub struct ReadGuard<'a> {
     inner: &'a PidSet,
 }
 impl<'a> ReadGuard<'a> {
-    fn new(inner: &'a PidSet) -> Self {
-        inner.borrow();
-        Self{ inner }
+    fn new(table: &'a PidTable) -> Option<Self> {
+        loop {
+            let ptr = table.read.load(Ordering::Acquire);
+            let guard = Self{ inner: unsafe{ ptr.as_ref()? } };
+            if guard.inner.borrow() {
+                return Some(guard)
+            }
+            // it is scheduled for deletion, wait for another one
+            std::hint::spin_loop();
+        }
     }
 }
 impl Drop for ReadGuard<'_> {
@@ -97,9 +104,7 @@ pub static PID_TABLE: PidTable = PidTable {
 impl PidTable {
     // this is lock free
     pub fn get(&self) -> Option<ReadGuard<'_>> {
-        let ptr = self.read.load(Ordering::SeqCst);
-        let pid_set = unsafe{ ptr.as_ref()? };
-        Some(ReadGuard::new(pid_set))
+        ReadGuard::new(self)
     }
 
     pub fn get_mut(&self) -> WriteGuard<'_> {
