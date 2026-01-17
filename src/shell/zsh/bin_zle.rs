@@ -8,14 +8,14 @@ use anyhow::Result;
 use std::sync::{Arc, Mutex};
 use std::ffi::{CString, CStr};
 use std::os::raw::*;
-use std::ptr::{null_mut};
 use crate::canceller;
+use super::builtin::Builtin;
 
 static ZLE_FD_SOURCE: Mutex<Option<mpsc::UnboundedReceiver<FdChange>>> = Mutex::new(None);
 
 struct ZleState {
     // original zle function
-    original: UnsafeSend<zsh_sys::Builtin>,
+    original: UnsafeSend<Option<Builtin>>,
     // sink to send fds
     fd_sink: Option<mpsc::UnboundedSender<FdChange>>,
     fd_mapping: HashMap<RawFd, (SyncFdChangeHook, canceller::Canceller)>,
@@ -157,30 +157,25 @@ pub fn take_fd_change_source() -> Option<mpsc::UnboundedReceiver<FdChange>> {
 }
 
 pub fn override_zle() -> Result<()> {
-    let original = super::pop_builtin("zle").unwrap();
+    let original = Builtin::pop(c"zle").unwrap();
+    let mut zle = original.clone();
     let (sender, receiver) = mpsc::unbounded_channel();
 
     *ZLE_STATE.lock().unwrap() = Some(ZleState{
-        original: unsafe{ UnsafeSend::new(original) },
+        original: unsafe{ UnsafeSend::new(Some(original)) },
         fd_sink: Some(sender),
         fd_mapping: HashMap::default(),
     });
     *ZLE_FD_SOURCE.lock().unwrap() = Some(receiver);
 
-    let mut zle = unsafe{ *original };
     zle.handlerfunc = Some(zle_handlerfunc);
-    zle.node = zsh_sys::hashnode{
-        next: null_mut(),
-        nam: CString::new("zle").unwrap().into_raw(),
-        flags: 0,
-    };
-    super::add_builtin("zle", Box::into_raw(Box::new(zle)));
+    zle.node.flags = 0;
+    zle.add();
     Ok(())
 }
 
 pub fn restore_zle() {
-    if let Some(mut zle) = ZLE_STATE.lock().unwrap().take() && !zle.original.as_ref().is_null() {
-        super::add_builtin("zle", zle.original.into_inner());
-        zle.original = unsafe{ UnsafeSend::new(null_mut()) };
+    if let Some(mut zle) = ZLE_STATE.lock().unwrap().take() && let Some(original) = zle.original.as_mut().take() {
+        original.add();
     }
 }

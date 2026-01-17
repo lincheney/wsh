@@ -10,6 +10,7 @@ use bstr::{BStr, BString, ByteSlice, ByteVec};
 mod string;
 mod bindings;
 mod linked_list;
+mod builtin;
 pub mod variables;
 pub mod functions;
 pub mod signals;
@@ -216,17 +217,6 @@ pub fn find_process_status(pid: i32, pop_if_done: bool) -> Option<c_int> {
 
 pub fn get_return_code() -> c_long {
     unsafe{ zsh_sys::lastval }
-}
-
-pub fn pop_builtin(name: &str) -> Option<zsh_sys::Builtin> {
-    let name = CString::new(name).unwrap();
-    let ptr = unsafe { zsh_sys::removehashnode(zsh_sys::builtintab, name.as_ptr().cast()) };
-    if ptr.is_null() { None } else { Some(ptr.cast()) }
-}
-
-pub fn add_builtin(cmd: &str, builtin: zsh_sys::Builtin) {
-    let cmd: ZString = cmd.into();
-    unsafe { zsh_sys::addhashnode(zsh_sys::builtintab, cmd.into_raw(), builtin.cast()) };
 }
 
 pub fn get_prompt(prompt: Option<&BStr>, escaped: bool) -> Option<CString> {

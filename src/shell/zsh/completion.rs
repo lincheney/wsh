@@ -4,12 +4,11 @@ use std::ffi::CStr;
 use tokio::sync::{mpsc};
 use anyhow::Result;
 use std::sync::{Mutex};
-use std::ffi::{CString};
 use std::os::raw::*;
 use std::ptr::{null_mut};
 use std::default::Default;
 use bstr::{BString};
-use super::bindings;
+use super::{bindings, builtin::Builtin};
 
 pub struct Match {
     inner: UnsafeSend<bindings::cmatch>,
@@ -98,7 +97,7 @@ impl Drop for Match {
 #[derive(Default)]
 struct CompaddState {
     // original compadd function
-    original: UnsafeSend<zsh_sys::Builtin>,
+    original: UnsafeSend<Option<Builtin>>,
     // sink to send matches
     sink: Option<mpsc::UnboundedSender<Vec<Match>>>,
     // matches we have already seen
@@ -153,28 +152,23 @@ pub fn override_compadd() -> Result<()> {
         anyhow::bail!("failed to load module zsh/complete")
     }
 
-    let original = super::pop_builtin("compadd").unwrap();
+    let original = Builtin::pop(c"compadd").unwrap();
+    let mut compadd = original.clone();
 
     *COMPADD_STATE.lock().unwrap() = Some(CompaddState{
-        original: unsafe{ UnsafeSend::new(original) },
+        original: unsafe{ UnsafeSend::new(Some(original)) },
         ..CompaddState::default()
     });
 
-    let mut compadd = unsafe{ *original };
     compadd.handlerfunc = Some(compadd_handlerfunc);
-    compadd.node = zsh_sys::hashnode{
-        next: null_mut(),
-        nam: CString::new("compadd").unwrap().into_raw(),
-        flags: 0,
-    };
-    super::add_builtin("compadd", Box::into_raw(Box::new(compadd)));
+    compadd.node.flags = 0;
+    compadd.add();
     Ok(())
 }
 
 pub fn restore_compadd() {
-    if let Some(mut compadd) = COMPADD_STATE.lock().unwrap().take() && !compadd.original.as_ref().is_null() {
-        super::add_builtin("compadd", compadd.original.into_inner());
-        compadd.original = unsafe{ UnsafeSend::new(null_mut()) };
+    if let Some(mut compadd) = COMPADD_STATE.lock().unwrap().take() && let Some(original) = compadd.original.as_mut().take() {
+        original.add();
     }
 }
 
