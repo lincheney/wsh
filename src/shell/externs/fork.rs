@@ -36,38 +36,32 @@ impl ForkState {
         // is there some easy way to tell that zsh is just going to exec
         // straight afterwards and we don't have to worry about this stuff?
 
-        // this is the big global fork lock
-        let fork_lock = super::FORK_LOCK.write();
+        super::STATE.with(|state| {
+            // if the state is None, then we don't need to bother about locks and stuff
+            // as we are probably on a non main thread
+            let state = state.borrow();
+            let state = state.as_ref()?;
+            // this is the big global fork lock
+            let fork_lock = super::FORK_LOCK.write();
+            let state = state.read_with_lock(&fork_lock);
 
-        let lua = {
-            let state = super::STATE.read_with_lock(&fork_lock);
-            if let Some(state) = state.as_ref() {
-                let tid = std::thread::current().id();
-                if state.shell.get_main_thread() != tid {
-                    // shell is not locked == we are forking for some unknown reason
-                    return None
-                }
+            // i can take a lock on lua by acquiring a ref to the app data
+            // then i just have to hold on to it as the ref holds the lock guard
+            state.ui.lua.set_app_data(());
+            // ui.lua.gc_stop();
+            let app_data = state.ui.lua.app_data_ref().unwrap();
+            let lua = Some((
+                unsafe {
+                    UnsafeSend::new(transmute::<mlua::AppDataRef<'_, ()>, mlua::AppDataRef<'static, ()>>(app_data))
+                },
+                state.ui.lua.clone(),
+            ));
 
-                // i can take a lock on lua by acquiring a ref to the app data
-                // then i just have to hold on to it as the ref holds the lock guard
-                state.ui.lua.set_app_data(());
-                // ui.lua.gc_stop();
-                let app_data = state.ui.lua.app_data_ref().unwrap();
-                Some((
-                    unsafe {
-                        UnsafeSend::new(transmute::<mlua::AppDataRef<'_, ()>, mlua::AppDataRef<'static, ()>>(app_data))
-                    },
-                    state.ui.lua.clone(),
-                ))
-            } else {
-                None
-            }
-        };
-
-        Some(Self {
-            pid: std::process::id(),
-            fork_lock: Some(unsafe{ UnsafeSend::new(fork_lock) }),
-            lua,
+            Some(Self {
+                pid: std::process::id(),
+                fork_lock: Some(unsafe{ UnsafeSend::new(fork_lock) }),
+                lua,
+            })
         })
     }
 

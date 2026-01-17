@@ -63,10 +63,6 @@ impl Shell {
         (shell, client)
     }
 
-    pub fn get_main_thread(&self) -> std::thread::ThreadId {
-        self.inner.main_thread
-    }
-
     pub fn recv_from_queue(&self) -> Result<Result<ShellMsg, std::sync::mpsc::RecvError>> {
         // let signals run while we are waiting for the next cmd
         self.inner.unqueue_signals()?;

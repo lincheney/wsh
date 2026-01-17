@@ -3,8 +3,10 @@ use bstr::BString;
 use crate::ui::{Ui};
 use crate::c_string_array::CStrArray;
 use std::os::raw::{c_char, c_int};
+use std::rc::Rc;
+use std::cell::RefCell;
 use std::ptr::null_mut;
-use std::sync::{LazyLock, OnceLock, Arc, Mutex};
+use std::sync::{LazyLock, OnceLock, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::ffi::CString;
 use anyhow::Result;
@@ -19,7 +21,11 @@ struct GlobalState {
     pub runtime: tokio::runtime::Runtime,
     first_drawn: AtomicBool,
 }
-static STATE: ForkLock<'static, Option<Arc<GlobalState>>> = FORK_LOCK.wrap(None);
+
+thread_local! {
+    static STATE: RefCell<Option<ForkLock<'static, Rc<GlobalState>>>> = const{ RefCell::new(None) };
+}
+
 static ORIGINAL_ZLE_ENTRY_PTR: OnceLock<zsh_sys::ZleEntryPoint> = OnceLock::new();
 static IS_RUNNING: Mutex<()> = Mutex::new(());
 
@@ -62,8 +68,14 @@ impl GlobalState {
         })
     }
 
-    fn get() -> Result<Arc<Self>> {
-        STATE.read().clone().ok_or_else(|| anyhow::anyhow!("wish is not running"))
+    fn get() -> Result<Rc<Self>> {
+        STATE.with(|state| {
+            if let Some(state) = &*state.borrow() {
+                Ok(state.read().clone())
+            } else {
+                anyhow::bail!("wish is not running")
+            }
+        })
     }
 
     fn shell_loop(&self) -> Result<Option<BString>> {
@@ -314,8 +326,10 @@ static mut MODULE_FEATURES: LazyLock<Features> = LazyLock::new(|| {
 #[unsafe(no_mangle)]
 pub extern "C" fn setup_() -> c_int {
     match GlobalState::new() {
-        Ok(state) => {
-            *STATE.write() = Some(Arc::new(state));
+        Ok(value) => {
+            STATE.with(|state| {
+                *state.borrow_mut() = Some(FORK_LOCK.wrap(Rc::new(value)));
+            });
             0
         },
         Err(err) => {
@@ -360,6 +374,6 @@ pub unsafe extern "C" fn cleanup_(module: zsh_sys::Module) -> c_int {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn finish_() -> c_int {
-    STATE.write().take();
+    STATE.with(|state| state.take());
     0
 }
