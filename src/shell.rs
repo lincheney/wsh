@@ -24,6 +24,7 @@ pub use zsh::{
     history,
     variables,
     process,
+    signals,
     functions::Function,
     parser::{Token},
     ZptyOpts,

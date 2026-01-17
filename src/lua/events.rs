@@ -122,6 +122,7 @@ event_types!(
     buffer_change(),
     precmd(),
     paste(LuaString),
+    window_resize(u32, u32),
 );
 
 

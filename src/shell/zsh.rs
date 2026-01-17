@@ -407,6 +407,18 @@ pub fn unqueue_signals() -> nix::Result<()> {
     Ok(())
 }
 
+pub fn winch_block() {
+    unsafe {
+        zsh_sys::signal_block(zsh_sys::signal_mask(signal::Signal::SIGWINCH as _));
+    }
+}
+
+pub fn winch_unblock() {
+    unsafe {
+        zsh_sys::signal_unblock(zsh_sys::signal_mask(signal::Signal::SIGWINCH as _));
+    }
+}
+
 pub fn zistype(x: c_char, y: c_short) -> bool {
     unsafe {
         zsh_sys::typtab[x as usize] & y > 0

@@ -152,7 +152,7 @@ pub struct Tui {
     buffer: Buffer,
     border_buffer: Buffer,
     prev_status_bar_position: usize,
-    pub max_height: u16,
+    pub max_height: u32,
     pub dirty: bool,
 }
 
@@ -262,7 +262,7 @@ impl Tui {
     pub fn draw<W: Write>(
         &mut self,
         writer: &mut W,
-        (width, height): (u16, u16),
+        (width, height): (u32, u32),
         mut cmdline: command_line::CommandLine<'_>,
         status_bar: &mut status_bar::StatusBar,
         clear: bool,
@@ -280,7 +280,7 @@ impl Tui {
         }
 
         // resize buffers
-        let area = Rect{x: 0, y: 0, width, height};
+        let area = Rect{x: 0, y: 0, width: width as _, height: height as _};
         self.buffer.resize(area);
 
         // quit early if nothing is dirty
@@ -305,7 +305,7 @@ impl Tui {
             cmdline.refresh(area);
         }
         if self.dirty {
-            self.widgets.refresh(Rect{ height: height.saturating_sub(status_bar.get_height()), ..area });
+            self.widgets.refresh(Rect{ height: (height as u16).saturating_sub(status_bar.get_height()), ..area });
         }
         if status_bar.dirty {
             status_bar.refresh(area);

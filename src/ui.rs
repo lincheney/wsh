@@ -1,5 +1,4 @@
 use bstr::{BStr, BString};
-use std::time::Duration;
 use std::future::Future;
 use std::sync::{Arc, Weak as WeakArc, atomic::{AtomicUsize, AtomicBool, Ordering}};
 use std::collections::HashSet;
@@ -58,7 +57,7 @@ pub struct UiInner {
 
     pub stdout: std::io::Stdout,
     enhanced_keyboard: bool,
-    size: (u16, u16),
+    size: (u32, u32),
 }
 
 pub struct UnlockedUi {
@@ -112,7 +111,7 @@ impl Ui {
             keybind_layer_counter: Default::default(),
             stdout: std::io::stdout(),
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
-            size: crossterm::terminal::size()?,
+            size: (1, 1),
         };
         ui.keybinds.push(Default::default());
 
@@ -163,7 +162,6 @@ impl Ui {
         }
 
         self.is_drawing.store(false, Ordering::Release);
-        let (width, height) = crossterm::terminal::size()?;
 
         fn draw_internal(ui: &mut UiInner, shell_vars: Option<crate::tui::command_line::ShellVars>) -> Result<()> {
             if let Some(shell_vars) = shell_vars {
@@ -181,15 +179,17 @@ impl Ui {
             Ok(())
         }
 
+        let size;
         {
             let this = self.unlocked.read();
             let ui = &mut *this.borrow_mut();
 
-            ui.size = (width, height);
+            size = ui.size;
+            let (width, height) = size;
             // take up at most 2/3 of the screen
             let height = (height * 2 / 3).max(1);
             // redraw all if dimensions have changed
-            if height != ui.tui.max_height || width != ui.tui.get_size().1 {
+            if height != ui.tui.max_height || width != ui.tui.get_size().1 as _ {
                 ui.tui.max_height = height;
                 ui.dirty = true;
             }
@@ -205,7 +205,7 @@ impl Ui {
         }
 
         // get the shell vars then reacquire the ui
-        let shell_vars = crate::tui::command_line::CommandLineState::get_shell_vars(&self.shell, width).await;
+        let shell_vars = crate::tui::command_line::CommandLineState::get_shell_vars(&self.shell, size.0).await;
 
         let this = self.unlocked.read();
         let ui = &mut *this.borrow_mut();
@@ -246,6 +246,13 @@ impl Ui {
 
         }
         self.handle_key_default(event, event_buffer.as_ref()).await?;
+        Ok(true)
+    }
+
+    pub async fn handle_window_resize(&self, width: u32, height: u32) -> Result<bool> {
+        self.get().borrow_mut().size = (width, height);
+        self.queue_draw();
+        self.trigger_window_resize_callbacks((width, height)).await;
         Ok(true)
     }
 
@@ -300,7 +307,6 @@ impl Ui {
             let this = self.unlocked.read();
             let mut ui = this.borrow_mut();
             if cursor.0 != 0 {
-                ui.size = crossterm::terminal::size()?;
                 queue!(ui.stdout, style::Print("\r\n"))?;
             }
             execute!(ui.stdout, style::ResetColor)?;
@@ -749,18 +755,4 @@ impl WeakUi {
             lua_error("ui not running")
         }
     }
-}
-
-// Resize events can occur in batches.
-// With a simple loop they can be flushed.
-// This function will keep the first and last resize event.
-fn flush_resize_events(first_resize: (u16, u16)) -> ((u16, u16), (u16, u16)) {
-    let mut last_resize = first_resize;
-    while let Ok(true) = event::poll(Duration::from_millis(50)) {
-        if let Ok(event::Event::Resize(x, y)) = event::read() {
-            last_resize = (x, y);
-        }
-    }
-
-    (first_resize, last_resize)
 }

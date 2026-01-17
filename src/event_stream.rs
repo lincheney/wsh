@@ -13,6 +13,7 @@ enum Message {
     Event(parser::Event, BString),
     Exit(i32),
     Draw,
+    WindowResize(u32, u32),
 }
 
 #[derive(Clone)]
@@ -87,8 +88,9 @@ impl EventStream {
         // read events
         let mut reader = AsyncFd::new(file)?;
         let mut parser = parser::Parser::new();
-        let mut pausable = self.pausable.clone();
 
+        let queue_sender = self.queue_sender.clone();
+        let mut pausable = self.pausable.clone();
         crate::spawn_and_log::<_, _, anyhow::Error>(async move {
             let mut buf = [0; 1024];
             loop {
@@ -110,10 +112,28 @@ impl EventStream {
                                     }
                                 },
                                 _ => {
-                                    let _ = self.queue_sender.send(Message::Event(event, event_buffer));
+                                    let _ = queue_sender.send(Message::Event(event, event_buffer));
                                 },
                             }
                         }
+                    },
+                }
+            }
+        });
+
+        let queue_sender = self.queue_sender.clone();
+        let mut pausable = self.pausable.clone();
+        crate::spawn_and_log::<_, _, anyhow::Error>(async move {
+            let Some(mut window_size) = crate::shell::signals::sigwinch::get_subscriber()
+                else { anyhow::bail!("cannot subscribe to window resize events"); };
+
+            loop {
+                match pausable.run(window_size.changed()).await {
+                    None => continue,
+                    Some(Err(_)) => return Ok(()),
+                    Some(Ok(())) => {
+                        let size = *window_size.borrow_and_update();
+                        let _ = queue_sender.send(Message::WindowResize(size.0, size.1));
                     },
                 }
             }
@@ -126,6 +146,11 @@ impl EventStream {
             match msg {
                 Some(Message::Event(event, event_buffer)) => {
                     if !ui.handle_event(event, event_buffer).await? {
+                        return Ok(0)
+                    }
+                },
+                Some(Message::WindowResize(width, height)) => {
+                    if !ui.handle_window_resize(width, height).await? {
                         return Ok(0)
                     }
                 },

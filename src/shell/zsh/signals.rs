@@ -3,6 +3,7 @@ use nix::sys::signal;
 use std::os::raw::{c_int};
 use std::sync::atomic::{AtomicI32, Ordering};
 use tokio::io::AsyncReadExt;
+pub mod sigwinch;
 
 // how the heck does this work
 //
@@ -69,6 +70,7 @@ pub fn invoke_signal_handler(arg: Option<&[u8]>) -> c_int {
 
     match signal.try_into() {
         Ok(signal::Signal::SIGCHLD) => super::process::sighandler(),
+        Ok(signal::Signal::SIGWINCH) => sigwinch::sighandler(),
         _ => 1, // unknown
     }
 }
@@ -79,7 +81,7 @@ fn resize_array<T: Copy + Default>(dst: &mut *mut T, old_len: usize, new_len: us
     *dst = Box::into_raw(new.into_boxed_slice()).cast();
 }
 
-fn hook_signal(signal: signal::Signal) -> Result<()> {
+pub(super) fn hook_signal(signal: signal::Signal) -> Result<()> {
     unsafe {
         // set the sighandler
         let handler = signal::SigHandler::Handler(sighandler);
@@ -98,10 +100,9 @@ fn hook_signal(signal: signal::Signal) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn self_pipe<C, F, T, E>(callback: C) -> Result<std::io::PipeWriter>
+pub(super) fn self_pipe<C, T, E>(callback: C) -> Result<std::io::PipeWriter>
 where
-    C: Fn() -> F + Send + 'static,
-    F: Future<Output = Result<T, E>> + Send + 'static,
+    C: Fn() -> Result<T, E> + Send + 'static,
     E: std::error::Error + Send + Sync + 'static,
 {
     let (reader, writer) = std::io::pipe()?;
@@ -114,7 +115,7 @@ where
         let mut buf = [0];
         loop {
             reader.read_exact(&mut buf).await?;
-            callback().await?;
+            callback()?;
         }
     });
 
@@ -134,7 +135,7 @@ pub fn init() -> Result<()> {
     }
 
     super::process::init()?;
-    hook_signal(signal::Signal::SIGCHLD)?;
+    sigwinch::init()?;
 
     Ok(())
 }

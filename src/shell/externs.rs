@@ -87,7 +87,12 @@ impl GlobalState {
                 let _ = trampoline.send(());
             }
 
-            match self.shell.recv_from_queue()? {
+            // allow sigwinch while we are waiting
+            zsh::winch_unblock();
+            let msg = self.shell.recv_from_queue()?;
+            zsh::winch_block();
+
+            match msg {
                 Ok(ShellMsg::accept_line_trampoline{line, returnvalue}) => {
                     if zle {
                         *self.shell.trampoline.lock().unwrap() = Some(returnvalue);

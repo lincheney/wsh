@@ -7,7 +7,7 @@ use std::os::raw::{c_int};
 use std::sync::{Mutex, atomic::{AtomicI32, Ordering}};
 mod pidset;
 
-static CHILD_PIPE: AtomicI32 = AtomicI32::new(-1);
+static SELF_PIPE: AtomicI32 = AtomicI32::new(-1);
 pub static PID_MAP: Mutex<Option<HashMap<pidset::Pid, oneshot::Sender<i32>>>> = Mutex::new(None);
 
 fn jobtab_retain_iter<'a, F: FnMut(&'a zsh_sys::process) -> bool>(mut callback: F) -> impl Iterator<Item=&'a zsh_sys::process> {
@@ -99,7 +99,7 @@ pub(super) fn sighandler() -> c_int {
 
             // notify that we found something
             if found {
-                let pipe = CHILD_PIPE.load(Ordering::Acquire);
+                let pipe = SELF_PIPE.load(Ordering::Acquire);
                 if pipe != -1 {
                     nix::unistd::write(BorrowedFd::borrow_raw(pipe), b"0").unwrap();
                 }
@@ -113,7 +113,7 @@ pub(super) fn sighandler() -> c_int {
 
 pub(super) fn init() -> Result<()> {
     // spawn a reader task
-    let writer = super::signals::self_pipe::<_, _, _, std::convert::Infallible>(|| async {
+    let writer = super::signals::self_pipe::<_, _, std::convert::Infallible>(|| {
         if let Some(pid_map) = &mut *PID_MAP.lock().unwrap() {
             // check for pids that are done
             pidset::PID_TABLE.extract_finished_pids(|pid, status| {
@@ -126,7 +126,9 @@ pub(super) fn init() -> Result<()> {
     })?;
 
     // set the writer for the handler to use
-    CHILD_PIPE.store(writer.into_raw_fd(), Ordering::Release);
+    SELF_PIPE.store(writer.into_raw_fd(), Ordering::Release);
+
+    super::signals::hook_signal(signal::Signal::SIGCHLD)?;
 
     Ok(())
 }
