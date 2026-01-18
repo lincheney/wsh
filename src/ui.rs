@@ -163,22 +163,6 @@ impl Ui {
 
         self.is_drawing.store(false, Ordering::Release);
 
-        fn draw_internal(ui: &mut UiInner, shell_vars: Option<crate::tui::command_line::ShellVars>) -> Result<()> {
-            if let Some(shell_vars) = shell_vars {
-                ui.cmdline.shell_vars = shell_vars;
-            }
-            let cmdline = ui.cmdline.make_command_line(&mut ui.buffer);
-            ui.tui.draw(
-                &mut ui.stdout,
-                ui.size,
-                cmdline,
-                &mut ui.status_bar,
-                ui.dirty,
-            )?;
-            ui.dirty = false;
-            Ok(())
-        }
-
         let size;
         {
             let this = self.unlocked.read();
@@ -200,7 +184,7 @@ impl Ui {
 
             if !(ui.dirty || ui.cmdline.is_dirty()) {
                 // don't need the shell vars, draw immediately
-                return draw_internal(ui, None)
+                return ui.draw(None)
             }
         }
 
@@ -208,8 +192,7 @@ impl Ui {
         let shell_vars = crate::tui::command_line::CommandLineState::get_shell_vars(&self.shell, size.0).await;
 
         let this = self.unlocked.read();
-        let ui = &mut *this.borrow_mut();
-        draw_internal(ui, Some(shell_vars))
+        this.borrow_mut().draw(Some(shell_vars))
     }
 
     pub async fn call_lua_fn<T: IntoLuaMulti + mlua::MaybeSend + 'static>(&self, draw: bool, callback: mlua::Function, arg: T) {
@@ -736,6 +719,23 @@ impl UiInner {
             Clear(ClearType::FromCursorDown),
             EndSynchronizedUpdate,
         )?;
+        Ok(())
+    }
+
+
+    fn draw(&mut self, shell_vars: Option<crate::tui::command_line::ShellVars>) -> Result<()> {
+        if let Some(shell_vars) = shell_vars {
+            self.cmdline.shell_vars = shell_vars;
+        }
+        let cmdline = self.cmdline.make_command_line(&mut self.buffer);
+        self.tui.draw(
+            &mut self.stdout,
+            self.size,
+            cmdline,
+            &mut self.status_bar,
+            self.dirty,
+        )?;
+        self.dirty = false;
         Ok(())
     }
 
