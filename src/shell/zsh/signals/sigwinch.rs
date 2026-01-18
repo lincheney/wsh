@@ -10,14 +10,14 @@ static SELF_PIPE: AtomicI32 = AtomicI32::new(-1);
 static RECEIVER: RwLock<Option<watch::Receiver<(u32, u32)>>> = RwLock::new(None);
 static SIZE: AtomicU64 = AtomicU64::new(0);
 
-fn fetch_term_size_from_zsh() {
-    // super::super::queue_signals();
+pub(in crate::shell) fn fetch_term_size_from_zsh() {
+    super::super::queue_signals();
     unsafe {
         let cols = zsh_sys::zterm_columns.max(1).min(u32::MAX as _) as u64;
         let lines = zsh_sys::zterm_lines.max(1).min(u32::MAX as _) as u64;
         SIZE.store((cols << 16) | lines, Ordering::Release);
     }
-    // let _ = super::super::unqueue_signals();
+    let _ = super::super::unqueue_signals();
 }
 
 fn get_term_size_from_zsh() -> (u32, u32) {

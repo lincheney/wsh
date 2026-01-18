@@ -207,6 +207,9 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                 zsh::initundo();
                 zsh::selectlocalmap(null_mut());
                 zsh_sys::zleactive = 1;
+                // window size may have changed since we last ran
+                zsh_sys::adjustwinsize(0);
+                zsh::signals::sigwinch::fetch_term_size_from_zsh();
 
                 // this is the only thread we should ever run this func
                 if !state.first_drawn.load(Ordering::Relaxed) {
