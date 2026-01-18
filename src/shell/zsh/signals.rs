@@ -90,7 +90,7 @@ pub(super) fn hook_signal(signal: signal::Signal) -> Result<()> {
 
         // now set the trap
         let signal = convert_to_custom_signal(signal as _);
-        let script = format!("\\builtin wsh .invoke-signal-handler {}", signal);
+        let script = format!("\\builtin wsh .invoke-signal-handler {signal}");
         let func = super::functions::Function::new(script.as_str().into())?;
         let eprog = func.0.as_ref().funcdef;
         (&mut *eprog).nref += 1;

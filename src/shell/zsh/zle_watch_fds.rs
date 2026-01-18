@@ -39,9 +39,7 @@ pub fn init(ui: &crate::ui::Ui) {
         let mut ui = ui.clone();
         tokio::task::spawn(async move {
             while let Some(change) = fd_source.recv().await {
-                ui.report_error(
-                    handle_fd_change(&ui, change).await
-                ).await;
+                ui.report_error(handle_fd_change(&ui, change).await);
             }
         });
     }

@@ -129,7 +129,7 @@ impl EventStream {
 
             loop {
                 match pausable.run(window_size.changed()).await {
-                    None => continue,
+                    None => (),
                     Some(Err(_)) => return Ok(()),
                     Some(Ok(())) => {
                         let size = *window_size.borrow_and_update();

@@ -1,5 +1,4 @@
 use bstr::BString;
-use anyhow::Result;
 use std::ffi::{CStr, CString};
 use crate::c_string_array::{CStringArray};
 use std::os::raw::{c_int};
@@ -121,9 +120,9 @@ impl<'a> ZleWidget<'a> {
         Self::exec_with_ptr(self.ptr, opts, args)
     }
 
-    pub(crate) fn exec_and_get_output<I: Iterator<Item=CString> + ExactSizeIterator>(&mut self, opts: Option<WidgetArgs>, args: I) -> Result<(BString, c_int)> {
+    pub(crate) fn exec_and_get_output<I: Iterator<Item=CString> + ExactSizeIterator>(&mut self, opts: Option<WidgetArgs>, args: I) -> (BString, c_int) {
         let sink = &mut *self.shell.sink.lock().unwrap();
-        Ok(super::capture_shout(sink, || Self::exec_with_ptr(self.ptr, opts, args)))
+        super::capture_shout(sink, || Self::exec_with_ptr(self.ptr, opts, args))
     }
 
 }

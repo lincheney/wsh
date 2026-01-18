@@ -47,7 +47,7 @@ impl GlobalState {
                 events.spawn(&ui);
                 ui.init_lua()?;
                 ui.get().inner.read().await.activate()?;
-                zsh::bin_zle::override_zle()?;
+                zsh::bin_zle::override_zle();
                 zsh::zle_watch_fds::init(&ui);
 
                 unsafe {
@@ -249,7 +249,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
             } else if cmd == zsh_sys::ZLE_CMD_TRASH as _ {
                 // something is probably going to print (error msgs etc) to the terminal
                 if let Ok(_lock) = state.ui.has_foreground_process.try_lock() {
-                    state.runtime.block_on(state.ui.prepare_for_unhandled_output(None)).unwrap();
+                    state.ui.prepare_for_unhandled_output(None).unwrap();
                 }
                 return null_mut()
 

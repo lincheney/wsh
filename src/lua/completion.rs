@@ -68,7 +68,7 @@ async fn get_completions(mut ui: Ui, _lua: Lua, val: Option<String>) -> Result<S
                 }
             },
             err => {
-                ui.report_error(err).await;
+                ui.report_error(err);
             },
         }
     });

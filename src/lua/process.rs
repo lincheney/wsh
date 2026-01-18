@@ -306,7 +306,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
                 let _ = result_sender.send(Err(err));
             } else {
                 let err: Result<()> = Err(err);
-                drawn = ui.report_error(err).await || drawn;
+                drawn = ui.report_error(err) || drawn;
             }
         }
 
@@ -493,7 +493,7 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
         let mut drawn = false;
 
         for err in errors {
-            drawn = ui.report_error(err).await || drawn;
+            drawn = ui.report_error(err) || drawn;
         }
 
         if let Err(err) = result {
@@ -501,7 +501,7 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
                 let _ = result_sender.send(Err(err));
             } else {
                 let err: Result<()> = Err(err);
-                drawn = ui.report_error(err).await || drawn;
+                drawn = ui.report_error(err) || drawn;
             }
         }
 

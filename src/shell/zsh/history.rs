@@ -1,6 +1,6 @@
 use std::ffi::{CStr};
 use std::cmp::Ordering;
-use std::os::raw::*;
+use std::os::raw::c_long;
 use std::ptr::NonNull;
 use std::marker::PhantomData;
 use bstr::{BString};

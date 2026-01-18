@@ -198,22 +198,22 @@ impl Ui {
     pub async fn call_lua_fn<T: IntoLuaMulti + mlua::MaybeSend + 'static>(&self, draw: bool, callback: mlua::Function, arg: T) {
         let result = callback.call_async::<LuaValue>(arg).await;
         let mut ui = self.clone();
-        if !ui.report_error(result).await && draw {
+        if !ui.report_error(result) && draw {
             ui.queue_draw();
         }
     }
 
-    pub async fn report_error<T, E: std::fmt::Display>(&mut self, result: std::result::Result<T, E>) -> bool {
+    pub fn report_error<T, E: std::fmt::Display>(&mut self, result: std::result::Result<T, E>) -> bool {
         if let Err(err) = result {
             log::error!("{}", err);
-            self.show_error_message(format!("ERROR: {err}")).await;
+            self.show_error_message(&format!("ERROR: {err}"));
             true
         } else {
             false
         }
     }
 
-    pub async fn show_error_message(&mut self, msg: String) {
+    pub fn show_error_message(&mut self, msg: &str) {
         let this = self.get();
         let mut ui = this.borrow_mut();
         ui.tui.add_error_message(msg);
@@ -239,7 +239,7 @@ impl Ui {
         Ok(true)
     }
 
-    pub async fn pre_accept_line(&self) -> Result<()> {
+    pub fn pre_accept_line(&self) -> Result<()> {
         {
             let this = &*self.unlocked.read();
             let mut ui = this.borrow_mut();
@@ -249,11 +249,11 @@ impl Ui {
             // TODO handle errors here properly
         }
         self.events.read().pause();
-        self.prepare_for_unhandled_output(None).await?;
+        self.prepare_for_unhandled_output(None)?;
         Ok(())
     }
 
-    pub async fn prepare_for_unhandled_output(&self, flag: Option<usize>) -> Result<bool> {
+    pub fn prepare_for_unhandled_output(&self, flag: Option<usize>) -> Result<bool> {
         // TODO if forked and trashed, zsh will NOT recover
         // we're going go to end up with janky output
         // how do we solve this?
@@ -335,7 +335,7 @@ impl Ui {
                 let lock = self.has_foreground_process.lock().await;
                 // last draw
                 crate::log_if_err(self.draw().await);
-                self.pre_accept_line().await?;
+                self.pre_accept_line()?;
                 // acceptline doesn't actually accept the line right now
                 // only when we return control to zle using the trampoline
                 if self.shell.do_accept_line_trampoline(Some(buffer)).await.is_err() {
@@ -473,6 +473,11 @@ impl Ui {
     }
 
     async fn handle_key_simple(&mut self, event: KeyEvent, buf: &BStr) -> Option<KeybindOutput> {
+        enum Value {
+            String(BString),
+            Widget{buffer: Option<BString>, cursor: Option<usize>, output: Option<BString>, accept_line: bool},
+        }
+
         // look for a lua callback
         let callback = self.get().borrow().keybinds
             .iter()
@@ -482,11 +487,6 @@ impl Ui {
         if let Some(callback) = callback {
             self.call_lua_fn(true, callback, ()).await;
             return Some(KeybindOutput::Value(Ok(true)))
-        }
-
-        enum Value {
-            String(BString),
-            Widget{buffer: Option<BString>, cursor: Option<usize>, output: Option<BString>, accept_line: bool},
         }
 
         // look for a zle widget
@@ -520,7 +520,7 @@ impl Ui {
 
                     widget.shell.set_lastchar(lastchar);
                     // executing a widget may block
-                    let (output, _) = tokio::task::block_in_place(|| widget.exec_and_get_output(None, [].into_iter())).unwrap();
+                    let (output, _) = tokio::task::block_in_place(|| widget.exec_and_get_output(None, [].into_iter()));
                     let (new_buffer, new_cursor) = shell.get_zle_buffer();
                     let new_cursor = new_cursor.unwrap_or(new_buffer.len() as _) as _;
                     let new_buffer = (new_buffer != *buffer).then_some(new_buffer);
@@ -631,7 +631,7 @@ impl Ui {
             if freeze_events {
                 self.events.read().pause();
             }
-            self.prepare_for_unhandled_output(Some(UI_FROZEN)).await?;
+            self.prepare_for_unhandled_output(Some(UI_FROZEN))?;
             Some(self.has_foreground_process.lock().await)
         } else {
             None

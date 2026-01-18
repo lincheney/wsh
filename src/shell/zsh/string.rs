@@ -1,4 +1,4 @@
-use std::os::raw::*;
+use std::os::raw::c_char;
 
 pub struct ZString {
     ptr: *mut c_char,

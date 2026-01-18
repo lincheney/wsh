@@ -122,6 +122,7 @@ async fn create_dynamic_var(
         VarType::array => make_dynamic_var!(create_dynamic_array_var).await,
         VarType::hashmap => make_dynamic_var!(create_dynamic_hash_var).await,
     }
+    Ok(())
 }
 
 pub fn init_lua(ui: &Ui) -> Result<()> {

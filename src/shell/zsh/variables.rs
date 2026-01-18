@@ -246,8 +246,7 @@ impl Variable {
         get: Box<dyn Send + Fn() -> T>,
         set: Option<Box<dyn Send + Fn(T)>>,
         unset: Option<Box<dyn Send + Fn(bool)>>,
-    ) -> Result<()>
-    {
+    ) {
         let flag = T::FLAG | zsh_sys::PM_SPECIAL | zsh_sys::PM_REMOVABLE | zsh_sys::PM_LOCAL;
         let gsu = CustomGSU { get, set, unset };
         unsafe {
@@ -272,7 +271,6 @@ impl Variable {
                 unreachable!();
             }
         }
-        Ok(())
     }
 
 }

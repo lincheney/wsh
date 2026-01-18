@@ -121,7 +121,7 @@ pub fn wrap<
     }
 
     // virtual text
-    for hl in highlights.clone() {
+    for hl in highlights {
         if hl.start >= line.len() {
             pos = handle_virtual_text(hl, hl.start, pos, &mut callback);
         }

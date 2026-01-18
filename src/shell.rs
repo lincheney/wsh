@@ -308,7 +308,7 @@ crate::TokioActor! {
             get: Box<dyn Send + Fn() -> BString>,
             set: Option<Box<dyn Send + Fn(BString)>>,
             unset: Option<Box<dyn Send + Fn(bool)>>
-        ) -> Result<()> {
+        ) {
             Variable::create_dynamic(&name, get, set, unset)
         }
 
@@ -318,7 +318,7 @@ crate::TokioActor! {
             get: Box<dyn Send + Fn() -> c_long>,
             set: Option<Box<dyn Send + Fn(c_long)>>,
             unset: Option<Box<dyn Send + Fn(bool)>>
-        ) -> Result<()> {
+        ) {
             Variable::create_dynamic(&name, get, set, unset)
         }
 
@@ -328,7 +328,7 @@ crate::TokioActor! {
             get: Box<dyn Send + Fn() -> f64>,
             set: Option<Box<dyn Send + Fn(f64)>>,
             unset: Option<Box<dyn Send + Fn(bool)>>
-        ) -> Result<()> {
+        ) {
             Variable::create_dynamic(&name, get, set, unset)
         }
 
@@ -338,7 +338,7 @@ crate::TokioActor! {
             get: Box<dyn Send + Fn() -> Vec<BString>>,
             set: Option<Box<dyn Send + Fn(Vec<BString>)>>,
             unset: Option<Box<dyn Send + Fn(bool)>>
-        ) -> Result<()> {
+        ) {
             Variable::create_dynamic(&name, get, set, unset)
         }
 
@@ -348,7 +348,7 @@ crate::TokioActor! {
             get: Box<dyn Send + Fn() -> HashMap<BString, BString>>,
             set: Option<Box<dyn Send + Fn(HashMap<BString, BString>)>>,
             unset: Option<Box<dyn Send + Fn(bool)>>
-        ) -> Result<()> {
+        ) {
             Variable::create_dynamic(&name, get, set, unset)
         }
 
@@ -448,7 +448,7 @@ crate::TokioActor! {
         }
 
         pub fn call_hook_func(&self, name: BString, args: Vec<BString>) -> Option<c_int> {
-            zsh::call_hook_func(CString::new(name).unwrap(), args.iter().map(|x| x.as_ref()))
+            zsh::call_hook_func(CString::new(name).unwrap().as_ref(), args.iter().map(|x| x.as_ref()))
         }
 
         pub fn run_watch_fd(&self, hook: Arc<bin_zle::FdChangeHook>, fd: RawFd, error: Option<std::io::Error>) {

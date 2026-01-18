@@ -415,10 +415,10 @@ pub fn zistype(x: c_char, y: c_short) -> bool {
     }
 }
 
-pub fn call_hook_func<'a, I: Iterator<Item=&'a BStr>>(name: CString, args: I) -> Option<c_int> {
+pub fn call_hook_func<'a, I: Iterator<Item=&'a BStr>>(name: &CStr, args: I) -> Option<c_int> {
     unsafe {
         if zsh_sys::getshfunc(name.as_ptr().cast_mut()).is_null() {
-            let mut name = name.clone().into_bytes();
+            let mut name = name.to_owned().into_bytes();
             name.push_str(zsh_sys::HOOK_SUFFIX);
             // check if it exists
             Variable::get(CStr::from_bytes_with_nul(&name).unwrap())?;

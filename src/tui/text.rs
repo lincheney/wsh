@@ -398,7 +398,7 @@ impl<T> Text<T> {
 
             // draw the line
             let mut cell = Cell::EMPTY;
-            for token in line.iter() {
+            for token in line {
                 if let WrapToken::String(symbol) = &token.inner {
                     cell.reset();
                     cell.set_symbol(symbol);

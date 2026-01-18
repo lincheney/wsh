@@ -111,9 +111,7 @@ impl RawForkLock {
                     |()| self.has_writer(),
                 ).unwrap();
 
-                if result.1.timed_out() {
-                    panic!("timed out waiting for fork lock read");
-                }
+                assert!(!result.1.timed_out(), "timed out waiting for fork lock read");
 
                 lock = result.0;
 

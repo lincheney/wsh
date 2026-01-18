@@ -171,7 +171,7 @@ impl Tui {
         (id, self.widgets.inner.last_mut().unwrap())
     }
 
-    pub fn add_message(&mut self, message: String) -> (usize, &mut WidgetWrapper) {
+    pub fn add_message(&mut self, message: &str) -> (usize, &mut WidgetWrapper) {
         let mut widget = widget::Widget::default();
         widget.inner.clear();
         for line in message.split('\n') {
@@ -180,7 +180,7 @@ impl Tui {
         self.add(widget.into())
     }
 
-    pub fn add_error_message(&mut self, message: String) -> (usize, &mut WidgetWrapper) {
+    pub fn add_error_message(&mut self, message: &str) -> (usize, &mut WidgetWrapper) {
         let mut widget = widget::Widget::default();
         widget.inner.clear();
         for line in message.split('\n') {

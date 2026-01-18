@@ -125,6 +125,6 @@ impl PidTable {
                 callback(pid, status);
                 false
             }
-        })
+        });
     }
 }

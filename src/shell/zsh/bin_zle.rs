@@ -4,7 +4,6 @@ use std::io::{Write, Cursor};
 use std::os::fd::RawFd;
 use crate::unsafe_send::UnsafeSend;
 use tokio::sync::{mpsc};
-use anyhow::Result;
 use std::sync::{Arc, Mutex};
 use std::ffi::{CString, CStr};
 use std::os::raw::*;
@@ -77,7 +76,7 @@ impl FdChangeHook {
             }
         } else {
             let args = [Some(fdstr.to_bytes().into()), error.map(|_| b"err".into())];
-            super::call_hook_func(self.func.clone(), args.into_iter().flatten());
+            super::call_hook_func(self.func.as_ref(), args.into_iter().flatten());
         }
         unsafe {
             super::unrefthingy(super::lbindk);
@@ -156,7 +155,7 @@ pub fn take_fd_change_source() -> Option<mpsc::UnboundedReceiver<FdChange>> {
     ZLE_FD_SOURCE.lock().unwrap().take()
 }
 
-pub fn override_zle() -> Result<()> {
+pub fn override_zle() {
     let original = Builtin::pop(c"zle").unwrap();
     let mut zle = original.clone();
     let (sender, receiver) = mpsc::unbounded_channel();
@@ -171,7 +170,6 @@ pub fn override_zle() -> Result<()> {
     zle.handlerfunc = Some(zle_handlerfunc);
     zle.node.flags = 0;
     zle.add();
-    Ok(())
 }
 
 pub fn restore_zle() {

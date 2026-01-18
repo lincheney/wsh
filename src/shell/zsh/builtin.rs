@@ -24,7 +24,7 @@ crate::impl_deref_helper!(mut self: Builtin, unsafe{ self.inner.as_mut() } => zs
 impl Clone for Builtin {
     fn clone(&self) -> Self {
         unsafe {
-            let mut inner = self.inner.as_ref().clone();
+            let mut inner = *self.inner.as_ref();
             // the name and optstr need to be cloned as well
             inner.node.nam = zsh_sys::ztrdup(inner.node.nam);
             inner.optstr = zsh_sys::ztrdup(inner.optstr);
