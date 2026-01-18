@@ -35,7 +35,7 @@ impl Scrolled<'_> {
             .chain(std::iter::once(self.in_view.len()))
             .map(move |i| {
                 let slice = &self.in_view[start .. i];
-                start = i + 1;
+                start = i;
                 slice
             })
     }
