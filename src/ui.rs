@@ -189,7 +189,7 @@ impl Ui {
             // take up at most 2/3 of the screen
             let height = (height * 2 / 3).max(1);
             // redraw all if dimensions have changed
-            if height != ui.tui.max_height || width != ui.tui.get_size().1 as _ {
+            if height != ui.tui.max_height || width != ui.tui.get_size().0 as _ {
                 ui.tui.max_height = height;
                 ui.dirty = true;
             }
