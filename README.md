@@ -35,8 +35,8 @@ i wish i could have
 * [x] <alt-.>, insert-last-word
 * [x] edit-command-line, i.e. in vim
 * [ ] ~~control over zerr, zwarning~~
-* [ ] ~~silence zerr, zwarning during parsing~~
-* [ ] ~~capture zerr, zwarning during completion~~
+* [ ] silence zerr, zwarning during parsing
+* [ ] capture zerr, zwarning during completion
 * [x] drop history entries which are space etc
 * [x] general selection widget interface
 * [x] embed process output in a tui message
@@ -48,14 +48,15 @@ i wish i could have
 * [ ] var for last term cursor position
 * [ ] options system
 * [x] alias, history expansion
-* [ ] complete command detection does not work with heredocs
+* [x] complete command detection does not work with heredocs
 * [ ] selecting `print -s echo` in history is weird
 * [x] silence parse warnings
-* [ ] custom buffer rendering, ghost text etc
+* [x] custom buffer rendering, ghost text etc
+* [ ] buffer text conceal
 * [x] merged prompt and buffer
 * [x] $POSTDISPLAY, $PREDISPLAY
 * [ ] $region_highlight
-* [ ] autosuggestions
+* [x] autosuggestions
 * [x] fix segfault when letting zle exit by itself
 * [ ] ~~try switch to termion~~
 * [x] remove extra zle prompt after accept line
@@ -74,13 +75,15 @@ i wish i could have
             due to the extra shell lock permit with `wsh lua` to allow recursion
         * are there other ways hit the shell lock?
             all other threads are dead so really you can run zsh (safe) and `wsh lua` and i think thats it
-    * [ ] is the ui fork safe?
+    * [x] is the ui fork safe?
         * if someone takes the ui lock right before fork, it will get lost and ui will be inaccessible
         * `( wsh lua 'wish.set_buffer("x"); print(wish.get_buffer())' )`
         * you can still control-c it, but not nice
-    * [ ] is the ui init fork safe?
+        * this is now wrapped in a forklock so should be fine
+    * [x] is the ui init fork safe?
         * the lock is used on init and `wsh lua ...`
         * same as above, if someone takes the lock before fork, you get a hang
+        * this is now wrapped in a forklock so should be fine
     * [x] is lua fork safe?
         * uhhh not really, see hacks in `./src/externs/fork.rs`, but those hacks may be good enough
     * [x] is `has_foreground_process` fork safe?
@@ -95,6 +98,7 @@ i wish i could have
     * [ ] is tokio fork safe?
         * no idea
         * seems to use tls for the handler, maybe its ok? dunno
+        * all the threads die, what happens to the runtime? should we instead start a new runtime?
 * [ ] control c style escape hatch
 * [ ] TMOUT
 * [x] scrolling widgets
@@ -105,4 +109,6 @@ i wish i could have
 * [ ] vi mode
 * [x] can we make `zle -F` work
 * [ ] tmux widget backend
+* [x] terminal resize
+* [ ] exit causes shell.func().await to panic
 * [ ]
