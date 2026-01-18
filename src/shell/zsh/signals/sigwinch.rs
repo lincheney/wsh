@@ -4,15 +4,28 @@ use nix::sys::signal;
 use anyhow::Result;
 use std::sync::{RwLock};
 use tokio::sync::{watch};
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 
 static SELF_PIPE: AtomicI32 = AtomicI32::new(-1);
 static RECEIVER: RwLock<Option<watch::Receiver<(u32, u32)>>> = RwLock::new(None);
+static SIZE: AtomicU64 = AtomicU64::new(0);
+
+fn fetch_term_size_from_zsh() {
+    // super::super::queue_signals();
+    unsafe {
+        let cols = zsh_sys::zterm_columns.max(1).min(u32::MAX as _) as u64;
+        let lines = zsh_sys::zterm_lines.max(1).min(u32::MAX as _) as u64;
+        SIZE.store((cols << 16) | lines, Ordering::Release);
+    }
+    // let _ = super::super::unqueue_signals();
+}
 
 fn get_term_size_from_zsh() -> (u32, u32) {
-    unsafe {
-        (zsh_sys::zterm_columns.max(1) as _, zsh_sys::zterm_lines.max(1) as _)
-    }
+    let size = SIZE.load(Ordering::Acquire);
+    (
+        (size >> 16) as _,
+        (size & 0xffff) as _,
+    )
 }
 
 pub fn get_term_size() -> Option<(u32, u32)> {
@@ -29,6 +42,7 @@ pub(super) fn sighandler() -> c_int {
         zsh_sys::zhandler(signal::Signal::SIGWINCH as _);
         let pipe = SELF_PIPE.load(Ordering::Acquire);
         if pipe != -1 {
+            fetch_term_size_from_zsh();
             nix::unistd::write(BorrowedFd::borrow_raw(pipe), b"0").unwrap();
         }
         0
@@ -36,6 +50,7 @@ pub(super) fn sighandler() -> c_int {
 }
 
 pub(super) fn init() -> Result<()> {
+    fetch_term_size_from_zsh();
     let (sender, receiver) = watch::channel(get_term_size_from_zsh());
     *RECEIVER.write().unwrap() = Some(receiver);
 
