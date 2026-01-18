@@ -176,14 +176,6 @@ pub struct ForkLockReadGuard<'a, T> {
 }
 crate::impl_deref_helper!(self: ForkLockReadGuard<'a, T>, self.inner => T);
 
-pub struct ForkLockWriteGuard<'a, 'b, T> {
-    #[allow(dead_code)]
-    guard: RawForkLockWriteGuard<'a, 'b>,
-    inner: &'b mut T,
-}
-crate::impl_deref_helper!(self: ForkLockWriteGuard<'a, 'b, T>, self.inner => T);
-crate::impl_deref_helper!(mut self: ForkLockWriteGuard<'a, 'b, T>, self.inner => T);
-
 impl<'a, T> ForkLock<'a, T> {
     pub fn read(&self) -> ForkLockReadGuard<'_, T> {
         let guard = self.lock.read();
@@ -193,10 +185,5 @@ impl<'a, T> ForkLock<'a, T> {
     pub fn read_with_lock(&self, lock: &'a RawForkLockWriteGuard) -> &T {
         assert!(std::ptr::eq(self.lock, lock.parent));
         unsafe{ &*self.inner.get() }
-    }
-
-    pub fn write(&self) -> ForkLockWriteGuard<'_, '_, T> {
-        let guard = self.lock.write();
-        ForkLockWriteGuard{ guard, inner: unsafe{ &mut *self.inner.get() } }
     }
 }
