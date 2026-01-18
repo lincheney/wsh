@@ -14,6 +14,10 @@ crate::impl_deref_helper!(self: PidSet, &self.inner => PidHashMap);
 crate::impl_deref_helper!(mut self: PidSet, &mut self.inner => PidHashMap);
 
 impl PidSet {
+    fn is_borrowed(&self) -> bool {
+        self.borrows.load(Ordering::Relaxed) <= 1
+    }
+
     fn borrow_exclusively(&self) -> bool {
         self.borrows.fetch_or(1, Ordering::AcqRel) <= 1
     }
@@ -23,7 +27,7 @@ impl PidSet {
     }
 
     fn unborrow(&self) {
-        self.borrows.fetch_sub(2, Ordering::AcqRel);
+        self.borrows.fetch_sub(2, Ordering::Relaxed);
     }
 }
 
@@ -39,11 +43,11 @@ pub struct WriteGuard<'a> {
 impl Drop for WriteGuard<'_> {
     fn drop(&mut self) {
         // free old sets; get the last one so that the iterator is consumed
-        let available = self.guard.1.extract_if(.., |set| set.borrow_exclusively()).last().unwrap_or_default();
+        let available = self.guard.1.extract_if(.., |set| !set.is_borrowed()).last().unwrap_or_default();
 
         let new = std::mem::replace(&mut self.guard.0, available);
         let new = Box::into_raw(Box::new(new));
-        let old = self.table.read.swap(new, Ordering::AcqRel);
+        let old = self.table.read.swap(new, Ordering::Relaxed);
 
         if !old.is_null() {
             let old = unsafe{ Box::from_raw(old) };
@@ -59,7 +63,7 @@ impl Drop for WriteGuard<'_> {
         // since i have the lock, its ok for me to just read from the raw ptr, nobody else can free it
         let new = unsafe{ &*new };
         self.guard.0.inner.clone_from(&new.inner);
-        self.guard.0.borrows.store(0, Ordering::Release);
+        self.guard.0.borrows.store(0, Ordering::Relaxed);
     }
 }
 crate::impl_deref_helper!(self: WriteGuard<'a>, &self.guard.0 => PidSet);
@@ -71,7 +75,7 @@ pub struct ReadGuard<'a> {
 impl<'a> ReadGuard<'a> {
     fn new(table: &'a PidTable) -> Option<Self> {
         loop {
-            let ptr = table.read.load(Ordering::Acquire);
+            let ptr = table.read.load(Ordering::Relaxed);
             let guard = Self{ inner: unsafe{ ptr.as_ref()? } };
             if guard.inner.borrow() {
                 return Some(guard)
