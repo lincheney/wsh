@@ -1,7 +1,8 @@
-use std::os::fd::AsRawFd;
+use std::os::fd::{IntoRawFd, AsRawFd, RawFd};
 use anyhow::Result;
 use mlua::{prelude::*, UserData, UserDataMethods};
-use tokio::fs::File;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use tokio::io::{
     BufReader,
     BufWriter,
@@ -11,6 +12,7 @@ use tokio::io::{
     AsyncReadExt,
     AsyncWriteExt,
     AsyncBufReadExt,
+    ReadBuf,
 };
 use crate::ui::Ui;
 
@@ -149,25 +151,25 @@ impl<T: AsyncWrite + AsRawFd + Unpin + mlua::MaybeSend + 'static> UserData for W
     }
 }
 
-pub struct ReadWriteFile{
-    pub inner: Option<BufStream<File>>,
+pub struct ReadWriteFile<T: AsyncRead + AsyncWrite>{
+    pub inner: Option<BufStream<T>>,
     pub is_tty_master: bool,
 }
-impl Readable<BufStream<File>> for ReadWriteFile {
-    fn get_reader(&mut self) -> Option<&mut BufStream<File>> {
+impl<T: AsyncRead + AsyncWrite> Readable<BufStream<T>> for ReadWriteFile<T> {
+    fn get_reader(&mut self) -> Option<&mut BufStream<T>> {
         self.inner.as_mut()
     }
     fn is_tty_master(&self) -> bool {
         self.is_tty_master
     }
 }
-impl Writeable<BufStream<File>> for ReadWriteFile {
-    fn get_writer(&mut self) -> Option<&mut BufStream<File>> {
+impl<T: AsyncRead + AsyncWrite> Writeable<BufStream<T>> for ReadWriteFile<T> {
+    fn get_writer(&mut self) -> Option<&mut BufStream<T>> {
         self.inner.as_mut()
     }
 }
 
-impl UserData for ReadWriteFile {
+impl<T: AsyncRead + AsyncWrite + AsRawFd + Unpin + mlua::MaybeSend + 'static> UserData for ReadWriteFile<T> {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("as_fd", |_lua, file, ()| {
             Ok(file.inner.as_ref().map(|x| x.get_ref().as_raw_fd()))
@@ -216,6 +218,41 @@ impl UserData for Receiver {
         });
     }
 }
+
+pub struct BorrowedAsyncFile(pub Option<tokio::fs::File>);
+
+impl Drop for BorrowedAsyncFile {
+    fn drop(&mut self) {
+        let _ = self.0.take().unwrap().try_into_std().unwrap().into_raw_fd();
+    }
+}
+
+impl AsRawFd for BorrowedAsyncFile {
+    fn as_raw_fd(&self) -> RawFd {
+        self.0.as_ref().unwrap().as_raw_fd()
+    }
+}
+
+impl AsyncRead for BorrowedAsyncFile {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+        std::pin::pin!(self.0.as_mut().unwrap()).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for BorrowedAsyncFile {
+    fn poll_write(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
+        std::pin::pin!(self.0.as_mut().unwrap()).poll_write(cx, buf)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        std::pin::pin!(self.0.as_mut().unwrap()).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        std::pin::pin!(self.0.as_mut().unwrap()).poll_shutdown(cx)
+    }
+}
+
 
 pub fn init_lua(ui: &Ui) -> Result<()> {
 

@@ -18,7 +18,7 @@ use tokio::process::Command;
 use tokio::sync::{oneshot, watch};
 use serde::{Deserialize, Deserializer, de};
 use crate::ui::{Ui};
-use super::asyncio::{ReadableFile, WriteableFile, ReadWriteFile};
+use super::asyncio::{ReadableFile, WriteableFile, ReadWriteFile, BorrowedAsyncFile};
 
 #[derive(Debug, Copy, Clone)]
 struct Signal(nix::sys::signal::Signal);
@@ -542,7 +542,8 @@ async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     };
     let zpty = ui.shell.zpty(name.clone().into(), cmd, opts).await?;
 
-    let pty = unsafe{ tokio::fs::File::from_raw_fd(zpty.fd) };
+    // do not drop the pty fd as zsh will do it for us
+    let pty = BorrowedAsyncFile(Some(unsafe{ tokio::fs::File::from_raw_fd(zpty.fd) }));
     let pty = ReadWriteFile{
         inner: Some(BufStream::new(pty)),
         is_tty_master: true,
