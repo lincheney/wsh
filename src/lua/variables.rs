@@ -6,7 +6,7 @@ use mlua::prelude::*;
 use crate::shell::variables;
 
 async fn get_var(ui: Ui, lua: Lua, (name, zle): (BString, Option<bool>)) -> Result<LuaValue> {
-    let val = match ui.shell.get_var(name, zle.unwrap_or(false)).await? {
+    let val = match ui.shell.get_var(name.into(), zle.unwrap_or(false)).await? {
         Some(variables::Value::String(val)) => val.into_lua(&lua)?,
         Some(variables::Value::Array(val)) => val.into_lua(&lua)?,
         Some(variables::Value::HashMap(val)) => val.into_lua(&lua)?,
@@ -38,17 +38,17 @@ async fn set_var(ui: Ui, lua: Lua, (name, val, global): (BString, LuaValue, Opti
             return Err(anyhow::anyhow!("invalid value: {:?}", val))
         },
     };
-    ui.shell.set_var(name, val, !global.unwrap_or(false)).await?;
+    ui.shell.set_var(name.into(), val, !global.unwrap_or(false)).await?;
     Ok(())
 }
 
 async fn unset_var(ui: Ui, _lua: Lua, name: BString) -> Result<()> {
-    ui.shell.unset_var(name).await;
+    ui.shell.unset_var(name.into()).await;
     Ok(())
 }
 
 async fn export_var(ui: Ui, _lua: Lua, name: BString) -> Result<()> {
-    ui.shell.export_var(name).await;
+    ui.shell.export_var(name.into()).await;
     Ok(())
 }
 

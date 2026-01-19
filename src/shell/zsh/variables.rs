@@ -6,6 +6,7 @@ use anyhow::Result;
 use crate::c_string_array::{CStringArray, CStrArray};
 use super::ZString;
 use bstr::{BStr, BString};
+use super::meta_string::{MetaStr};
 
 fn pm_type(flags: c_int) -> c_int {
     flags & (zsh_sys::PM_SCALAR | zsh_sys::PM_INTEGER | zsh_sys::PM_EFLOAT | zsh_sys::PM_FFLOAT | zsh_sys::PM_ARRAY | zsh_sys::PM_HASHED) as c_int
@@ -89,17 +90,16 @@ fn try_hashtable_to_hashmap(table: zsh_sys::HashTable) -> Result<HashMap<BString
 }
 
 impl Variable {
-    pub(in crate::shell) fn get<S: AsRef<CStr>>(name: S) -> Option<Self> {
+    pub(in crate::shell) fn get(name: MetaStr<'_>) -> Option<Self> {
         let bracks = 1;
-        let name = name.as_ref();
-        let mut c_varname_ptr = name.as_ptr().cast_mut();
+        let mut ptr = name.as_ptr().cast_mut();
         let mut value: zsh_sys::value = unsafe{ std::mem::MaybeUninit::zeroed().assume_init() };
-        let ptr = unsafe{ zsh_sys::getvalue(
+        let ret = unsafe{ zsh_sys::getvalue(
             &raw mut value,
-            &raw mut c_varname_ptr,
+            &raw mut ptr,
             bracks,
         ) };
-        if ptr.is_null() {
+        if ret.is_null() {
             None
         } else {
             Some(Self{
@@ -112,9 +112,8 @@ impl Variable {
         }
     }
 
-    pub(in crate::shell) fn set(name: &[u8], value: Value, local: bool) -> Result<()> {
-        let c_name = CString::new(name).unwrap();
-        let name = c_name.as_ptr().cast_mut();
+    pub(in crate::shell) fn set(name: MetaStr<'_>, value: Value, local: bool) -> Result<()> {
+        let name = name.as_ptr().cast_mut();
         let param = match value {
             Value::HashMap(value) => {
                 let value: CStringArray = value.into_iter()
@@ -157,9 +156,8 @@ impl Variable {
 
     }
 
-    pub(in crate::shell) fn unset(name: &[u8]) {
-        let c_name = CString::new(name).unwrap();
-        unsafe{ zsh_sys::unsetparam(c_name.as_ptr().cast_mut()); }
+    pub(in crate::shell) fn unset(name: MetaStr<'_>) {
+        unsafe{ zsh_sys::unsetparam(name.as_ptr().cast_mut()); }
     }
 
     pub(in crate::shell) fn export(&self) {

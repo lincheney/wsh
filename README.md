@@ -111,4 +111,5 @@ i wish i could have
 * [ ] tmux widget backend
 * [x] terminal resize
 * [ ] exit causes shell.func().await to panic
+* [ ] what exactly needs to be metafied?
 * [ ]

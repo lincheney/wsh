@@ -29,6 +29,8 @@ pub use zsh::{
     parser::{Token},
     ZptyOpts,
     Zpty,
+    MetaStr,
+    MetaString,
 };
 pub use externs::{run_with_shell};
 pub use variables::Variable;
@@ -115,7 +117,7 @@ pub fn control_c() -> nix::Result<()> {
     nix::sys::signal::kill(nix::unistd::Pid::from_raw(0), nix::sys::signal::Signal::SIGINT)
 }
 
-pub fn get_var(_shell: &ShellInternal, string: &CStr) -> Option<Variable> {
+pub fn get_var(_shell: &ShellInternal, string: zsh::MetaStr) -> Option<Variable> {
     Variable::get(string)
 }
 
@@ -241,12 +243,11 @@ crate::TokioActor! {
             zsh::process::check_pid_status(pid)
         }
 
-        pub fn get_var(&self, name: BString, zle: bool) -> anyhow::Result<Option<variables::Value>> {
-            let name = CString::new(name)?;
+        pub fn get_var(&self, name: MetaString, zle: bool) -> anyhow::Result<Option<variables::Value>> {
             if zle {
                 self.start_zle_scope();
             }
-            let result = if let Some(mut v) = Variable::get(name) {
+            let result = if let Some(mut v) = Variable::get(name.as_str()) {
                 v.as_value().map(Some)
             } else {
                 Ok(None)
@@ -257,12 +258,11 @@ crate::TokioActor! {
             result
         }
 
-        pub fn get_var_as_string(&self, name: BString, zle: bool) -> anyhow::Result<Option<BString>> {
-            let name = CString::new(name)?;
+        pub fn get_var_as_string(&self, name: MetaString, zle: bool) -> anyhow::Result<Option<BString>> {
             if zle {
                 self.start_zle_scope();
             }
-            let result = Variable::get(name).map(|mut v| v.as_bytes());
+            let result = Variable::get(name.as_str()).map(|mut v| v.as_bytes());
             if zle {
                 self.end_zle_scope();
             }
@@ -285,16 +285,16 @@ crate::TokioActor! {
             zsh::end_zle_scope();
         }
 
-        pub fn set_var(&self, name: BString, value: variables::Value, local: bool) -> anyhow::Result<()> {
-            Variable::set(&name, value, local)
+        pub fn set_var(&self, name: MetaString, value: variables::Value, local: bool) -> anyhow::Result<()> {
+            Variable::set(name.as_str(), value, local)
         }
 
-        pub fn unset_var(&self, name: BString) {
-            Variable::unset(&name);
+        pub fn unset_var(&self, name: MetaString) {
+            Variable::unset(name.as_str());
         }
 
-        pub fn export_var(&self, name: BString) -> bool {
-            if let Ok(name) = CString::new(name) && let Some(var) = Variable::get(name) {
+        pub fn export_var(&self, name: MetaString) -> bool {
+            if let Some(var) = Variable::get(name.as_str()) {
                 var.export();
                 true
             } else {
@@ -374,21 +374,11 @@ crate::TokioActor! {
         }
 
         pub fn set_zle_buffer(&self, buffer: BString, cursor: i64) {
-            zsh::start_zle_scope();
-            Variable::set(b"BUFFER", buffer.into(), true).unwrap();
-            Variable::set(b"CURSOR", cursor.into(), true).unwrap();
-            zsh::end_zle_scope();
+            zsh::set_zle_buffer(buffer, cursor);
         }
 
         pub fn get_zle_buffer(&self) -> (BString, Option<i64>) {
-            zsh::start_zle_scope();
-            let buffer = Variable::get(c"BUFFER").unwrap().as_bytes();
-            let cursor = Variable::get(c"CURSOR").unwrap().try_as_int();
-            zsh::end_zle_scope();
-            match cursor {
-                Ok(Some(cursor)) => (buffer, Some(cursor)),
-                _ => (buffer, None),
-            }
+            zsh::get_zle_buffer()
         }
 
         pub fn set_lastchar(&self, char: [u8; 4]) {
@@ -447,8 +437,9 @@ crate::TokioActor! {
             zsh::unqueue_signals()
         }
 
-        pub fn call_hook_func(&self, name: BString, args: Vec<BString>) -> Option<c_int> {
-            zsh::call_hook_func(CString::new(name).unwrap().as_ref(), args.iter().map(|x| x.as_ref()))
+        pub fn call_hook_func(&self, name: MetaString, args: Vec<MetaString>) -> Option<c_int> {
+            // needs metafy
+            zsh::call_hook_func(name.as_str(), args.iter().map(|x| x.as_str()))
         }
 
         pub fn run_watch_fd(&self, hook: Arc<bin_zle::FdChangeHook>, fd: RawFd, error: Option<std::io::Error>) {

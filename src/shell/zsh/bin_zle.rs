@@ -5,10 +5,11 @@ use std::os::fd::RawFd;
 use crate::unsafe_send::UnsafeSend;
 use tokio::sync::{mpsc};
 use std::sync::{Arc, Mutex};
-use std::ffi::{CString, CStr};
+use std::ffi::{CStr};
 use std::os::raw::*;
 use crate::canceller;
 use super::builtin::Builtin;
+use super::meta_string::{MetaStr, MetaString};
 
 static ZLE_FD_SOURCE: Mutex<Option<mpsc::UnboundedReceiver<FdChange>>> = Mutex::new(None);
 
@@ -40,7 +41,7 @@ pub enum FdChange {
 type SyncFdChangeHook = Arc<Mutex<Option<Arc<FdChangeHook>>>>;
 #[derive(Debug)]
 pub struct FdChangeHook {
-    func: CString,
+    func: MetaString,
     widget: bool,
 }
 
@@ -66,7 +67,7 @@ impl FdChangeHook {
         let mut cursor = Cursor::new([0; 128]);
         write!(cursor, "{fd}").unwrap();
         let fdbuf = cursor.into_inner();
-        let fdstr = CStr::from_bytes_until_nul(&fdbuf).unwrap();
+        let fdstr = MetaStr::from_bytes(&fdbuf);
 
         // what does this do
         let save_lbindk = unsafe{ super::refthingy(super::lbindk) };
@@ -75,8 +76,8 @@ impl FdChangeHook {
                 super::zlecallhook(self.func.as_ptr().cast_mut(), fdstr.as_ptr().cast_mut());
             }
         } else {
-            let args = [Some(fdstr.to_bytes().into()), error.map(|_| b"err".into())];
-            super::call_hook_func(self.func.as_ref(), args.into_iter().flatten());
+            let args = [Some(fdstr), error.map(|_| MetaStr::new(c"err"))];
+            super::call_hook_func(self.func.as_str(), args.into_iter().flatten());
         }
         unsafe {
             super::unrefthingy(super::lbindk);
@@ -112,7 +113,7 @@ unsafe extern "C" fn zle_handlerfunc(nam: *mut c_char, argv: *mut *mut c_char, o
             {
 
                 let hook = Some(Arc::new(FdChangeHook {
-                    func: CStr::from_ptr((*watch).func).to_owned(),
+                    func: CStr::from_ptr((*watch).func).to_owned().into(),
                     widget: (*watch).widget != 0,
                 }));
                 match zle.fd_mapping.entry(fd) {

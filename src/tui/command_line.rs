@@ -4,7 +4,7 @@ use bstr::BString;
 use std::io::{Write};
 use crate::tui::{Drawer, Canvas};
 use crate::buffer::Buffer;
-use crate::shell::{ShellClient};
+use crate::shell::{ShellClient, MetaStr};
 use ratatui::layout::Rect;
 
 const FALLBACK_PROMPT: &CStr = c">>> ";
@@ -56,8 +56,8 @@ impl CommandLineState {
         shell.do_run(move |shell| {
 
             shell.start_zle_scope();
-            let predisplay = crate::shell::get_var(shell, c"PREDISPLAY").map(|mut v| v.as_bytes());
-            let postdisplay = crate::shell::get_var(shell, c"POSTDISPLAY").map(|mut v| v.as_bytes());
+            let predisplay = crate::shell::get_var(shell, MetaStr::new(c"PREDISPLAY")).map(|mut v| v.as_bytes());
+            let postdisplay = crate::shell::get_var(shell, MetaStr::new(c"POSTDISPLAY")).map(|mut v| v.as_bytes());
             let prompt = shell.get_prompt(None, true).unwrap_or_else(|| FALLBACK_PROMPT.into());
             let prompt_size = shell.get_prompt_size(prompt.clone(), Some(width as _));
             let prompt = crate::shell::remove_invisible_chars(&prompt).into_owned();

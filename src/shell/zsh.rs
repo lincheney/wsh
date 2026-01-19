@@ -16,6 +16,7 @@ pub mod functions;
 pub mod signals;
 pub mod process;
 mod widget;
+mod meta_string;
 pub mod zle_watch_fds;
 pub use widget::ZleWidget;
 pub mod history;
@@ -25,6 +26,7 @@ pub mod parser;
 pub use string::ZString;
 pub(super) use bindings::*;
 use variables::{Variable};
+pub use meta_string::{MetaStr, MetaString};
 
 pub static JOB: LazyLock<c_int> = LazyLock::new(|| unsafe{ zsh_sys::initjob() });
 
@@ -111,7 +113,7 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
         }
 
         // get fd from $REPLY
-        let Some(mut fd) = variables::Variable::get(c"REPLY")
+        let Some(mut fd) = variables::Variable::get(MetaStr::new(c"REPLY"))
             else { anyhow::bail!("could not get $REPLY") };
 
         let fd = if let Some(fd) = fd.try_as_int()? {
@@ -133,7 +135,7 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
         // bless
         // add a newline to help with parsing
         execstring("zpty_output=$'\\n'\"$(zpty & wait $!)\"", Default::default());
-        let Some(mut output) = variables::Variable::get(c"zpty_output")
+        let Some(mut output) = variables::Variable::get(MetaStr::new(c"zpty_output"))
             else { anyhow::bail!("could not get $zpty_output") };
         let output = output.as_bytes();
 
@@ -223,7 +225,7 @@ pub fn get_prompt(prompt: Option<&BStr>, escaped: bool) -> Option<CString> {
     let prompt = if let Some(prompt) = prompt {
         CString::new(prompt.to_vec()).unwrap()
     } else {
-        let prompt = variables::Variable::get(c"PROMPT")?.as_bytes();
+        let prompt = variables::Variable::get(MetaStr::new(c"PROMPT"))?.as_bytes();
         CString::new(prompt).unwrap()
     };
 
@@ -312,15 +314,15 @@ pub fn end_zle_scope() {
 
 pub fn set_zle_buffer(buffer: BString, cursor: i64) {
     start_zle_scope();
-    Variable::set(b"BUFFER", buffer.into(), true).unwrap();
-    Variable::set(b"CURSOR", cursor.into(), true).unwrap();
+    Variable::set(MetaStr::new(c"BUFFER"), buffer.into(), true).unwrap();
+    Variable::set(MetaStr::new(c"CURSOR"), cursor.into(), true).unwrap();
     end_zle_scope();
 }
 
 pub fn get_zle_buffer() -> (BString, Option<i64>) {
     start_zle_scope();
-    let buffer = Variable::get(c"BUFFER").unwrap().as_bytes();
-    let cursor = Variable::get(c"CURSOR").unwrap().try_as_int();
+    let buffer = Variable::get(MetaStr::new(c"BUFFER")).unwrap().as_bytes();
+    let cursor = Variable::get(MetaStr::new(c"CURSOR")).unwrap().try_as_int();
     end_zle_scope();
     match cursor {
         Ok(Some(cursor)) => (buffer, Some(cursor)),
@@ -415,18 +417,19 @@ pub fn zistype(x: c_char, y: c_short) -> bool {
     }
 }
 
-pub fn call_hook_func<'a, I: Iterator<Item=&'a BStr>>(name: &CStr, args: I) -> Option<c_int> {
+pub fn call_hook_func<'a, I: Iterator<Item=MetaStr<'a>>>(name: MetaStr<'_>, args: I) -> Option<c_int> {
     unsafe {
+        // needs metafy
         if zsh_sys::getshfunc(name.as_ptr().cast_mut()).is_null() {
-            let mut name = name.to_owned().into_bytes();
-            name.push_str(zsh_sys::HOOK_SUFFIX);
+            let mut name = name.to_string();
+            name.push_str(MetaStr::from_bytes(zsh_sys::HOOK_SUFFIX));
             // check if it exists
-            Variable::get(CStr::from_bytes_with_nul(&name).unwrap())?;
+            Variable::get(name.as_str())?;
         }
     }
 
-    let args = std::iter::once(metafy(name.to_bytes()).cast_const())
-        .chain(args.map(|x| metafy(x).cast_const()));
+    let args = std::iter::once(name.as_ptr())
+        .chain(args.map(|x| x.as_ptr()));
 
     // convert args to a linked list
     let args = linked_list::LinkedList::new_from_ptrs(args);
