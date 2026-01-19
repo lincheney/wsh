@@ -78,7 +78,6 @@ impl Sink {
         mut flushable: tokio::sync::mpsc::Receiver<mpsc::Sender<()>>,
     ) {
 
-        let mut allow_flush = true;
         let mut flush_notifier: Option<mpsc::Sender<()>> = None;
         let fd = AsyncFd::new(reader.as_raw_fd()).unwrap();
 
@@ -98,10 +97,9 @@ impl Sink {
                         },
                     }
                 },
-                sender = flushable.recv(), if allow_flush => {
+                sender = flushable.recv() => {
                     flush_notifier = sender;
                     if flush_notifier.is_some() {
-                        allow_flush = true;
                         // flush as requested
                         unsafe {
                             nix::libc::fflush(writer_ptr.into_inner()); // ignore errors?
