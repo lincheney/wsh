@@ -2,9 +2,9 @@ use bstr::{BStr, BString, ByteSlice, ByteVec};
 use std::os::raw::{c_char};
 use serde::{Deserialize};
 use std::ops::Range;
-use std::ffi::CStr;
 use std::ptr::null_mut;
 use super::bindings::{Meta, token, lextok};
+use super::{MetaStr, MetaString};
 
 #[derive(Clone, Copy, Deserialize)]
 #[serde(default)]
@@ -108,8 +108,7 @@ fn parse_internal(
     dummy: Option<&BStr>,
 ) -> (bool, Vec<Token>) {
 
-    let ptr = super::metafy(cmd);
-    let metafied = unsafe{ CStr::from_ptr(ptr) };
+    let metafied = MetaString::from(cmd.to_owned());
     let metalen = metafied.count_bytes();
     let mut complete = true;
     let mut heredocs = vec![];
@@ -119,11 +118,10 @@ fn parse_internal(
 
     let mut push_token = |tokens: &mut Vec<Token>, tokstr: &[u8], kind: Option<TokenKind>, has_meta| {
         let range = if has_meta {
-            let mut tokstr = tokstr.to_owned();
-            super::unmetafy_owned(&mut tokstr);
-            find_str(BStr::new(tokstr.as_slice()), cmd, start).unwrap()
+            let tokstr = super::meta_string::unmetafy(tokstr.into());
+            find_str(&tokstr, cmd, start).unwrap()
         } else {
-            find_str(BStr::new(tokstr), cmd, start).unwrap()
+            find_str(tokstr.into(), cmd, start).unwrap()
         };
         start = range.end;
         tokens.push(Token{range: range.start + range_offset .. range.end + range_offset, kind, nested: None});
@@ -132,7 +130,7 @@ fn parse_internal(
     // do similar to bufferwords
     unsafe {
         zsh_sys::zcontext_save();
-        zsh_sys::inpush(ptr, 0, null_mut());
+        zsh_sys::inpush(metafied.as_ptr().cast_mut(), 0, null_mut());
         zsh_sys::zlemetall = cmd.len() as _;
         zsh_sys::zlemetacs = zsh_sys::zlemetall;
         zsh_sys::strinbeg(0);
@@ -176,7 +174,7 @@ fn parse_internal(
                 // tokstr metafied and tokenized
                 // let's go through the tokens
 
-                let tokstr = CStr::from_ptr(zsh_sys::tokstr).to_bytes();
+                let tokstr = MetaStr::from_ptr(zsh_sys::tokstr).to_bytes();
 
                 let mut slice_start = 0;
                 let mut meta = false;
@@ -294,7 +292,7 @@ fn find_heredocs(cmd: &BStr, tokens: &mut Vec<Token>, range_offset: usize, hered
         }
         prev_index = index;
 
-        let tag = unsafe { CStr::from_ptr(zsh_sys::quotesubst(*tokstr)) }.to_bytes();
+        let tag = unsafe { MetaStr::from_ptr(zsh_sys::quotesubst(*tokstr)) }.to_bytes();
         let allow_tabs = matches!(tokens[index-1].kind, Some(TokenKind::Lextok(lextok::DINANGDASH)));
         let allow_subst = !tokens[index].as_str(cmd, range_offset).iter().any(|&c| matches!(c, b'\''|b'"'|b'\\'));
         tokens[index].kind = Some(TokenKind::HeredocOpenTag);

@@ -56,7 +56,7 @@ impl UserData for Function {
 }
 
 async fn make_zsh_function(ui: Ui, lua: Lua, code: BString) -> Result<LuaValue> {
-    let func = ui.shell.make_function(code).await?;
+    let func = ui.shell.make_function(code.into()).await?;
     Ok(lua.pack(Function {
         inner: func,
         ui: ui.downgrade(),

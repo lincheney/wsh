@@ -3,7 +3,6 @@ use std::ptr::NonNull;
 use std::os::raw::{c_int, c_long, c_char};
 use anyhow::Result;
 use crate::c_string_array::{CStringArray, CStrArray};
-use super::ZString;
 use bstr::{BStr, BString};
 use super::meta_string::{MetaStr, MetaString};
 
@@ -89,7 +88,7 @@ fn try_hashtable_to_hashmap(table: zsh_sys::HashTable) -> Result<HashMap<BString
 }
 
 impl Variable {
-    pub(in crate::shell) fn get(name: MetaStr<'_>) -> Option<Self> {
+    pub(in crate::shell) fn get(name: &MetaStr) -> Option<Self> {
         let bracks = 1;
         let mut ptr = name.as_ptr().cast_mut();
         let mut value: zsh_sys::value = unsafe{ std::mem::MaybeUninit::zeroed().assume_init() };
@@ -111,19 +110,19 @@ impl Variable {
         }
     }
 
-    pub(in crate::shell) fn set(name: MetaStr<'_>, value: Value, local: bool) -> Result<()> {
+    pub(in crate::shell) fn set(name: &MetaStr, value: Value, local: bool) -> Result<()> {
         let name = name.as_ptr().cast_mut();
         let param = match value {
             Value::HashMap(value) => {
                 let value: CStringArray = value.into_iter()
                     .flat_map(|(k, v)| [k, v])
-                    .map(|x| MetaString::from_vec(x.into()).into_inner())
+                    .map(|x| MetaString::from(x).into_inner())
                     .collect();
                 unsafe{ zsh_sys::sethparam(name, value.into_raw()) }
             },
             Value::Array(value) => {
                 let value: CStringArray = value.into_iter()
-                    .map(|x| MetaString::from_vec(x.into()).into_inner())
+                    .map(|x| MetaString::from(x).into_inner())
                     .collect();
                 unsafe{ zsh_sys::setaparam(name, value.into_raw()) }
             },
@@ -139,9 +138,10 @@ impl Variable {
             },
             Value::String(value) => {
                 // setsparam will free the value for us
-                let value: MetaString = value.into();
-                let c_value: ZString = value.as_bytes_with_nul().into();
-                unsafe{ zsh_sys::setsparam(name, c_value.into_raw()) }
+                unsafe {
+                    let ptr = value.into_raw();
+                    zsh_sys::setsparam(name, ptr)
+                }
             },
         };
 
@@ -158,7 +158,7 @@ impl Variable {
 
     }
 
-    pub(in crate::shell) fn unset(name: MetaStr<'_>) {
+    pub(in crate::shell) fn unset(name: &MetaStr) {
         unsafe{ zsh_sys::unsetparam(name.as_ptr().cast_mut()); }
     }
 
@@ -170,13 +170,21 @@ impl Variable {
         unsafe{ &mut *self.value.pm }
     }
 
-    pub fn as_bytes(&mut self) -> BString {
+    pub fn as_meta_bytes(&mut self) -> Option<&MetaStr> {
         unsafe{
             let var = zsh_sys::getstrvalue(&raw mut self.value);
             if var.is_null() {
-                return BString::new(vec![]);
+                None
+            } else {
+                Some(MetaStr::from_ptr(var))
             }
-            MetaStr::from_ptr(var).to_string().unmetafy()
+        }
+    }
+
+    pub fn as_bytes(&mut self) -> BString {
+        match self.as_meta_bytes() {
+            Some(x) => x.unmetafy().into_owned(),
+            None => BString::new(vec![]),
         }
     }
 
@@ -239,7 +247,7 @@ impl Variable {
     }
 
     pub(in crate::shell) fn create_dynamic<T: VariableGSU>(
-        name: MetaStr,
+        name: &MetaStr,
         get: Box<dyn Send + Fn() -> T>,
         set: Option<Box<dyn Send + Fn(T)>>,
         unset: Option<Box<dyn Send + Fn(bool)>>,
@@ -347,7 +355,9 @@ impl VariableGSU for BString {
     }
 
     fn into_raw(self) -> Self::Type {
-        super::metafy(&self)
+        unsafe{
+            zsh_sys::ztrdup_metafy(self.as_ptr().cast())
+        }
     }
 }
 
@@ -385,7 +395,7 @@ impl VariableGSU for Vec<BString> {
 
     fn into_raw(self) -> Self::Type {
         self.into_iter()
-            .map(|x| MetaString::from_vec(x.into()).into_inner())
+            .map(|x| MetaString::from(x).into_inner())
             .collect::<CStringArray>()
             .into_raw()
     }

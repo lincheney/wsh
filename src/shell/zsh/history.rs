@@ -1,9 +1,9 @@
-use std::ffi::{CStr};
 use std::cmp::Ordering;
 use std::os::raw::c_long;
 use std::ptr::NonNull;
 use std::marker::PhantomData;
 use bstr::{BString};
+use super::{MetaStr};
 
 #[derive(Debug)]
 pub struct Entry {
@@ -20,11 +20,10 @@ impl From<&zsh_sys::histent> for Entry {
         } else {
             histent.zle_text
         };
-        let mut text = unsafe{ CStr::from_ptr(text_ptr) }.to_bytes_with_nul().to_owned();
-        super::unmetafy_owned(&mut text);
+        let text = unsafe{ MetaStr::from_ptr(text_ptr) }.unmetafy().into_owned();
 
         Self {
-            text: text.into(),
+            text,
             start_time: histent.stim,
             finish_time: histent.ftim,
             histnum: histent.histnum,

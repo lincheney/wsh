@@ -1,13 +1,11 @@
 use nix::sys::signal;
 use std::sync::{LazyLock};
 use std::os::fd::{RawFd};
-use std::ffi::{CString, CStr};
 use std::os::raw::*;
 use std::default::Default;
 use std::ptr::null_mut;
-use bstr::{BStr, BString, ByteSlice, ByteVec};
+use bstr::{BString, ByteSlice};
 
-mod string;
 mod bindings;
 mod linked_list;
 mod builtin;
@@ -16,6 +14,7 @@ pub mod functions;
 pub mod signals;
 pub mod process;
 mod widget;
+#[macro_use]
 mod meta_string;
 pub mod zle_watch_fds;
 pub use widget::ZleWidget;
@@ -23,7 +22,6 @@ pub mod history;
 pub mod completion;
 pub mod bin_zle;
 pub mod parser;
-pub use string::ZString;
 pub(super) use bindings::*;
 use variables::{Variable};
 pub use meta_string::{MetaStr, MetaString};
@@ -36,9 +34,11 @@ pub fn opt_isset(opts: &zsh_sys::options, c: u8) -> bool {
     opts.ind[c as usize] != 0
 }
 
-pub fn shell_quote(string: &CStr) -> BString {
+pub fn shell_quote(string: &MetaStr) -> &MetaStr {
     unsafe {
-        CStr::from_ptr(zsh_sys::quotestring(string.as_ptr(), zsh_sys::QT_SINGLE_OPTIONAL as _)).to_bytes().into()
+        // allocated on the arena, so don't free it
+        // TODO we should make an owned value
+        MetaStr::from_ptr(zsh_sys::quotestring(string.as_ptr(), zsh_sys::QT_SINGLE_OPTIONAL as _))
     }
 }
 
@@ -46,7 +46,7 @@ pub fn shell_quote(string: &CStr) -> BString {
 pub struct ExecstringOpts<'a> {
     dont_change_job: bool,
     exiting: bool,
-    context: Option<&'a str>,
+    context: Option<&'a MetaStr>,
 }
 
 impl Default for ExecstringOpts<'_> {
@@ -55,15 +55,13 @@ impl Default for ExecstringOpts<'_> {
     }
 }
 
-pub fn execstring<S: AsRef<BStr>>(cmd: S, opts: ExecstringOpts) -> c_long {
-    let cmd = cmd.as_ref().to_vec();
-    let context = opts.context.map(|c| ZString::from(c).into_raw());
+pub fn execstring(cmd: &MetaStr, opts: ExecstringOpts) -> c_long {
     unsafe{
         zsh_sys::execstring(
-            metafy(&cmd),
+            cmd.as_ptr().cast_mut(),
             opts.dont_change_job.into(),
             opts.exiting.into(),
-            context.unwrap_or(null_mut()),
+            opts.context.map_or(null_mut(), |x| x.as_ptr().cast_mut()),
         );
     }
     get_return_code()
@@ -78,34 +76,33 @@ pub struct ZptyOpts {
 pub struct Zpty {
     pub pid: u32,
     pub fd: RawFd,
-    pub name: CString,
+    pub name: MetaString,
 }
 
-pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
-    let mut cmd = shell_quote(cmd);
-
+pub fn zpty(name: MetaString, cmd: &MetaStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
     let silent = 0;
     if unsafe{ zsh_sys::require_module(c"zsh/zpty".as_ptr(), null_mut(), silent) } > 0 {
         anyhow::bail!("failed to load module zsh/zpty")
     }
 
+    let mut cmd = shell_quote(cmd).to_owned();
     // reversed
     // add a read so that we have time to get the pid
-    cmd.insert_str(0, " '\\builtin read -k1;'");
-    cmd.insert_str(0, shell_quote(&name).as_bytes());
+    cmd.insert_str(0, meta_str!(c" '\\builtin read -k1;'"));
+    cmd.insert_str(0, shell_quote(name.as_ref()));
     if opts.echo_input {
-        cmd.insert_str(0, "-e ");
+        cmd.insert_str(0, meta_str!(c"-e "));
     }
     if opts.non_blocking {
-        cmd.insert_str(0, "-b ");
+        cmd.insert_str(0, meta_str!(c"-b "));
     }
-    cmd.insert_str(0, "zpty ");
+    cmd.insert_str(0, meta_str!(c"zpty "));
 
     unsafe {
         zsh_sys::startparamscope();
     }
 
-    let code = execstring(cmd, Default::default());
+    let code = execstring(cmd.as_ref(), Default::default());
 
     let result = (|| {
         if code > 0 {
@@ -113,7 +110,7 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
         }
 
         // get fd from $REPLY
-        let Some(mut fd) = variables::Variable::get(MetaStr::new(c"REPLY"))
+        let Some(mut fd) = variables::Variable::get(meta_str!(c"REPLY"))
             else { anyhow::bail!("could not get $REPLY") };
 
         let fd = if let Some(fd) = fd.try_as_int()? {
@@ -134,8 +131,8 @@ pub fn zpty(name: CString, cmd: &CStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
         // *however* if i fork the child proc can't read the pty and read will always fail immediately
         // bless
         // add a newline to help with parsing
-        execstring("zpty_output=$'\\n'\"$(zpty & wait $!)\"", Default::default());
-        let Some(mut output) = variables::Variable::get(MetaStr::new(c"zpty_output"))
+        execstring(meta_str!(c"zpty_output=$'\\n'\"$(zpty & wait $!)\""), Default::default());
+        let Some(mut output) = variables::Variable::get(meta_str!(c"zpty_output"))
             else { anyhow::bail!("could not get $zpty_output") };
         let output = output.as_bytes();
 
@@ -221,12 +218,13 @@ pub fn get_return_code() -> c_long {
     unsafe{ zsh_sys::lastval }
 }
 
-pub fn get_prompt(prompt: Option<&BStr>, escaped: bool) -> Option<CString> {
+pub fn get_prompt(prompt: Option<&MetaStr>, escaped: bool) -> Option<MetaString> {
+    let mut var;
     let prompt = if let Some(prompt) = prompt {
-        CString::new(prompt.to_vec()).unwrap()
+        prompt
     } else {
-        let prompt = variables::Variable::get(MetaStr::new(c"PROMPT"))?.as_bytes();
-        CString::new(prompt).unwrap()
+        var = variables::Variable::get(meta_str!(c"PROMPT"))?;
+        var.as_meta_bytes()?
     };
 
     // The prompt used for spelling correction.  The sequence `%R' expands to the string which presumably needs  spelling  correction,  and
@@ -237,11 +235,13 @@ pub fn get_prompt(prompt: Option<&BStr>, escaped: bool) -> Option<CString> {
     let glitch = escaped.into();
     unsafe {
         let ptr = zsh_sys::promptexpand(prompt.as_ptr().cast_mut(), glitch, r, R, null_mut());
-        Some(CString::from_raw(ptr))
+        let str = MetaStr::from_ptr(ptr).to_owned();
+        zsh_sys::zsfree(ptr);
+        Some(str)
     }
 }
 
-pub fn get_prompt_size(prompt: &CStr, term_width: Option<c_long>) -> (c_int, c_int) {
+pub fn get_prompt_size(prompt: &MetaStr, term_width: Option<c_long>) -> (c_int, c_int) {
     let mut width = 0;
     let mut height = 0;
     let overflow = 0;
@@ -261,42 +261,6 @@ pub fn get_prompt_size(prompt: &CStr, term_width: Option<c_long>) -> (c_int, c_i
     (width, height)
 }
 
-pub fn metafy(value: &[u8]) -> *mut c_char {
-    unsafe {
-        if value.is_empty() {
-            // make an empty string on the arena
-            let ptr = zsh_sys::zhalloc(1).cast();
-            *ptr = 0;
-            ptr
-        } else {
-            // metafy will ALWAYS write a terminating null no matter what
-            zsh_sys::metafy(value.as_ptr() as _, value.len() as _, zsh_sys::META_HEAPDUP as _)
-        }
-    }
-}
-
-pub fn unmetafy<'a>(ptr: *mut u8) -> &'a [u8] {
-    // threadsafe!
-    let mut len = 0i32;
-    unsafe {
-        zsh_sys::unmetafy(ptr.cast(), &raw mut len);
-        std::slice::from_raw_parts(ptr, len as _)
-    }
-}
-
-pub fn unmetafy_owned(value: &mut Vec<u8>) {
-    // threadsafe!
-    let mut len = 0i32;
-    // MUST end with null byte
-    if value.last().is_none_or(|c| *c != 0) {
-        value.push(0);
-    }
-    unsafe {
-        zsh_sys::unmetafy(value.as_mut_ptr().cast(), &raw mut len);
-    }
-    value.truncate(len as _);
-}
-
 pub fn start_zle_scope() {
     unsafe {
         zsh_sys::startparamscope();
@@ -314,15 +278,15 @@ pub fn end_zle_scope() {
 
 pub fn set_zle_buffer(buffer: BString, cursor: i64) {
     start_zle_scope();
-    Variable::set(MetaStr::new(c"BUFFER"), buffer.into(), true).unwrap();
-    Variable::set(MetaStr::new(c"CURSOR"), cursor.into(), true).unwrap();
+    Variable::set(meta_str!(c"BUFFER"), buffer.into(), true).unwrap();
+    Variable::set(meta_str!(c"CURSOR"), cursor.into(), true).unwrap();
     end_zle_scope();
 }
 
 pub fn get_zle_buffer() -> (BString, Option<i64>) {
     start_zle_scope();
-    let buffer = Variable::get(MetaStr::new(c"BUFFER")).unwrap().as_bytes();
-    let cursor = Variable::get(MetaStr::new(c"CURSOR")).unwrap().try_as_int();
+    let buffer = Variable::get(meta_str!(c"BUFFER")).unwrap().as_bytes();
+    let cursor = Variable::get(meta_str!(c"CURSOR")).unwrap().try_as_int();
     end_zle_scope();
     match cursor {
         Ok(Some(cursor)) => (buffer, Some(cursor)),
@@ -417,14 +381,14 @@ pub fn zistype(x: c_char, y: c_short) -> bool {
     }
 }
 
-pub fn call_hook_func<'a, I: Iterator<Item=MetaStr<'a>>>(name: MetaStr<'_>, args: I) -> Option<c_int> {
+pub fn call_hook_func<'a, I: Iterator<Item=&'a MetaStr>>(name: &'a MetaStr, args: I) -> Option<c_int> {
     unsafe {
         // needs metafy
         if zsh_sys::getshfunc(name.as_ptr().cast_mut()).is_null() {
-            let mut name = name.to_string();
+            let mut name = name.to_owned();
             name.push_str(MetaStr::from_bytes(zsh_sys::HOOK_SUFFIX));
             // check if it exists
-            Variable::get(name.as_str())?;
+            Variable::get(name.as_ref())?;
         }
     }
 

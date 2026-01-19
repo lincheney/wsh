@@ -1,4 +1,4 @@
-use std::ffi::CStr;
+use std::borrow::Cow;
 use super::text::{HighlightedRange, Highlight};
 use bstr::BString;
 use std::io::{Write};
@@ -6,8 +6,9 @@ use crate::tui::{Drawer, Canvas};
 use crate::buffer::Buffer;
 use crate::shell::{ShellClient, MetaStr};
 use ratatui::layout::Rect;
+use crate::meta_str;
 
-const FALLBACK_PROMPT: &CStr = c">>> ";
+const FALLBACK_PROMPT: &MetaStr = crate::meta_str!(c">>> ");
 // for internal use
 const PREDISPLAY_NS: usize = usize::MAX;
 const POSTDISPLAY_NS: usize = PREDISPLAY_NS - 1;
@@ -56,11 +57,11 @@ impl CommandLineState {
         shell.do_run(move |shell| {
 
             shell.start_zle_scope();
-            let predisplay = crate::shell::get_var(shell, MetaStr::new(c"PREDISPLAY")).map(|mut v| v.as_bytes());
-            let postdisplay = crate::shell::get_var(shell, MetaStr::new(c"POSTDISPLAY")).map(|mut v| v.as_bytes());
-            let prompt = shell.get_prompt(None, true).unwrap_or_else(|| FALLBACK_PROMPT.into());
+            let predisplay = crate::shell::get_var(shell, meta_str!(c"PREDISPLAY")).map(|mut v| v.as_bytes());
+            let postdisplay = crate::shell::get_var(shell, meta_str!(c"POSTDISPLAY")).map(|mut v| v.as_bytes());
+            let prompt = shell.get_prompt(None, true).map_or(Cow::Borrowed(FALLBACK_PROMPT), Cow::Owned);
             let prompt_size = shell.get_prompt_size(prompt.clone(), Some(width as _));
-            let prompt = crate::shell::remove_invisible_chars(&prompt).into_owned();
+            let prompt = crate::shell::remove_invisible_chars(prompt).into_owned();
             shell.end_zle_scope();
 
             ShellVars {

@@ -1,12 +1,12 @@
 use std::ptr::NonNull;
-use std::ffi::{CStr};
+use super::MetaStr;
 
 pub struct Builtin {
     inner: NonNull<zsh_sys::builtin>,
 }
 
 impl Builtin {
-    pub fn pop(name: &CStr) -> Option<Builtin> {
+    pub fn pop(name: &MetaStr) -> Option<Builtin> {
         let ptr = unsafe { zsh_sys::removehashnode(zsh_sys::builtintab, name.as_ptr()) };
         NonNull::new(ptr.cast()).map(|inner| Self{ inner })
     }

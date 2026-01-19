@@ -489,9 +489,14 @@ impl Ui {
             return Some(KeybindOutput::Value(Ok(true)))
         }
 
+        let mut lastchar = [0; 4];
+        let len = buf.len().min(lastchar.len());
+        lastchar[..len].copy_from_slice(&buf[..len]);
+
         // look for a zle widget
         let ui = self.clone();
-        let buf = buf.to_owned();
+        let buf: crate::shell::MetaString = buf.to_owned().into();
+
         let result = self.shell.do_run(move |shell| {
             match KeybindValue::find(shell, buf.as_ref()) {
                 Some(KeybindValue::String(string)) => {
@@ -513,10 +518,6 @@ impl Ui {
                     let cursor = ui.buffer.get_cursor();
 
                     widget.shell.set_zle_buffer(buffer.clone(), cursor as _);
-
-                    let mut lastchar = [0; 4];
-                    let len = buf.len().min(lastchar.len());
-                    lastchar[..len].copy_from_slice(&buf[..len]);
 
                     widget.shell.set_lastchar(lastchar);
                     // executing a widget may block

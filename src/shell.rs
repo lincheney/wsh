@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use tokio::sync::{mpsc};
 use anyhow::Result;
@@ -6,18 +7,18 @@ use std::io::{Write};
 use std::os::fd::{RawFd};
 use std::ptr::NonNull;
 use std::os::raw::{c_long, c_char, c_int};
-use std::ffi::{CString, CStr};
 use std::default::Default;
 use std::sync::{Arc};
 use std::ptr::null_mut;
 use std::sync::{Mutex};
-use bstr::{BStr, BString, ByteSlice, ByteVec};
+use bstr::{BString, ByteSlice, ByteVec};
 
 mod externs;
 mod file_stream;
 mod zsh;
 #[macro_use]
 mod actor_macro;
+use crate::meta_str;
 pub use zsh::{
     completion,
     bin_zle,
@@ -84,32 +85,29 @@ pub enum KeybindValue<'a> {
 }
 
 impl<'a> KeybindValue<'a> {
-    pub fn find(shell: &'a ShellInternal, key: &BStr) -> Option<Self> {
+    pub fn find(shell: &'a ShellInternal, key: &MetaStr) -> Option<Self> {
         let mut strp: *mut c_char = std::ptr::null_mut();
-        let key = zsh::metafy(key.into());
 
         let keymap = unsafe{ NonNull::new(zsh::localkeymap).map_or(zsh::curkeymap, |x| x.as_ptr()) };
-        let keybind = unsafe{ zsh::keybind(keymap, key, &raw mut strp) };
+        let keybind = unsafe{ zsh::keybind(keymap, key.as_ptr().cast_mut(), &raw mut strp) };
         if let Some(keybind) = NonNull::new(keybind) {
             return Some(KeybindValue::Widget(zsh::ZleWidget::new(keybind, shell)))
         }
         let strp = NonNull::new(strp)?;
-        let strp = unsafe{ CStr::from_ptr(strp.as_ptr()) }.to_bytes();
+        let strp = unsafe{ MetaStr::from_ptr(strp.as_ptr()) }.to_bytes();
         Some(KeybindValue::String(strp.into()))
     }
 }
 
 
-pub fn remove_invisible_chars(string: &CStr) -> std::borrow::Cow<'_, CStr> {
+pub fn remove_invisible_chars(string: Cow<'_, MetaStr>) -> Cow<'_, MetaStr> {
     let bytes = string.to_bytes();
     if bytes.contains(&(zsh::Inpar as _)) || bytes.contains(&(zsh::Outpar as _)) || bytes.contains(&(zsh::Meta as _)) {
-        let mut bytes = bytes.to_owned();
-        bytes.retain(|c| *c != zsh::Inpar as _ && *c != zsh::Outpar as _);
-        let bytes = CString::new(bytes).unwrap();
-        zsh::unmetafy(bytes.as_ptr() as _);
-        std::borrow::Cow::Owned(bytes)
+        let mut string = string.into_owned();
+        string.modify(|buf| buf.retain(|c| *c != zsh::Inpar as _ && *c != zsh::Outpar as _));
+        Cow::Owned(string)
     } else {
-        std::borrow::Cow::Borrowed(string)
+        string
     }
 }
 
@@ -117,7 +115,7 @@ pub fn control_c() -> nix::Result<()> {
     nix::sys::signal::kill(nix::unistd::Pid::from_raw(0), nix::sys::signal::Signal::SIGINT)
 }
 
-pub fn get_var(_shell: &ShellInternal, string: zsh::MetaStr) -> Option<Variable> {
+pub fn get_var(_shell: &ShellInternal, string: &zsh::MetaStr) -> Option<Variable> {
     Variable::get(string)
 }
 
@@ -140,14 +138,14 @@ crate::TokioActor! {
                 zsh_sys::opts[zsh_sys::SHINSTDIN as usize] = 1;
 
                 // zle_main runs these
-                let keymap = CString::new("main").unwrap();
+                let keymap = meta_str!(c"main");
                 zsh::selectkeymap(keymap.as_ptr().cast_mut(), 1);
                 zsh::initundo();
             }
         }
 
-        pub fn exec(&self, string: BString) -> c_long {
-            zsh::execstring(string, Default::default())
+        pub fn exec(&self, string: MetaString) -> c_long {
+            zsh::execstring(string.as_ref(), Default::default())
         }
 
         pub fn exec_subshell(
@@ -177,7 +175,8 @@ crate::TokioActor! {
                 cmd.push_str("!");
             }
 
-            let code = zsh::execstring(cmd, Default::default());
+            let cmd: MetaString = cmd.into();
+            let code = zsh::execstring(cmd.as_ref(), Default::default());
             if code > 0 {
                 // somehow failed to spawn subshell?
                 anyhow::bail!("failed to start subshell with error code {code}");
@@ -186,17 +185,14 @@ crate::TokioActor! {
             Ok(unsafe{ zsh_sys::lastpid })
         }
 
-        pub fn zpty(&self, name: BString, cmd: BString, opts: ZptyOpts) -> Result<Zpty> {
-            let cmd = CString::new(cmd).unwrap();
-            let name = CString::new(name).unwrap();
-            zsh::zpty(name, &cmd, opts)
+        pub fn zpty(&self, name: MetaString, cmd: MetaString, opts: ZptyOpts) -> Result<Zpty> {
+            zsh::zpty(name, cmd.as_ref(), opts)
         }
 
-        pub fn zpty_delete(&self, name: BString) -> c_long {
-            let name = CString::new(name).unwrap();
-            let mut cmd = zsh::shell_quote(&name);
-            cmd.insert_str(0, "zpty -d ");
-            zsh::execstring(cmd, Default::default())
+        pub fn zpty_delete(&self, name: MetaString) -> c_long {
+            let mut cmd = zsh::shell_quote(name.as_ref()).to_owned();
+            cmd.insert_str(0, meta_str!(c"zpty -d "));
+            zsh::execstring(cmd.as_ref(), Default::default())
         }
 
         pub fn get_completions(&self, line: BString, sender: mpsc::UnboundedSender<Vec<zsh::completion::Match>>) -> Result<BString> {
@@ -214,12 +210,12 @@ crate::TokioActor! {
             zsh::parser::parse(string, options)
         }
 
-        pub fn get_prompt(&self, prompt: Option<BString>, escaped: bool) -> Option<CString> {
+        pub fn get_prompt(&self, prompt: Option<MetaString>, escaped: bool) -> Option<MetaString> {
             zsh::get_prompt(prompt.as_ref().map(|p| p.as_ref()), escaped)
         }
 
-        pub fn get_prompt_size(&self, prompt: CString, term_width: Option<c_long>) -> (usize, usize) {
-            let (width, height) = zsh::get_prompt_size(&prompt, term_width);
+        pub fn get_prompt_size(&self, prompt: Cow<'static, MetaStr>, term_width: Option<c_long>) -> (usize, usize) {
+            let (width, height) = zsh::get_prompt_size(prompt.as_ref(), term_width);
             (width as _, height as _)
         }
 
@@ -247,7 +243,7 @@ crate::TokioActor! {
             if zle {
                 self.start_zle_scope();
             }
-            let result = if let Some(mut v) = Variable::get(name.as_str()) {
+            let result = if let Some(mut v) = Variable::get(name.as_ref()) {
                 v.as_value().map(Some)
             } else {
                 Ok(None)
@@ -262,7 +258,7 @@ crate::TokioActor! {
             if zle {
                 self.start_zle_scope();
             }
-            let result = Variable::get(name.as_str()).map(|mut v| v.as_bytes());
+            let result = Variable::get(name.as_ref()).map(|mut v| v.as_bytes());
             if zle {
                 self.end_zle_scope();
             }
@@ -286,15 +282,15 @@ crate::TokioActor! {
         }
 
         pub fn set_var(&self, name: MetaString, value: variables::Value, local: bool) -> anyhow::Result<()> {
-            Variable::set(name.as_str(), value, local)
+            Variable::set(name.as_ref(), value, local)
         }
 
         pub fn unset_var(&self, name: MetaString) {
-            Variable::unset(name.as_str());
+            Variable::unset(name.as_ref());
         }
 
         pub fn export_var(&self, name: MetaString) -> bool {
-            if let Some(var) = Variable::get(name.as_str()) {
+            if let Some(var) = Variable::get(name.as_ref()) {
                 var.export();
                 true
             } else {
@@ -309,7 +305,7 @@ crate::TokioActor! {
             set: Option<Box<dyn Send + Fn(BString)>>,
             unset: Option<Box<dyn Send + Fn(bool)>>
         ) {
-            Variable::create_dynamic(name.as_str(), get, set, unset)
+            Variable::create_dynamic(name.as_ref(), get, set, unset)
         }
 
         pub fn create_dynamic_integer_var(
@@ -319,7 +315,7 @@ crate::TokioActor! {
             set: Option<Box<dyn Send + Fn(c_long)>>,
             unset: Option<Box<dyn Send + Fn(bool)>>
         ) {
-            Variable::create_dynamic(name.as_str(), get, set, unset)
+            Variable::create_dynamic(name.as_ref(), get, set, unset)
         }
 
         pub fn create_dynamic_float_var(
@@ -329,7 +325,7 @@ crate::TokioActor! {
             set: Option<Box<dyn Send + Fn(f64)>>,
             unset: Option<Box<dyn Send + Fn(bool)>>
         ) {
-            Variable::create_dynamic(name.as_str(), get, set, unset)
+            Variable::create_dynamic(name.as_ref(), get, set, unset)
         }
 
         pub fn create_dynamic_array_var(
@@ -339,7 +335,7 @@ crate::TokioActor! {
             set: Option<Box<dyn Send + Fn(Vec<BString>)>>,
             unset: Option<Box<dyn Send + Fn(bool)>>
         ) {
-            Variable::create_dynamic(name.as_str(), get, set, unset)
+            Variable::create_dynamic(name.as_ref(), get, set, unset)
         }
 
         pub fn create_dynamic_hash_var(
@@ -349,7 +345,7 @@ crate::TokioActor! {
             set: Option<Box<dyn Send + Fn(HashMap<BString, BString>)>>,
             unset: Option<Box<dyn Send + Fn(bool)>>
         ) {
-            Variable::create_dynamic(name.as_str(), get, set, unset)
+            Variable::create_dynamic(name.as_ref(), get, set, unset)
         }
 
         pub fn goto_history(&self, index: history::HistoryIndex, skipdups: bool) {
@@ -368,8 +364,9 @@ crate::TokioActor! {
 
         pub fn get_cwd(&self) -> BString {
             unsafe {
+                // allocated on the arena, do not free
                 let ptr = zsh_sys::zgetcwd();
-                CStr::from_ptr(ptr).to_bytes().into()
+                MetaStr::from_ptr(ptr).unmetafy().into_owned()
             }
         }
 
@@ -411,7 +408,7 @@ crate::TokioActor! {
             unsafe{ zsh::done != 0 }
         }
 
-        pub fn make_function(&self, code: BString) -> Result<Arc<zsh::functions::Function>> {
+        pub fn make_function(&self, code: MetaString) -> Result<Arc<zsh::functions::Function>> {
             let func = zsh::functions::Function::new(code.as_ref())?;
             Ok(Arc::new(func))
         }
@@ -419,8 +416,8 @@ crate::TokioActor! {
         pub fn exec_function(
             &self,
             function: Arc<zsh::functions::Function>,
-            arg0: Option<BString>,
-            args: Vec<BString>
+            arg0: Option<MetaString>,
+            args: Vec<MetaString>
         ) -> c_int {
             function.execute(arg0.as_ref().map(|x| x.as_ref()), args.iter().map(|x| x.as_ref()))
         }
@@ -439,7 +436,7 @@ crate::TokioActor! {
 
         pub fn call_hook_func(&self, name: MetaString, args: Vec<MetaString>) -> Option<c_int> {
             // needs metafy
-            zsh::call_hook_func(name.as_str(), args.iter().map(|x| x.as_str()))
+            zsh::call_hook_func(name.as_ref(), args.iter().map(|x| x.as_ref()))
         }
 
         pub fn run_watch_fd(&self, hook: Arc<bin_zle::FdChangeHook>, fd: RawFd, error: Option<std::io::Error>) {

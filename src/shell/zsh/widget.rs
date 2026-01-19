@@ -1,10 +1,10 @@
-use bstr::BString;
-use std::ffi::{CStr, CString};
+use bstr::{BString};
 use crate::c_string_array::{CStringArray};
 use std::os::raw::{c_int};
 use std::sync::{OnceLock};
 use std::ptr::NonNull;
 use super::bindings;
+use super::{MetaStr, MetaString};
 
 #[derive(Eq, PartialEq)]
 struct Widget(NonNull<bindings::widget>);
@@ -46,17 +46,17 @@ impl<'a> ZleWidget<'a> {
 
         if w.is_internal() && let Some(widget) = w.widget() {
             // these are just caches
-            if SELF_INSERT.get().is_none() && w.name() == c"self-insert" {
+            if SELF_INSERT.get().is_none() && w.name() == MetaStr::new(c"self-insert") {
                 let _ = SELF_INSERT.set(widget);
-            } else if IMMORTAL_SELF_INSERT.get().is_none() && w.name() == c".self-insert" {
+            } else if IMMORTAL_SELF_INSERT.get().is_none() && w.name() == MetaStr::new(c".self-insert") {
                 let _ = IMMORTAL_SELF_INSERT.set(widget);
-            } else if UNDEFINED_KEY.get().is_none() && w.name() == c"undefined-key" {
+            } else if UNDEFINED_KEY.get().is_none() && w.name() == MetaStr::new(c"undefined-key") {
                 let _ = UNDEFINED_KEY.set(widget);
-            } else if IMMORTAL_UNDEFINED_KEY.get().is_none() && w.name() == c".undefined-key" {
+            } else if IMMORTAL_UNDEFINED_KEY.get().is_none() && w.name() == MetaStr::new(c".undefined-key") {
                 let _ = IMMORTAL_UNDEFINED_KEY.set(widget);
-            } else if ACCEPT_LINE.get().is_none() && w.name() == c"accept-line" {
+            } else if ACCEPT_LINE.get().is_none() && w.name() == MetaStr::new(c"accept-line") {
                 let _ = ACCEPT_LINE.set(widget);
-            } else if IMMORTAL_ACCEPT_LINE.get().is_none() && w.name() == c".accept-line" {
+            } else if IMMORTAL_ACCEPT_LINE.get().is_none() && w.name() == MetaStr::new(c".accept-line") {
                 let _ = IMMORTAL_ACCEPT_LINE.set(widget);
             }
         }
@@ -90,11 +90,13 @@ impl<'a> ZleWidget<'a> {
         unsafe{ (*self.ptr.as_ref().widget).flags & bindings::WidgetFlag::WIDGET_INT as i32 != 0 }
     }
 
-    pub fn name(&self) -> &CStr {
-        unsafe{ CStr::from_ptr(self.ptr.as_ref().nam) }
+    pub fn name(&self) -> &'a MetaStr {
+        unsafe {
+            MetaStr::from_ptr(self.ptr.as_ref().nam)
+        }
     }
 
-    pub(crate) fn exec_with_ptr<I: Iterator<Item=CString> + ExactSizeIterator>(
+    pub(crate) fn exec_with_ptr<I: Iterator<Item=MetaString> + ExactSizeIterator>(
         ptr: NonNull<bindings::thingy>,
         opts: Option<WidgetArgs>,
         args: I,
@@ -105,7 +107,7 @@ impl<'a> ZleWidget<'a> {
         let args_ptr = if args.len() == 0 {
             &raw mut null
         } else {
-            args.collect::<CStringArray>().as_ptr()
+            args.map(|x| x.into_inner()).collect::<CStringArray>().as_ptr()
         };
 
         unsafe {
@@ -116,11 +118,11 @@ impl<'a> ZleWidget<'a> {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn exec<I: Iterator<Item=CString> + ExactSizeIterator>(&self, opts: Option<WidgetArgs>, args: I) -> c_int {
+    pub(crate) fn exec<I: Iterator<Item=MetaString> + ExactSizeIterator>(&self, opts: Option<WidgetArgs>, args: I) -> c_int {
         Self::exec_with_ptr(self.ptr, opts, args)
     }
 
-    pub(crate) fn exec_and_get_output<I: Iterator<Item=CString> + ExactSizeIterator>(&mut self, opts: Option<WidgetArgs>, args: I) -> (BString, c_int) {
+    pub(crate) fn exec_and_get_output<I: Iterator<Item=MetaString> + ExactSizeIterator>(&mut self, opts: Option<WidgetArgs>, args: I) -> (BString, c_int) {
         let sink = &mut *self.shell.sink.lock().unwrap();
         super::capture_shout(sink, || Self::exec_with_ptr(self.ptr, opts, args))
     }

@@ -90,8 +90,8 @@ pub(super) fn hook_signal(signal: signal::Signal) -> Result<()> {
 
         // now set the trap
         let signal = convert_to_custom_signal(signal as _);
-        let script = format!("\\builtin wsh .invoke-signal-handler {signal}");
-        let func = super::functions::Function::new(script.as_str().into())?;
+        let script: super::MetaString = format!("\\builtin wsh .invoke-signal-handler {signal}").into();
+        let func = super::functions::Function::new(script.as_ref())?;
         let eprog = func.0.as_ref().funcdef;
         (&mut *eprog).nref += 1;
         zsh_sys::settrap(signal, eprog, zsh_sys::ZSIG_TRAPPED as _);

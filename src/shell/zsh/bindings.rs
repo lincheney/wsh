@@ -4,6 +4,7 @@
 #![allow(dead_code)]
 #![allow(clippy::unreadable_literal)]
 
+use super::MetaStr;
 use paste::paste;
 use zsh_sys::*;
 
@@ -16,8 +17,8 @@ pub fn isset(setting: usize) -> bool {
 macro_rules! make_str_getter {
     ($field:ident) => (
         paste! {
-            pub fn [<get_ $field>](&self) -> Option<&std::ffi::CStr> {
-                Some(unsafe{ std::ffi::CStr::from_ptr(self.$field.as_ref()?) })
+            pub fn [<get_ $field>](&self) -> Option<&MetaStr> {
+                Some(unsafe{ MetaStr::from_ptr(self.$field.as_ref()?) })
             }
         }
     )
@@ -42,24 +43,21 @@ impl cmatch {
 
 impl std::fmt::Debug for cmatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        use std::ffi::CStr;
-        use std::ptr::NonNull;
-
         f.debug_struct("cmatch")
-            .field("str_", &NonNull::new(self.str_).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
-            .field("orig", &NonNull::new(self.orig).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
-            .field("ipre", &NonNull::new(self.ipre).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
-            .field("ripre", &NonNull::new(self.ripre).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
-            .field("isuf", &NonNull::new(self.isuf).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
-            .field("ppre", &NonNull::new(self.ppre).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
-            .field("psuf", &NonNull::new(self.psuf).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
-            .field("prpre", &NonNull::new(self.prpre).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
-            .field("pre", &NonNull::new(self.pre).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
-            .field("suf", &NonNull::new(self.suf).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
-            .field("disp", &NonNull::new(self.disp).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
-            .field("autoq", &NonNull::new(self.autoq).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
-            .field("rems", &NonNull::new(self.rems).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
-            .field("remf", &NonNull::new(self.remf).map(|s| unsafe{ CStr::from_ptr(s.as_ptr()) }))
+            .field("str_", &self.get_str_())
+            .field("orig", &self.get_orig())
+            .field("ipre", &self.get_ipre())
+            .field("ripre", &self.get_ripre())
+            .field("isuf", &self.get_isuf())
+            .field("ppre", &self.get_ppre())
+            .field("psuf", &self.get_psuf())
+            .field("prpre", &self.get_prpre())
+            .field("pre", &self.get_pre())
+            .field("suf", &self.get_suf())
+            .field("disp", &self.get_disp())
+            .field("autoq", &self.get_autoq())
+            .field("rems", &self.get_rems())
+            .field("remf", &self.get_remf())
             .field("brpl", &self.brpl)
             .field("brsl", &self.brsl)
 

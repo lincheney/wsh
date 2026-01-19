@@ -1,6 +1,5 @@
 use crate::unsafe_send::UnsafeSend;
 use std::collections::HashSet;
-use std::ffi::CStr;
 use tokio::sync::{mpsc};
 use anyhow::Result;
 use std::sync::{Mutex};
@@ -9,6 +8,7 @@ use std::ptr::{null_mut};
 use std::default::Default;
 use bstr::{BString};
 use super::{bindings, builtin::Builtin};
+use super::MetaStr;
 
 pub struct Match {
     inner: UnsafeSend<bindings::cmatch>,
@@ -61,7 +61,7 @@ impl Match {
         }
     }
 
-    pub fn get_orig(&self) -> Option<&CStr> {
+    pub fn get_orig(&self) -> Option<&MetaStr> {
         self.inner.as_ref().get_orig()
     }
 }
@@ -111,7 +111,7 @@ impl CompaddState {
     }
 }
 
-static COMPFUNC: &CStr = c"_main_complete";
+static COMPFUNC: &MetaStr = meta_str!(c"_main_complete");
 static COMPADD_STATE: Mutex<Option<CompaddState>> = Mutex::new(None);
 
 unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_char, options: zsh_sys::Options, func: c_int) -> c_int {
@@ -124,7 +124,7 @@ unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_cha
 
         if !bindings::matches.is_null() && let Some(sink) = compadd.sink.as_ref() {
             if !bindings::amatches.is_null() && !(*bindings::amatches).name.is_null() {
-                // let g = CStr::from_ptr((*bindings::amatches).name);
+                // let g = MetaStr::from_ptr((*bindings::amatches).name);
                 // eprintln!("DEBUG(dachas)\t{}\t= {:?}\r", stringify!(g), g);
             }
 
@@ -152,7 +152,7 @@ pub fn override_compadd() -> Result<()> {
         anyhow::bail!("failed to load module zsh/complete")
     }
 
-    let original = Builtin::pop(c"compadd").unwrap();
+    let original = Builtin::pop(meta_str!(c"compadd")).unwrap();
     let mut compadd = original.clone();
 
     *COMPADD_STATE.lock().unwrap() = Some(CompaddState{
@@ -194,14 +194,14 @@ pub fn get_completions(line: BString, sink: mpsc::UnboundedSender<Vec<Match>>) {
         bindings::cfargs = cfargs.as_mut_ptr();
         bindings::compfunc = COMPFUNC.as_ptr().cast_mut();
         // zsh will switch up the pgid if monitor and interactive are set
-        super::execstring("set +o monitor", Default::default());
+        super::execstring(meta_str!(c"set +o monitor"), Default::default());
         bindings::menucomplete(null_mut());
         // prevent completion list from showing
         bindings::showinglist = 0;
         // bindings::invalidate_list();
         // soft exit menu completion
         bindings::minfo.cur = null_mut();
-        super::execstring("set -o monitor", Default::default());
+        super::execstring(meta_str!(c"set -o monitor"), Default::default());
 
         let mut compadd = COMPADD_STATE.lock().unwrap();
         let compadd = compadd.as_mut().unwrap();

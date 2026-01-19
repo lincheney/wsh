@@ -5,7 +5,6 @@ use std::os::fd::RawFd;
 use crate::unsafe_send::UnsafeSend;
 use tokio::sync::{mpsc};
 use std::sync::{Arc, Mutex};
-use std::ffi::{CStr};
 use std::os::raw::*;
 use crate::canceller;
 use super::builtin::Builtin;
@@ -77,7 +76,7 @@ impl FdChangeHook {
             }
         } else {
             let args = [Some(fdstr), error.map(|_| MetaStr::new(c"err"))];
-            super::call_hook_func(self.func.as_str(), args.into_iter().flatten());
+            super::call_hook_func(self.func.as_ref(), args.into_iter().flatten());
         }
         unsafe {
             super::unrefthingy(super::lbindk);
@@ -95,7 +94,8 @@ unsafe extern "C" fn zle_handlerfunc(nam: *mut c_char, argv: *mut *mut c_char, o
             let Some(fd_sink) = &zle.fd_sink
             && super::opt_isset(&*options, b'F')
             && (!super::opt_isset(&*options, b'L') || (*argv).is_null())
-            && let Some(fd) = CStr::from_ptr(*argv).to_str().ok().and_then(|s| s.parse::<RawFd>().ok())
+            && let Ok(fd) = std::str::from_utf8(&MetaStr::from_ptr(*argv).unmetafy())
+            && let Ok(fd) = fd.parse()
         {
             Some((fd_sink, fd, !(*argv.add(1)).is_null()))
         } else {
@@ -113,7 +113,7 @@ unsafe extern "C" fn zle_handlerfunc(nam: *mut c_char, argv: *mut *mut c_char, o
             {
 
                 let hook = Some(Arc::new(FdChangeHook {
-                    func: CStr::from_ptr((*watch).func).to_owned().into(),
+                    func: MetaStr::from_ptr((*watch).func).to_owned(),
                     widget: (*watch).widget != 0,
                 }));
                 match zle.fd_mapping.entry(fd) {
@@ -157,7 +157,7 @@ pub fn take_fd_change_source() -> Option<mpsc::UnboundedReceiver<FdChange>> {
 }
 
 pub fn override_zle() {
-    let original = Builtin::pop(c"zle").unwrap();
+    let original = Builtin::pop(meta_str!(c"zle")).unwrap();
     let mut zle = original.clone();
     let (sender, receiver) = mpsc::unbounded_channel();
 

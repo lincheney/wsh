@@ -1,33 +1,46 @@
 use std::os::raw::c_char;
+use std::borrow::{Cow, Borrow};
 use std::ffi::{CStr, CString};
 use bstr::{BStr, BString, ByteVec};
+
+#[macro_export]
+macro_rules! meta_str {
+    ($arg:literal) => {
+        MetaStr::new($arg)
+    }
+}
 
 fn imeta(c: u8) -> bool {
     super::zistype(c as _, zsh_sys::IMETA as _)
 }
 
 fn metafied_len(string: &[u8]) -> usize {
-    // unsafe {
-        // zsh_sys::metalen(string.as_ptr().cast(), string.len() as _) as _
-    // }
     string.len() + string.iter().filter(|&&c| imeta(c)).count()
 }
 
-fn needs_meta(string: &BStr) -> bool {
-    string.iter().any(|&c| imeta(c))
-}
+// fn needs_meta(string: &BStr) -> bool {
+    // string.iter().any(|&c| imeta(c))
+// }
 
 const fn is_trivially_meta(string: &[u8]) -> bool {
     // basic meta check
     let mut i = 0;
     while i < string.len() {
-        // anything ascii and not null does not need meta
+        // anything not ascii or null needs meta
         if !(0 < string[i] && string[i] < 128) {
             return false
         }
         i += 1;
     }
     true
+}
+
+pub fn unmetafy(bytes: &BStr) -> Cow<'_, BStr> {
+    if is_trivially_meta(&bytes) {
+        Cow::Borrowed(bytes)
+    } else {
+        Cow::Owned(MetaString::from(bytes.to_owned()).unmetafy())
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -38,7 +51,43 @@ crate::impl_deref_helper!(self: MetaString, &self.inner => CString);
 
 impl MetaString {
 
-    pub fn from_vec(mut val: Vec<u8>) -> Self {
+    pub fn into_inner(self) -> CString {
+        self.inner
+    }
+
+    pub fn into_raw(self) -> *mut c_char {
+        self.inner.into_raw()
+    }
+
+    pub fn modify<F: Fn(&mut Vec<u8>)>(&mut self, callback: F) {
+        let mut buf = std::mem::take(&mut self.inner).into_bytes();
+        callback(&mut buf);
+        self.inner = CString::new(buf).unwrap();
+    }
+
+    pub fn push_str(&mut self, str: &MetaStr) {
+        self.modify(|buf| buf.push_str(str.to_bytes()));
+    }
+
+    pub fn insert_str(&mut self, pos: usize, str: &MetaStr) {
+        self.modify(|buf| buf.insert_str(pos, str.to_bytes()));
+    }
+
+    pub fn unmetafy(self) -> BString {
+        // threadsafe!
+        let mut len = 0i32;
+        let mut bytes: BString = self.inner.into_bytes_with_nul().into();
+        unsafe {
+            zsh_sys::unmetafy(bytes.as_mut_ptr().cast(), &raw mut len);
+        }
+        bytes.truncate(len as _);
+        bytes
+    }
+
+}
+
+impl From<Vec<u8>> for MetaString {
+    fn from(mut val: Vec<u8>) -> MetaString {
         let old_len = val.len();
         let new_len = metafied_len(val.as_ref());
         // extra 1 for the terminating null byte
@@ -56,46 +105,6 @@ impl MetaString {
         }
         let inner = CString::from_vec_with_nul(val.into()).unwrap();
         Self { inner }
-    }
-
-    pub fn as_str(&self) -> MetaStr<'_> {
-        MetaStr{ inner: self.inner.as_ref() }
-    }
-
-    pub fn into_inner(self) -> CString {
-        self.inner
-    }
-
-    pub fn into_raw(self) -> *mut c_char {
-        self.inner.into_raw()
-    }
-
-    pub fn into_bytes(self) -> Vec<u8> {
-        self.inner.into_bytes()
-    }
-
-    pub fn push_str(&mut self, str: MetaStr<'_>) {
-        let mut buf = std::mem::take(&mut self.inner).into_bytes();
-        buf.push_str(str.to_bytes());
-        self.inner = CString::new(buf).unwrap();
-    }
-
-    pub fn unmetafy(self) -> BString {
-        // threadsafe!
-        let mut len = 0i32;
-        let mut bytes: BString = self.inner.into_bytes_with_nul().into();
-        unsafe {
-            zsh_sys::unmetafy(bytes.as_mut_ptr().cast(), &raw mut len);
-        }
-        bytes.truncate(len as _);
-        bytes
-    }
-
-}
-
-impl From<Vec<u8>> for MetaString {
-    fn from(val: Vec<u8>) -> MetaString {
-        Self::from_vec(val)
     }
 }
 
@@ -119,46 +128,86 @@ impl From<BString> for MetaString {
     }
 }
 
-pub struct MetaStr<'a> {
-    inner: &'a CStr,
+impl From<String> for MetaString {
+    fn from(val: String) -> MetaString {
+        let val: Vec<u8> = val.into();
+        val.into()
+    }
 }
-crate::impl_deref_helper!(self: MetaStr<'a>, &self.inner => &'a CStr);
 
-impl<'a> MetaStr<'a> {
-    pub const fn new(inner: &'a CStr) -> Self {
+impl AsRef<MetaStr> for MetaString {
+    fn as_ref(&self) -> &MetaStr {
+        unsafe{ MetaStr::new_unchecked(self.inner.as_ref()) }
+    }
+}
+
+impl Borrow<MetaStr> for MetaString {
+    fn borrow(&self) -> &MetaStr {
+        self.as_ref()
+    }
+}
+
+#[derive(PartialEq, Debug)]
+#[repr(transparent)]
+pub struct MetaStr {
+    inner: CStr,
+}
+crate::impl_deref_helper!(self: MetaStr, &self.inner => CStr);
+
+impl MetaStr {
+
+    const unsafe fn new_unchecked(inner: &CStr) -> &Self {
+        unsafe{ &*(inner as *const _ as *const Self) }
+    }
+
+    pub const fn new(inner: &CStr) -> &Self {
         match Self::try_new(inner) {
             Ok(x) => x,
             Err(e) => panic!("{}", e),
         }
     }
 
-    pub const fn try_new(inner: &'a CStr) -> Result<Self, &'static str> {
+    pub const fn try_new(inner: &CStr) -> Result<&Self, &'static str> {
         if is_trivially_meta(inner.to_bytes()) {
-            Ok(Self{ inner })
+            Ok(unsafe{ Self::new_unchecked(inner) })
         } else {
             Err("string is not metafied")
         }
     }
 
-    pub const fn from_bytes(bytes: &'a [u8]) -> Self {
+    pub const fn from_bytes(bytes: &[u8]) -> &Self {
         match Self::try_from_bytes(bytes) {
             Ok(x) => x,
             Err(e) => panic!("{}", e),
         }
     }
 
-    pub const fn try_from_bytes(bytes: &'a [u8]) -> Result<Self, &'static str> {
+    pub const fn try_from_bytes(bytes: &[u8]) -> Result<&Self, &'static str> {
         match CStr::from_bytes_with_nul(bytes) {
             Ok(x) => Self::try_new(x),
             Err(_) => Err("bytes does not end with null"),
         }
     }
 
-    pub unsafe fn from_ptr(ptr: *mut c_char) -> Self {
-        Self{ inner: unsafe{ CStr::from_ptr(ptr) } }
+    pub unsafe fn from_ptr<'a>(ptr: *const c_char) -> &'a Self {
+        unsafe {
+            let str = CStr::from_ptr(ptr);
+            &*(str as *const _ as *const Self)
+        }
     }
 
-    pub fn to_string(&self) -> MetaString {
+    pub fn unmetafy(&self) -> Cow<'_, BStr> {
+        if is_trivially_meta(self.inner.to_bytes()) {
+            Cow::Borrowed(self.inner.to_bytes().into())
+        } else {
+            Cow::Owned(self.to_owned().unmetafy())
+        }
+    }
+}
+
+impl ToOwned for MetaStr {
+    type Owned = MetaString;
+    fn to_owned(&self) -> Self::Owned {
         MetaString{ inner: self.inner.to_owned() }
     }
 }

@@ -8,9 +8,8 @@ use std::cell::RefCell;
 use std::ptr::null_mut;
 use std::sync::{LazyLock, OnceLock, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::ffi::CString;
 use anyhow::Result;
-use crate::shell::{Shell, ShellMsg, zsh};
+use crate::shell::{Shell, ShellMsg, zsh, MetaString};
 use crate::fork_lock::{RawForkLock, ForkLock};
 
 static FORK_LOCK: RawForkLock = RawForkLock::new();
@@ -237,7 +236,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                     Ok(Some(mut string)) => {
                         // MUST have a newline here
                         string.push(b'\n');
-                        CString::new(string).unwrap().into_raw()
+                        MetaString::from(string).into_raw()
                     },
                     Ok(None) => {
                         // TODO quit
@@ -303,7 +302,6 @@ static mut MODULE_FEATURES: LazyLock<Features> = LazyLock::new(|| {
             node: zsh_sys::hashnode{
                 next: null_mut(),
                 nam: c"wsh".as_ptr().cast_mut(),
-                // CString::new("wsh").unwrap().into_raw(),
                 flags: 0,
             },
             handlerfunc: Some(handlerfunc),

@@ -1,10 +1,11 @@
-use std::ffi::{CString};
+use super::MetaStr;
 use std::os::raw::{c_int};
-use bstr::{BString, BStr};
+use bstr::{BString};
 use std::ptr::null_mut;
 use anyhow::Result;
 use crate::unsafe_send::UnsafeSend;
 use std::sync::{LazyLock};
+use crate::meta_str;
 
 pub static FUNCTIONS: LazyLock<UnsafeSend<zsh_sys::HashTable>> = LazyLock::new(|| {
     unsafe {
@@ -19,12 +20,11 @@ pub static FUNCTIONS: LazyLock<UnsafeSend<zsh_sys::HashTable>> = LazyLock::new(|
 pub struct Function(pub(super) UnsafeSend<zsh_sys::shfunc>);
 
 impl Function {
-    pub fn new(code: &BStr) -> Result<Self> {
-        let code = super::metafy(code.into());
+    pub fn new(code: &MetaStr) -> Result<Self> {
         let lineno = 1;
         // prog is allocated on the zsh heap, so we dont need to free it
         // but we DO need to dup it
-        let prog = unsafe{ zsh_sys::parse_string(code, lineno) };
+        let prog = unsafe{ zsh_sys::parse_string(code.as_ptr().cast_mut(), lineno) };
 
         if prog.is_null() || prog == &raw mut zsh_sys::dummy_eprog {
             anyhow::bail!("invalid function definition: {code:?}");
@@ -51,11 +51,9 @@ impl Function {
         Ok(Self(unsafe{ UnsafeSend::new(func) }))
     }
 
-    pub fn execute<'a, I: Iterator<Item=&'a BStr>>(&self, arg0: Option<&'a BStr>, args: I) -> c_int {
-        let args = arg0.or(Some(b"".into())).into_iter()
-            .chain(args)
-            .map(|x| super::metafy(x).cast_const());
-
+    pub fn execute<'a, I: Iterator<Item=&'a MetaStr>>(&self, arg0: Option<&'a MetaStr>, args: I) -> c_int {
+        let args = arg0.or(Some(meta_str!(c""))).into_iter().chain(args);
+        let args = args.map(|x| x.as_ptr());
         // convert args to a linked list
         let args = super::linked_list::LinkedList::new_from_ptrs(args);
 
@@ -68,10 +66,12 @@ impl Function {
     }
 
     pub fn get_source(&self) -> BString {
-        let source = unsafe {
-            CString::from_raw(zsh_sys::getpermtext(self.0.as_ref().funcdef, null_mut(), 1))
-        };
-        source.into_bytes().into()
+        unsafe {
+            let ptr = zsh_sys::getpermtext(self.0.as_ref().funcdef, null_mut(), 1);
+            let source = MetaStr::from_ptr(ptr).unmetafy().into_owned();
+            zsh_sys::zsfree(ptr);
+            source
+        }
     }
 }
 

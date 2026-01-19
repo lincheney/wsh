@@ -453,8 +453,10 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
                     }
 
                     match cmd {
-                        ShellRunCmd::Simple(cmd) => ui.shell.exec(cmd).await,
+                        ShellRunCmd::Simple(cmd) => ui.shell.exec(cmd.into()).await,
                         ShellRunCmd::Function{func, args, arg0} => {
+                            let arg0 = arg0.map(|x| x.into());
+                            let args = args.into_iter().map(|x| x.into()).collect();
                             ui.shell.exec_function(func.clone(), arg0, args).await as _
                         },
                         ShellRunCmd::Subshell(_) => unreachable!(),
@@ -540,7 +542,7 @@ async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         echo_input: args.echo_input,
         non_blocking: true,
     };
-    let zpty = ui.shell.zpty(name.clone().into(), cmd, opts).await?;
+    let zpty = ui.shell.zpty(name.clone().into(), cmd.into(), opts).await?;
 
     // do not drop the pty fd as zsh will do it for us
     let pty = BorrowedAsyncFile(Some(unsafe{ tokio::fs::File::from_raw_fd(zpty.fd) }));
