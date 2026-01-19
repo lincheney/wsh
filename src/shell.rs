@@ -305,7 +305,7 @@ crate::TokioActor! {
             set: Option<Box<dyn Send + Fn(BString)>>,
             unset: Option<Box<dyn Send + Fn(bool)>>
         ) {
-            Variable::create_dynamic(name.as_ref(), get, set, unset)
+            Variable::create_dynamic(name.as_ref(), get, set, unset);
         }
 
         pub fn create_dynamic_integer_var(
@@ -315,7 +315,7 @@ crate::TokioActor! {
             set: Option<Box<dyn Send + Fn(c_long)>>,
             unset: Option<Box<dyn Send + Fn(bool)>>
         ) {
-            Variable::create_dynamic(name.as_ref(), get, set, unset)
+            Variable::create_dynamic(name.as_ref(), get, set, unset);
         }
 
         pub fn create_dynamic_float_var(
@@ -325,7 +325,7 @@ crate::TokioActor! {
             set: Option<Box<dyn Send + Fn(f64)>>,
             unset: Option<Box<dyn Send + Fn(bool)>>
         ) {
-            Variable::create_dynamic(name.as_ref(), get, set, unset)
+            Variable::create_dynamic(name.as_ref(), get, set, unset);
         }
 
         pub fn create_dynamic_array_var(
@@ -335,7 +335,7 @@ crate::TokioActor! {
             set: Option<Box<dyn Send + Fn(Vec<BString>)>>,
             unset: Option<Box<dyn Send + Fn(bool)>>
         ) {
-            Variable::create_dynamic(name.as_ref(), get, set, unset)
+            Variable::create_dynamic(name.as_ref(), get, set, unset);
         }
 
         pub fn create_dynamic_hash_var(
@@ -345,7 +345,7 @@ crate::TokioActor! {
             set: Option<Box<dyn Send + Fn(HashMap<BString, BString>)>>,
             unset: Option<Box<dyn Send + Fn(bool)>>
         ) {
-            Variable::create_dynamic(name.as_ref(), get, set, unset)
+            Variable::create_dynamic(name.as_ref(), get, set, unset);
         }
 
         pub fn goto_history(&self, index: history::HistoryIndex, skipdups: bool) {

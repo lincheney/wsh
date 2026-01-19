@@ -52,7 +52,7 @@ impl<T> RwLock<T> {
         Self{
             inner: tokio::sync::RwLock::new(inner),
             #[cfg(debug_assertions)]
-            debug: std::sync::Mutex::new(("", "".into())),
+            debug: std::sync::Mutex::new(("", String::new())),
         }
     }
 

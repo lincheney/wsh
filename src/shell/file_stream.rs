@@ -49,8 +49,7 @@ impl Sink {
     pub fn clear(&mut self) -> Result<(), std::io::Error> {
         self.output.try_iter()
             .find_map(|x| x.err())
-            .map(Err)
-            .unwrap_or(Ok(()))
+            .map_or(Ok(()), Err)
     }
 
     pub fn read(&mut self) -> Result<BString, std::io::Error> {

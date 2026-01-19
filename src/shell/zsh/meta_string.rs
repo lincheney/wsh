@@ -36,7 +36,7 @@ const fn is_trivially_meta(string: &[u8]) -> bool {
 }
 
 pub fn unmetafy(bytes: &BStr) -> Cow<'_, BStr> {
-    if is_trivially_meta(&bytes) {
+    if is_trivially_meta(bytes) {
         Cow::Borrowed(bytes)
     } else {
         Cow::Owned(MetaString::from(bytes.to_owned()).unmetafy())
@@ -103,7 +103,7 @@ impl From<Vec<u8>> for MetaString {
                 debug_assert_eq!(ret, ptr);
             }
         }
-        let inner = CString::from_vec_with_nul(val.into()).unwrap();
+        let inner = CString::from_vec_with_nul(val).unwrap();
         Self { inner }
     }
 }
