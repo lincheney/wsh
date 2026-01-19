@@ -44,6 +44,7 @@ struct RedrawOptions {
     messages: bool,
     status_bar: bool,
     all: bool,
+    now: bool,
 }
 
 fn get_cursor(ui: &Ui, _lua: &Lua, (): ()) -> Result<usize> {
@@ -86,15 +87,21 @@ async fn accept_line(mut ui: Ui, _lua: Lua, (): ()) -> Result<bool> {
 async fn redraw(ui: Ui, lua: Lua, val: Option<LuaValue>) -> Result<()> {
     if let Some(val) = val {
         let val: RedrawOptions = lua.from_value(val)?;
-        let ui = ui.get();
-        let mut ui = ui.borrow_mut();
-        if val.all { ui.dirty = true; }
-        if val.prompt { ui.cmdline.prompt_dirty = true; }
-        if val.predisplay { ui.cmdline.predisplay_dirty = true; }
-        if val.postdisplay { ui.cmdline.postdisplay_dirty = true; }
-        if val.buffer { ui.buffer.dirty = true; }
-        if val.messages { ui.tui.dirty = true; }
-        if val.status_bar { ui.status_bar.dirty = true; }
+        {
+            let ui = ui.get();
+            let mut ui = ui.borrow_mut();
+            if val.all { ui.dirty = true; }
+            if val.prompt { ui.cmdline.prompt_dirty = true; }
+            if val.predisplay { ui.cmdline.predisplay_dirty = true; }
+            if val.postdisplay { ui.cmdline.postdisplay_dirty = true; }
+            if val.buffer { ui.buffer.dirty = true; }
+            if val.messages { ui.tui.dirty = true; }
+            if val.status_bar { ui.status_bar.dirty = true; }
+        }
+
+        if val.now {
+            return ui.draw().await
+        }
     }
 
     ui.queue_draw();
