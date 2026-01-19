@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 use std::ptr::NonNull;
-use std::ffi::{CString, CStr};
 use std::os::raw::{c_int, c_long, c_char};
 use anyhow::Result;
 use crate::c_string_array::{CStringArray, CStrArray};
 use super::ZString;
 use bstr::{BStr, BString};
-use super::meta_string::{MetaStr};
+use super::meta_string::{MetaStr, MetaString};
 
 fn pm_type(flags: c_int) -> c_int {
     flags & (zsh_sys::PM_SCALAR | zsh_sys::PM_INTEGER | zsh_sys::PM_EFLOAT | zsh_sys::PM_FFLOAT | zsh_sys::PM_ARRAY | zsh_sys::PM_HASHED) as c_int
@@ -118,12 +117,14 @@ impl Variable {
             Value::HashMap(value) => {
                 let value: CStringArray = value.into_iter()
                     .flat_map(|(k, v)| [k, v])
-                    .map(|x| CString::new(x).unwrap())
+                    .map(|x| MetaString::from_vec(x.into()).into_inner())
                     .collect();
                 unsafe{ zsh_sys::sethparam(name, value.into_raw()) }
             },
             Value::Array(value) => {
-                let value: CStringArray = value.into_iter().map(|x| CString::new(x).unwrap()).collect();
+                let value: CStringArray = value.into_iter()
+                    .map(|x| MetaString::from_vec(x.into()).into_inner())
+                    .collect();
                 unsafe{ zsh_sys::setaparam(name, value.into_raw()) }
             },
             Value::Float(value) => {
@@ -138,7 +139,8 @@ impl Variable {
             },
             Value::String(value) => {
                 // setsparam will free the value for us
-                let c_value: ZString = (&value[..]).into();
+                let value: MetaString = value.into();
+                let c_value: ZString = value.as_bytes_with_nul().into();
                 unsafe{ zsh_sys::setsparam(name, c_value.into_raw()) }
             },
         };
@@ -169,16 +171,13 @@ impl Variable {
     }
 
     pub fn as_bytes(&mut self) -> BString {
-        let str = unsafe{
+        unsafe{
             let var = zsh_sys::getstrvalue(&raw mut self.value);
             if var.is_null() {
                 return BString::new(vec![]);
             }
-            CStr::from_ptr(var)
-        };
-        let mut str = str.to_bytes().into();
-        super::unmetafy_owned(&mut str);
-        str.into()
+            MetaStr::from_ptr(var).to_string().unmetafy()
+        }
     }
 
     pub fn try_as_int(&mut self) -> Result<Option<i64>> {
@@ -239,8 +238,8 @@ impl Variable {
         )
     }
 
-    pub(in crate::shell) fn create_dynamic<N: AsRef<BStr>, T: VariableGSU>(
-        name: N,
+    pub(in crate::shell) fn create_dynamic<T: VariableGSU>(
+        name: MetaStr,
         get: Box<dyn Send + Fn() -> T>,
         set: Option<Box<dyn Send + Fn(T)>>,
         unset: Option<Box<dyn Send + Fn(bool)>>,
@@ -248,9 +247,7 @@ impl Variable {
         let flag = T::FLAG | zsh_sys::PM_SPECIAL | zsh_sys::PM_REMOVABLE | zsh_sys::PM_LOCAL;
         let gsu = CustomGSU { get, set, unset };
         unsafe {
-            let c_name = CString::new(name.as_ref().to_vec()).unwrap();
-            let c_varname_ptr = c_name.as_ptr().cast_mut();
-            let param = zsh_sys::createparam(c_varname_ptr, flag as _);
+            let param = zsh_sys::createparam(name.as_ptr().cast_mut(), flag as _);
             (*param).level = zsh_sys::locallevel;
             // stuff the actual gsu into the data field
             (*param).u.data = Box::into_raw(Box::new(gsu)).cast();
@@ -387,7 +384,10 @@ impl VariableGSU for Vec<BString> {
     }
 
     fn into_raw(self) -> Self::Type {
-        self.into_iter().map(|x| CString::new(x).unwrap()).collect::<CStringArray>().into_raw()
+        self.into_iter()
+            .map(|x| MetaString::from_vec(x.into()).into_inner())
+            .collect::<CStringArray>()
+            .into_raw()
     }
 }
 

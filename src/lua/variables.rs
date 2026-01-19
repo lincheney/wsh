@@ -98,7 +98,7 @@ async fn create_dynamic_var(
     macro_rules! make_dynamic_var {
         ($func:ident) => (
             ui.shell.clone().$func(
-                name,
+                name.into(),
                 make_dynamic_var_func!(| | get.call_async(())),
                 if let Some(set) = set {
                     Some(make_dynamic_var_func!(|x| set.call_async(x)))

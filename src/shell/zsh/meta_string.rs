@@ -62,6 +62,10 @@ impl MetaString {
         MetaStr{ inner: self.inner.as_ref() }
     }
 
+    pub fn into_inner(self) -> CString {
+        self.inner
+    }
+
     pub fn into_raw(self) -> *mut c_char {
         self.inner.into_raw()
     }
@@ -74,6 +78,17 @@ impl MetaString {
         let mut buf = std::mem::take(&mut self.inner).into_bytes();
         buf.push_str(str.to_bytes());
         self.inner = CString::new(buf).unwrap();
+    }
+
+    pub fn unmetafy(self) -> BString {
+        // threadsafe!
+        let mut len = 0i32;
+        let mut bytes: BString = self.inner.into_bytes_with_nul().into();
+        unsafe {
+            zsh_sys::unmetafy(bytes.as_mut_ptr().cast(), &raw mut len);
+        }
+        bytes.truncate(len as _);
+        bytes
     }
 
 }
@@ -137,6 +152,10 @@ impl<'a> MetaStr<'a> {
             Ok(x) => Self::try_new(x),
             Err(_) => Err("bytes does not end with null"),
         }
+    }
+
+    pub unsafe fn from_ptr(ptr: *mut c_char) -> Self {
+        Self{ inner: unsafe{ CStr::from_ptr(ptr) } }
     }
 
     pub fn to_string(&self) -> MetaString {
