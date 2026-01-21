@@ -169,6 +169,8 @@ impl EventStream {
         let ui = ui.clone();
         crate::spawn_and_log(async move {
             let tty = std::fs::File::open("/dev/tty")?;
+            // move to an fd >= 10
+            let tty = crate::utils::move_fd(tty)?;
             crate::utils::set_nonblocking_fd(&tty)?;
             self.run(tty, ui).await
         });

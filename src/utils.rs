@@ -17,7 +17,7 @@ pub fn set_nonblocking_fd<R: AsRawFd>(file: &R) -> Result<()> {
     Ok(())
 }
 
-pub fn dup_fd(fd: BorrowedFd) -> std::io::Result<OwnedFd> {
+pub fn move_fd<T: Into<OwnedFd> + From<OwnedFd>>(file: T) -> std::io::Result<T> {
     // behave like zsh_sys::movefd
     // why not use zsh_sys::movefd, because it stores info in fdtable
     // and we would have to clear it on drop
@@ -25,11 +25,15 @@ pub fn dup_fd(fd: BorrowedFd) -> std::io::Result<OwnedFd> {
     const SLOT: Option<OwnedFd> = None;
     let mut fds = [SLOT; 10];
     let mut i = 0;
-    let mut fd = fd.try_clone_to_owned()?;
+    let mut fd = file.into();
     while fd.as_raw_fd() < 10 {
         fds[i] = Some(fd);
         fd = fds[i].as_ref().unwrap().try_clone()?;
         i += 1;
     }
-    Ok(fd)
+    Ok(fd.into())
+}
+
+pub fn dup_fd(fd: BorrowedFd) -> std::io::Result<OwnedFd> {
+    move_fd(fd.try_clone_to_owned()?)
 }
