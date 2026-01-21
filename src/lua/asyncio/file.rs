@@ -10,7 +10,6 @@ use tokio::io::{
     AsyncWriteExt,
     AsyncBufReadExt,
 };
-pub mod zpty;
 
 trait Writeable<W: AsyncWrite> {
     fn get_writer(&mut self) -> &mut Option<W>;

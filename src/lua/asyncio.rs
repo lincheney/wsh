@@ -2,7 +2,7 @@ use anyhow::Result;
 use mlua::{prelude::*, UserData, UserDataMethods};
 use crate::ui::Ui;
 mod file;
-pub use file::{ReadableFile, WriteableFile, ReadWriteFile, zpty};
+pub use file::{ReadableFile, WriteableFile, ReadWriteFile};
 
 fn schedule(ui: &Ui, _lua: &Lua, cb: LuaFunction) -> Result<()> {
     let ui = ui.clone();

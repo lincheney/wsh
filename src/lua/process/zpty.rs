@@ -1,14 +1,13 @@
 use bstr::BString;
 use std::time::SystemTime;
 use std::default::Default;
-use std::os::fd::{FromRawFd};
 use anyhow::{Result};
 use mlua::{prelude::*};
 use tokio::io::{BufStream};
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{watch};
 use serde::{Deserialize};
 use crate::ui::{Ui};
-use crate::lua::asyncio::{ReadWriteFile, zpty::ZptyFile};
+use crate::lua::asyncio::{ReadWriteFile};
 
 #[derive(Default, Debug, Deserialize)]
 #[serde(default)]
@@ -29,17 +28,7 @@ enum ZptyArgs {
 
 pub struct Zpty {
     name: String,
-    dropped: Option<oneshot::Sender<()>>,
 }
-
-impl Drop for Zpty {
-    fn drop(&mut self) {
-        if let Some(dropped) = self.dropped.take() {
-            let _ = dropped.send(());
-        }
-    }
-}
-
 
 pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let args = match lua.from_value(val)? {
@@ -59,13 +48,15 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let zpty = ui.shell.zpty(name.clone().into(), cmd.into(), opts).await?;
 
     // do not drop the pty fd as zsh will do it for us
-    let pty = ZptyFile(Some(unsafe{ tokio::fs::File::from_raw_fd(zpty.fd) }));
+    // so we dup the fd to one we own instead
+    let pty = crate::utils::dup_fd(unsafe{ std::os::fd::BorrowedFd::borrow_raw(zpty.fd) })?;
+    let pty: std::fs::File = pty.into();
+    let pty = tokio::fs::File::from_std(pty);
     let pty = ReadWriteFile{
         inner: Some(BufStream::new(pty)),
         is_tty_master: true,
     };
 
-    let dropped = oneshot::channel();
     let zpty_name = name.clone().into();
     let pid = zpty.pid;
     tokio::task::spawn(async move {
@@ -78,7 +69,9 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         // send the code out
         let _ = sender.send(Some(Ok(code as _)));
 
-        let _ = dropped.1.await;
+        // delete the pty once it has finished
+        // this will close the original zpty fds
+        // which is ok for us since we have dup-ed them
         ui.shell.zpty_delete(zpty_name).await
     });
 
@@ -86,7 +79,7 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         super::Process{
             pid,
             result: super::CommandResult{ inner: receiver },
-            zpty: Some(Zpty{ name, dropped: Some(dropped.0) }),
+            zpty: Some(Zpty{ name }),
         },
         pty,
     ))?)
