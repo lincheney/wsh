@@ -87,7 +87,7 @@ impl EventStream {
 
         // read events
         let mut reader = AsyncFd::new(file)?;
-        let mut parser = parser::Parser::new();
+        let mut parser = parser::Parser::default();
 
         let queue_sender = self.queue_sender.clone();
         let mut pausable = self.pausable.clone();

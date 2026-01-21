@@ -430,7 +430,7 @@ impl Ui {
         // shucks, gotta do recursion
         let mut success = true;
         for _hop in 0..20 {
-            let mut parser = crate::keybind::parser::Parser::new();
+            let mut parser = crate::keybind::parser::Parser::default();
             parser.feed(mapping.as_ref());
             mapping.clear();
             for (event, buf) in parser.iter() {

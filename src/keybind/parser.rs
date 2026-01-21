@@ -107,16 +107,12 @@ impl From<Key> for Event {
     }
 }
 
+#[derive(Default)]
 pub struct Parser {
     buffer: VecDeque<u8>,
 }
 
 impl Parser {
-    pub fn new() -> Self {
-        Self {
-            buffer: VecDeque::new(),
-        }
-    }
 
     pub fn feed(&mut self, bytes: &[u8]) {
         self.buffer.extend(bytes.iter());
