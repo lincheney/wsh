@@ -26,10 +26,6 @@ enum ZptyArgs {
     Full(FullZptyArgs),
 }
 
-pub struct Zpty {
-    name: String,
-}
-
 pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let args = match lua.from_value(val)? {
         ZptyArgs::Full(args) => args,
@@ -70,7 +66,7 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         // delete the zpty once it has finished
         // this will close the original zpty fds
         // which is ok for us since we have dup-ed them
-        ui.shell.zpty_delete(zpty.name.into()).await
+        ui.shell.zpty_delete(zpty.name).await
     });
 
     Ok(lua.pack_multi((
