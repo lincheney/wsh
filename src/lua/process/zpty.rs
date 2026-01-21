@@ -45,19 +45,17 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         echo_input: args.echo_input,
         non_blocking: true,
     };
-    let zpty = ui.shell.zpty(name.clone().into(), cmd.into(), opts).await?;
+    let zpty = ui.shell.zpty(name.into(), cmd.into(), opts).await?;
 
     // do not drop the pty fd as zsh will do it for us
     // so we dup the fd to one we own instead
     let pty = crate::utils::dup_fd(unsafe{ std::os::fd::BorrowedFd::borrow_raw(zpty.fd) })?;
-    let pty: std::fs::File = pty.into();
-    let pty = tokio::fs::File::from_std(pty);
+    let pty = tokio::fs::File::from_std(pty.into());
     let pty = ReadWriteFile{
         inner: Some(BufStream::new(pty)),
         is_tty_master: true,
     };
 
-    let zpty_name = name.clone().into();
     let pid = zpty.pid;
     tokio::task::spawn(async move {
         // get the status
@@ -69,17 +67,16 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         // send the code out
         let _ = sender.send(Some(Ok(code as _)));
 
-        // delete the pty once it has finished
+        // delete the zpty once it has finished
         // this will close the original zpty fds
         // which is ok for us since we have dup-ed them
-        ui.shell.zpty_delete(zpty_name).await
+        ui.shell.zpty_delete(zpty.name.into()).await
     });
 
     Ok(lua.pack_multi((
         super::Process{
             pid,
             result: super::CommandResult{ inner: receiver },
-            zpty: Some(Zpty{ name }),
         },
         pty,
     ))?)

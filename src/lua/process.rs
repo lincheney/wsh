@@ -65,8 +65,6 @@ impl UserData for CommandResult {
 struct Process {
     pid: u32,
     result: CommandResult,
-    #[allow(unused)]
-    zpty: Option<zpty::Zpty>,
 }
 
 impl UserData for Process {
@@ -291,7 +289,6 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         Process{
             pid,
             result: CommandResult{ inner: receiver },
-            zpty: None,
         },
         stdin,
         stdout,
@@ -489,7 +486,6 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
         Process{
             pid,
             result: CommandResult{ inner: receiver },
-            zpty: None,
         },
         stdin,
         stdout,
