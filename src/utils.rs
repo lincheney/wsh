@@ -19,6 +19,8 @@ pub fn set_nonblocking_fd<R: AsRawFd>(file: &R) -> Result<()> {
 
 pub fn dup_fd(fd: BorrowedFd) -> std::io::Result<OwnedFd> {
     // behave like zsh_sys::movefd
+    // why not use zsh_sys::movefd, because it stores info in fdtable
+    // and we would have to clear it on drop
     // we need to store them for a bit to prevent them getting dropped
     const SLOT: Option<OwnedFd> = None;
     let mut fds = [SLOT; 10];
