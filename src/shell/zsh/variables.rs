@@ -356,7 +356,6 @@ impl VariableGSU for BString {
             let string = MetaString::from_raw(ptr).unmetafy();
             // zsh may try to strlen afterwards but we will have already freed the pointer
             (*param).width = string.len() as _;
-            zsh_sys::zsfree(ptr);
             string
         }
     }
