@@ -235,9 +235,7 @@ pub fn get_prompt(prompt: Option<&MetaStr>, escaped: bool) -> Option<MetaString>
     let glitch = escaped.into();
     unsafe {
         let ptr = zsh_sys::promptexpand(prompt.as_ptr().cast_mut(), glitch, r, R, null_mut());
-        let str = MetaStr::from_ptr(ptr).to_owned();
-        zsh_sys::zsfree(ptr);
-        Some(str)
+        Some(MetaString::from_raw(ptr))
     }
 }
 

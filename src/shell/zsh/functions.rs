@@ -1,4 +1,4 @@
-use super::MetaStr;
+use super::{MetaStr, MetaString};
 use std::os::raw::{c_int};
 use bstr::{BString};
 use std::ptr::null_mut;
@@ -68,9 +68,7 @@ impl Function {
     pub fn get_source(&self) -> BString {
         unsafe {
             let ptr = zsh_sys::getpermtext(self.0.as_ref().funcdef, null_mut(), 1);
-            let source = MetaStr::from_ptr(ptr).unmetafy().into_owned();
-            zsh_sys::zsfree(ptr);
-            source
+            MetaString::from_raw(ptr).unmetafy()
         }
     }
 }
