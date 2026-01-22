@@ -1,3 +1,4 @@
+use bstr::BString;
 use anyhow::Result;
 use mlua::{prelude::*, Function};
 use serde::{Deserialize, Serialize};
@@ -91,13 +92,27 @@ macro_rules! event_types {
         )*
         }
 
+        async fn trigger_event_callback(ui: Ui, lua: Lua, (event, arg): (String, LuaValue)) -> Result<()> {
+            match event.as_ref() {
+                $(
+                stringify!($name) => {
+                    ui.[<trigger_ $name _callbacks>](lua.from_value(arg)?).await
+                },
+                )*
+                _ => {
+                    anyhow::bail!("invalid event {event}")
+                },
+            }
+            Ok(())
+        }
+
     }
 
     )
 }
 
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct KeyEvent {
     key: String,
     control: bool,
@@ -121,7 +136,7 @@ event_types!(
     accept_line(),
     buffer_change(),
     precmd(),
-    paste(LuaString),
+    paste(BString),
     window_resize(u32, u32),
 );
 
@@ -140,6 +155,7 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
 
     ui.set_lua_fn("add_event_callback", add_event_callback)?;
     ui.set_lua_fn("remove_event_callback", remove_event_callback)?;
+    ui.set_lua_async_fn("trigger_event_callback", trigger_event_callback)?;
 
     Ok(())
 }

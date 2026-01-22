@@ -595,7 +595,6 @@ impl Ui {
             },
 
             Event::BracketedPaste(data) => {
-                let data = self.lua.create_string(data)?;
                 self.trigger_paste_callbacks(data).await;
             },
 
