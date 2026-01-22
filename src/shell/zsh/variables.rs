@@ -2,9 +2,8 @@ use std::collections::HashMap;
 use std::ptr::NonNull;
 use std::os::raw::{c_int, c_long, c_char};
 use anyhow::Result;
-use crate::c_string_array::{CStringArray, CStrArray};
 use bstr::{BStr, BString};
-use super::meta_string::{MetaStr, MetaString};
+use super::{MetaStr, MetaString, MetaArray};
 
 fn pm_type(flags: c_int) -> c_int {
     flags & (zsh_sys::PM_SCALAR | zsh_sys::PM_INTEGER | zsh_sys::PM_EFLOAT | zsh_sys::PM_FFLOAT | zsh_sys::PM_ARRAY | zsh_sys::PM_HASHED) as c_int
@@ -70,22 +69,16 @@ fn try_hashtable_to_hashmap(table: zsh_sys::HashTable) -> Result<HashMap<BString
     let mut hashmap = HashMap::new();
     unsafe {
         // paramvalarr allocates on the arena; do not free
-        let keys = CStrArray::from_raw(zsh_sys::paramvalarr(table, zsh_sys::SCANPM_WANTKEYS as c_int) as _);
-        let values = CStrArray::from_raw(zsh_sys::paramvalarr(table, zsh_sys::SCANPM_WANTVALS as c_int) as _);
+        let keys = MetaArray::iter_ptr(zsh_sys::paramvalarr(table, zsh_sys::SCANPM_WANTKEYS as c_int).cast());
+        let values = MetaArray::iter_ptr(zsh_sys::paramvalarr(table, zsh_sys::SCANPM_WANTVALS as c_int).cast());
 
-        let keys = keys.iter().map(Some).chain(std::iter::repeat(None));
-        let values = values.iter().map(Some).chain(std::iter::repeat(None));
+        let keys = keys.map(Some).chain(std::iter::repeat(None));
+        let values = values.map(Some).chain(std::iter::repeat(None));
 
         for (k, v) in keys.zip(values) {
             match (k, v) {
-                (Some(k), Some(v)) => hashmap.insert(
-                    MetaStr::new_unchecked(k).unmetafy().into_owned(),
-                    MetaStr::new_unchecked(v).unmetafy().into_owned(),
-                ),
-                (Some(k), None) => hashmap.insert(
-                    MetaStr::new_unchecked(k).unmetafy().into_owned(),
-                    vec![].into(),
-                ),
+                (Some(k), Some(v)) => hashmap.insert(k.unmetafy().into_owned(), v.unmetafy().into_owned()),
+                (Some(k), None) => hashmap.insert(k.unmetafy().into_owned(), vec![].into()),
                 (None, Some(_))    => anyhow::bail!("hashmap has more values than keys"),
                 _ => break,
             };
@@ -121,15 +114,15 @@ impl Variable {
         let name = name.as_ptr().cast_mut();
         let param = match value {
             Value::HashMap(value) => {
-                let value: CStringArray = value.into_iter()
+                let value: MetaArray = value.into_iter()
                     .flat_map(|(k, v)| [k, v])
-                    .map(|x| MetaString::from(x).into_inner())
+                    .map(|x| x.into())
                     .collect();
                 unsafe{ zsh_sys::sethparam(name, value.into_raw()) }
             },
             Value::Array(value) => {
-                let value: CStringArray = value.into_iter()
-                    .map(|x| MetaString::from(x).into_inner())
+                let value: MetaArray = value.into_iter()
+                    .map(|x| x.into())
                     .collect();
                 unsafe{ zsh_sys::setaparam(name, value.into_raw()) }
             },
@@ -209,8 +202,8 @@ impl Variable {
 
     pub fn try_as_array(&mut self) -> Option<Vec<BString>> {
         if self.value.isarr != 0 {
-            let array = unsafe{ CStrArray::from_raw(zsh_sys::getarrvalue(&raw mut self.value) as _) };
-            Some(array.iter().map(|x| x.to_owned().into_bytes().into()).collect())
+            let array = unsafe{ MetaArray::iter_ptr(zsh_sys::getarrvalue(&raw mut self.value) as _) };
+            Some(array.map(|x| x.unmetafy().into_owned()).collect())
         } else {
             None
         }
@@ -395,17 +388,16 @@ impl VariableGSU for Vec<BString> {
 
     fn from_raw(_param: zsh_sys::Param, ptr: Self::Type) -> Self {
         unsafe{
-            CStringArray::from_raw(ptr)
-                .into_iter()
-                .map(|x| MetaString::from(x).unmetafy())
-                .collect()
+            let result = MetaArray::iter_ptr(ptr.cast()).map(|x| x.unmetafy().into_owned()).collect();
+            zsh_sys::freearray(ptr);
+            result
         }
     }
 
     fn into_raw(self) -> Self::Type {
         self.into_iter()
-            .map(|x| MetaString::from(x).into_inner())
-            .collect::<CStringArray>()
+            .map(|x| x.into())
+            .collect::<MetaArray>()
             .into_raw()
     }
 }

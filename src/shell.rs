@@ -32,6 +32,7 @@ pub use zsh::{
     Zpty,
     MetaStr,
     MetaString,
+    MetaArray,
 };
 pub use externs::{run_with_shell};
 pub use variables::Variable;

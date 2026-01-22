@@ -1,7 +1,6 @@
 mod fork;
 use bstr::BString;
 use crate::ui::{Ui};
-use crate::c_string_array::CStrArray;
 use std::os::raw::{c_char, c_int};
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -9,7 +8,7 @@ use std::ptr::null_mut;
 use std::sync::{LazyLock, OnceLock, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::Result;
-use crate::shell::{Shell, ShellMsg, zsh, MetaString};
+use crate::shell::{Shell, ShellMsg, zsh, MetaString, MetaArray};
 use crate::fork_lock::{RawForkLock, ForkLock};
 
 static FORK_LOCK: RawForkLock = RawForkLock::new();
@@ -141,8 +140,8 @@ pub fn run_with_shell<F: 'static + Send + Future<Output: Send>>(future: F) -> Re
 
 unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _options: zsh_sys::Options, _func: c_int) -> c_int {
 
-    let argv = unsafe{ CStrArray::from_raw(argv as _) };
-    let mut iter = argv.iter().map(|s| s.to_bytes());
+    let iter = unsafe{ MetaArray::iter_ptr(argv as _) };
+    let mut iter = iter.map(|s| s.to_bytes());
     match iter.next() {
         Some(b"lua") => {
             let result: Result<()> = tokio::task::block_in_place(|| {

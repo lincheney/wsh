@@ -2,6 +2,7 @@ use std::os::raw::c_char;
 use std::borrow::{Cow, Borrow};
 use std::ffi::{CStr, CString};
 use bstr::{BStr, BString, ByteVec};
+pub mod array;
 
 #[macro_export]
 macro_rules! meta_str {

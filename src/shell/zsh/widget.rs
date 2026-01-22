@@ -1,10 +1,9 @@
 use bstr::{BString};
-use crate::c_string_array::{CStringArray};
 use std::os::raw::{c_int};
 use std::sync::{OnceLock};
 use std::ptr::NonNull;
 use super::bindings;
-use super::{MetaStr, MetaString};
+use super::{MetaStr, MetaString, MetaArray};
 
 #[derive(Eq, PartialEq)]
 struct Widget(NonNull<bindings::widget>);
@@ -103,17 +102,12 @@ impl<'a> ZleWidget<'a> {
     ) -> c_int {
 
         let opts = opts.unwrap_or_default();
-        let mut null = std::ptr::null_mut();
-        let args_ptr = if args.len() == 0 {
-            &raw mut null
-        } else {
-            args.map(|x| x.into_inner()).collect::<CStringArray>().as_ptr()
-        };
+        let args: MetaArray = args.collect();
 
         unsafe {
             bindings::zmod.mult = opts.times.into();
             bindings::insmode = opts.insert.into();
-            bindings::execzlefunc(ptr.as_ptr(), args_ptr, 0, 0)
+            bindings::execzlefunc(ptr.as_ptr(), args.as_ptr().cast_mut(), 0, 0)
         }
     }
 
