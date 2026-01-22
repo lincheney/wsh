@@ -355,8 +355,18 @@ impl VariableGSU for BString {
     }
 
     fn into_raw(self) -> Self::Type {
-        unsafe{
-            zsh_sys::ztrdup_metafy(self.as_ptr().cast())
+        unsafe {
+            if self.is_empty() {
+                // self.as_ptr() is invalid when self is empty
+                // but we still need to hand over a valid string
+                // i.e. zsh expects a non-null pointer
+                let ptr = zsh_sys::zalloc(1).cast();
+                *ptr = 0;
+                ptr
+            } else {
+                // cannot use ztrdup_metafy as it assumes a null terminated string
+                zsh_sys::metafy(self.as_ptr().cast_mut().cast(), self.len() as _, zsh_sys::META_DUP as _)
+            }
         }
     }
 }
