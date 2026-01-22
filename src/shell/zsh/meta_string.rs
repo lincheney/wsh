@@ -59,6 +59,10 @@ impl MetaString {
         self.inner.into_raw()
     }
 
+    pub unsafe fn from_raw(ptr: *mut c_char) -> Self {
+        Self{ inner: unsafe{ CString::from_raw(ptr) } }
+    }
+
     pub fn modify<F: Fn(&mut Vec<u8>)>(&mut self, callback: F) {
         let mut buf = std::mem::take(&mut self.inner).into_bytes();
         callback(&mut buf);
@@ -74,10 +78,10 @@ impl MetaString {
     }
 
     pub fn unmetafy(self) -> BString {
-        // threadsafe!
         let mut len = 0i32;
         let mut bytes: BString = self.inner.into_bytes_with_nul().into();
         unsafe {
+            // threadsafe!
             zsh_sys::unmetafy(bytes.as_mut_ptr().cast(), &raw mut len);
         }
         bytes.truncate(len as _);
@@ -156,7 +160,7 @@ crate::impl_deref_helper!(self: MetaStr, &self.inner => CStr);
 
 impl MetaStr {
 
-    const unsafe fn new_unchecked(inner: &CStr) -> &Self {
+    pub const unsafe fn new_unchecked(inner: &CStr) -> &Self {
         unsafe{ &*(inner as *const _ as *const Self) }
     }
 

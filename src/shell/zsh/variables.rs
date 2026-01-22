@@ -69,6 +69,7 @@ impl From<HashMap<BString, BString>> for Value {
 fn try_hashtable_to_hashmap(table: zsh_sys::HashTable) -> Result<HashMap<BString, BString>> {
     let mut hashmap = HashMap::new();
     unsafe {
+        // paramvalarr allocates on the arena; do not free
         let keys = CStrArray::from_raw(zsh_sys::paramvalarr(table, zsh_sys::SCANPM_WANTKEYS as c_int) as _);
         let values = CStrArray::from_raw(zsh_sys::paramvalarr(table, zsh_sys::SCANPM_WANTVALS as c_int) as _);
 
@@ -77,9 +78,15 @@ fn try_hashtable_to_hashmap(table: zsh_sys::HashTable) -> Result<HashMap<BString
 
         for (k, v) in keys.zip(values) {
             match (k, v) {
-                (Some(k), Some(v)) => hashmap.insert(k.to_bytes().into(), v.to_bytes().into()),
-                (Some(k), None)    => hashmap.insert(k.to_bytes().into(), vec![].into()),
-                (None, Some(_))    => return Err(anyhow::anyhow!("hashmap has more values than keys")),
+                (Some(k), Some(v)) => hashmap.insert(
+                    MetaStr::new_unchecked(k).unmetafy().into_owned(),
+                    MetaStr::new_unchecked(v).unmetafy().into_owned(),
+                ),
+                (Some(k), None) => hashmap.insert(
+                    MetaStr::new_unchecked(k).unmetafy().into_owned(),
+                    vec![].into(),
+                ),
+                (None, Some(_))    => anyhow::bail!("hashmap has more values than keys"),
                 _ => break,
             };
         }
@@ -346,31 +353,16 @@ impl VariableGSU for BString {
 
     fn from_raw(param: zsh_sys::Param, ptr: Self::Type) -> Self {
         unsafe {
-            let mut len = 0;
-            zsh_sys::unmetafy(ptr, &raw mut len);
-            let value: &[u8] = std::slice::from_raw_parts(ptr.cast(), len as _);
-            let string = BStr::new(value).into();
+            let string = MetaString::from_raw(ptr).unmetafy();
             // zsh may try to strlen afterwards but we will have already freed the pointer
-            (*param).width = len;
+            (*param).width = string.len() as _;
             zsh_sys::zsfree(ptr);
             string
         }
     }
 
     fn into_raw(self) -> Self::Type {
-        unsafe {
-            if self.is_empty() {
-                // self.as_ptr() is invalid when self is empty
-                // but we still need to hand over a valid string
-                // i.e. zsh expects a non-null pointer
-                let ptr = zsh_sys::zalloc(1).cast();
-                *ptr = 0;
-                ptr
-            } else {
-                // cannot use ztrdup_metafy as it assumes a null terminated string
-                zsh_sys::metafy(self.as_ptr().cast_mut().cast(), self.len() as _, zsh_sys::META_DUP as _)
-            }
-        }
+        MetaString::from(self).into_raw()
     }
 }
 
@@ -403,7 +395,12 @@ impl VariableGSU for Vec<BString> {
     type Type = *mut *mut c_char;
 
     fn from_raw(_param: zsh_sys::Param, ptr: Self::Type) -> Self {
-        unsafe{ CStringArray::from_raw(ptr) }.into_iter().map(|x| x.into_bytes().into()).collect()
+        unsafe{
+            CStringArray::from_raw(ptr)
+                .into_iter()
+                .map(|x| MetaString::from(x).unmetafy())
+                .collect()
+        }
     }
 
     fn into_raw(self) -> Self::Type {
