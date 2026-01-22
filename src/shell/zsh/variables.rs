@@ -318,7 +318,7 @@ unsafe extern "C" fn custom_gsu_get<T: VariableGSU>(param: zsh_sys::Param) -> T:
 unsafe extern "C" fn custom_gsu_set<T: VariableGSU>(param: zsh_sys::Param, value: T::Type) {
     unsafe {
         if let Some(set) = &(*((*param).u.data as *const CustomGSU<T>)).set {
-            set(T::from_raw(value));
+            set(T::from_raw(param, value));
         }
     }
 }
@@ -336,7 +336,7 @@ pub trait VariableGSU {
     const FLAG: u32;
     type Type;
 
-    fn from_raw(value: Self::Type) -> Self;
+    fn from_raw(param: zsh_sys::Param, value: Self::Type) -> Self;
     fn into_raw(self) -> Self::Type;
 }
 
@@ -344,13 +344,16 @@ impl VariableGSU for BString {
     const FLAG: u32 = zsh_sys::PM_SCALAR;
     type Type = *mut c_char;
 
-    fn from_raw(ptr: Self::Type) -> Self {
+    fn from_raw(param: zsh_sys::Param, ptr: Self::Type) -> Self {
         unsafe {
             let mut len = 0;
             zsh_sys::unmetafy(ptr, &raw mut len);
             let value: &[u8] = std::slice::from_raw_parts(ptr.cast(), len as _);
+            let string = BStr::new(value).into();
+            // zsh may try to strlen afterwards but we will have already freed the pointer
+            (*param).width = len;
             zsh_sys::zsfree(ptr);
-            BStr::new(value).into()
+            string
         }
     }
 
@@ -375,7 +378,7 @@ impl VariableGSU for c_long {
     const FLAG: u32 = zsh_sys::PM_INTEGER;
     type Type = c_long;
 
-    fn from_raw(value: Self::Type) -> Self {
+    fn from_raw(_param: zsh_sys::Param, value: Self::Type) -> Self {
         value
     }
     fn into_raw(self) -> Self::Type {
@@ -387,7 +390,7 @@ impl VariableGSU for f64 {
     const FLAG: u32 = zsh_sys::PM_FFLOAT;
     type Type = f64;
 
-    fn from_raw(value: Self::Type) -> Self {
+    fn from_raw(_param: zsh_sys::Param, value: Self::Type) -> Self {
         value
     }
     fn into_raw(self) -> Self::Type {
@@ -399,7 +402,7 @@ impl VariableGSU for Vec<BString> {
     const FLAG: u32 = zsh_sys::PM_ARRAY;
     type Type = *mut *mut c_char;
 
-    fn from_raw(ptr: Self::Type) -> Self {
+    fn from_raw(_param: zsh_sys::Param, ptr: Self::Type) -> Self {
         unsafe{ CStringArray::from_raw(ptr) }.into_iter().map(|x| x.into_bytes().into()).collect()
     }
 
@@ -415,7 +418,7 @@ impl VariableGSU for HashMap<BString, BString> {
     const FLAG: u32 = zsh_sys::PM_HASHED;
     type Type = zsh_sys::HashTable;
 
-    fn from_raw(ptr: Self::Type) -> Self {
+    fn from_raw(_param: zsh_sys::Param, ptr: Self::Type) -> Self {
         let map = try_hashtable_to_hashmap(ptr);
         unsafe {
             zsh_sys::deleteparamtable(ptr);
