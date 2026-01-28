@@ -207,6 +207,12 @@ impl Tui {
         None
     }
 
+    pub fn get(&self, id: usize) -> Option<&WidgetWrapper> {
+        self.get_index(id).map(|i| {
+            &self.widgets.inner[i]
+        })
+    }
+
     pub fn get_mut(&mut self, id: usize) -> Option<&mut WidgetWrapper> {
         self.get_index(id).map(|i| {
             self.dirty = true;

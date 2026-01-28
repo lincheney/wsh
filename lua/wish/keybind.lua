@@ -228,6 +228,9 @@ wish.set_keymap('<a-a>', function()
     require('wish/background-job').run_in_background(buffer)
 end)
 
+wish.set_keymap('<c-`>', function()
+    require('wish/background-job').focus_next_job{key = "`", control = true}
+end)
 wish.add_event_callback('key', function(arg)
     -- error("got a key " .. arg.key)
 end)

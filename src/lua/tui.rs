@@ -451,6 +451,16 @@ async fn clear_ansi_message(ui: Ui, _lua: Lua, id: usize) -> Result<()> {
     }
 }
 
+async fn get_message_text(ui: Ui, _lua: Lua, id: usize) -> Result<Vec<BString>> {
+    let ui = ui.get();
+    let tui = &ui.borrow().tui;
+
+    match tui.get(id) {
+        Some(msg) => Ok(msg.as_ref().inner.get().into()),
+        _ => anyhow::bail!("can't find widget with id {}", id),
+    }
+}
+
 async fn message_to_ansi_string(ui: Ui, _lua: Lua, (id, width): (usize, Option<u16>)) -> Result<mlua::BString> {
     let ui = ui.get();
     let tui = &ui.borrow().tui;
@@ -495,6 +505,7 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_async_fn("set_ansi_message", set_ansi_message)?;
     ui.set_lua_async_fn("feed_ansi_message", feed_ansi_message)?;
     ui.set_lua_async_fn("clear_ansi_message", clear_ansi_message)?;
+    ui.set_lua_async_fn("get_message_text", get_message_text)?;
     ui.set_lua_async_fn("message_to_ansi_string", message_to_ansi_string)?;
     ui.set_lua_async_fn("set_status_bar", set_status_bar)?;
 
