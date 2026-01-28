@@ -222,7 +222,7 @@ impl Ui {
 
     pub async fn handle_event(&mut self, event: Event, event_buffer: BString) -> Result<bool> {
         if let Event::Key(event) = event {
-            self.trigger_key_callbacks(event.into()).await;
+            self.trigger_key_callbacks((event.into(), event_buffer.clone())).await;
             if let Some(result) = self.handle_key(event, event_buffer.as_ref()).await {
                 return result
             }

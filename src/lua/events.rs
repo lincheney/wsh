@@ -132,7 +132,7 @@ impl From<crate::keybind::parser::KeyEvent> for KeyEvent {
 }
 
 event_types!(
-    key(KeyEvent),
+    key(KeyEvent, BString),
     accept_line(),
     buffer_change(),
     precmd(),
