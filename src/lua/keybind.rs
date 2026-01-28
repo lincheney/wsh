@@ -9,6 +9,7 @@ use crate::ui::{Ui};
 pub struct KeybindMapping {
     id: usize,
     pub inner: HashMap<(Key, KeyModifiers), Function>,
+    pub no_fallthrough: bool,
 }
 
 
@@ -86,12 +87,13 @@ async fn set_keymap(ui: Ui, _lua: Lua, (key, callback, layer): (String, Function
     Ok(())
 }
 
-async fn add_keymap_layer(ui: Ui, _lua: Lua, _val: ()) -> Result<usize> {
+async fn add_keymap_layer(ui: Ui, _lua: Lua, no_fallthrough: Option<bool>) -> Result<usize> {
+    let no_fallthrough = no_fallthrough.unwrap_or(false);
     let ui = ui.get();
     let mut ui = ui.borrow_mut();
     ui.keybind_layer_counter += 1;
     let id = ui.keybind_layer_counter;
-    ui.keybinds.push(KeybindMapping{id, inner: HashMap::default()});
+    ui.keybinds.push(KeybindMapping{id, inner: HashMap::default(), no_fallthrough});
     Ok(id)
 }
 

@@ -479,14 +479,29 @@ impl Ui {
         }
 
         // look for a lua callback
-        let callback = self.get().borrow().keybinds
+        let result = self.get().borrow().keybinds
             .iter()
             .rev()
-            .find_map(|k| k.inner.get(&(event.key, event.modifiers)))
-            .cloned();
-        if let Some(callback) = callback {
-            self.call_lua_fn(true, callback, ()).await;
-            return Some(KeybindOutput::Value(Ok(true)))
+            .find_map(|k| {
+                if let Some(callback) = k.inner.get(&(event.key, event.modifiers)) {
+                    Some(Some(callback.clone()))
+                } else if k.no_fallthrough {
+                    Some(None)
+                } else {
+                    None
+                }
+            });
+
+        match result {
+            Some(Some(callback)) => {
+                self.call_lua_fn(true, callback, ()).await;
+                return Some(KeybindOutput::Value(Ok(true)))
+            },
+            Some(None) => {
+                // no fallthrough
+                return Some(KeybindOutput::Value(Ok(true)))
+            },
+            None => (), // fallthrough
         }
 
         let mut lastchar = [0; 4];
