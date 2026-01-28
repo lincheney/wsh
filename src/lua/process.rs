@@ -250,8 +250,8 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
             match pid_receiver.await {
                 Ok((pid, pid_waiter)) => {
                     let stdin  = proc.stdin.take().map(|s| WriteableFile(Some(BufWriter::new(s))));
-                    let stdout = proc.stdout.take().map(|s| ReadableFile(Some(BufReader::new(s))));
-                    let stderr = proc.stderr.take().map(|s| ReadableFile(Some(BufReader::new(s))));
+                    let stdout = proc.stdout.take().map(|s| ReadableFile(Some(BufReader::new(s)), false));
+                    let stderr = proc.stderr.take().map(|s| ReadableFile(Some(BufReader::new(s)), false));
 
                     let _ = result_sender.take().unwrap().send(Ok((pid, stdin, stdout, stderr)));
                     let code = pid_waiter.await.unwrap_or(-1);
@@ -382,7 +382,7 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
                 ($name:ident, false) => (
                     stdio_pipe!($name, File::open("/dev/null"), {
                         let (send, recv) = tokio::net::unix::pipe::pipe()?;
-                        let recv = ReadableFile(Some(BufReader::new(recv)));
+                        let recv = ReadableFile(Some(BufReader::new(recv)), false);
                         (Some(recv), Some(OverriddenStream::new(&std::io::$name(), send.into_nonblocking_fd()?)))
                     })
                 );

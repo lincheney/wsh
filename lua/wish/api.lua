@@ -65,9 +65,10 @@ function wish.cmd(...)
 end
 
 function wish.async.zpty(...)
-    local proc, pty = wish.__zpty(...)
+    local proc, stdin, stdout = wish.__zpty(...)
     return {
-        pty = pty,
+        stdin = stdin,
+        stdout = stdout,
         is_finished = function(self) return proc:is_finished() end,
         wait = function(self) return proc:wait() end,
         kill = function(self, ...) return proc:kill(...) end,

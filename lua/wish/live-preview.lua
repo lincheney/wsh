@@ -66,7 +66,7 @@ local function preview(buffer)
         proc = proc,
         is_current = function(self) return self == current_preview end,
         read_once = function(self)
-            local data = self.proc.pty:read()
+            local data = self.proc.stdout:read()
             if not self:is_current() then
                 return false
             end

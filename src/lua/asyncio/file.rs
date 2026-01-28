@@ -3,7 +3,6 @@ use mlua::{prelude::*, UserData, UserDataMethods};
 use tokio::io::{
     BufReader,
     BufWriter,
-    BufStream,
     AsyncRead,
     AsyncWrite,
     AsyncReadExt,
@@ -20,13 +19,13 @@ trait Readable<R: AsyncRead> {
     fn is_tty_master(&self) -> bool;
 }
 
-pub struct ReadableFile<T>(pub Option<BufReader<T>>);
+pub struct ReadableFile<T>(pub Option<BufReader<T>>, pub bool);
 impl<T: AsyncRead> Readable<BufReader<T>> for ReadableFile<T> {
     fn get_reader(&mut self) -> Option<&mut BufReader<T>> {
         self.0.as_mut()
     }
     fn is_tty_master(&self) -> bool {
-        false
+        self.1
     }
 }
 
@@ -142,41 +141,6 @@ impl<T: AsyncWrite + AsRawFd + Unpin + mlua::MaybeSend + 'static> UserData for W
             Ok(())
         });
 
-        add_writeable_methods(methods);
-    }
-}
-
-pub struct ReadWriteFile<T: AsyncRead + AsyncWrite>{
-    pub inner: Option<BufStream<T>>,
-    pub is_tty_master: bool,
-}
-impl<T: AsyncRead + AsyncWrite> Readable<BufStream<T>> for ReadWriteFile<T> {
-    fn get_reader(&mut self) -> Option<&mut BufStream<T>> {
-        self.inner.as_mut()
-    }
-    fn is_tty_master(&self) -> bool {
-        self.is_tty_master
-    }
-}
-impl<T: AsyncRead + AsyncWrite> Writeable<BufStream<T>> for ReadWriteFile<T> {
-    fn get_writer(&mut self) -> &mut Option<BufStream<T>> {
-        &mut self.inner
-    }
-}
-
-impl<T: AsyncRead + AsyncWrite + AsRawFd + Unpin + mlua::MaybeSend + 'static> UserData for ReadWriteFile<T> {
-    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("as_fd", |_lua, file, ()| {
-            Ok(file.inner.as_ref().map(|x| x.get_ref().as_raw_fd()))
-        });
-
-        methods.add_method_mut("close", |_lua, file, ()| {
-            file.inner = None;
-            Ok(())
-        });
-
-        add_readable_methods(methods);
-        add_bufreadable_methods(methods);
         add_writeable_methods(methods);
     }
 }

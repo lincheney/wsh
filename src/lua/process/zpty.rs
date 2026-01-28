@@ -1,3 +1,4 @@
+use std::sync::{Arc};
 use bstr::BString;
 use std::time::SystemTime;
 use std::default::Default;
@@ -6,11 +7,11 @@ use mlua::{prelude::*};
 use std::io::{Read, Write};
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
-use tokio::io::{BufStream, unix::AsyncFd, ReadBuf, AsyncRead, AsyncWrite};
+use tokio::io::{unix::AsyncFd, ReadBuf, AsyncRead, AsyncWrite, BufWriter, BufReader};
 use tokio::sync::{watch};
 use serde::{Deserialize};
 use crate::ui::{Ui};
-use crate::lua::asyncio::{ReadWriteFile};
+use crate::lua::asyncio::{ReadableFile, WriteableFile};
 
 #[derive(Default, Debug, Deserialize)]
 #[serde(default)]
@@ -18,7 +19,7 @@ struct FullZptyArgs {
     args: BString,
     height: Option<usize>,
     width: Option<usize>,
-    echo_input: bool,
+    no_echo_input: bool,
 }
 
 
@@ -30,7 +31,7 @@ enum ZptyArgs {
 }
 
 struct AsyncZpty {
-    inner: AsyncFd<std::fs::File>,
+    inner: Arc<AsyncFd<std::fs::File>>,
 }
 
 impl std::os::fd::AsRawFd for AsyncZpty {
@@ -44,7 +45,8 @@ impl AsyncRead for AsyncZpty {
         loop {
             let mut guard = ready!(self.inner.poll_read_ready(cx))?;
             let unfilled = buf.initialize_unfilled();
-            match guard.try_io(|inner| inner.get_ref().read(unfilled)) {
+            let result = guard.try_io(|inner| inner.get_ref().read(unfilled));
+            match result {
                 Ok(Ok(len)) => {
                     buf.advance(len);
                     return Poll::Ready(Ok(()));
@@ -60,7 +62,8 @@ impl AsyncWrite for AsyncZpty {
     fn poll_write(self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &[u8]) -> Poll<std::io::Result<usize>> {
         loop {
             let mut guard = ready!(self.inner.poll_write_ready(cx))?;
-            match guard.try_io(|inner| inner.get_ref().write(buf)) {
+            let result = guard.try_io(|inner| inner.get_ref().write(buf));
+            match result {
                 Ok(result) => return Poll::Ready(result),
                 Err(_would_block) => continue,
             }
@@ -88,7 +91,7 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64();
     let name = format!("zpty-{time}");
     let opts = crate::shell::ZptyOpts{
-        echo_input: args.echo_input,
+        echo_input: !args.no_echo_input,
         non_blocking: true,
     };
     let zpty = ui.shell.zpty(name.into(), cmd.into(), opts).await?;
@@ -97,11 +100,9 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     // so we dup the fd to one we own instead
     let pty = crate::utils::dup_fd(unsafe{ std::os::fd::BorrowedFd::borrow_raw(zpty.fd) })?;
     // crate::utils::set_nonblocking_fd(&pty)?;
-    let pty = AsyncZpty{ inner: AsyncFd::new(pty.into())? };
-    let pty = ReadWriteFile{
-        inner: Some(BufStream::new(pty)),
-        is_tty_master: true,
-    };
+    let pty = Arc::new(AsyncFd::new(pty.into())?);
+    let stdin = WriteableFile(Some(BufWriter::new(AsyncZpty{ inner: pty.clone() })));
+    let stdout = ReadableFile(Some(BufReader::new(AsyncZpty{ inner: pty })), true);
 
     let pid = zpty.pid;
     tokio::task::spawn(async move {
@@ -125,6 +126,7 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
             pid,
             result: super::CommandResult{ inner: receiver },
         },
-        pty,
+        stdin,
+        stdout,
     ))?)
 }
