@@ -136,6 +136,11 @@ fn time(_lua: &Lua, (): ()) -> LuaResult<f64> {
     Ok(SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64())
 }
 
+async fn sleep(_lua: Lua, seconds: f64) -> LuaResult<()> {
+    tokio::time::sleep(std::time::Duration::from_secs_f64(seconds)).await;
+    Ok(())
+}
+
 async fn lua_try(lua: Lua, (func, catch, finally): (LuaFunction, Option<LuaFunction>, Option<LuaFunction>)) -> LuaResult<LuaMultiValue> {
     let mut result = func.call_async(()).await;
 
@@ -199,6 +204,7 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_async_fn("get_cwd", get_cwd)?;
     ui.set_lua_async_fn("call_hook_func", call_hook_func)?;
     ui.set_lua_async_fn("print", print)?;
+    ui.get_lua_api()?.set("sleep", ui.lua.create_async_function(sleep)?)?;
     ui.get_lua_api()?.set("time", ui.lua.create_function(time)?)?;
     ui.get_lua_api()?.set("try", ui.lua.create_async_function(lua_try)?)?;
     ui.set_lua_async_fn("__laggy", __laggy)?;
