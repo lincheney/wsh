@@ -298,6 +298,7 @@ impl<T> Text<T> {
         let borders = if let Some((block, ref mut buffer)) = block {
             // 3 lines in case you have borders
             buffer.resize(Rect{ height: 3, ..area });
+            buffer.reset();
             block.render_ref(buffer.area, buffer);
             let inner_area = block.inner(buffer.area);
             // since the border buffer height is different, the inner height will be wrong
