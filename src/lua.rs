@@ -63,20 +63,20 @@ fn set_cursor(ui: &Ui, _lua: &Lua, val: usize) -> Result<()> {
 
 async fn set_buffer(ui: Ui, _lua: Lua, (val, len): (mlua::String, Option<usize>)) -> Result<()> {
     ui.get().borrow_mut().buffer.splice_at_cursor(&val.as_bytes(), len);
-    ui.trigger_buffer_change_callbacks(()).await;
+    ui.trigger_buffer_change_callbacks().await;
     Ok(())
 }
 
 async fn undo_buffer(ui: Ui, _lua: Lua, (): ()) -> Result<()> {
     if ui.get().borrow_mut().buffer.move_in_history(false) {
-        ui.trigger_buffer_change_callbacks(()).await;
+        ui.trigger_buffer_change_callbacks().await;
     }
     Ok(())
 }
 
 async fn redo_buffer(ui: Ui, _lua: Lua, (): ()) -> Result<()> {
     if ui.get().borrow_mut().buffer.move_in_history(true) {
-        ui.trigger_buffer_change_callbacks(()).await;
+        ui.trigger_buffer_change_callbacks().await;
     }
     Ok(())
 }

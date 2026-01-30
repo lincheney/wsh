@@ -90,7 +90,7 @@ async fn insert_completion(ui: Ui, _lua: Lua, val: Match) -> Result<()> {
         ui.buffer.insert_or_set(Some(new_buffer.as_ref()), Some(new_pos));
     }
 
-    ui.trigger_buffer_change_callbacks(()).await;
+    ui.trigger_buffer_change_callbacks().await;
     ui.queue_draw();
     Ok(())
 }

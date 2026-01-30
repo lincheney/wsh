@@ -61,7 +61,7 @@ async fn goto_history_internal(ui: Ui, index: HistoryIndex) {
         new_buffer.is_some()
     };
     if changed {
-        ui.trigger_buffer_change_callbacks(()).await;
+        ui.trigger_buffer_change_callbacks().await;
     }
 }
 

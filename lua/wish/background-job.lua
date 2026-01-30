@@ -154,14 +154,14 @@ function M.focus_next_job(exit_key)
     local msg, job = next(jobs, active_job and active_job.job.msg)
     if msg then
         active_job = active_job or {
-            key_event_id = wish.add_event_callback('key', function(arg)
-                if wish.iter(exit_key):all(function(k, v) return arg[1][k] == v end) then
+            key_event_id = wish.add_event_callback('key', function(key, data)
+                if wish.iter(exit_key):all(function(k, v) return key[k] == v end) then
                     -- run it later or the user keybind may trigger immediately
                     wish.schedule(function()
                         M.focus_next_job(exit_key)
                     end)
                 else
-                    active_job.job.proc.stdin:write(arg[2])
+                    active_job.job.proc.stdin:write(data)
                 end
             end),
             keymap_layer = wish.add_keymap_layer(true),

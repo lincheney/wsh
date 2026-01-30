@@ -145,7 +145,7 @@ impl Ui {
     }
 
     pub async fn start_cmd(&self) -> Result<()> {
-        self.trigger_precmd_callbacks(()).await;
+        self.trigger_precmd_callbacks().await;
         self.draw().await
     }
 
@@ -222,7 +222,7 @@ impl Ui {
 
     pub async fn handle_event(&mut self, event: Event, event_buffer: BString) -> Result<bool> {
         if let Event::Key(event) = event {
-            self.trigger_key_callbacks((event.into(), event_buffer.clone())).await;
+            self.trigger_key_callbacks(&event.into(), &event_buffer).await;
             if let Some(result) = self.handle_key(event, event_buffer.as_ref()).await {
                 return result
             }
@@ -235,7 +235,7 @@ impl Ui {
     pub async fn handle_window_resize(&self, width: u32, height: u32) -> Result<bool> {
         self.get().borrow_mut().size = (width, height);
         self.queue_draw();
-        self.trigger_window_resize_callbacks((width, height)).await;
+        self.trigger_window_resize_callbacks(&width, &height).await;
         Ok(true)
     }
 
@@ -330,7 +330,7 @@ impl Ui {
 
         // time to execute
         if let Some(buffer) = buffer {
-            self.trigger_accept_line_callbacks(()).await;
+            self.trigger_accept_line_callbacks().await;
             {
                 let lock = self.has_foreground_process.lock().await;
                 // last draw
@@ -348,7 +348,7 @@ impl Ui {
 
         } else {
             self.get().borrow_mut().buffer.insert_at_cursor(b"\n");
-            self.trigger_buffer_change_callbacks(()).await;
+            self.trigger_buffer_change_callbacks().await;
             self.draw().await?;
         }
 
@@ -572,7 +572,7 @@ impl Ui {
                 }
 
                 if buffer.is_some() {
-                    self.trigger_buffer_change_callbacks(()).await;
+                    self.trigger_buffer_change_callbacks().await;
                 }
                 // anything could have happened, so trigger a redraw
                 self.queue_draw();
@@ -601,7 +601,7 @@ impl Ui {
                     let mut ui = this.borrow_mut();
                     ui.buffer.insert_at_cursor(c.encode_utf8(&mut buf).as_bytes());
                 }
-                self.trigger_buffer_change_callbacks(()).await;
+                self.trigger_buffer_change_callbacks().await;
                 self.queue_draw();
             },
 
@@ -610,7 +610,7 @@ impl Ui {
             },
 
             Event::BracketedPaste(data) => {
-                self.trigger_paste_callbacks(data).await;
+                self.trigger_paste_callbacks(&data).await;
             },
 
             _ => (),
