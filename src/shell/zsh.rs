@@ -397,7 +397,10 @@ pub fn call_hook_func<'a, I: Iterator<Item=&'a MetaStr>>(name: &'a MetaStr, args
     let args = linked_list::LinkedList::new_from_ptrs(args);
 
     let mut list = args.as_linkroot();
-    unsafe {
-        Some(zsh_sys::callhookfunc(name.as_ptr().cast_mut(), &raw mut list, 1, null_mut()))
+    let mut retval = 0;
+    if unsafe{ zsh_sys::callhookfunc(name.as_ptr().cast_mut(), &raw mut list, 1, &raw mut retval) } != 0 {
+        None
+    } else {
+        Some(retval)
     }
 }
