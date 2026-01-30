@@ -7,7 +7,7 @@ pub mod array;
 #[macro_export]
 macro_rules! meta_str {
     ($arg:literal) => {
-        MetaStr::new($arg)
+        crate::shell::MetaStr::new($arg)
     }
 }
 
