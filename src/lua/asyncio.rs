@@ -45,11 +45,6 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     let tbl = ui.lua.create_table()?;
     ui.get_lua_api()?.set("async", &tbl)?;
 
-    tbl.set("sleep", ui.lua.create_async_function(|_, secs: f64| async move {
-        tokio::time::sleep(std::time::Duration::from_secs_f64(secs)).await;
-        Ok(())
-    })?)?;
-
     // this exists bc mlua calls coroutine.resume all the time so we can't use it
     tbl.set("promise", ui.lua.create_function(|lua, ()| {
         let (sender, receiver) = tokio::sync::oneshot::channel();

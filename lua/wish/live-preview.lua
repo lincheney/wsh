@@ -26,7 +26,7 @@ local function debounce(delay, func)
             wish.schedule(function()
                 local wait = delay
                 while wait > 0 do
-                    wish.async.sleep(wait)
+                    wish.sleep(wait)
                     wait = next_call - wish.time()
                 end
                 next_call = nil

@@ -252,7 +252,7 @@ wish.add_event_callback('paste', function(data)
         wish.redraw{buffer = true}
 
         wish.schedule(function()
-            wish.async.sleep(0.5)
+            wish.sleep(0.5)
             if clear_paste == id then
                 wish.clear_buf_highlights(PASTE_NS)
                 wish.redraw{buffer = true}
