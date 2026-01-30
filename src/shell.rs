@@ -353,12 +353,12 @@ crate::TokioActor! {
             history::History::goto(&self, index, skipdups);
         }
 
-        pub fn append_history(&self, text: BString) {
-            history::History::append(&self, text);
+        pub fn append_history(&self, text: BString) -> Result<()> {
+            history::History::append(&self, text)
         }
 
-        pub fn append_history_words(&self, words: Vec<BString>) {
-            history::History::append_words(&self, words);
+        pub fn append_history_words(&self, words: Vec<BString>) -> Result<()> {
+            history::History::append_words(&self, words)
         }
 
         pub fn expandhistory(&self, buffer: BString) -> Option<BString> {
@@ -443,7 +443,7 @@ crate::TokioActor! {
             zsh::unqueue_signals()
         }
 
-        pub fn call_hook_func(&self, name: MetaString, args: Vec<MetaString>) -> Option<c_int> {
+        pub fn call_hook_func(&self, name: Cow<'static, MetaStr>, args: Vec<MetaString>) -> Option<c_int> {
             // needs metafy
             zsh::call_hook_func(name.as_ref(), args.iter().map(|x| x.as_ref()))
         }

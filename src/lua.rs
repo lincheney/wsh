@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::str::FromStr;
 use serde::{Deserialize, Deserializer, de};
 use bstr::BString;
@@ -120,7 +121,7 @@ async fn get_cwd(ui: Ui, _lua: Lua, (): ()) -> Result<BString> {
 async fn call_hook_func(ui: Ui, _lua: Lua, mut args: Vec<BString>) -> Result<Option<i32>> {
     let arg0 = args.remove(0);
     ui.freeze_if(true, true, async {
-        ui.shell.call_hook_func(arg0.into(), args.into_iter().map(|x| x.into()).collect()).await
+        ui.shell.call_hook_func(Cow::Owned(arg0.into()), args.into_iter().map(|x| x.into()).collect()).await
     }).await
 }
 
