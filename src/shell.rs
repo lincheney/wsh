@@ -350,15 +350,15 @@ crate::TokioActor! {
         }
 
         pub fn goto_history(&self, index: history::HistoryIndex, skipdups: bool) {
-            history::History::goto(&self, index, skipdups);
+            history::History::goto(self, index, skipdups);
         }
 
         pub fn append_history(&self, text: BString) -> Result<()> {
-            history::History::append(&self, text)
+            history::History::append(self, text)
         }
 
         pub fn append_history_words(&self, words: Vec<BString>) -> Result<()> {
-            history::History::append_words(&self, words)
+            history::History::append_words(self, words)
         }
 
         pub fn expandhistory(&self, buffer: BString) -> Option<BString> {
