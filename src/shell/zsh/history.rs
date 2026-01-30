@@ -1,9 +1,11 @@
+use anyhow::Result;
 use std::cmp::Ordering;
 use std::os::raw::c_long;
 use std::ptr::NonNull;
 use std::marker::PhantomData;
 use bstr::{BString};
-use super::{MetaStr};
+use crate::shell::ShellInternal;
+use super::{MetaStr, Variable};
 
 #[derive(Debug)]
 pub struct Entry {
@@ -45,11 +47,11 @@ pub enum HistoryIndex {
 
 pub struct History<'a> {
     ring: Option<EntryPtr<'a>>,
-    _shell: &'a crate::shell::ShellInternal,
+    _shell: &'a ShellInternal,
 }
 
 impl<'a> History<'a> {
-    pub fn goto(index: HistoryIndex, skipdups: bool) {
+    pub fn goto(_shell: &ShellInternal, index: HistoryIndex, skipdups: bool) {
         // no idea what the return value means
         match index {
             HistoryIndex::Absolute(index) => unsafe{ super::zle_goto_hist(index, 0, skipdups.into()) },
@@ -57,7 +59,7 @@ impl<'a> History<'a> {
         };
     }
 
-    pub fn get(shell: &'a crate::shell::ShellInternal) -> Self {
+    pub fn get(shell: &'a ShellInternal) -> Self {
         Self{
             ring: EntryPtr::new(unsafe{ zsh_sys::hist_ring }),
             _shell: shell,
@@ -99,6 +101,38 @@ impl<'a> History<'a> {
             unsafe{ super::histline = 0; }
             None
         }
+    }
+
+    fn append_internal<T: Into<super::variables::Value>>(value: T, name: &MetaStr, cmd: &MetaStr) -> Result<()> {
+        unsafe {
+            let is_cur_hist = zsh_sys::curhist == super::histline as _;
+
+            zsh_sys::startparamscope();
+            Variable::set(name, value.into(), true).unwrap();
+            let ret = super::execstring(cmd, Default::default());
+            zsh_sys::endparamscope();
+
+            if ret != 0 {
+                anyhow::bail!("failed to add to history");
+            }
+
+            // reset histline if necessary
+            // print -s/-S doesn't do this for us
+            if is_cur_hist {
+                super::histline = zsh_sys::curhist as _;
+            }
+        }
+        Ok(())
+    }
+
+    pub fn append_words(_shell: &ShellInternal, words: Vec<BString>) -> Result<()> {
+        // make an array of the words and pass to print -s
+        Self::append_internal(words, meta_str!(c"__hist"), meta_str!(c"print -s \"${__hist[@]}\""))
+    }
+
+    pub fn append(_shell: &ShellInternal, text: BString) -> Result<()> {
+        // make a string and pass to print -S
+        Self::append_internal(text, meta_str!(c"__hist"), meta_str!(c"print -s \"$__hist}\""))
     }
 
 }

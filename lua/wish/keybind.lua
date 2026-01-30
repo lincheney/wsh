@@ -216,11 +216,7 @@ end)
 wish.set_keymap('<a-a>', function()
     -- run in the background
     local buffer = wish.get_buffer()
-    wish.in_param_scope(function()
-        wish.unset_var('BUFFER')
-        wish.set_var('BUFFER', buffer)
-        wish.cmd{args=[[print -S "$BUFFER"]], foreground=false}.wait()
-    end)
+    wish.append_history(buffer)
     wish.trigger_event_callback('accept_line')
     wish.call_hook_func{'preexec', buffer}
     wish.set_cursor(0)

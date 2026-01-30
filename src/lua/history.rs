@@ -1,3 +1,4 @@
+use bstr::BString;
 use crate::lua::{HasEventCallbacks};
 use anyhow::Result;
 use mlua::{prelude::*};
@@ -72,12 +73,24 @@ async fn goto_history_relative(ui: Ui, _lua: Lua, val: i32) -> Result<()> {
     Ok(())
 }
 
+async fn append_history(ui: Ui, _lua: Lua, val: BString) -> Result<()> {
+    ui.shell.append_history(val).await;
+    Ok(())
+}
+
+async fn append_history_words(ui: Ui, _lua: Lua, val: Vec<BString>) -> Result<()> {
+    ui.shell.append_history_words(val).await;
+    Ok(())
+}
+
 pub fn init_lua(ui: &Ui) -> Result<()> {
 
     ui.set_lua_async_fn("get_history", get_history)?;
     ui.set_lua_async_fn("get_history_index", get_history_index)?;
     ui.set_lua_async_fn("goto_history", goto_history)?;
     ui.set_lua_async_fn("goto_history_relative", goto_history_relative)?;
+    ui.set_lua_async_fn("append_history", append_history)?;
+    ui.set_lua_async_fn("append_history_words", append_history_words)?;
 
     Ok(())
 }
