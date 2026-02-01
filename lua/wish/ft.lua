@@ -41,13 +41,19 @@ function M.activate()
                 return
             end
 
+            local smartcase = data:find('^[a-z]$') and '['..data..data:upper()..']'
             local buffer = wish.get_buffer()
             local cursor = wish.get_cursor()
             cursor = wish.str.to_byte_pos(buffer, cursor) or #buffer - 1
             local matches = {}
             local start = 1
+            local s, e
             while start <= #buffer do
-                local s, e = buffer:find(data, start, true)
+                if smartcase then
+                    s, e = buffer:find(smartcase, start)
+                else
+                    s, e = buffer:find(data, start, true)
+                end
                 if not s then
                     break
                 end
