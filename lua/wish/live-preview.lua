@@ -1,7 +1,7 @@
 local M = {}
 
 local active = false
-local msg = wish.set_ansi_message{
+local msg = wish.set_message{
     hidden = true,
     persist = true,
     dim = true,
@@ -40,7 +40,7 @@ local function preview(buffer)
 
     if not buffer:find('%S') then
         current_preview = nil
-        wish.set_ansi_message{id = msg, hidden = true}
+        wish.set_message{id = msg, hidden = true}
         wish.redraw()
         return
     end
@@ -87,11 +87,11 @@ local function preview(buffer)
             -- clear old msg
             if self.need_clear then
                 self.need_clear = false
-                wish.clear_ansi_message(msg)
+                wish.clear_message(msg)
             end
 
             wish.feed_ansi_message(msg, value)
-            wish.set_ansi_message{
+            wish.set_message{
                 id = msg,
                 hidden = false,
                 border = {
@@ -115,7 +115,7 @@ end)
 local function stop()
     wish.remove_event_callback(buffer_change_callback)
     wish.remove_event_callback(accept_line_callback)
-    wish.set_ansi_message{id = msg, hidden = true}
+    wish.set_message{id = msg, hidden = true}
     active = false
     wish.redraw()
 end

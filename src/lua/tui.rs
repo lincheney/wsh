@@ -74,13 +74,6 @@ pub struct WidgetOptions {
     pub text: Option<TextParts>,
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-pub struct AnsiWidgetOptions {
-    #[serde(flatten)]
-    options: CommonWidgetOptions,
-}
-
 #[derive(Clone, Copy, Debug, Default, strum::EnumString)]
 pub enum BorderSide {
     Top,
@@ -316,7 +309,6 @@ async fn set_message(ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
     };
 
     if let Some(options) = options {
-        let widget = widget.as_mut();
         if let Some(text) = options.text {
             parse_text_parts(text, &mut widget.inner);
         }
@@ -402,34 +394,13 @@ async fn add_buf_highlight_namespace(ui: Ui, _lua: Lua, _val: ()) -> Result<usiz
     Ok(ui.buffer.highlight_counter)
 }
 
-async fn set_ansi_message(ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
-    let ui = ui.get();
-    let options: Option<AnsiWidgetOptions> = lua.from_value(val)?;
-
-    let tui = &mut ui.borrow_mut().tui;
-    let (id, widget): (_, &mut tui::WidgetWrapper) = match options.as_ref().and_then(|o| o.options.id).map(|id| (id, tui.get_mut(id))) {
-        Some((id, Some(widget))) => (id, widget),
-        None => {
-            let widget = tui::ansi::Parser::default();
-            tui.add(widget.into())
-        },
-        Some((id, None)) => anyhow::bail!("can't find widget with id {}", id),
-    };
-
-    if let Some(options) = options {
-        set_widget_options(widget.as_mut(), options.options);
-    }
-    tui.dirty = true;
-    Ok(id)
-}
-
 async fn feed_ansi_message(ui: Ui, _lua: Lua, (id, value): (usize, LuaString)) -> Result<()> {
     let ui = ui.get();
     let tui = &mut ui.borrow_mut().tui;
 
     match tui.get_mut(id) {
-        Some(tui::WidgetWrapper::Ansi(parser)) => {
-            parser.feed((&*value.as_bytes()).into());
+        Some(widget) => {
+            widget.feed_ansi((&*value.as_bytes()).into());
             tui.dirty = true;
             Ok(())
         },
@@ -437,13 +408,13 @@ async fn feed_ansi_message(ui: Ui, _lua: Lua, (id, value): (usize, LuaString)) -
     }
 }
 
-async fn clear_ansi_message(ui: Ui, _lua: Lua, id: usize) -> Result<()> {
+async fn clear_message(ui: Ui, _lua: Lua, id: usize) -> Result<()> {
     let ui = ui.get();
     let tui = &mut ui.borrow_mut().tui;
 
     match tui.get_mut(id) {
-        Some(tui::WidgetWrapper::Ansi(parser)) => {
-            parser.clear();
+        Some(widget) => {
+            widget.clear();
             tui.dirty = true;
             Ok(())
         },
@@ -456,7 +427,7 @@ async fn get_message_text(ui: Ui, _lua: Lua, id: usize) -> Result<Vec<BString>> 
     let tui = &ui.borrow().tui;
 
     match tui.get(id) {
-        Some(msg) => Ok(msg.as_ref().inner.get().into()),
+        Some(msg) => Ok(msg.inner.get().into()),
         _ => anyhow::bail!("can't find widget with id {}", id),
     }
 }
@@ -502,9 +473,8 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_async_fn("add_buf_highlight_namespace", add_buf_highlight_namespace)?;
     ui.set_lua_async_fn("add_buf_highlight", add_buf_highlight)?;
     ui.set_lua_async_fn("clear_buf_highlights", clear_buf_highlights)?;
-    ui.set_lua_async_fn("set_ansi_message", set_ansi_message)?;
     ui.set_lua_async_fn("feed_ansi_message", feed_ansi_message)?;
-    ui.set_lua_async_fn("clear_ansi_message", clear_ansi_message)?;
+    ui.set_lua_async_fn("clear_message", clear_message)?;
     ui.set_lua_async_fn("get_message_text", get_message_text)?;
     ui.set_lua_async_fn("message_to_ansi_string", message_to_ansi_string)?;
     ui.set_lua_async_fn("set_status_bar", set_status_bar)?;

@@ -4,6 +4,7 @@ use bstr::{BStr, BString, ByteSlice};
 use ratatui::{
     style::*,
 };
+use crate::tui::text::Text;
 
 const TAB_SIZE: usize = 8;
 
@@ -23,7 +24,6 @@ pub struct Parser {
     buffer: BString,
     style: Style,
     state: State,
-    pub(super) widget: super::widget::Widget,
     cursor_x: usize,
     need_newline: bool,
     pub ocrnl: bool,
@@ -142,25 +142,21 @@ fn parse_ansi_col(mut style: Style, string: &BStr) -> Style {
 
 impl Parser {
 
-    pub fn as_widget(&mut self) -> &mut super::widget::Widget {
-        &mut self.widget
-    }
-
-    fn add_line(&mut self) {
-        self.widget.inner.push_line(b"".into(), None);
+    fn add_line(&mut self, text: &mut Text) {
+        text.push_line(b"".into(), None);
         self.cursor_x = 0;
         self.need_newline = false;
     }
 
-    fn add_buffer(&mut self) {
+    fn add_buffer(&mut self, text: &mut Text) {
         if !self.buffer.is_empty() {
-            self.add_str(self.buffer.to_string());
+            self.add_str(text, self.buffer.to_string());
             self.buffer.clear();
         }
     }
 
-    fn to_byte_pos(&self, pos: usize) -> usize {
-        let line = self.widget.inner.get().last().unwrap();
+    fn to_byte_pos(&self, text: &Text, pos: usize) -> usize {
+        let line = text.get().last().unwrap();
         let mut width = 0;
         let mut byte_pos = 0;
         for (s, _, c) in line.grapheme_indices().chain(std::iter::once((line.len(), line.len(), " "))) {
@@ -172,42 +168,42 @@ impl Parser {
         byte_pos
     }
 
-    fn splice(&mut self, range: Option<Range<usize>>, replace_with: Option<String>, style: Option<Style>) {
+    fn splice(&mut self, text: &mut Text, range: Option<Range<usize>>, replace_with: Option<String>, style: Option<Style>) {
         let style = style.map(|s| s.into());
 
-        let lineno = self.widget.inner.len() - 1;
-        let len = self.widget.inner.get()[lineno].len();
+        let lineno = text.len() - 1;
+        let len = text.get()[lineno].len();
 
         let range = match (range, &replace_with) {
             (Some(range), _) => range,
             (None, Some(replace_with)) => {
                 // calculate the range based on the cursor
-                self.to_byte_pos(self.cursor_x) .. self.to_byte_pos(self.cursor_x + replace_with.width()).min(len)
+                self.to_byte_pos(text, self.cursor_x) .. self.to_byte_pos(text, self.cursor_x + replace_with.width()).min(len)
             },
             (None, None) => return,
         };
 
-        self.widget.inner.delete_str(lineno, range.start, range.end - range.start);
+        text.delete_str(lineno, range.start, range.end - range.start);
         if let Some(replace_with) = replace_with {
-            self.widget.inner.insert_str(replace_with.as_str().into(), lineno, range.start, style);
+            text.insert_str(replace_with.as_str().into(), lineno, range.start, style);
         }
     }
 
-    fn add_str(&mut self, string: String) {
+    fn add_str(&mut self, text: &mut Text, string: String) {
         if string.is_empty() {
             return
         }
 
-        if self.need_newline || self.widget.inner.get().is_empty() {
-            self.add_line();
+        if self.need_newline || text.get().is_empty() {
+            self.add_line(text);
         }
 
         let width = string.width();
-        self.splice(None, Some(string), Some(self.style));
+        self.splice(text, None, Some(string), Some(self.style));
         self.cursor_x += width;
     }
 
-    pub fn feed(&mut self, string: &BStr) {
+    pub fn feed(&mut self, text: &mut Text, string: &BStr) {
         // we support some csi styling, newlines, tabs and normal text and that's about it
 
         for c in string.iter() {
@@ -230,22 +226,22 @@ impl Parser {
                     let param = if param.is_empty() { b"0" } else { param };
                     let param = std::str::from_utf8(param).unwrap().parse::<usize>().unwrap();
 
-                    if let Some(last_line) = self.widget.inner.get().last() {
-                        let cursor_x = self.to_byte_pos(self.cursor_x);
+                    if let Some(last_line) = text.get().last() {
+                        let cursor_x = self.to_byte_pos(text, self.cursor_x);
                         match param {
                             0 => {
                                 let range = cursor_x .. last_line.len();
-                                self.splice(Some(range), None, Some(Style::new()));
+                                self.splice(text, Some(range), None, Some(Style::new()));
                             },
                             1 => {
                                 let range = 0 .. cursor_x;
                                 let replace_with = " ".repeat(self.cursor_x);
-                                self.splice(Some(range), Some(replace_with), Some(Style::new()));
+                                self.splice(text, Some(range), Some(replace_with), Some(Style::new()));
                             },
                             2 => {
                                 let range = 0 .. last_line.len();
                                 let replace_with = " ".repeat(self.cursor_x);
-                                self.splice(Some(range), Some(replace_with), Some(Style::new()));
+                                self.splice(text, Some(range), Some(replace_with), Some(Style::new()));
                             },
                             _ => (),
                         }
@@ -268,12 +264,12 @@ impl Parser {
                 (State::Esc, _) => State::None,
 
                 (State::None, b'\n') => {
-                    self.add_buffer();
+                    self.add_buffer(text);
                     self.need_newline = true;
                     State::None
                 },
                 (State::None, b'\r') => {
-                    self.add_buffer();
+                    self.add_buffer(text);
                     if self.ocrnl {
                         self.need_newline = true;
                     } else {
@@ -282,9 +278,9 @@ impl Parser {
                     State::None
                 },
                 (State::None, b'\t') => {
-                    self.add_buffer();
+                    self.add_buffer(text);
                     let len = TAB_SIZE - self.cursor_x % TAB_SIZE;
-                    self.add_str(" ".repeat(len));
+                    self.add_str(text, " ".repeat(len));
                     State::None
                 },
                 (State::None, 0..0x7f) if !(b' '..b'~').contains(c) => {
@@ -298,29 +294,20 @@ impl Parser {
             };
 
             if old_state == State::None && self.state != State::None {
-                self.add_buffer();
+                self.add_buffer(text);
             }
         }
 
         if self.state == State::None {
-            self.add_buffer();
+            self.add_buffer(text);
         }
     }
 
     pub fn clear(&mut self) {
-        self.widget.inner.clear();
         self.buffer.clear();
         self.state = State::None;
         self.cursor_x = 0;
         self.need_newline = false;
     }
 
-}
-
-impl From<&[u8]> for Parser {
-    fn from(val: &[u8]) -> Self {
-        let mut parser = Self::default();
-        parser.feed(val.into());
-        parser
-    }
 }

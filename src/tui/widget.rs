@@ -1,3 +1,4 @@
+use bstr::BStr;
 use std::default::Default;
 use std::io::{Write};
 use ratatui::{
@@ -6,6 +7,7 @@ use ratatui::{
     style::*,
     buffer::Buffer,
 };
+mod ansi;
 
 #[derive(Default, Debug, Clone, Copy)]
 pub enum UnderlineOption {
@@ -91,7 +93,7 @@ impl StyleOptions {
 }
 
 #[derive(Default, Debug)]
-pub struct Widget{
+pub struct Widget {
     pub(super) id: usize,
     pub constraint: Option<Constraint>,
     pub inner: super::text::Text,
@@ -106,6 +108,7 @@ pub struct Widget{
     pub hidden: bool,
     pub(super) line_count: u16,
     // text_overrides_style: bool,
+    pub(super) ansi: ansi::Parser,
 }
 
 impl Widget {
@@ -152,6 +155,15 @@ impl Widget {
             height = height.min(max_height);
         }
         height
+    }
+
+    pub fn feed_ansi(&mut self, string: &BStr) {
+        self.ansi.feed(&mut self.inner, string)
+    }
+
+    pub fn clear(&mut self) {
+        self.inner.clear();
+        self.ansi.clear();
     }
 
 }

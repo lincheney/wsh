@@ -85,7 +85,7 @@ end
 function M.run_in_background(command)
     wish.schedule(function()
 
-        local msg = wish.set_ansi_message{
+        local msg = wish.set_message{
             persist = true,
             height = 'max:7',
             border = {

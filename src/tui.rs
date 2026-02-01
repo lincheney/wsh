@@ -19,9 +19,9 @@ mod drawer;
 mod wrap;
 mod scroll;
 pub mod widget;
+pub use widget::Widget;
 pub mod command_line;
 pub mod status_bar;
-pub mod ansi;
 pub mod text;
 pub use drawer::{Drawer, Canvas};
 
@@ -69,55 +69,20 @@ fn buffer_nonempty_height(buffer: &Buffer) -> u16 {
     buffer.area.height - trailing_empty_lines as u16
 }
 
-#[derive(Debug)]
-pub enum WidgetWrapper {
-    Widget(widget::Widget),
-    Ansi(ansi::Parser),
-}
-
-impl WidgetWrapper {
-    pub fn as_ref(&self) -> &widget::Widget {
-        match self {
-            Self::Widget(w) => w,
-            Self::Ansi(p) => &p.widget,
-        }
-    }
-
-    pub fn as_mut(&mut self) -> &mut widget::Widget {
-        match self {
-            Self::Widget(w) => w,
-            Self::Ansi(p) => p.as_widget(),
-        }
-    }
-}
-
-impl From<widget::Widget> for WidgetWrapper {
-    fn from(widget: widget::Widget) -> Self {
-        Self::Widget(widget)
-    }
-}
-
-impl From<ansi::Parser> for WidgetWrapper {
-    fn from(parser: ansi::Parser) -> Self {
-        Self::Ansi(parser)
-    }
-}
-
 #[derive(Default)]
 struct Widgets {
-    inner: Vec<WidgetWrapper>,
+    inner: Vec<widget::Widget>,
     pub height: u16,
 }
 
 impl Widgets {
     fn get_height(&self) -> u16 {
-        self.inner.iter().map(|w| w.as_ref().line_count).sum()
+        self.inner.iter().map(|w| w.line_count).sum()
     }
 
     fn refresh(&mut self, area: Rect) {
         let mut height = 0;
         for w in &mut self.inner {
-            let w = w.as_mut();
             if w.hidden || area.height <= height as _ {
                 w.line_count = 0;
             } else {
@@ -134,7 +99,7 @@ impl Widgets {
         area: Rect,
     ) -> std::io::Result<()> {
 
-        let widgets = self.inner.iter().map(|w| w.as_ref()).filter(|w| !w.hidden && w.line_count > 0);
+        let widgets = self.inner.iter().filter(|w| !w.hidden && w.line_count > 0);
         let layout = Layout::vertical(widgets.clone().map(|w| w.constraint.unwrap_or(Constraint::Max(w.line_count))));
         let layouts = layout.split(area);
 
@@ -162,16 +127,16 @@ impl Tui {
         (self.buffer.area.width, self.buffer.area.height)
     }
 
-    pub fn add(&mut self, mut widget: WidgetWrapper) -> (usize, &mut WidgetWrapper) {
+    pub fn add(&mut self, mut widget: Widget) -> (usize, &mut Widget) {
         let id = self.counter;
-        widget.as_mut().id = id;
+        widget.id = id;
         self.counter += 1;
         self.dirty = true;
         self.widgets.inner.push(widget);
         (id, self.widgets.inner.last_mut().unwrap())
     }
 
-    pub fn add_message(&mut self, message: &str) -> (usize, &mut WidgetWrapper) {
+    pub fn add_message(&mut self, message: &str) -> (usize, &mut Widget) {
         let mut widget = widget::Widget::default();
         widget.inner.clear();
         for line in message.split('\n') {
@@ -180,7 +145,7 @@ impl Tui {
         self.add(widget.into())
     }
 
-    pub fn add_error_message(&mut self, message: &str) -> (usize, &mut WidgetWrapper) {
+    pub fn add_error_message(&mut self, message: &str) -> (usize, &mut Widget) {
         let mut widget = widget::Widget::default();
         widget.inner.clear();
         for line in message.split('\n') {
@@ -189,16 +154,16 @@ impl Tui {
         self.add(widget.into())
     }
 
-    pub fn add_zle_message(&mut self, message: &[u8]) -> (usize, &mut WidgetWrapper) {
-        let mut parser = ansi::Parser::default();
-        parser.ocrnl = true; // treat \r as \n
-        parser.feed(message.into());
-        self.add(parser.widget.into())
+    pub fn add_zle_message(&mut self, message: &[u8]) -> (usize, &mut Widget) {
+        let mut widget = widget::Widget::default();
+        widget.ansi.ocrnl = true; // treat \r as \n
+        widget.feed_ansi(message.into());
+        self.add(widget)
     }
 
     pub fn get_index(&self, id: usize) -> Option<usize> {
         for (i, w) in self.widgets.inner.iter().enumerate() {
-            match w.as_ref().id.cmp(&id) {
+            match w.id.cmp(&id) {
                 std::cmp::Ordering::Equal => return Some(i),
                 std::cmp::Ordering::Greater => break,
                 std::cmp::Ordering::Less => (),
@@ -207,20 +172,20 @@ impl Tui {
         None
     }
 
-    pub fn get(&self, id: usize) -> Option<&WidgetWrapper> {
+    pub fn get(&self, id: usize) -> Option<&Widget> {
         self.get_index(id).map(|i| {
             &self.widgets.inner[i]
         })
     }
 
-    pub fn get_mut(&mut self, id: usize) -> Option<&mut WidgetWrapper> {
+    pub fn get_mut(&mut self, id: usize) -> Option<&mut Widget> {
         self.get_index(id).map(|i| {
             self.dirty = true;
             &mut self.widgets.inner[i]
         })
     }
 
-    pub fn remove(&mut self, id: usize) -> Option<WidgetWrapper> {
+    pub fn remove(&mut self, id: usize) -> Option<Widget> {
         self.get_index(id).map(|i| {
             self.dirty = true;
             self.widgets.inner.remove(i)
@@ -229,7 +194,7 @@ impl Tui {
 
     pub fn render_to_string(&self, id: usize, width: Option<u16>) -> Option<BString> {
         self.get_index(id).map(|i| {
-            let widget = self.widgets.inner[i].as_ref();
+            let widget = &self.widgets.inner[i];
             let width = width.unwrap_or(self.buffer.area.width);
             let width = std::num::NonZero::new(width).map_or(80, |w| w.get());
 
@@ -253,7 +218,7 @@ impl Tui {
     }
 
     pub fn clear_non_persistent(&mut self) {
-        self.widgets.inner.retain(|w| w.as_ref().persist);
+        self.widgets.inner.retain(|w| w.persist);
         self.dirty = true;
     }
 

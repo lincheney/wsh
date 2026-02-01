@@ -167,7 +167,7 @@ wish.set_keymap('<a-,>', function()
 end)
 
 wish.set_keymap('<f12>', function()
-    local id = wish.set_ansi_message{
+    local id = wish.set_message{
         dim = true,
         -- border = {
             -- fg = 'blue',
