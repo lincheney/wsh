@@ -112,6 +112,16 @@ pub fn remove_invisible_chars(string: Cow<'_, MetaStr>) -> Cow<'_, MetaStr> {
     }
 }
 
+pub fn shell_quote(mut string: MetaString) -> MetaString {
+    string.modify(|string| {
+        string.replace(b"\\", b"\\\\");
+        string.replace(b"'", b"\\'");
+        string.insert_str(0, b"$'");
+        string.push_str(b"'");
+    });
+    string
+}
+
 pub fn control_c() -> nix::Result<()> {
     nix::sys::signal::kill(nix::unistd::Pid::from_raw(0), nix::sys::signal::Signal::SIGINT)
 }
@@ -191,7 +201,7 @@ crate::TokioActor! {
         }
 
         pub fn zpty_delete(&self, name: MetaString) -> c_long {
-            let mut cmd = zsh::shell_quote(name.as_ref()).to_owned();
+            let mut cmd = shell_quote(name);
             cmd.insert_str(0, meta_str!(c"zpty -d "));
             zsh::execstring(cmd.as_ref(), Default::default())
         }

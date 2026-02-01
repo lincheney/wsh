@@ -64,8 +64,8 @@ impl MetaString {
         Self{ inner: unsafe{ CString::from_raw(ptr) } }
     }
 
-    pub fn modify<F: Fn(&mut Vec<u8>)>(&mut self, callback: F) {
-        let mut buf = std::mem::take(&mut self.inner).into_bytes();
+    pub fn modify<F: Fn(&mut BString)>(&mut self, callback: F) {
+        let mut buf = std::mem::take(&mut self.inner).into_bytes().into();
         callback(&mut buf);
         self.inner = CString::new(buf).unwrap();
     }

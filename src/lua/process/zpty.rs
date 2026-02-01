@@ -1,3 +1,4 @@
+use crate::meta_str;
 use std::sync::{Arc};
 use bstr::BString;
 use std::time::SystemTime;
@@ -87,14 +88,18 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
 
     let (sender, receiver) = watch::channel(None);
 
-    let cmd = args.args;
+    // wrap in an eval so that zpty doesn't immediately fail
+    let mut cmd = crate::shell::shell_quote(args.args.into());
+    cmd.insert_str(0, meta_str!(c"eval "));
+
     let time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64();
     let name = format!("zpty-{time}");
     let opts = crate::shell::ZptyOpts{
         echo_input: !args.no_echo_input,
         non_blocking: true,
     };
-    let zpty = ui.shell.zpty(name.into(), cmd.into(), opts).await?;
+    // TODO capture shout
+    let zpty = ui.shell.zpty(name.into(), cmd, opts).await?;
 
     // do not drop the pty fd as zsh will do it for us
     // so we dup the fd to one we own instead
