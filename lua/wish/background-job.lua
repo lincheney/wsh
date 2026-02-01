@@ -124,7 +124,7 @@ function M.run_in_background(command)
                         local marker = job.output_marker
                         wish.sleep(M.PROMPT_TIMEOUT)
                         -- marker has not changed, so output/prompt has not changed
-                        if marker == job.output_marker then
+                        if marker == job.output_marker and jobs[msg] then
                             job.waiting_for_input = true
                             update_message(job)
                         end
@@ -143,8 +143,8 @@ function M.run_in_background(command)
             update_message(job)
         end
         local output = wish.message_to_ansi_string(msg)
-        wish.remove_message(msg)
         jobs[msg] = nil
+        wish.remove_message(msg)
 
         wish.print(output)
     end)
