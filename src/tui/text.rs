@@ -210,11 +210,21 @@ impl<T> Text<T> {
         self.dirty = true;
     }
 
-    pub fn get_size(&self, width: usize, mut initial_indent: usize) -> (usize, usize) {
+    pub fn get_size<'a, I>(
+        &'a self,
+        width: usize,
+        mut initial_indent: usize,
+        extra_highlights: I,
+    ) -> (usize, usize)
+    where
+        T: 'a,
+        I: Clone + Iterator<Item=&'a HighlightedRange<T>>,
+    {
+
         let mut pos = (initial_indent, 0);
 
         for (lineno, line) in self.lines.iter().enumerate() {
-            let highlights = self.highlights.iter().filter(|h| h.lineno == lineno);
+            let highlights = self.highlights.iter().chain(extra_highlights.clone()).filter(|h| h.lineno == lineno);
             super::wrap::wrap(line.as_ref(), highlights, None, width, initial_indent, |_, _, token, _| {
                 match token {
                     WrapToken::LineBreak => {

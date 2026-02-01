@@ -55,7 +55,7 @@ impl Buffer {
     }
 
     pub fn get_size(&self, width: usize, initial_indent: usize) -> (usize, usize) {
-        self.contents.get_size(width, initial_indent)
+        self.contents.get_size(width, initial_indent, [].iter())
     }
 
     fn get_len(&mut self) -> usize {
