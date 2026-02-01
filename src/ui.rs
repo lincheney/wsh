@@ -288,11 +288,12 @@ impl Ui {
             let cursor = tokio::time::timeout(crate::timed_lock::DEFAULT_DURATION, cursor).await.unwrap().unwrap_or((0, 0));
 
             let this = self.unlocked.read();
-            let mut ui = this.borrow_mut();
+            let ui = &mut *this.borrow_mut();
             if cursor.0 != 0 {
                 queue!(ui.stdout, style::Print("\r\n"))?;
             }
             execute!(ui.stdout, style::ResetColor)?;
+            ui.cmdline.make_command_line(&mut ui.buffer).hard_reset();
             ui.dirty = true;
             Ok(true)
         }

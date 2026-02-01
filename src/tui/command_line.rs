@@ -102,6 +102,10 @@ impl CommandLine<'_> {
 
     pub fn reset(&mut self) {
         self.set_is_dirty(true);
+    }
+
+    pub fn hard_reset(&mut self) {
+        self.reset();
         self.cursor_coord = (0, 0);
         self.draw_end_pos = (0, 0);
     }
