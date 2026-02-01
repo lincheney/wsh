@@ -118,6 +118,7 @@ impl CommandLine<'_> {
                     blend: true,
                     namespace: PREDISPLAY_NS,
                     virtual_text: Some(text.clone()),
+                    conceal: None,
                 },
             });
         }

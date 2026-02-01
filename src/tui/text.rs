@@ -2,7 +2,7 @@ use std::io::{Write};
 use std::ops::Range;
 use bstr::{BStr, BString, ByteVec, ByteSlice};
 use unicode_width::UnicodeWidthStr;
-use ratatui::style::{Style, Modifier, Stylize};
+use ratatui::style::{Style};
 use ratatui::text::{Line, Span};
 use ratatui::layout::{Alignment, Rect};
 use ratatui::widgets::{Block, WidgetRef};
@@ -19,6 +19,7 @@ pub struct Highlight<T> {
     pub blend: bool,
     pub namespace: T,
     pub virtual_text: Option<BString>,
+    pub conceal: Option<bool>,
 }
 
 impl<T: Default> From<Style> for Highlight<T> {
@@ -28,6 +29,7 @@ impl<T: Default> From<Style> for Highlight<T> {
             blend: true,
             namespace: T::default(),
             virtual_text: None,
+            conceal: None,
         }
     }
 }
@@ -66,24 +68,6 @@ impl<T> HighlightedRange<T> {
     }
 }
 
-
-pub fn merge_highlights<'a, T: 'a, I: Iterator<Item=&'a Highlight<T>>>(init: Style, iter: I) -> Style {
-    let mut style = init;
-    for h in iter {
-        if !h.blend {
-            // start from scratch
-            style = Style::new();
-        }
-        let reverse = style.add_modifier.contains(Modifier::REVERSED);
-        style = style.patch(h.style);
-        if reverse == h.style.add_modifier.contains(Modifier::REVERSED) {
-            style = style.not_reversed();
-        } else {
-            style = style.reversed();
-        }
-    }
-    style
-}
 
 pub struct Scroll {
     pub show_scrollbar: bool,

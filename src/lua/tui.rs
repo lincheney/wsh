@@ -358,6 +358,7 @@ struct BufferHighlight {
     #[serde(flatten)]
     style: BufferStyleOptions,
     virtual_text: Option<BString>,
+    conceal: Option<bool>,
     namespace: Option<usize>,
 }
 
@@ -375,6 +376,7 @@ async fn add_buf_highlight(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
             style: style.as_style(),
             namespace: hl.namespace.unwrap_or(0),
             virtual_text: hl.virtual_text,
+            conceal: hl.conceal,
             blend,
         },
     });

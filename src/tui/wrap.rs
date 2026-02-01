@@ -1,10 +1,39 @@
 use std::borrow::Cow;
 use unicode_width::UnicodeWidthStr;
 use bstr::{BStr, ByteSlice};
-use ratatui::style::{Style, Color};
-use super::text::{HighlightedRange, merge_highlights};
+use ratatui::style::{Style, Color, Modifier, Stylize};
+use super::text::{HighlightedRange, Highlight};
 
 const ESCAPE_STYLE: Style = Style::new().fg(Color::Gray);
+
+pub fn merge_highlights<'a, T: 'a, I: Iterator<Item=&'a Highlight<T>>>(init: Style, iter: I) -> Style {
+    let mut style = init;
+    for h in iter {
+        if !h.blend {
+            // start from scratch
+            style = Style::new();
+        }
+        let reverse = style.add_modifier.contains(Modifier::REVERSED);
+        style = style.patch(h.style);
+        if reverse == h.style.add_modifier.contains(Modifier::REVERSED) {
+            style = style.not_reversed();
+        } else {
+            style = style.reversed();
+        }
+    }
+    style
+}
+
+pub fn merge_conceal<'a, T: 'a, I: Iterator<Item=&'a Highlight<T>>>(iter: I) -> bool {
+    let mut conceal = false;
+    for h in iter {
+        if !h.blend {
+            conceal = false;
+        }
+        conceal = h.conceal.unwrap_or(conceal);
+    }
+    conceal
+}
 
 #[derive(Debug)]
 pub enum WrapToken<'a> {
@@ -99,6 +128,7 @@ pub fn wrap<
     };
 
     for (start, end, grapheme) in line.grapheme_indices() {
+        let mut conceal = false;
 
         if highlights.clone().any(|h| h.start == start || h.end == start) {
 
@@ -109,15 +139,27 @@ pub fn wrap<
                 merge_highlights(s, highlights)
             });
 
+            conceal = merge_conceal(
+                highlights.clone()
+                    .filter(|h| h.start <= start && start < h.end)
+                    .map(|hl| &hl.inner)
+            );
+
             // virtual text
+            // use the end pos if concealed
+            // so that at least buffer will place the cursor on the
+            // end of the virt text
+            let x = if conceal { end } else { start };
             for hl in highlights.clone() {
                 if hl.start == start {
-                    pos = handle_virtual_text(hl, start, pos, &mut callback);
+                    pos = handle_virtual_text(hl, x, pos, &mut callback);
                 }
             }
         }
 
-        pos = wrap_grapheme(start, end, grapheme, line, style, max_width, pos, &mut callback);
+        if !conceal {
+            pos = wrap_grapheme(start, end, grapheme, line, style, max_width, pos, &mut callback);
+        }
     }
 
     // virtual text
