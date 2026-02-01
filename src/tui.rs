@@ -145,7 +145,7 @@ impl Tui {
         for line in message.split('\n') {
             widget.inner.push_line(line.into(), None);
         }
-        self.add(widget.into())
+        self.add(widget)
     }
 
     pub fn add_error_message(&mut self, message: &str) -> (usize, &mut Widget) {
@@ -154,7 +154,7 @@ impl Tui {
         for line in message.split('\n') {
             widget.inner.push_line(line.into(), Some(Style::new().fg(Color::Red).into()));
         }
-        self.add(widget.into())
+        self.add(widget)
     }
 
     pub fn add_zle_message(&mut self, message: &[u8]) -> (usize, &mut Widget) {

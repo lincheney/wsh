@@ -155,7 +155,7 @@ impl Parser {
         }
     }
 
-    pub fn to_byte_pos<T>(&self, text: &Text<T>, pos: usize) -> usize {
+    pub fn to_byte_pos<T>(text: &Text<T>, pos: usize) -> usize {
         let line = text.get().last().unwrap();
         let mut width = 0;
         let mut byte_pos = 0;
@@ -178,7 +178,7 @@ impl Parser {
             (Some(range), _) => range,
             (None, Some(replace_with)) => {
                 // calculate the range based on the cursor
-                self.to_byte_pos(text, self.cursor_x) .. self.to_byte_pos(text, self.cursor_x + replace_with.width()).min(len)
+                Self::to_byte_pos(text, self.cursor_x) .. Self::to_byte_pos(text, self.cursor_x + replace_with.width()).min(len)
             },
             (None, None) => return,
         };
@@ -227,7 +227,7 @@ impl Parser {
                     let param = std::str::from_utf8(param).unwrap().parse::<usize>().unwrap();
 
                     if let Some(last_line) = text.get().last() {
-                        let cursor_x = self.to_byte_pos(text, self.cursor_x);
+                        let cursor_x = Self::to_byte_pos(text, self.cursor_x);
                         match param {
                             0 => {
                                 let range = cursor_x .. last_line.len();

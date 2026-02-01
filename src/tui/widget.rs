@@ -115,7 +115,7 @@ pub struct Widget {
 impl Widget {
 
     fn ensure_cursor_space(&mut self) -> (usize, bool) {
-        let pos = self.ansi.to_byte_pos(&self.inner, self.ansi.cursor_x);
+        let pos = ansi::Parser::to_byte_pos(&self.inner, self.ansi.cursor_x);
         let line = self.inner.get().last().unwrap();
         let need_space = pos == line.len();
         if need_space {
@@ -214,7 +214,7 @@ impl Widget {
     }
 
     pub fn feed_ansi(&mut self, string: &BStr) {
-        self.ansi.feed(&mut self.inner, string)
+        self.ansi.feed(&mut self.inner, string);
     }
 
     pub fn clear(&mut self) {

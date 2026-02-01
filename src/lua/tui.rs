@@ -309,7 +309,7 @@ async fn set_message(ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
         Some((id, Some(widget))) => (id, widget),
         None => {
             let widget = tui::widget::Widget::default();
-            tui.add(widget.into())
+            tui.add(widget)
         },
         Some((id, None)) => anyhow::bail!("can't find widget with id {}", id),
     };
