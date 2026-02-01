@@ -132,7 +132,7 @@ impl<'a> History<'a> {
 
     pub fn append(_shell: &ShellInternal, text: BString) -> Result<()> {
         // make a string and pass to print -S
-        Self::append_internal(text, meta_str!(c"__hist"), meta_str!(c"print -s \"$__hist}\""))
+        Self::append_internal(text, meta_str!(c"__hist"), meta_str!(c"print -s \"$__hist\""))
     }
 
 }
