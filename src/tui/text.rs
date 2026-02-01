@@ -2,7 +2,7 @@ use std::io::{Write};
 use std::ops::Range;
 use bstr::{BStr, BString, ByteVec, ByteSlice};
 use unicode_width::UnicodeWidthStr;
-use ratatui::style::{Style};
+use ratatui::style::{Style, Modifier, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::layout::{Alignment, Rect};
 use ratatui::widgets::{Block, WidgetRef};
@@ -74,7 +74,13 @@ pub fn merge_highlights<'a, T: 'a, I: Iterator<Item=&'a Highlight<T>>>(init: Sty
             // start from scratch
             style = Style::new();
         }
+        let reverse = style.add_modifier.contains(Modifier::REVERSED);
         style = style.patch(h.style);
+        if reverse == h.style.add_modifier.contains(Modifier::REVERSED) {
+            style = style.not_reversed();
+        } else {
+            style = style.reversed();
+        }
     }
     style
 }
