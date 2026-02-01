@@ -229,6 +229,9 @@ wish.set_keymap('<c-`>', function()
 end)
 wish.add_event_callback('key', function(arg)
     -- error("got a key " .. arg.key)
+
+wish.set_keymap('<c-f>', function()
+    require('wish/ft').activate()
 end)
 
 local PASTE_NS = wish.add_buf_highlight_namespace()
