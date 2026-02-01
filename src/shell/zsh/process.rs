@@ -3,12 +3,13 @@ use std::collections::HashMap;
 use anyhow::Result;
 use nix::sys::signal;
 use std::os::fd::{IntoRawFd, BorrowedFd};
-use std::os::raw::{c_int};
+use std::os::raw::{c_int, c_void};
 use std::sync::{Mutex, atomic::{AtomicI32, Ordering}};
 mod pidset;
 
 static SELF_PIPE: AtomicI32 = AtomicI32::new(-1);
 pub static PID_MAP: Mutex<Option<HashMap<pidset::Pid, oneshot::Sender<i32>>>> = Mutex::new(None);
+static mut THIS_JOB: i32 = 1;
 
 fn jobtab_retain_iter<'a, F: FnMut(&'a zsh_sys::process) -> bool>(mut callback: F) -> impl Iterator<Item=&'a zsh_sys::process> {
     unsafe {
@@ -75,7 +76,7 @@ pub(super) fn sighandler() -> c_int {
 
         // reset thisjob so it doesn't go off reporting job statuses for foreground jobs
         let thisjob = zsh_sys::thisjob;
-        zsh_sys::thisjob = 1;
+        zsh_sys::thisjob = THIS_JOB;
         zsh_sys::zhandler(signal::Signal::SIGCHLD as _);
         zsh_sys::thisjob = thisjob;
 
@@ -111,6 +112,15 @@ pub(super) fn sighandler() -> c_int {
     }
 }
 
+extern "C" fn before_trap_hook(_hook: zsh_sys::Hookdef, _arg: *mut c_void) -> c_int {
+    // traps make new jobs, so i need this hook to record what the original job is
+    unsafe {
+        // this is ok as it only ever runs in the main thread
+        THIS_JOB = zsh_sys::thisjob;
+    }
+    0
+}
+
 pub(super) fn init() -> Result<()> {
     // spawn a reader task
     let writer = super::signals::self_pipe::<_, _, std::convert::Infallible>(|| {
@@ -127,6 +137,10 @@ pub(super) fn init() -> Result<()> {
 
     // set the writer for the handler to use
     SELF_PIPE.store(writer.into_raw_fd(), Ordering::Release);
+
+    unsafe {
+        zsh_sys::addhookfunc(c"before_trap".as_ptr().cast_mut(), Some(before_trap_hook));
+    }
 
     super::signals::hook_signal(signal::Signal::SIGCHLD)?;
 
