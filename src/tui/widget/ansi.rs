@@ -263,6 +263,11 @@ impl Parser {
                 (State::Csi, _) => State::None,
                 (State::Esc, _) => State::None,
 
+                (_, b'\x08') => {
+                    self.add_buffer(text);
+                    self.cursor_x = self.cursor_x.saturating_sub(1);
+                    State::None
+                },
                 (State::None, b'\n') => {
                     self.add_buffer(text);
                     self.need_newline = true;
