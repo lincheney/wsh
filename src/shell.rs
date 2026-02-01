@@ -114,8 +114,12 @@ pub fn remove_invisible_chars(string: Cow<'_, MetaStr>) -> Cow<'_, MetaStr> {
 
 pub fn shell_quote(mut string: MetaString) -> MetaString {
     string.modify(|string| {
-        string.replace(b"\\", b"\\\\");
-        string.replace(b"'", b"\\'");
+        let mut start = 0;
+        while let Some(found) = string[start..].find_byteset(b"\\'") {
+            // insert an escape here
+            string.insert_str(start + found, b"\\");
+            start += found + 2;
+        }
         string.insert_str(0, b"$'");
         string.push_str(b"'");
     });
