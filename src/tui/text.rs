@@ -272,22 +272,37 @@ impl<T> Text<T> {
         }
     }
 
-    pub fn render<W :Write, C: Canvas>(
-        &self,
+    pub fn render<'a, W, C, I>(
+        &'a self,
         drawer: &mut Drawer<W, C>,
         block: Option<(&Block<'_>, &mut Buffer)>,
         max_height: Option<(usize, Scroll)>,
-    ) -> std::io::Result<()> {
-        self.render_with_callback::<W, C, fn(&mut Drawer<W, C>, usize, usize, usize)>(drawer, block, max_height, None)
+        extra_highlights: I,
+    ) -> std::io::Result<()>
+    where
+        T: 'a,
+        W :Write,
+        C: Canvas,
+        I: Clone + Iterator<Item=&'a HighlightedRange<T>>,
+    {
+        self.render_with_callback::<W, C, I, fn(&mut Drawer<W, C>, usize, usize, usize)>(drawer, block, max_height, extra_highlights, None)
     }
 
-    pub fn render_with_callback<W :Write, C: Canvas, F: FnMut(&mut Drawer<W, C>, usize, usize, usize)>(
-        &self,
+    pub fn render_with_callback<'a, W, C, I, F>(
+        &'a self,
         drawer: &mut Drawer<W, C>,
         mut block: Option<(&Block<'_>, &mut Buffer)>,
         max_height: Option<(usize, Scroll)>,
+        extra_highlights: I,
         mut callback: Option<F>,
-    ) -> std::io::Result<()> {
+    ) -> std::io::Result<()>
+    where
+        T: 'a,
+        W :Write,
+        C: Canvas,
+        I: Clone + Iterator<Item=&'a HighlightedRange<T>>,
+        F: FnMut(&mut Drawer<W, C>, usize, usize, usize),
+    {
 
         struct Borders<'a> {
             top: &'a [Cell],
@@ -349,7 +364,7 @@ impl<T> Text<T> {
         let max_lines = max_height.saturating_sub(border_bottom_height);
         let scrolled = super::scroll::wrap(
             &self.lines,
-            &self.highlights,
+            self.highlights.iter().chain(extra_highlights),
             Some(self.style),
             area.width as usize,
             max_lines,

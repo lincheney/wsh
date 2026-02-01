@@ -107,26 +107,76 @@ pub struct Widget {
     pub persist: bool,
     pub hidden: bool,
     pub(super) line_count: u16,
-    // text_overrides_style: bool,
+
     pub(super) ansi: ansi::Parser,
+    pub ansi_show_cursor: bool,
 }
 
 impl Widget {
 
+    fn ensure_cursor_space(&mut self) -> (usize, bool) {
+        let pos = self.ansi.to_byte_pos(&self.inner, self.ansi.cursor_x);
+        let line = self.inner.get().last().unwrap();
+        let need_space = pos == line.len();
+        if need_space {
+            // add an extra space
+            self.inner.push_str(b" ".into(), None);
+        }
+        (pos, need_space)
+    }
+
+    fn remove_cursor_space(&mut self) {
+        let lineno = self.inner.len() - 1;
+        let line = self.inner.get().last().unwrap();
+        let offset = line.len() - 1;
+        self.inner.delete_str(lineno, offset, 1);
+    }
+
     pub(super) fn render<W: Write, C: super::Canvas>(
-        &self,
+        &mut self,
         drawer: &mut super::Drawer<W, C>,
         buffer: &mut Buffer,
         max_height: Option<usize>,
     ) -> std::io::Result<()> {
-        self.inner.render(
+
+        // this is such a hack
+        let mut need_cursor_space = false;
+        let cursor_highlight = if self.ansi_show_cursor {
+            let start;
+            (start, need_cursor_space) = self.ensure_cursor_space();
+            Some(super::text::HighlightedRange{
+                lineno: self.inner.len().saturating_sub(1),
+                start,
+                end: start + 1,
+                inner: ratatui::style::Style::from(ratatui::style::Modifier::REVERSED).into(),
+            })
+        } else {
+            None
+        };
+
+        let result = self.inner.render(
             drawer,
             self.block.as_ref().map(|block| (block, buffer)),
-            max_height.map(|w| (w, super::text::Scroll{ show_scrollbar: true, position: super::scroll::ScrollPosition::StickyBottom } )),
-        )
+            max_height.map(|w| {
+                (
+                    w,
+                    super::text::Scroll{
+                        show_scrollbar: true,
+                        position: super::scroll::ScrollPosition::StickyBottom,
+                    },
+                )
+            }),
+            cursor_highlight.iter(),
+        );
+
+        if need_cursor_space {
+            self.remove_cursor_space();
+        }
+
+        result
     }
 
-    pub(super) fn get_height_for_width(&self, mut area: Rect) -> u16 {
+    pub(super) fn get_height_for_width(&mut self, mut area: Rect) -> u16 {
         let mut height = 0;
         let mut min_height = None;
         let mut max_height = None;
@@ -143,7 +193,13 @@ impl Widget {
             area = inner;
         }
 
+        let need_cursor_space = self.ansi_show_cursor && self.ensure_cursor_space().1;
+
         height = height.max(self.inner.get_size(area.width as _, 0).1 as _);
+
+        if need_cursor_space {
+            self.remove_cursor_space();
+        }
 
         if self.border_show_empty || height > 0 {
             height += border_height;

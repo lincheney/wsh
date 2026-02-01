@@ -42,9 +42,9 @@ impl Scrolled<'_> {
     }
 }
 
-pub fn wrap<'a, T>(
+pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
     lines: &'a [BString],
-    highlights: &'a [HighlightedRange<T>],
+    highlights: I,
     init_style: Option<Style>,
     max_width: usize,
     max_height: usize,
@@ -67,7 +67,7 @@ pub fn wrap<'a, T>(
         }
         super::wrap::wrap(
             line.as_ref(),
-            highlights.iter().filter(|hl| hl.lineno == lineno),
+            highlights.clone().filter(|hl| hl.lineno == lineno),
             init_style,
             max_width,
             initial_indent,

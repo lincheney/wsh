@@ -24,7 +24,7 @@ pub struct Parser {
     buffer: BString,
     style: Style,
     state: State,
-    cursor_x: usize,
+    pub cursor_x: usize,
     need_newline: bool,
     pub ocrnl: bool,
 }
@@ -142,20 +142,20 @@ fn parse_ansi_col(mut style: Style, string: &BStr) -> Style {
 
 impl Parser {
 
-    fn add_line(&mut self, text: &mut Text) {
+    fn add_line<T>(&mut self, text: &mut Text<T>) {
         text.push_line(b"".into(), None);
         self.cursor_x = 0;
         self.need_newline = false;
     }
 
-    fn add_buffer(&mut self, text: &mut Text) {
+    fn add_buffer<T: Default>(&mut self, text: &mut Text<T>) {
         if !self.buffer.is_empty() {
             self.add_str(text, self.buffer.to_string());
             self.buffer.clear();
         }
     }
 
-    fn to_byte_pos(&self, text: &Text, pos: usize) -> usize {
+    pub fn to_byte_pos<T>(&self, text: &Text<T>, pos: usize) -> usize {
         let line = text.get().last().unwrap();
         let mut width = 0;
         let mut byte_pos = 0;
@@ -168,7 +168,7 @@ impl Parser {
         byte_pos
     }
 
-    fn splice(&mut self, text: &mut Text, range: Option<Range<usize>>, replace_with: Option<String>, style: Option<Style>) {
+    fn splice<T: Default>(&mut self, text: &mut Text<T>, range: Option<Range<usize>>, replace_with: Option<String>, style: Option<Style>) {
         let style = style.map(|s| s.into());
 
         let lineno = text.len() - 1;
@@ -189,7 +189,7 @@ impl Parser {
         }
     }
 
-    fn add_str(&mut self, text: &mut Text, string: String) {
+    fn add_str<T: Default>(&mut self, text: &mut Text<T>, string: String) {
         if string.is_empty() {
             return
         }
@@ -203,7 +203,7 @@ impl Parser {
         self.cursor_x += width;
     }
 
-    pub fn feed(&mut self, text: &mut Text, string: &BStr) {
+    pub fn feed<T: Default>(&mut self, text: &mut Text<T>, string: &BStr) {
         // we support some csi styling, newlines, tabs and normal text and that's about it
 
         for c in string.iter() {

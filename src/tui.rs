@@ -93,16 +93,19 @@ impl Widgets {
     }
 
     fn render<W :Write, C: Canvas>(
-        &self,
+        &mut self,
         drawer: &mut Drawer<W, C>,
         buffer: &mut Buffer,
         area: Rect,
     ) -> std::io::Result<()> {
 
-        let widgets = self.inner.iter().filter(|w| !w.hidden && w.line_count > 0);
-        let layout = Layout::vertical(widgets.clone().map(|w| w.constraint.unwrap_or(Constraint::Max(w.line_count))));
+        let filter = |w: &Widget| !w.hidden && w.line_count > 0;
+
+        let widgets = self.inner.iter().filter(|w| filter(w));
+        let layout = Layout::vertical(widgets.map(|w| w.constraint.unwrap_or(Constraint::Max(w.line_count))));
         let layouts = layout.split(area);
 
+        let widgets = self.inner.iter_mut().filter(|w| filter(w));
         for (widget, area) in widgets.zip(layouts.iter()) {
             widget.render(drawer, buffer, Some(area.height as usize))?;
         }
@@ -192,9 +195,9 @@ impl Tui {
         })
     }
 
-    pub fn render_to_string(&self, id: usize, width: Option<u16>) -> Option<BString> {
+    pub fn render_to_string(&mut self, id: usize, width: Option<u16>) -> Option<BString> {
         self.get_index(id).map(|i| {
-            let widget = &self.widgets.inner[i];
+            let widget = &mut self.widgets.inner[i];
             let width = width.unwrap_or(self.buffer.area.width);
             let width = std::num::NonZero::new(width).map_or(80, |w| w.get());
 
@@ -338,7 +341,7 @@ impl Tui {
         // go back to the cursor
         drawer.move_to_pos(cmdline.cursor_coord)?;
 
-        if new_status_bar_height > 0 && (clear || status_bar.dirty) && let Some(widget) = &status_bar.inner {
+        if new_status_bar_height > 0 && (clear || status_bar.dirty) && let Some(widget) = &mut status_bar.inner {
             // save cursor position so we can go back to it
             queue!(drawer.writer, cursor::SavePosition)?;
 

@@ -64,6 +64,8 @@ struct CommonWidgetOptions {
     pub style: TextStyleOptions,
     pub border: Option<BorderOptions>,
     pub height: Option<SerdeConstraint>,
+    // ansi options
+    pub show_cursor: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -184,7 +186,7 @@ impl From<StyleOptions> for tui::widget::StyleOptions {
     }
 }
 
-fn parse_text_parts(parts: TextParts, text: &mut tui::text::Text) {
+fn parse_text_parts<T: Default+Clone>(parts: TextParts, text: &mut tui::text::Text<T>) {
     match parts {
         TextParts::Single(part) => {
             text.clear();
@@ -251,6 +253,10 @@ fn set_widget_options(widget: &mut tui::widget::Widget, options: CommonWidgetOpt
 
     if let Some(align) = options.style.align {
         widget.inner.alignment = align.0;
+    }
+
+    if let Some(show_cursor) = options.show_cursor {
+        widget.ansi_show_cursor = show_cursor;
     }
 
     match options.border {
@@ -434,7 +440,7 @@ async fn get_message_text(ui: Ui, _lua: Lua, id: usize) -> Result<Vec<BString>> 
 
 async fn message_to_ansi_string(ui: Ui, _lua: Lua, (id, width): (usize, Option<u16>)) -> Result<mlua::BString> {
     let ui = ui.get();
-    let tui = &ui.borrow().tui;
+    let tui = &mut ui.borrow_mut().tui;
 
     match tui.render_to_string(id, width) {
         None => anyhow::bail!("can't find widget with id {}", id),

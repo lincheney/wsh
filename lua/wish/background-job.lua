@@ -25,8 +25,10 @@ local function update_message(job)
 
     if active_job and job == active_job.job then
         props.dim = false
+        props.show_cursor = true
     else
         props.dim = true
+        props.show_cursor = false
     end
 
     if job.output_marker == 0 then
