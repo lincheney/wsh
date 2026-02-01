@@ -387,9 +387,7 @@ crate::TokioActor! {
 
         pub fn get_cwd(&self) -> BString {
             unsafe {
-                // allocated on the arena, do not free
-                let ptr = zsh_sys::zgetcwd();
-                MetaStr::from_ptr(ptr).unmetafy().into_owned()
+                MetaStr::from_ptr(zsh_sys::pwd).unmetafy().into_owned()
             }
         }
 
