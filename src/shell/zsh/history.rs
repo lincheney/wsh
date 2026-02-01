@@ -103,12 +103,12 @@ impl<'a> History<'a> {
         }
     }
 
-    fn append_internal<T: Into<super::variables::Value>>(value: T, name: &MetaStr, cmd: &MetaStr) -> Result<()> {
+    fn append_internal(value: super::variables::Value, name: &MetaStr, cmd: &MetaStr) -> Result<()> {
         unsafe {
             let is_cur_hist = zsh_sys::curhist == super::histline as _;
 
             zsh_sys::startparamscope();
-            Variable::set(name, value.into(), true).unwrap();
+            Variable::set(name, value, true).unwrap();
             let ret = super::execstring(cmd, Default::default());
             zsh_sys::endparamscope();
 
@@ -127,12 +127,12 @@ impl<'a> History<'a> {
 
     pub fn append_words(_shell: &ShellInternal, words: Vec<BString>) -> Result<()> {
         // make an array of the words and pass to print -s
-        Self::append_internal(words, meta_str!(c"__hist"), meta_str!(c"print -s \"${__hist[@]}\""))
+        Self::append_internal(words.into(), meta_str!(c"__hist"), meta_str!(c"print -s \"${__hist[@]}\""))
     }
 
     pub fn append(_shell: &ShellInternal, text: BString) -> Result<()> {
         // make a string and pass to print -S
-        Self::append_internal(text, meta_str!(c"__hist"), meta_str!(c"print -s \"$__hist\""))
+        Self::append_internal(text.into(), meta_str!(c"__hist"), meta_str!(c"print -s \"$__hist\""))
     }
 
 }
