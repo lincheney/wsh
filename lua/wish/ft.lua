@@ -41,26 +41,21 @@ function M.activate()
                 return
             end
 
-            local smartcase = data:find('^[a-z]$') and '['..data..data:upper()..']'
             local buffer = wish.get_buffer()
             local cursor = wish.get_cursor()
             cursor = wish.str.to_byte_pos(buffer, cursor) or #buffer - 1
             local matches = {}
-            local start = 1
-            local s, e
-            while start <= #buffer do
-                if smartcase then
-                    s, e = buffer:find(smartcase, start)
-                else
-                    s, e = buffer:find(data, start, true)
-                end
-                if not s then
-                    break
-                end
-                start = e + 1
+
+            local pat
+            if data:find('^[a-z]$') then
+                pat = '()['..data..data:upper()..']()'
+            else
+                pat = '()['..data..']()'
+            end
+            for s, e in buffer:gmatch(pat) do
                 if s ~= cursor + 1 then
                     s = wish.str.from_byte_pos(buffer, s - 1)
-                    e = wish.str.from_byte_pos(buffer, e) or #buffer
+                    e = wish.str.from_byte_pos(buffer, e - 1) or #buffer
                     table.insert(matches, {s, e})
                 end
             end
