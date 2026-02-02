@@ -1,5 +1,5 @@
 use std::io::Write;
-use bstr::{BString, ByteSlice};
+use bstr::{BStr, BString, ByteSlice};
 use crate::tui::{Drawer, Canvas, text::Text, text::HighlightedRange};
 
 #[derive(Debug)]
@@ -58,7 +58,7 @@ impl Buffer {
         self.contents.get_size(width, initial_indent, [].iter())
     }
 
-    fn get_len(&mut self) -> usize {
+    pub fn get_len(&mut self) -> usize {
         *self.len.get_or_insert_with(|| self.contents.get()[0].graphemes().count())
     }
 
@@ -83,7 +83,7 @@ impl Buffer {
             let len = self.get_contents().len();
             self.contents.delete_str(0, 0, len);
             self.cursor = 0;
-            self.splice_at_cursor(contents, None);
+            self.splice_at(self.cursor, contents, None, false);
         }
         if let Some(cursor) = cursor {
             self.cursor = cursor;
@@ -113,19 +113,38 @@ impl Buffer {
         self.set(None, Some(cursor));
     }
 
-    pub fn splice_at_cursor(&mut self, data: &[u8], replace_len: Option<usize>) {
+    pub fn splice_at(&mut self, start: usize, data: &[u8], replace_len: Option<usize>, minimise: bool) {
         // turn it into an edit
-        let start = self.cursor_byte_pos();
         let end = if let Some(replace_len) = replace_len {
-            self.byte_pos(self.cursor + replace_len)
+            self.byte_pos(start + replace_len)
         } else {
             self.get_contents().len()
         };
-        let edit = Edit{
-            before: self.get_contents()[start .. end].into(),
-            after: data.into(),
+        let mut start = self.byte_pos(start);
+        let mut old = &self.get_contents()[start .. end];
+        let mut new: &BStr = data.into();
+
+        if minimise {
+            if old == new {
+                return
+            }
+            let prefix_len = new.iter().zip(old).take_while(|(x, y)| x == y).count();
+            old = &old[prefix_len .. ];
+            new = &new[prefix_len .. ];
+            start += prefix_len;
+            if !old.is_empty() && !new.is_empty() {
+                let suffix_len = new.iter().rev().zip(old.iter().rev()).take_while(|(x, y)| x == y).count();
+                old = &old[ .. old.len() - suffix_len];
+                new = &new[ .. new.len() - suffix_len];
+            }
+        }
+
+        let edit = Edit {
+            before: old.into(),
+            after: new.into(),
             position: start,
         };
+
         if self.history_index < self.history.len() {
             drop(self.history.drain(self.history_index .. ));
         }
@@ -167,7 +186,7 @@ impl Buffer {
     }
 
     pub fn insert_at_cursor(&mut self, data: &[u8]) {
-        self.splice_at_cursor(data, Some(0));
+        self.splice_at(self.cursor_byte_pos(), data, Some(0), false);
     }
 
     pub fn save(&mut self) {

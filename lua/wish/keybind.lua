@@ -1,42 +1,40 @@
+local utf8 = require('wish/utf8')
+
 local cut_contents = nil
-local function cut_buffer(len)
-    local buffer = wish.get_buffer()
-    local cursor = wish.str.to_byte_pos(buffer, wish.get_cursor()) or #buffer
-    cut_contents = buffer:sub(cursor + 1, len and cursor + len)
-    wish.set_buffer('', len)
-end
 
 wish.create_dynamic_var('CLIPBOARD', 'string', function()
     return wish.async.spawn{args={'wl-paste'}, foreground=false, stdout='piped'}.stdout:read()
 end)
 
 wish.set_keymap('<bs>', function()
-    local cursor = wish.get_cursor()
+    local buffer, cursor = wish.get_buffer()
     if cursor > 0 then
-        wish.set_cursor(cursor-1)
-        wish.set_buffer('', 1)
+        buffer = utf8.sub(buffer, 1, cursor-1) .. utf8.sub(buffer, cursor+1)
+        wish.set_buffer(buffer, cursor-1)
     end
 end)
 
 wish.set_keymap('<delete>', function()
-    wish.set_buffer('', 1)
+    wish.splice_buffer('', 1)
 end)
 
 wish.set_keymap('<c-u>', function()
-    local cursor = wish.get_cursor()
+    local buffer, cursor = wish.get_buffer()
     if cursor > 0 then
-        wish.set_cursor(0)
-        cut_buffer(cursor)
+        cut_contents = utf8.sub(buffer, 1, cursor)
+        wish.set_buffer(utf8.sub(buffer, cursor+1), 0)
     end
 end)
 
 wish.set_keymap('<c-k>', function()
-    cut_buffer(nil)
+    local buffer, cursor = wish.get_buffer()
+    cut_contents = utf8.sub(buffer, cursor+1)
+    wish.set_buffer(utf8.sub(buffer, 1, cursor))
 end)
 
 wish.set_keymap('<c-y>', function()
     if cut_contents then
-        wish.set_buffer(cut_contents, 0)
+        wish.splice_buffer(cut_contents, 0)
     end
 end)
 
@@ -44,8 +42,8 @@ wish.set_keymap('<c-a>',   function() wish.set_cursor(0) end)
 wish.set_keymap('<home>',  function() wish.set_cursor(0) end)
 wish.set_keymap('<c-e>',   function() wish.set_cursor(wish.str.len(wish.get_buffer())) end)
 wish.set_keymap('<end>',   function()
-    local cursor = wish.get_cursor()
-    local buflen = wish.str.len(wish.get_buffer())
+    local buffer, cursor = wish.get_buffer()
+    local buflen = utf8.len(buffer)
     if cursor == buflen then
         require('wish/autosuggestions').accept_suggestion()
     else
@@ -56,46 +54,41 @@ wish.set_keymap('<left>',  function() wish.set_cursor(math.max(0, wish.get_curso
 wish.set_keymap('<right>', function() wish.set_cursor(wish.get_cursor() + 1) end)
 
 wish.set_keymap('<c-left>', function()
-    local cursor = wish.get_cursor()
+    local buffer, cursor = wish.get_buffer()
     if cursor > 0 then
-        local buffer = wish.get_buffer()
-        cursor = wish.str.to_byte_pos(buffer, cursor)
-        cursor = buffer:sub(1, cursor):find('%S+%s*$')
+        cursor = utf8.sub(buffer, 1, cursor):find('%S+%s*$')
         wish.set_cursor(wish.str.from_byte_pos(buffer, (cursor or 1) - 1))
     end
 end)
 
 wish.set_keymap('<c-right>', function()
-    local buffer = wish.get_buffer()
-    local cursor = wish.str.to_byte_pos(buffer, wish.get_cursor()) or #buffer
-    cursor = buffer:find('%f[%s]', cursor + 2)
+    local buffer, cursor = wish.get_buffer()
+    cursor = utf8.find(buffer, '%f[%s]', cursor+2)
     wish.set_cursor(wish.str.from_byte_pos(buffer, (cursor or #buffer + 1) - 1) or #buffer)
 end)
 
 wish.set_keymap('<c-w>', function()
-    local cursor = wish.get_cursor()
+    local buffer, cursor = wish.get_buffer()
     if cursor > 0 then
-        local buffer = wish.get_buffer()
-        cursor = wish.str.to_byte_pos(buffer, cursor) or #buffer
-        local start = buffer:sub(1, cursor):find('%S+%s*$')
+        local start = utf8.sub(buffer, 1, cursor):find('%S+%s*$')
         if start then
             start = wish.str.from_byte_pos(buffer, start - 1)
-            wish.set_cursor(start)
-            cut_buffer(cursor - start)
+            cut_contents = utf8.sub(buffer, start+1, cursor)
+            buffer = utf8.sub(buffer, 1, start) .. utf8.sub(buffer, cursor+1)
+            wish.set_buffer(buffer, start)
         end
     end
 end)
 
 wish.set_keymap('<a-bs>', function()
-    local cursor = wish.get_cursor()
+    local buffer, cursor = wish.get_buffer()
     if cursor > 0 then
-        local buffer = wish.get_buffer()
-        cursor = wish.str.to_byte_pos(buffer, cursor) or #buffer
-        local start = buffer:sub(1, cursor):find('[^/%s]+[/%s]*$')
+        local start = utf8.sub(buffer, 1, cursor):find('[^/%s]+[/%s]*$')
         if start then
             start = wish.str.from_byte_pos(buffer, start - 1)
-            wish.set_cursor(start)
-            cut_buffer(cursor - start)
+            cut_contents = utf8.sub(buffer, start+1, cursor)
+            buffer = utf8.sub(buffer, 1, start) .. utf8.sub(buffer, cursor+1)
+            wish.set_buffer(buffer, start)
         end
     end
 end)
@@ -108,7 +101,7 @@ wish.set_keymap('<a-_>', function()
 end)
 
 wish.set_keymap('<a-cr>', function()
-    wish.set_buffer('\n')
+    wish.splice_buffer('\n')
 end)
 
 -- there ought to be a better way of doing this
@@ -134,8 +127,7 @@ wish.set_keymap('<c-r>', require('wish/history').history_search)
 wish.set_keymap('<a-v>', function()
     local buffer
     local cursor
-    local old_buffer = wish.get_buffer()
-    local old_cursor = wish.get_cursor()
+    local old_buffer, old_cursor = wish.get_buffer()
     wish.in_param_scope(function()
         for k, v in pairs{
             REGION_ACTIVE = 1,
@@ -152,9 +144,7 @@ wish.set_keymap('<a-v>', function()
         cursor = wish.get_var('CURSOR') or old_cursor
     end)
     if buffer ~= old_buffer and cursor ~= old_cursor then
-        wish.set_cursor(0)
-        wish.set_buffer(buffer)
-        wish.set_cursor(cursor)
+        wish.set_buffer(buffer, cursor)
     end
 end)
 
@@ -219,16 +209,13 @@ wish.set_keymap('<a-a>', function()
     wish.append_history(buffer)
     wish.trigger_event_callback('accept_line')
     wish.call_hook_func{'preexec', buffer}
-    wish.set_cursor(0)
-    wish.set_buffer('')
+    wish.set_buffer('', 0)
     require('wish/background-job').run_in_background(buffer)
 end)
 
 wish.set_keymap('<c-`>', function()
     require('wish/background-job').focus_next_job{key = "`", control = true}
 end)
-wish.add_event_callback('key', function(arg)
-    -- error("got a key " .. arg.key)
 
 wish.set_keymap('<c-f>', function()
     require('wish/ft').activate()
@@ -241,31 +228,30 @@ wish.add_event_callback('paste', function(data)
     if #data > 0 then
         local id = math.random()
         clear_paste = id
-        local cursor = wish.get_cursor()
-        local buffer = wish.get_buffer()
-        local len = wish.str.len(data)
-        local buflen = wish.str.len(buffer)
+        local buffer, cursor = wish.get_buffer()
+        local len = utf8.len(data)
+        local buflen = utf8.len(buffer)
 
         local _, prefix = wish.str.to_byte_pos(buffer, cursor)
         prefix = prefix or #buffer
-        wish.set_buffer(data, 0)
+        wish.splice_buffer(data)
 
         -- flash blue for a bit
         wish.add_buf_highlight{namespace = PASTE_NS, fg = 'blue', start = prefix, finish = prefix + len}
-        wish.redraw{buffer = true}
+        wish.redraw()
 
         wish.schedule(function()
             wish.sleep(0.5)
             if clear_paste == id then
                 wish.clear_buf_highlights(PASTE_NS)
-                wish.redraw{buffer = true}
+                wish.redraw()
             end
         end)
     end
 end)
 wish.add_event_callback('accept_line', function()
     wish.clear_buf_highlights(PASTE_NS)
-    wish.redraw{buffer = true}
+    wish.redraw()
 end)
 
 wish.set_status_bar{

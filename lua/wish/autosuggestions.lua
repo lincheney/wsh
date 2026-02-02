@@ -49,7 +49,6 @@ end)
 
 function M.accept_suggestion()
     if suggestion and suggestion ~= '' then
-        wish.set_cursor(0)
         wish.set_buffer(suggestion)
     end
 end

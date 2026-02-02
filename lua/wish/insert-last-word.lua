@@ -1,4 +1,5 @@
 local M = {}
+local utf8 = require('wish/utf8')
 
 local state = {
     original_buffer = nil,
@@ -7,8 +8,8 @@ local state = {
 }
 
 function M.handler(backward)
-    local buffer = wish.get_buffer()
-    local cursor = wish.str.to_byte_pos(buffer, wish.get_cursor()) or #buffer
+    local buffer, cursor = wish.get_buffer()
+    local cursor = wish.str.to_byte_pos(buffer, cursor) or #buffer
     local prefix = buffer:sub(1, cursor)
 
     if not state.histno or state.buffer ~= prefix then
@@ -32,8 +33,8 @@ function M.handler(backward)
         value = wish.shell_split(value)
         value = value[#value] or ''
         local prev = #prefix - #state.original_buffer
-        wish.set_cursor(wish.str.from_byte_pos(buffer, cursor - prev) or #buffer)
-        wish.set_buffer(value, prev)
+        buffer = buffer:sub(1, cursor - prev - 1) .. value .. buffer:sub(cursor)
+        wish.set_buffer(value)
         state.buffer = state.original_buffer .. value
     end
 
