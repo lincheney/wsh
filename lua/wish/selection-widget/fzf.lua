@@ -1,5 +1,7 @@
 local M = {}
 
+local utf8 = require('wish/utf8')
+
 local state = nil
 
 function M.stop()
@@ -11,8 +13,9 @@ function M.stop()
 end
 
 local function start_proc()
+    state.cursor = wish.get_cursor()
     -- go to last line
-    wish.set_cursor(wish.str.len(wish.get_buffer()))
+    wish.set_cursor(utf8.len(wish.get_buffer()) + 1)
     wish.redraw()
 
     state.proc = wish.async.spawn{
@@ -28,7 +31,6 @@ local function start_proc()
         stdin = 'piped',
         stdout = 'piped',
     }
-    state.cursor = wish.get_cursor()
     state.resume()
 end
 

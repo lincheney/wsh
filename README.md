@@ -52,7 +52,7 @@ i wish i could have
 * [ ] selecting `print -s echo` in history is weird
 * [x] silence parse warnings
 * [x] custom buffer rendering, ghost text etc
-* [ ] buffer text conceal
+* [x] buffer text conceal
 * [x] merged prompt and buffer
 * [x] $POSTDISPLAY, $PREDISPLAY
 * [ ] $region_highlight
@@ -111,5 +111,5 @@ i wish i could have
 * [ ] tmux widget backend
 * [x] terminal resize
 * [ ] exit causes shell.func().await to panic
-* [ ] what exactly needs to be metafied?
+* [x] what exactly needs to be metafied?
 * [ ]

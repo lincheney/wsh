@@ -48,15 +48,14 @@ function M.activate()
 
             local pat
             if data:find('^[a-z]$') then
-                pat = '()['..data..data:upper()..']()'
+                pat = '()['..data..data:upper()..']'
             else
-                pat = '()['..data..']()'
+                pat = '()['..data..']'
             end
-            for s, e in buffer:gmatch(pat) do
-                if s ~= cursor + 1 then
-                    s = wish.str.from_byte_pos(buffer, s - 1)
-                    e = wish.str.from_byte_pos(buffer, e - 1) or #buffer
-                    table.insert(matches, {s, e})
+            for s in buffer:gmatch(pat) do
+                s = wish.str.from_byte_pos(buffer, s) - 1
+                if s ~= cursor then
+                    table.insert(matches, s)
                 end
             end
 
@@ -68,22 +67,22 @@ function M.activate()
 
             -- jump directly to the only match
             if #matches == 1 then
-                wish.set_cursor(matches[1][1])
+                wish.set_cursor(matches[1])
                 -- deactivate later
                 wish.schedule(M.deactivate)
                 return
             end
 
             -- sort by distance from cursor
-            wish.table.sort_by(matches, function(m) return math.abs(m[1] - cursor) end)
+            wish.table.sort_by(matches, function(m) return math.abs(m - cursor) end)
 
             -- highlight the keys
             positions = {}
             for i, m in ipairs(matches) do
                 local c = CHARS:sub(i, i)
                 wish.add_buf_highlight{
-                    start = m[1],
-                    finish = m[2],
+                    start = m + 1,
+                    finish = m + 1,
                     namespace = NAMESPACE,
                     fg = 'cyan',
                     underline = true,
@@ -92,7 +91,7 @@ function M.activate()
                     conceal = true,
                     no_blend = true,
                 }
-                positions[c] = m[1]
+                positions[c] = m
             end
             wish.redraw()
 

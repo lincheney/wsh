@@ -15,8 +15,8 @@ function M.find(str, pat, init, plain)
     end
     local s, e = string.find(str, pat, init, plain)
     if s then
-        s = wish.str.from_byte_pos(buffer, s)
-        e = wish.str.from_byte_pos(buffer, e)
+        s = wish.str.from_byte_pos(str, s)
+        e = wish.str.from_byte_pos(str, e)
         return s, e
     end
 end

@@ -6,7 +6,7 @@ fn tokens_to_lua(tokens: &Vec<crate::shell::Token>, lua: &Lua) -> Result<LuaTabl
     let tbl = lua.create_table_with_capacity(tokens.len(), 0)?;
     for token in tokens {
         let t = lua.create_table()?;
-        t.raw_set("start", token.range.start)?;
+        t.raw_set("start", token.range.start + 1)?;
         t.raw_set("finish", token.range.end)?;
         if let Some(kind) = &token.kind {
             t.raw_set("kind", kind.to_string())?;

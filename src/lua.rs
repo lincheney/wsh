@@ -49,17 +49,17 @@ struct RedrawOptions {
 }
 
 fn get_cursor(ui: &Ui, _lua: &Lua, (): ()) -> Result<usize> {
-    Ok(ui.get().borrow().buffer.get_cursor())
+    Ok(ui.get().borrow().buffer.get_cursor() + 1)
 }
 
 fn get_buffer(ui: &Ui, lua: &Lua, (): ()) -> Result<(mlua::String, usize)> {
     let ui = ui.get();
     let buffer = &ui.borrow().buffer;
-    Ok((lua.create_string(buffer.get_contents())?, buffer.get_cursor()))
+    Ok((lua.create_string(buffer.get_contents())?, buffer.get_cursor() + 1))
 }
 
 fn set_cursor(ui: &Ui, _lua: &Lua, val: usize) -> Result<()> {
-    ui.get().borrow_mut().buffer.set_cursor(val);
+    ui.get().borrow_mut().buffer.set_cursor(val.saturating_sub(1));
     Ok(())
 }
 
@@ -68,7 +68,9 @@ async fn set_buffer(ui: Ui, _lua: Lua, (val, cursor): (mlua::String, Option<usiz
         let ui = ui.get();
         let buffer = &mut ui.borrow_mut().buffer;
         buffer.splice_at(0, &val.as_bytes(), None, true);
-        buffer.set(None, cursor);
+        if let Some(cursor) = cursor {
+            buffer.set_cursor(cursor.saturating_sub(1));
+        }
     }
     ui.trigger_buffer_change_callbacks().await;
     Ok(())
@@ -79,7 +81,9 @@ async fn splice_buffer(ui: Ui, _lua: Lua, (val, len, cursor): (mlua::String, Opt
         let ui = ui.get();
         let buffer = &mut ui.borrow_mut().buffer;
         buffer.splice_at(buffer.get_cursor(), &val.as_bytes(), len, true);
-        buffer.set(None, cursor);
+        if let Some(cursor) = cursor {
+            buffer.set_cursor(cursor.saturating_sub(1));
+        }
     }
     ui.trigger_buffer_change_callbacks().await;
     Ok(())

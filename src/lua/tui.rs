@@ -370,7 +370,7 @@ async fn add_buf_highlight(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
 
     ui.borrow_mut().buffer.add_highlight(tui::text::HighlightedRange{
         lineno: 0,
-        start: hl.start,
+        start: hl.start.saturating_sub(1),
         end: hl.finish,
         inner: tui::text::Highlight{
             style: style.as_style(),
