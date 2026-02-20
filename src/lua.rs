@@ -140,6 +140,10 @@ async fn get_cwd(ui: Ui, _lua: Lua, (): ()) -> Result<BString> {
     Ok(ui.shell.get_cwd().await)
 }
 
+fn get_size(ui: &Ui, _lua: &Lua, (): ()) -> Result<(u32, u32)> {
+    Ok(ui.get().borrow().size)
+}
+
 async fn call_hook_func(ui: Ui, _lua: Lua, mut args: Vec<BString>) -> Result<Option<i32>> {
     let arg0 = args.remove(0);
     ui.freeze_if(true, true, async {
@@ -226,6 +230,7 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_async_fn("redraw",  redraw)?;
     ui.set_lua_fn("exit", exit)?;
     ui.set_lua_async_fn("get_cwd", get_cwd)?;
+    ui.set_lua_fn("get_size", get_size)?;
     ui.set_lua_async_fn("call_hook_func", call_hook_func)?;
     ui.set_lua_async_fn("print", print)?;
     ui.get_lua_api()?.set("sleep", ui.lua.create_async_function(sleep)?)?;
