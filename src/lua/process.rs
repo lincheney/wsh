@@ -297,6 +297,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
 
 }
 
+#[derive(Debug)]
 struct OverriddenStream {
     fd: RawFd,
     replacement: RawFd,
@@ -369,7 +370,7 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
         let mut result_sender = Some(result_sender);
         let mut errors = [Ok(()), Ok(()), Ok(())];
 
-        let result = ui.freeze_if(foreground, true, async {
+        let result: Result<Result<_>> = ui.freeze_if(foreground, true, async {
 
             macro_rules! stdio_pipe {
                 ($name:ident, true) => (
@@ -401,7 +402,6 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
 
             let mut streams = [stdin.1, stdout.1, stderr.1];
 
-            let is_subshell = matches!(cmd, ShellRunCmd::Subshell(_));
             let code = match cmd {
                 cmd @ (ShellRunCmd::Simple(_) | ShellRunCmd::Function{..}) => {
 
@@ -409,25 +409,48 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
                     // send streams back to caller
                     let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
 
-                    // no forking, override fds in place
-                    let mut result = streams.iter_mut().flatten().try_for_each(|s| s.override_fd());
-                    if result.is_err() {
-                        // didnt work, restore any backups
-                        if let Err(e) = streams.iter_mut().flatten().try_for_each(|s| s.restore()) {
-                            result = result.context(e);
+                    // wrap the whole thing in a do_run to ensure fd restoration happens in the
+                    // correct order
+                    let (code, errs) = ui.shell.do_run(move |shell| {
+                        // no forking, override fds in place
+                        let result = streams.iter_mut().flatten().try_for_each(|s| s.override_fd());
+                        if let Err(result) = result {
+                            let mut result = Err(result);
+                            // didnt work, restore any backups
+                            if let Err(e) = streams.iter_mut().flatten().try_for_each(|s| s.restore()) {
+                                result = result.context(e);
+                            }
+                            return result
                         }
-                        return result
+
+                        let code = match cmd {
+                            ShellRunCmd::Simple(cmd) => shell.exec(cmd.into()),
+                            ShellRunCmd::Function{func, args, arg0} => {
+                                let arg0 = arg0.map(|x| x.into());
+                                let args = args.into_iter().map(|x| x.into()).collect();
+                                shell.exec_function(func.clone(), arg0, args) as _
+                            },
+                            ShellRunCmd::Subshell(_) => unreachable!(),
+                        };
+
+                        // finished, restore any backups
+                        let mut errors = [Ok(()), Ok(()), Ok(())];
+                        for (s, e) in streams.iter_mut().zip(errors.iter_mut()) {
+                            if let Some(s) = s {
+                                *e = s.restore();
+                            }
+                        }
+
+                        Ok((code, errors))
+
+                    }).await?;
+
+                    for (dst, src) in errors.iter_mut().zip(errs) {
+                        *dst = src;
                     }
 
-                    match cmd {
-                        ShellRunCmd::Simple(cmd) => ui.shell.exec(cmd.into()).await,
-                        ShellRunCmd::Function{func, args, arg0} => {
-                            let arg0 = arg0.map(|x| x.into());
-                            let args = args.into_iter().map(|x| x.into()).collect();
-                            ui.shell.exec_function(func.clone(), arg0, args).await as _
-                        },
-                        ShellRunCmd::Subshell(_) => unreachable!(),
-                    }
+                    code
+
                 },
                 ShellRunCmd::Subshell(cmd) => {
                     // fork it now to get the pid
@@ -443,15 +466,6 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
                     }
                 },
             };
-
-            if !is_subshell {
-                // finished, restore any backups
-                for (s, e) in streams.iter_mut().zip(errors.iter_mut()) {
-                    if let Some(s) = s {
-                        *e = s.restore();
-                    }
-                }
-            }
 
             // send the code out
             let _ = sender.send(Some(Ok(code as _)));

@@ -37,7 +37,7 @@ macro_rules! TokioActor {
             #[allow(dead_code)]
             impl [<$name Client>] {
 
-                pub async fn do_run<T: 'static + Send, F: 'static + Sync + Send + Fn(&$name) -> T>(&self, func: F) -> T {
+                pub async fn do_run<T: 'static + Send, F: 'static + Sync + Send + FnOnce(&$name) -> T>(&self, func: F) -> T {
                     *self.run(Box::new(move |shell| Box::new(func(shell)))).await.downcast().unwrap()
                 }
 

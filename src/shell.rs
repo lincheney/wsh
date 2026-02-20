@@ -143,7 +143,7 @@ pub struct ShellInternal {
 crate::TokioActor! {
     impl ShellInternal {
 
-        pub fn run(&self, func: Box<dyn Send + Fn(&ShellInternal) -> Box<dyn Any + Send>>) -> Box<dyn Any + Send> {
+        pub fn run(&self, func: Box<dyn Send + FnOnce(&ShellInternal) -> Box<dyn Any + Send>>) -> Box<dyn Any + Send> {
             func(self)
         }
 
