@@ -143,7 +143,7 @@ impl Widget {
         // this is such a hack
         let cursor_highlight = self.ansi_show_cursor.then(|| self.make_cursor_space_hl());
 
-        let result = self.inner.render(
+        self.inner.render(
             drawer,
             self.block.as_ref().map(|block| (block, buffer)),
             max_height.map(|w| {
@@ -156,9 +156,7 @@ impl Widget {
                 )
             }),
             cursor_highlight.iter(),
-        );
-
-        result
+        )
     }
 
     pub(super) fn get_height_for_width(&self, mut area: Rect) -> u16 {

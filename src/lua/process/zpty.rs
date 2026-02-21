@@ -53,7 +53,7 @@ impl AsyncRead for AsyncZpty {
                     return Poll::Ready(Ok(()));
                 },
                 Ok(Err(err)) => return Poll::Ready(Err(err)),
-                Err(_would_block) => continue,
+                Err(_would_block) => (),
             }
         }
     }
@@ -66,7 +66,7 @@ impl AsyncWrite for AsyncZpty {
             let result = guard.try_io(|inner| inner.get_ref().write(buf));
             match result {
                 Ok(result) => return Poll::Ready(result),
-                Err(_would_block) => continue,
+                Err(_would_block) => (),
             }
         }
     }
