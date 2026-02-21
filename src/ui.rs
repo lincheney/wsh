@@ -1,6 +1,6 @@
 use bstr::{BStr, BString};
 use std::future::Future;
-use std::sync::{Arc, Weak as WeakArc, atomic::{AtomicUsize, AtomicBool, Ordering}};
+use std::sync::{Arc, atomic::{AtomicUsize, AtomicBool, Ordering}};
 use std::collections::HashSet;
 use std::default::Default;
 use mlua::prelude::*;
@@ -78,16 +78,16 @@ impl UnlockedUi {
 
 crate::strong_weak_wrapper! {
     pub struct Ui {
-        pub unlocked: Arc::<ForkLock<'static, UnlockedUi>> [WeakArc::<ForkLock<'static, UnlockedUi>>],
-        pub shell: Arc::<ShellClient> [WeakArc::<ShellClient>],
-        pub lua: Arc::<Lua> [WeakArc::<Lua>],
-        pub events: Arc::<ForkLock<'static, crate::event_stream::EventController>> [WeakArc::<ForkLock<'static, crate::event_stream::EventController>>],
-        pub has_foreground_process: Arc::<tokio::sync::Mutex<()>> [WeakArc::<tokio::sync::Mutex<()>>],
-        preparing_for_unhandled_output: Arc::<AtomicUsize> [WeakArc::<AtomicUsize>],
-        threads: Arc::<ForkLock<'static, std::sync::Mutex<HashSet<nix::unistd::Pid>>>> [WeakArc::<ForkLock<'static, std::sync::Mutex<HashSet<nix::unistd::Pid>>>>],
-        is_drawing: Arc::<AtomicBool> [WeakArc::<AtomicBool>],
+        pub unlocked: ForkLock<'static, UnlockedUi>,
+        pub shell: ShellClient,
+        pub lua: Lua,
+        pub events: ForkLock<'static, crate::event_stream::EventController>,
+        pub has_foreground_process: tokio::sync::Mutex<()>,
+        preparing_for_unhandled_output: AtomicUsize,
+        threads: ForkLock<'static, std::sync::Mutex<HashSet<nix::unistd::Pid>>>,
+        is_drawing: AtomicBool,
 
-        pub pid_map: Arc::<ForkLock<'static, std::sync::Mutex<PidMap>>> [WeakArc::<ForkLock<'static, std::sync::Mutex<PidMap>>>],
+        pub pid_map: ForkLock<'static, std::sync::Mutex<PidMap>>,
     }
 }
 
