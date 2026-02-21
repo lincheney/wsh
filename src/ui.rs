@@ -163,36 +163,42 @@ impl Ui {
 
         self.is_drawing.store(false, Ordering::Release);
 
-        let size;
-        {
-            let this = self.unlocked.read();
-            let ui = &mut *this.borrow_mut();
+        let mut size = None;
+        let mut shell_vars = None;
+        loop {
+            let size = {
+                let this = self.unlocked.read();
+                let ui = &mut *this.borrow_mut();
 
-            size = ui.size;
-            let (width, height) = size;
-            // take up at most 2/3 of the screen
-            let height = (height * 2 / 3).max(1);
-            // redraw all if dimensions have changed
-            if height != ui.tui.max_height || width != ui.tui.get_size().0 as _ {
-                ui.tui.max_height = height;
-                ui.dirty = true;
-            }
+                if size == Some(ui.size) {
+                    return ui.draw(shell_vars);
+                }
+                // if the size has changed, recompute everything
 
-            if !(ui.dirty || ui.buffer.dirty || ui.tui.dirty || ui.status_bar.dirty) {
-                return Ok(())
-            }
+                size = Some(ui.size);
+                let (width, height) = ui.size;
+                // take up at most 2/3 of the screen
+                let height = (height * 2 / 3).max(1);
+                // redraw all if dimensions have changed
+                if height != ui.tui.max_height || width != ui.tui.get_size().0 as _ {
+                    ui.tui.max_height = height;
+                    ui.dirty = true;
+                }
 
-            if !(ui.dirty || ui.cmdline.is_dirty()) {
-                // don't need the shell vars, draw immediately
-                return ui.draw(None)
-            }
+                if !(ui.dirty || ui.buffer.dirty || ui.tui.dirty || ui.status_bar.dirty) {
+                    return Ok(())
+                }
+
+                if !(ui.dirty || ui.cmdline.is_dirty()) {
+                    // don't need the shell vars, draw immediately
+                    return ui.draw(None)
+                }
+                ui.size
+            };
+
+            // get the shell vars then reacquire the ui
+            shell_vars = Some(crate::tui::command_line::CommandLineState::get_shell_vars(&self.shell, size.0).await);
         }
-
-        // get the shell vars then reacquire the ui
-        let shell_vars = crate::tui::command_line::CommandLineState::get_shell_vars(&self.shell, size.0).await;
-
-        let this = self.unlocked.read();
-        this.borrow_mut().draw(Some(shell_vars))
     }
 
     pub async fn call_lua_fn<T: IntoLuaMulti + mlua::MaybeSend + 'static>(&self, draw: bool, callback: mlua::Function, arg: T) {
