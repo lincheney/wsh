@@ -4,11 +4,12 @@ use anyhow::Result;
 use nix::sys::signal;
 use std::os::fd::{IntoRawFd, BorrowedFd};
 use std::os::raw::{c_int, c_void};
-use std::sync::{Mutex, atomic::{AtomicI32, Ordering}};
+use std::sync::{atomic::{AtomicI32, Ordering}};
 mod pidset;
 
 static SELF_PIPE: AtomicI32 = AtomicI32::new(-1);
-pub static PID_MAP: Mutex<Option<HashMap<pidset::Pid, oneshot::Sender<i32>>>> = Mutex::new(None);
+pub type PidMap = HashMap<pidset::Pid, oneshot::Sender<i32>>;
+// pub static PID_MAP: Mutex<Option<HashMap<pidset::Pid, oneshot::Sender<i32>>>> = Mutex::new(None);
 static mut THIS_JOB: i32 = 1;
 
 fn jobtab_retain_iter<'a, F: FnMut(&'a zsh_sys::process) -> bool>(mut callback: F) -> impl Iterator<Item=&'a zsh_sys::process> {
@@ -46,16 +47,14 @@ fn jobtab_iter<'a>() -> impl Iterator<Item=&'a zsh_sys::process> {
     jobtab_retain_iter(|_| true)
 }
 
-pub fn clear_pids() {
+pub fn clear_pids(ui: &crate::ui::Ui) {
     pidset::PID_TABLE.clear();
-    if let Some(map) = PID_MAP.lock().unwrap().as_mut() {
-        map.clear();
-    }
+    ui.pid_map.read().lock().unwrap().clear();
 }
 
-pub fn register_pid(pid: pidset::Pid, add_to_jobtab: bool) -> oneshot::Receiver<i32> {
-    let mut pid_map = PID_MAP.lock().unwrap();
-    let pid_map = pid_map.get_or_insert_default();
+pub fn register_pid(ui: &crate::ui::Ui, pid: pidset::Pid, add_to_jobtab: bool) -> oneshot::Receiver<i32> {
+    let pid_map = ui.pid_map.read();
+    let mut pid_map = pid_map.lock().unwrap();
     let (sender, receiver) = oneshot::channel();
     pid_map.insert(pid, sender);
     pidset::PID_TABLE.register_pid(pid, add_to_jobtab);
@@ -134,10 +133,13 @@ extern "C" fn before_trap_hook(_hook: zsh_sys::Hookdef, _arg: *mut c_void) -> c_
     0
 }
 
-pub(super) fn init() -> Result<()> {
+pub(super) fn init(ui: &crate::ui::Ui) -> Result<()> {
     // spawn a reader task
-    let writer = super::signals::self_pipe::<_, _, std::convert::Infallible>(|| {
-        if let Some(pid_map) = &mut *PID_MAP.lock().unwrap() {
+    let ui = ui.clone();
+    let writer = super::signals::self_pipe::<_, _, std::convert::Infallible>(move || {
+        let pid_map = ui.pid_map.read();
+        let mut pid_map = pid_map.lock().unwrap();
+        if !pid_map.is_empty() {
             // check for pids that are done
             pidset::PID_TABLE.extract_finished_pids(|pid, status| {
                 if let Some(sender) = pid_map.remove(&pid) {

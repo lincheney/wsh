@@ -122,7 +122,7 @@ where
     Ok(writer)
 }
 
-pub fn init() -> Result<()> {
+pub fn init(ui: &crate::ui::Ui) -> Result<()> {
     #[allow(static_mut_refs)]
     unsafe {
         let trapcount = (zsh_sys::SIGCOUNT + 3 + nix::libc::SIGRTMAX() as u32 - nix::libc::SIGRTMIN() as u32 + 1) as usize;
@@ -134,7 +134,7 @@ pub fn init() -> Result<()> {
         resize_array(&mut super::siglists, trapcount, SIGTRAPPED_COUNT as usize);
     }
 
-    super::process::init()?;
+    super::process::init(ui)?;
     sigwinch::init()?;
 
     Ok(())

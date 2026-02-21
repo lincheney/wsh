@@ -75,16 +75,20 @@ impl Drop for ForkState {
         if !self.is_parent() {
             crate::IS_FORKED.store(true, Ordering::Relaxed);
 
-            // clear pid table
-            // since we are now the child, we won't be able to wait for any of them
-            crate::shell::zsh::process::clear_pids();
-
             if let Some(fork_lock) = self.fork_lock.take() {
                 // reset the lock if in the child
                 // we need to do this since all the other threads waiting on the lock
                 // are now gone
                 fork_lock.as_ref().reset();
             }
+
+            // clear pid table
+            // since we are now the child, we won't be able to wait for any of them
+            super::STATE.with(|state| {
+                let state = state.borrow();
+                let state = state.as_ref().unwrap();
+                crate::shell::zsh::process::clear_pids(&state.read().ui);
+            });
         }
 
         if let Some((lock, lua)) = self.lua.take() {

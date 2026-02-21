@@ -112,7 +112,7 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let pid = zpty.pid;
     tokio::task::spawn(async move {
         // get the status
-        let pid_waiter = crate::shell::process::register_pid(pid as _, false);
+        let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, false);
         let code = match ui.shell.check_pid_status(pid as _).await {
             None | Some(-1) => pid_waiter.await.unwrap_or(-1),
             Some(code) => code,

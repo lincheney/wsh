@@ -13,7 +13,7 @@ const FALLBACK_PROMPT: &MetaStr = crate::meta_str!(c">>> ");
 const PREDISPLAY_NS: usize = usize::MAX;
 const POSTDISPLAY_NS: usize = PREDISPLAY_NS - 1;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct ShellVars {
     predisplay: Option<BString>,
     postdisplay: Option<BString>,

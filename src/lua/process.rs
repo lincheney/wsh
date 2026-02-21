@@ -230,18 +230,21 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     tokio::task::spawn(async move {
 
         let (pid_sender, pid_receiver) = oneshot::channel();
-        tokio::task::spawn_blocking(move || {
-            let mut buf = [0; _];
-            if crate::log_if_err(pid_read.read(&mut buf)).is_some() {
-                // get the pid
-                let pid = u32::from_le_bytes(buf);
-                let pid_waiter = crate::shell::process::register_pid(pid as _, true);
-                let _ = pid_sender.send((pid, pid_waiter));
-                // send the ack
-                crate::log_if_err(sync_pid_write.write_all(b" "));
-            }
-            drop(sync_pid_write);
-        });
+        {
+            let ui = ui.clone();
+            tokio::task::spawn_blocking(move || {
+                let mut buf = [0; _];
+                if crate::log_if_err(pid_read.read(&mut buf)).is_some() {
+                    // get the pid
+                    let pid = u32::from_le_bytes(buf);
+                    let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, true);
+                    let _ = pid_sender.send((pid, pid_waiter));
+                    // send the ack
+                    crate::log_if_err(sync_pid_write.write_all(b" "));
+                }
+                drop(sync_pid_write);
+            });
+        }
 
         let mut result_sender = Some(result_sender);
         let result: Result<Result<_>> = ui.freeze_if(foreground, true, async {
@@ -459,7 +462,7 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
                     // send streams back to caller
                     let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
                     // get the status
-                    let pid_waiter = crate::shell::process::register_pid(pid as _, false);
+                    let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, false);
                     match ui.shell.check_pid_status(pid as _).await {
                         None | Some(-1) => pid_waiter.await.unwrap_or(-1) as _,
                         Some(code) => code as _,

@@ -39,7 +39,7 @@ impl GlobalState {
             let ui = Ui::new(&FORK_LOCK, event_ctrl, shell_client)?;
 
             zsh::completion::override_compadd()?;
-            zsh::signals::init()?;
+            zsh::signals::init(&ui)?;
 
             if !crate::is_forked() {
                 events.spawn(&ui);

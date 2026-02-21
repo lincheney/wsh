@@ -22,7 +22,7 @@ use crate::tui::{
 };
 
 use crate::timed_lock::{RwLock};
-use crate::shell::{ShellClient, KeybindValue};
+use crate::shell::{ShellClient, KeybindValue, process::PidMap};
 use crate::lua::{EventCallbacks, HasEventCallbacks};
 
 const UNHANDLED_OUTPUT: usize = 1;
@@ -86,6 +86,8 @@ crate::strong_weak_wrapper! {
         preparing_for_unhandled_output: Arc::<AtomicUsize> [WeakArc::<AtomicUsize>],
         threads: Arc::<ForkLock<'static, std::sync::Mutex<HashSet<nix::unistd::Pid>>>> [WeakArc::<ForkLock<'static, std::sync::Mutex<HashSet<nix::unistd::Pid>>>>],
         is_drawing: Arc::<AtomicBool> [WeakArc::<AtomicBool>],
+
+        pub pid_map: Arc::<ForkLock<'static, std::sync::Mutex<PidMap>>> [WeakArc::<ForkLock<'static, std::sync::Mutex<PidMap>>>],
     }
 }
 
@@ -130,6 +132,7 @@ impl Ui {
             preparing_for_unhandled_output: Default::default(),
             threads: Arc::new(lock.wrap(std::sync::Mutex::new(HashSet::new()))),
             is_drawing: Arc::new(false.into()),
+            pid_map: Arc::new(lock.wrap(Default::default())),
         };
 
         Ok(ui)
