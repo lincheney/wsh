@@ -9,7 +9,7 @@ end)
 wish.set_keymap('<bs>', function()
     local buffer, cursor = wish.get_buffer()
     if cursor > 0 then
-        buffer = utf8.sub(buffer, 1, cursor-1) .. utf8.sub(buffer, cursor+1)
+        buffer = utf8.sub(buffer, 1, cursor-2) .. utf8.sub(buffer, cursor)
         wish.set_buffer(buffer, cursor-1)
     end
 end)
