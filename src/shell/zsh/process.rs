@@ -46,6 +46,13 @@ fn jobtab_iter<'a>() -> impl Iterator<Item=&'a zsh_sys::process> {
     jobtab_retain_iter(|_| true)
 }
 
+pub fn clear_pids() {
+    pidset::PID_TABLE.clear();
+    if let Some(map) = PID_MAP.lock().unwrap().as_mut() {
+        map.clear();
+    }
+}
+
 pub fn register_pid(pid: pidset::Pid, add_to_jobtab: bool) -> oneshot::Receiver<i32> {
     let mut pid_map = PID_MAP.lock().unwrap();
     let pid_map = pid_map.get_or_insert_default();
@@ -93,7 +100,7 @@ pub(super) fn sighandler() -> c_int {
                     // found one
                     if proc.status >= 0 && let Some((status, added)) = pids.get(&proc.pid) {
                         found = true;
-                        status.store(proc.status, std::sync::atomic::Ordering::Release);
+                        status.store(proc.status, Ordering::Release);
                         // pop it off
                         if *added {
                             return false

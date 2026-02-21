@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::hash::{BuildHasherDefault, DefaultHasher};
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct ConstHashMap<K, V> {
     inner: HashMap<K, V, BuildHasherDefault<DefaultHasher>>,
 }

@@ -41,6 +41,10 @@ impl PidTable {
         }
     }
 
+    pub fn clear(&self) {
+        self.get_mut().clear();
+    }
+
     pub fn register_pid(&self, pid: Pid, add_to_jobtab: bool) {
         self.get_mut().insert(pid, (Arc::new(AtomicI32::new(-1)), add_to_jobtab));
     }
