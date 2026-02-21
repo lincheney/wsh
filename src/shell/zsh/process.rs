@@ -63,7 +63,8 @@ pub(super) fn sighandler() -> c_int {
     #[allow(static_mut_refs)]
     unsafe {
         // register any pids we are interested in
-        if let Some(pids) = pidset::PID_TABLE.get() && !pids.is_empty() {
+        let pids = pidset::PID_TABLE.get();
+        if !pids.is_empty() {
             super::queue_signals();
             for (&pid, (status, add)) in pids.iter() {
                 // register these pids
@@ -81,7 +82,8 @@ pub(super) fn sighandler() -> c_int {
         zsh_sys::thisjob = thisjob;
 
         // check for our pids
-        if let Some(pids) = pidset::PID_TABLE.get() && !pids.is_empty() {
+        let pids = pidset::PID_TABLE.get();
+        if !pids.is_empty() {
             super::queue_signals();
             let mut found = false;
             jobtab_retain_iter(|proc| {
