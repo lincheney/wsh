@@ -63,16 +63,18 @@ pub(super) fn sighandler() -> c_int {
     #[allow(static_mut_refs)]
     unsafe {
         // register any pids we are interested in
-        let pids = pidset::PID_TABLE.get();
-        if !pids.is_empty() {
-            super::queue_signals();
-            for (&pid, (status, add)) in pids.iter() {
-                // register these pids
-                if *add && status.load(Ordering::Relaxed) < 0 && !jobtab_iter().any(|proc| proc.pid == pid) {
-                    super::add_pid(pid);
+        {
+            let pids = pidset::PID_TABLE.get();
+            if !pids.is_empty() {
+                super::queue_signals();
+                for (&pid, (status, add)) in pids.iter() {
+                    // register these pids
+                    if *add && status.load(Ordering::Relaxed) < 0 && !jobtab_iter().any(|proc| proc.pid == pid) {
+                        super::add_pid(pid);
+                    }
                 }
+                super::unqueue_signals().unwrap();
             }
-            super::unqueue_signals().unwrap();
         }
 
         // reset thisjob so it doesn't go off reporting job statuses for foreground jobs
@@ -82,32 +84,34 @@ pub(super) fn sighandler() -> c_int {
         zsh_sys::thisjob = thisjob;
 
         // check for our pids
-        let pids = pidset::PID_TABLE.get();
-        if !pids.is_empty() {
-            super::queue_signals();
-            let mut found = false;
-            jobtab_retain_iter(|proc| {
-                // found one
-                if proc.status >= 0 && let Some((status, added)) = pids.get(&proc.pid) {
-                    found = true;
-                    status.store(proc.status, std::sync::atomic::Ordering::Release);
-                    // pop it off
-                    if *added {
-                        return false
+        {
+            let pids = pidset::PID_TABLE.get();
+            if !pids.is_empty() {
+                super::queue_signals();
+                let mut found = false;
+                jobtab_retain_iter(|proc| {
+                    // found one
+                    if proc.status >= 0 && let Some((status, added)) = pids.get(&proc.pid) {
+                        found = true;
+                        status.store(proc.status, std::sync::atomic::Ordering::Release);
+                        // pop it off
+                        if *added {
+                            return false
+                        }
+                    }
+                    true
+                }).for_each(drop);
+                super::unqueue_signals().unwrap();
+
+                // notify that we found something
+                if found {
+                    let pipe = SELF_PIPE.load(Ordering::Acquire);
+                    if pipe != -1 {
+                        nix::unistd::write(BorrowedFd::borrow_raw(pipe), b"0").unwrap();
                     }
                 }
-                true
-            }).for_each(drop);
-            super::unqueue_signals().unwrap();
 
-            // notify that we found something
-            if found {
-                let pipe = SELF_PIPE.load(Ordering::Acquire);
-                if pipe != -1 {
-                    nix::unistd::write(BorrowedFd::borrow_raw(pipe), b"0").unwrap();
-                }
             }
-
         }
 
         0
