@@ -4,7 +4,7 @@ function M.debug_tokens(tokens, buffer)
     local x = {}
     for i = 1, #tokens do
         x[i] = {
-            buffer:sub(tokens[i].start+1, tokens[i].finish),
+            buffer:sub(tokens[i].start, tokens[i].finish),
             tokens[i].kind,
             tokens[i].nested and M.debug_tokens(tokens[i].nested, buffer)
         }
@@ -39,7 +39,7 @@ local function apply_matcher(matcher, token, str)
     end
 
     if matcher.regex or matcher.not_regex then
-        tokstr = tokstr or string.sub(str, token.start+1, token.finish)
+        tokstr = tokstr or string.sub(str, token.start, token.finish)
         if type(matcher.regex) == 'string' then
             matcher.regex = wish.regex(matcher.regex)
         end

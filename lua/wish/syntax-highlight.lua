@@ -87,7 +87,7 @@ local function apply_highlight_matcher(matcher, token, str, highlights, priority
             local index = capture[2] or capture[1]
             local hl = wish.table.copy(wish.style[matcher.hl])
             hl.start = token.start + index[1] - 1
-            hl.finish = token.start + index[2]
+            hl.finish = token.start + index[2] - 1
             hl.namespace = NAMESPACE
             hl.priority = priority
             table.insert(highlights, hl)
