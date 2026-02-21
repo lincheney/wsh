@@ -64,6 +64,15 @@ function wish.cmd(...)
     }
 end
 
+function wish.silent_cmd(...)
+    local args = {...}
+    if #args == 1 then
+        args = {args = args[1]}
+    end
+    args.foreground = false
+    return wish.cmd(args)
+end
+
 function wish.async.zpty(...)
     local proc, stdin, stdout = wish.__zpty(...)
     return {
