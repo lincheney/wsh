@@ -271,18 +271,13 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
             Ok(())
         }).await;
 
-        let mut drawn = false;
         if let Err(err) = result {
             if let Some(result_sender) = result_sender {
                 let _ = result_sender.send(Err(err));
             } else {
                 let err: Result<()> = Err(err);
-                drawn = ui.report_error(err) || drawn;
+                ui.report_error(err);
             }
-        }
-
-        if foreground && ! drawn {
-            crate::log_if_err(ui.draw().await);
         }
 
     });

@@ -669,7 +669,9 @@ impl Ui {
             if freeze_events {
                 self.events.read().unpause();
             }
-            crate::log_if_err(self.recover_from_unhandled_output(Some(UI_FROZEN)).await);
+            if crate::log_if_err(self.recover_from_unhandled_output(Some(UI_FROZEN)).await) == Some(true) {
+                self.queue_draw();
+            }
         }
 
         Ok(result)
