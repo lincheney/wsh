@@ -209,7 +209,7 @@ impl<'a, 'b, W: Write, C: Canvas> Drawer<'a, 'b, W, C> {
 
     fn cells_are_cleared(cells: &[Cell], style: Option<Style>) -> bool {
         if let Some(style) = style {
-            cells.iter().all(|c| c.style() == style)
+            cells.iter().all(|c| c.symbol() == " " && c.style() == style)
         } else {
             cells.iter().all(super::cell_is_empty)
         }
