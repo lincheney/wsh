@@ -131,8 +131,9 @@ async fn redraw(ui: Ui, lua: Lua, val: Option<LuaValue>) -> Result<()> {
     Ok(())
 }
 
-fn exit(ui: &Ui, _lua: &Lua, code: Option<i32>) -> Result<()> {
-    ui.events.read().exit(code.unwrap_or(0));
+async fn exit(mut ui: Ui, _lua: Lua, code: Option<i32>) -> Result<()> {
+    ui.shell.exit(code.unwrap_or(0)).await;
+    ui.accept_line().await?;
     Ok(())
 }
 
@@ -228,7 +229,7 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_async_fn("redo_buffer", redo_buffer)?;
     ui.set_lua_async_fn("accept_line", accept_line)?;
     ui.set_lua_async_fn("redraw",  redraw)?;
-    ui.set_lua_fn("exit", exit)?;
+    ui.set_lua_async_fn("exit", exit)?;
     ui.set_lua_async_fn("get_cwd", get_cwd)?;
     ui.set_lua_fn("get_size", get_size)?;
     ui.set_lua_async_fn("call_hook_func", call_hook_func)?;

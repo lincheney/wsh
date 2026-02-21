@@ -361,6 +361,13 @@ pub fn unqueue_signals() -> nix::Result<()> {
     Ok(())
 }
 
+pub fn exit(code: i32) {
+    unsafe {
+        zsh_sys::exit_pending = 1;
+        zsh_sys::exit_val = code;
+    }
+}
+
 pub fn winch_block() {
     unsafe {
         zsh_sys::signal_block(zsh_sys::signal_mask(signal::Signal::SIGWINCH as _));

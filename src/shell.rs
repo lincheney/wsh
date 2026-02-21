@@ -440,6 +440,10 @@ crate::TokioActor! {
             unreachable!("{:?}", line)
         }
 
+        pub fn exit(&self, code: i32) {
+            zsh::exit(code);
+        }
+
         pub fn acceptline(&self) {
             unsafe { zsh::acceptline(); }
         }

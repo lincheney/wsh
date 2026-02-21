@@ -116,8 +116,7 @@ wish.set_keymap('<c-d>', function()
     wish.redraw()
     if not wish.get_buffer():find('%S') then
         -- wish.exit()
-        wish.set_buffer('exit')
-        wish.accept_line()
+        wish.exit()
     end
 end)
 
