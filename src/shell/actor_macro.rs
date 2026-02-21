@@ -36,17 +36,6 @@ macro_rules! TokioActor {
 
             #[allow(dead_code)]
             impl [<$name Client>] {
-
-                pub async fn do_run<T: 'static + Send, F: 'static + Sync + Send + FnOnce(&$name) -> T>(&self, func: F) -> T {
-                    *self.run(Box::new(move |shell| Box::new(func(shell)))).await.downcast().unwrap()
-                }
-
-                pub async fn do_accept_line_trampoline(&self, line: Option<BString>) -> Result<(), tokio::sync::oneshot::error::RecvError> {
-                    let (sender, receiver) = ::tokio::sync::oneshot::channel();
-                    self.queue.send([<$name Msg>]::accept_line_trampoline{line, returnvalue: sender}).unwrap();
-                    receiver.await
-                }
-
                 $(
                 pub async fn $fn(&self, $($arg: $argtype),*) $(-> $rettype)? {
                     let thread = ::std::thread::current().id();

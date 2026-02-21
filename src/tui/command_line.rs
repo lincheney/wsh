@@ -54,7 +54,7 @@ impl CommandLineState {
     }
 
     pub async fn get_shell_vars(shell: &ShellClient, width: u32) -> ShellVars {
-        shell.do_run(move |shell| {
+        shell.run(move |shell| {
 
             shell.start_zle_scope();
             let predisplay = crate::shell::get_var(shell, meta_str!(c"PREDISPLAY")).map(|mut v| v.as_bytes());

@@ -57,7 +57,7 @@ pub struct UiInner {
 
     pub stdout: std::io::Stdout,
     enhanced_keyboard: bool,
-    size: (u32, u32),
+    pub size: (u32, u32),
 }
 
 pub struct UnlockedUi {
@@ -339,7 +339,7 @@ impl Ui {
                 self.pre_accept_line()?;
                 // acceptline doesn't actually accept the line right now
                 // only when we return control to zle using the trampoline
-                if self.shell.do_accept_line_trampoline(Some(buffer)).await.is_err() {
+                if self.shell.accept_line_trampoline(Some(buffer)).await.is_err() {
                     return Ok(false)
                 }
                 drop(lock);
@@ -513,7 +513,7 @@ impl Ui {
         let ui = self.clone();
         let buf: crate::shell::MetaString = buf.to_owned().into();
 
-        let result = self.shell.do_run(move |shell| {
+        let result = self.shell.run(move |shell| {
             match KeybindValue::find(shell, buf.as_ref()) {
                 Some(KeybindValue::String(string)) => {
                     // recurse

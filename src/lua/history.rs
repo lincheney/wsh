@@ -19,7 +19,7 @@ fn entry_to_lua(entry: crate::shell::history::Entry, lua: &Lua) -> Result<LuaTab
 async fn get_history(ui: Ui, lua: Lua, _val: ()) -> Result<(usize, LuaTable)> {
     let current = ui.shell.get_histline().await;
 
-    let tbl: Result<_> = ui.shell.do_run(move |shell| {
+    let tbl: Result<_> = ui.shell.run(move |shell| {
         let tbl = lua.create_table()?;
         let history = crate::shell::history::History::get(shell);
         for entry in history.iter() {

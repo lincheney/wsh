@@ -44,7 +44,6 @@ pub struct Shell {
 }
 
 pub type ShellMsg = ShellInternalMsg;
-pub type ShellClient = ShellInternalClient;
 
 impl Shell {
     pub fn make() -> (Self, ShellClient) {
@@ -55,8 +54,10 @@ impl Shell {
             main_thread: std::thread::current().id(),
         };
         let client = ShellClient {
-            inner: shell.clone(),
-            queue: sender,
+            inner: ShellInternalClient {
+                inner: shell.clone(),
+                queue: sender,
+            },
         };
         let shell = Shell {
             inner: shell.clone(),
@@ -79,6 +80,24 @@ impl Shell {
         self.inner.handle_one_message(msg);
     }
 }
+
+pub struct ShellClient {
+    inner: ShellInternalClient,
+}
+crate::impl_deref_helper!(self: ShellClient, &self.inner => ShellInternalClient);
+
+impl ShellClient {
+    pub async fn accept_line_trampoline(&self, line: Option<BString>) -> Result<(), tokio::sync::oneshot::error::RecvError> {
+        let (sender, receiver) = ::tokio::sync::oneshot::channel();
+        self.queue.send(ShellInternalMsg::accept_line_trampoline{line, returnvalue: sender}).unwrap();
+        receiver.await
+    }
+
+    pub async fn run<T: 'static + Send, F: 'static + Sync + Send + FnOnce(&ShellInternal) -> T>(&self, func: F) -> T {
+        *self.inner.run(Box::new(move |shell| Box::new(func(shell)))).await.downcast().unwrap()
+    }
+}
+
 
 pub enum KeybindValue<'a> {
     String(BString),

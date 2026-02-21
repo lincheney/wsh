@@ -411,7 +411,7 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
 
                     // wrap the whole thing in a do_run to ensure fd restoration happens in the
                     // correct order
-                    let (code, errs) = ui.shell.do_run(move |shell| {
+                    let (code, errs) = ui.shell.run(move |shell| {
                         // no forking, override fds in place
                         let result = streams.iter_mut().flatten().try_for_each(|s| s.override_fd());
                         if let Err(result) = result {
