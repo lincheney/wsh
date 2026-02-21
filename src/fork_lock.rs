@@ -65,13 +65,15 @@ pub struct RawForkLockWriteGuard<'a: 'b, 'b> {
 
 impl RawForkLockWriteGuard<'_, '_> {
     pub fn reset(&self) {
+        // this is only ever called post-fork in the child where no other threads are running
+        // so it is fine to be relaxed and not notify
         self.parent.counter.store(1, Ordering::Relaxed);
     }
 }
 
 impl Drop for RawForkLockWriteGuard<'_, '_> {
     fn drop(&mut self) {
-        self.parent.counter.fetch_sub(1, Ordering::Relaxed);
+        self.parent.remove_writer();
     }
 }
 
@@ -92,6 +94,11 @@ impl RawForkLock {
         if self.counter.fetch_sub(2, Ordering::AcqRel) == 3 {
             self.condvar.notify_all();
         }
+    }
+
+    fn remove_writer(&self) {
+        self.counter.fetch_sub(1, Ordering::AcqRel);
+        self.condvar.notify_all();
     }
 
     fn read(&self) -> RawForkLockReadGuard<'_> {
