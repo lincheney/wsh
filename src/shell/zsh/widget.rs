@@ -45,17 +45,17 @@ impl<'a> ZleWidget<'a> {
 
         if w.is_internal() && let Some(widget) = w.widget() {
             // these are just caches
-            if SELF_INSERT.get().is_none() && w.name() == MetaStr::new(c"self-insert") {
+            if SELF_INSERT.get().is_none() && w.name() == meta_str!(c"self-insert") {
                 let _ = SELF_INSERT.set(widget);
-            } else if IMMORTAL_SELF_INSERT.get().is_none() && w.name() == MetaStr::new(c".self-insert") {
+            } else if IMMORTAL_SELF_INSERT.get().is_none() && w.name() == meta_str!(c".self-insert") {
                 let _ = IMMORTAL_SELF_INSERT.set(widget);
-            } else if UNDEFINED_KEY.get().is_none() && w.name() == MetaStr::new(c"undefined-key") {
+            } else if UNDEFINED_KEY.get().is_none() && w.name() == meta_str!(c"undefined-key") {
                 let _ = UNDEFINED_KEY.set(widget);
-            } else if IMMORTAL_UNDEFINED_KEY.get().is_none() && w.name() == MetaStr::new(c".undefined-key") {
+            } else if IMMORTAL_UNDEFINED_KEY.get().is_none() && w.name() == meta_str!(c".undefined-key") {
                 let _ = IMMORTAL_UNDEFINED_KEY.set(widget);
-            } else if ACCEPT_LINE.get().is_none() && w.name() == MetaStr::new(c"accept-line") {
+            } else if ACCEPT_LINE.get().is_none() && w.name() == meta_str!(c"accept-line") {
                 let _ = ACCEPT_LINE.set(widget);
-            } else if IMMORTAL_ACCEPT_LINE.get().is_none() && w.name() == MetaStr::new(c".accept-line") {
+            } else if IMMORTAL_ACCEPT_LINE.get().is_none() && w.name() == meta_str!(c".accept-line") {
                 let _ = IMMORTAL_ACCEPT_LINE.set(widget);
             }
         }

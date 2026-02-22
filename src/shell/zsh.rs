@@ -13,9 +13,9 @@ pub mod variables;
 pub mod functions;
 pub mod signals;
 pub mod process;
-mod widget;
 #[macro_use]
 mod meta_string;
+mod widget;
 pub mod zle_watch_fds;
 pub use widget::ZleWidget;
 pub mod history;
