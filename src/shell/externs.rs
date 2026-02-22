@@ -66,14 +66,18 @@ impl GlobalState {
         })
     }
 
-    fn get() -> Result<Rc<Self>> {
+    fn with<T, F: FnOnce(&Rc<Self>) -> T>(f: F) -> Result<T> {
         STATE.with(|state| {
             if let Some(state) = &*state.borrow() {
-                Ok(state.read().clone())
+                Ok(f(&*state.read()))
             } else {
                 anyhow::bail!("wish is not running")
             }
         })
+    }
+
+    fn get() -> Result<Rc<Self>> {
+        Self::with(|state| state.clone())
     }
 
     fn shell_loop(&self) -> Result<Option<BString>> {

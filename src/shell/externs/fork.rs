@@ -84,10 +84,11 @@ impl Drop for ForkState {
 
             // clear pid table
             // since we are now the child, we won't be able to wait for any of them
-            super::STATE.with(|state| {
-                let state = state.borrow();
-                let state = state.as_ref().unwrap();
-                crate::shell::zsh::process::clear_pids(&state.read().ui);
+            // we shouldn't have to rush this, since we don't have any child processes
+            // we shouldn't get any SIGCHLD yet
+            crate::shell::zsh::process::clear_pids();
+            let _ = super::GlobalState::with(|state| {
+                state.ui.pid_map.read().lock().unwrap().clear();
             });
         }
 

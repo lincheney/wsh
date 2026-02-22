@@ -47,9 +47,8 @@ fn jobtab_iter<'a>() -> impl Iterator<Item=&'a zsh_sys::process> {
     jobtab_retain_iter(|_| true)
 }
 
-pub fn clear_pids(ui: &crate::ui::Ui) {
+pub fn clear_pids() {
     pidset::PID_TABLE.clear();
-    ui.pid_map.read().lock().unwrap().clear();
 }
 
 pub fn register_pid(ui: &crate::ui::Ui, pid: pidset::Pid, add_to_jobtab: bool) -> oneshot::Receiver<i32> {
