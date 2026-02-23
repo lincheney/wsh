@@ -13,8 +13,8 @@ use crate::fork_lock::{RawForkLock, ForkLock};
 
 static FORK_LOCK: RawForkLock = RawForkLock::new();
 
-struct GlobalState {
-    ui: Ui,
+pub(in crate::shell) struct GlobalState {
+    pub(in crate::shell) ui: Ui,
     shell: Shell,
     pub runtime: tokio::runtime::Runtime,
     first_drawn: AtomicBool,
@@ -39,6 +39,7 @@ impl GlobalState {
             let ui = Ui::new(&FORK_LOCK, event_ctrl, shell_client)?;
 
             zsh::completion::override_compadd()?;
+            zsh::widget::overrides::override_all()?;
             zsh::signals::init(&ui)?;
 
             if !crate::is_forked() {
@@ -66,7 +67,7 @@ impl GlobalState {
         })
     }
 
-    fn with<T, F: FnOnce(&Rc<Self>) -> T>(f: F) -> Result<T> {
+    pub fn with<T, F: FnOnce(&Rc<Self>) -> T>(f: F) -> Result<T> {
         STATE.with(|state| {
             if let Some(state) = &*state.borrow() {
                 Ok(f(&*state.read()))
@@ -133,6 +134,7 @@ impl GlobalState {
 impl Drop for GlobalState {
     fn drop(&mut self) {
         zsh::completion::restore_compadd();
+        zsh::widget::overrides::restore_all();
         zsh::bin_zle::restore_zle();
     }
 }

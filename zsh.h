@@ -36,6 +36,7 @@
 #include <unistd.h>
 typedef void* LinkList;
 typedef void* Eprog;
+typedef void* HashTable;
 typedef uint32_t mode_t;
 
 mod_export static unsigned char Meta = ((char) 0x83);
@@ -175,12 +176,22 @@ Keymap curkeymap;
 Keymap localkeymap;
 
 typedef void* HashNode;
-struct widget {
-    int flags;		/* flags (see below) */
-    // there's more, but sure
-};
+typedef int (*ZleIntFunc) (char **);
 typedef struct widget* Widget;
 typedef struct thingy* Thingy;
+struct widget {
+    int flags;		/* flags (see below) */
+    Thingy first;	/* `first' thingy that names this widget */
+    union {
+	ZleIntFunc fn;	/* pointer to internally implemented widget */
+	char *fnnam;	/* name of the shell function for user-defined widget */
+	struct {
+	    ZleIntFunc fn; /* internal widget function to call */
+	    char *wid;     /* name of widget to call */
+	    char *func;    /* name of shell function to call */
+	} comp;
+    } u;
+};
 struct thingy {
     HashNode next;	/* next node in the hash chain */
     char *nam;		/* name of the thingy */
@@ -189,7 +200,8 @@ struct thingy {
     Widget widget;	/* widget named by this thingy */
     Thingy samew;	/* `next' thingy (circularly) naming the same widget */
 };
-struct thingy thingies; // this is actually an array
+struct thingy* thingies; // this is actually an array
+mod_export HashTable thingytab;
 Thingy keybind(Keymap km, char *seq, char **strp);
 mod_export Thingy refthingy(Thingy th);
 void unrefthingy(Thingy th);
