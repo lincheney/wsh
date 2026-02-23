@@ -23,6 +23,7 @@ pub use widget::Widget;
 pub mod command_line;
 pub mod status_bar;
 pub mod text;
+pub mod layout;
 pub use drawer::{Drawer, Canvas};
 
 pub struct MoveUp(pub u16);
@@ -70,52 +71,9 @@ fn buffer_nonempty_height(buffer: &Buffer) -> u16 {
 }
 
 #[derive(Default)]
-struct Widgets {
-    inner: Vec<widget::Widget>,
-    pub height: u16,
-}
-
-impl Widgets {
-    fn get_height(&self) -> u16 {
-        self.inner.iter().map(|w| w.line_count).sum()
-    }
-
-    fn refresh(&mut self, area: Rect) {
-        let mut height = 0;
-        for w in &mut self.inner {
-            if w.hidden || area.height <= height as _ {
-                w.line_count = 0;
-            } else {
-                w.line_count = w.get_height_for_width(area).min(area.height - height);
-                height += w.line_count;
-            }
-        }
-    }
-
-    fn render<W :Write, C: Canvas>(
-        &mut self,
-        drawer: &mut Drawer<W, C>,
-        buffer: &mut Buffer,
-        area: Rect,
-    ) -> std::io::Result<()> {
-
-        let widgets = self.inner.iter().filter(|w| !w.hidden && w.line_count > 0);
-        let layout = Layout::vertical(widgets.clone().map(|w| w.constraint.unwrap_or(Constraint::Max(w.line_count))));
-        let layouts = layout.split(area);
-
-        for (widget, area) in widgets.zip(layouts.iter()) {
-            widget.render(drawer, buffer, Some(area.height as usize))?;
-        }
-        Ok(())
-    }
-}
-
-#[derive(Default)]
 pub struct Tui {
-    counter: usize,
-    widgets: Widgets,
+    pub nodes: layout::Nodes,
     buffer: Buffer,
-    border_buffer: Buffer,
     prev_status_bar_position: usize,
     pub max_height: u32,
     pub dirty: bool,
@@ -127,16 +85,14 @@ impl Tui {
         (self.buffer.area.width, self.buffer.area.height)
     }
 
-    pub fn add(&mut self, mut widget: Widget) -> (usize, &mut Widget) {
-        let id = self.counter;
-        widget.id = id;
-        self.counter += 1;
+    pub fn add(&mut self, widget: Widget) -> usize {
         self.dirty = true;
-        self.widgets.inner.push(widget);
-        (id, self.widgets.inner.last_mut().unwrap())
+        let id = self.nodes.add(layout::NodeKind::Widget(widget)).id;
+        self.nodes.add_child(id);
+        id
     }
 
-    pub fn add_message(&mut self, message: &str) -> (usize, &mut Widget) {
+    pub fn add_message(&mut self, message: &str) -> usize {
         let mut widget = widget::Widget::default();
         widget.inner.clear();
         for line in message.split('\n') {
@@ -145,7 +101,7 @@ impl Tui {
         self.add(widget)
     }
 
-    pub fn add_error_message(&mut self, message: &str) -> (usize, &mut Widget) {
+    pub fn add_error_message(&mut self, message: &str) -> usize {
         let mut widget = widget::Widget::default();
         widget.inner.clear();
         for line in message.split('\n') {
@@ -154,79 +110,58 @@ impl Tui {
         self.add(widget)
     }
 
-    pub fn add_zle_message(&mut self, message: &[u8]) -> (usize, &mut Widget) {
+    pub fn add_zle_message(&mut self, message: &[u8]) -> usize {
         let mut widget = widget::Widget::default();
         widget.ansi.ocrnl = true; // treat \r as \n
         widget.feed_ansi(message.into());
         self.add(widget)
     }
 
-    pub fn get_index(&self, id: usize) -> Option<usize> {
-        for (i, w) in self.widgets.inner.iter().enumerate() {
-            match w.id.cmp(&id) {
-                std::cmp::Ordering::Equal => return Some(i),
-                std::cmp::Ordering::Greater => break,
-                std::cmp::Ordering::Less => (),
-            }
-        }
-        None
+    pub fn get_node(&self, id: usize) -> Option<&layout::Node> {
+        self.nodes.get_node(id)
     }
 
-    pub fn get(&self, id: usize) -> Option<&Widget> {
-        self.get_index(id).map(|i| {
-            &self.widgets.inner[i]
-        })
+    pub fn get_node_mut(&mut self, id: usize) -> Option<&mut layout::Node> {
+        self.dirty = true;
+        self.nodes.get_node_mut(id)
     }
 
-    pub fn get_mut(&mut self, id: usize) -> Option<&mut Widget> {
-        self.get_index(id).map(|i| {
-            self.dirty = true;
-            &mut self.widgets.inner[i]
-        })
-    }
-
-    pub fn remove(&mut self, id: usize) -> Option<Widget> {
-        self.get_index(id).map(|i| {
-            self.dirty = true;
-            self.widgets.inner.remove(i)
-        })
+    pub fn remove(&mut self, id: usize) -> Option<layout::Node> {
+        self.dirty = true;
+        self.nodes.remove(id)
     }
 
     pub fn render_to_string(&self, id: usize, width: Option<u16>) -> Option<BString> {
-        self.get_index(id).map(|i| {
-            let widget = &self.widgets.inner[i];
-            let width = width.unwrap_or(self.buffer.area.width);
-            let width = std::num::NonZero::new(width).map_or(80, |w| w.get());
+        let node = self.get_node(id)?;
+        let width = width.unwrap_or(self.buffer.area.width);
+        let width = std::num::NonZero::new(width).map_or(80, |w| w.get());
 
-            let mut string = vec![];
-            let mut writer = Cursor::new(&mut string);
-            // always start with a reset
-            writer.write_all(b"\x1b[0m").unwrap();
-            let mut canvas = drawer::DummyCanvas::default();
-            canvas.size = (width, u16::MAX);
-            let mut drawer = drawer::Drawer::new(&mut canvas, &mut writer, (0, 0));
-            let mut border_buffer = Buffer::default();
+        let mut string = vec![];
+        let mut writer = Cursor::new(&mut string);
+        // always start with a reset
+        writer.write_all(b"\x1b[0m").unwrap();
+        let mut canvas = drawer::DummyCanvas::default();
+        canvas.size = (width, u16::MAX);
+        let mut drawer = drawer::Drawer::new(&mut canvas, &mut writer, (0, 0));
 
-            widget.render(&mut drawer, &mut border_buffer, None).unwrap();
-            string.into()
-        })
+        self.nodes.render_node(node, &mut drawer, None).unwrap();
+        Some(string.into())
     }
 
     pub fn clear_all(&mut self) {
-        self.widgets.inner.clear();
+        self.nodes.clear_all();
         self.dirty = true;
     }
 
     pub fn clear_non_persistent(&mut self) {
-        self.widgets.inner.retain(|w| w.persist);
+        self.nodes.clear_non_persistent();
         self.dirty = true;
     }
 
     pub fn reset(&mut self) {
         self.prev_status_bar_position = 0;
         self.buffer.reset();
-        self.border_buffer.reset();
-        self.widgets.height = 0;
+        self.nodes.height.set(0);
         self.dirty = true;
     }
 
@@ -261,7 +196,7 @@ impl Tui {
 
         // old heights
         let mut old_cmdline_height = cmdline.get_height();
-        let mut old_widgets_height = self.widgets.get_height() as usize;
+        let mut old_widgets_height = self.nodes.get_height() as usize;
         let mut old_status_bar_height = status_bar.inner.as_ref().map_or(0, |w| w.line_count) as usize;
         if clear {
             old_cmdline_height = 0;
@@ -276,7 +211,7 @@ impl Tui {
             cmdline.refresh(area);
         }
         if self.dirty {
-            self.widgets.refresh(Rect{ height: (height as u16).saturating_sub(status_bar.get_height()), ..area });
+            self.nodes.refresh(Rect{ height: (height as u16).saturating_sub(status_bar.get_height()), ..area });
         }
         if status_bar.dirty {
             status_bar.refresh(area);
@@ -284,7 +219,7 @@ impl Tui {
 
         // new heights
         let new_cmdline_height = cmdline.get_height();
-        let new_widgets_height = self.widgets.get_height() as usize;
+        let new_widgets_height = self.nodes.get_height() as usize;
         let new_status_bar_height = status_bar.get_height() as usize;
         let new_height = new_cmdline_height + new_widgets_height + new_status_bar_height;
 
@@ -322,7 +257,7 @@ impl Tui {
             // go to next line after end of buffer
             drawer.move_to(cmdline.draw_end_pos);
             drawer.goto_newline(None)?;
-            self.widgets.render(&mut drawer, &mut self.border_buffer, Rect{ height: new_widgets_height as u16, ..area})?;
+            self.nodes.render(&mut drawer, Some(new_widgets_height))?;
         }
 
         // the prompt/buffer/widgets used to be bigger, so clear the extra bits
@@ -353,7 +288,7 @@ impl Tui {
                 cursor::MoveToColumn(0),
             )?;
             drawer.set_pos((0, area.height - new_status_bar_height as u16));
-            widget.render(&mut drawer, &mut self.border_buffer, None)?;
+            widget.render(&mut drawer, true, None, None)?;
             // clear everything else below
             // drawer.clear_to_end_of_screen(None)?;
 

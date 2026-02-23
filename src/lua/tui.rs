@@ -9,7 +9,7 @@ use ratatui::{
 };
 use mlua::{prelude::*};
 use crate::ui::{Ui};
-use crate::tui;
+use crate::tui::{self, layout::{Node, NodeKind, Layout}};
 use super::SerdeWrap;
 
 #[derive(Debug, Copy, Clone)]
@@ -30,7 +30,7 @@ impl<'de> Deserialize<'de> for SerdeConstraint {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default)]
 pub struct TextStyleOptions {
     pub align: Option<SerdeWrap<Alignment>>,
@@ -38,7 +38,7 @@ pub struct TextStyleOptions {
     pub style: StyleOptions,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default)]
 pub struct TextOptions {
     pub text: Option<String>,
@@ -46,7 +46,7 @@ pub struct TextOptions {
     pub style: TextStyleOptions,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum TextParts {
     Single(String),
@@ -56,24 +56,50 @@ pub enum TextParts {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-struct CommonWidgetOptions {
-    id: Option<usize>,
-    pub persist: Option<bool>,
-    pub hidden: Option<bool>,
+struct MessageStyleOptions {
     #[serde(flatten)]
     pub style: TextStyleOptions,
     pub border: Option<BorderOptions>,
-    pub height: Option<SerdeConstraint>,
     // ansi options
     pub show_cursor: Option<bool>,
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-pub struct WidgetOptions {
+#[derive(Debug, Deserialize)]
+#[allow(nonstandard_style)]
+enum Direction {
+    vertical,
+    horizontal,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum LayoutChild {
+    Message(MessageOptions),
+    WidgetRef(usize),
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum MessageInner {
+    Layout{
+        direction: Direction,
+        children: Vec<LayoutChild>,
+    },
+    Widget{
+        #[serde(flatten)]
+        style: MessageStyleOptions,
+        text: Option<TextParts>,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MessageOptions {
+    id: Option<usize>,
+    pub persist: Option<bool>,
+    pub hidden: Option<bool>,
+    pub height: Option<SerdeConstraint>,
     #[serde(flatten)]
-    options: CommonWidgetOptions,
-    pub text: Option<TextParts>,
+    inner: MessageInner,
 }
 
 #[derive(Clone, Copy, Debug, Default, strum::EnumString)]
@@ -117,19 +143,19 @@ pub struct BorderOptions {
     pub style: StyleOptions,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct UnderlineStyleOptions {
     color: SerdeWrap<Color>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum UnderlineOption {
     Bool(bool),
     Options(UnderlineStyleOptions),
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default)]
 pub struct StyleOptions {
     pub fg: Option<SerdeWrap<Color>>,
@@ -238,49 +264,40 @@ fn parse_text_parts<T: Default+Clone>(parts: TextParts, text: &mut tui::text::Te
     }
 }
 
-fn set_widget_options(widget: &mut tui::widget::Widget, options: CommonWidgetOptions) {
-    if let Some(persist) = options.persist {
-        widget.persist = persist;
-    }
-
-    if let Some(hidden) = options.hidden {
-        widget.hidden = hidden;
-    }
-
-    if let Some(constraint) = options.height {
-        widget.constraint = Some(constraint.0);
-    }
-
-    if let Some(align) = options.style.align {
+fn set_widget_options(
+    widget: &mut tui::widget::Widget,
+    style: &MessageStyleOptions,
+) {
+    if let Some(align) = style.style.align {
         widget.inner.alignment = align.0;
     }
 
-    if let Some(show_cursor) = options.show_cursor {
+    if let Some(show_cursor) = style.show_cursor {
         widget.ansi_show_cursor = show_cursor;
     }
 
-    match options.border {
+    match &style.border {
         // explicitly disabled
         Some(BorderOptions{enabled: Some(false), ..}) => {
             widget.block = None;
         },
         Some(options) => {
-            let style: tui::widget::StyleOptions = options.style.into();
+            let style: tui::widget::StyleOptions = options.style.clone().into();
             widget.border_style = widget.border_style.patch(style.as_style());
             widget.border_type = options.r#type.unwrap_or(SerdeWrap(widget.border_type)).0;
             widget.border_show_empty = options.show_empty.unwrap_or(widget.border_show_empty);
 
-            let border_sides = match options.sides {
+            let border_sides = match &options.sides {
                 Some(BorderSides::Single(b)) => b.0.into(),
                 Some(BorderSides::Multiple(b)) => b.iter().map(|x| x.0.into()).reduce(|x: Borders, y| x.union(y)).unwrap_or(Borders::ALL),
                 None => widget.border_sides.unwrap_or(Borders::ALL),
             };
             widget.border_sides = Some(border_sides);
 
-            let mut block = options.title
+            let mut block = options.title.as_ref()
                 .map(|title| {
                     let text = widget.border_title.get_or_insert_default();
-                    parse_text_parts(title, text);
+                    parse_text_parts(title.clone(), text);
                     Block::new().title(text as &tui::text::Text)
                 })
                 .or_else(|| widget.block.clone())
@@ -295,32 +312,113 @@ fn set_widget_options(widget: &mut tui::widget::Widget, options: CommonWidgetOpt
         None => {},
     }
 
-    widget.style = widget.style.merge(&options.style.style.into());
+    widget.style = widget.style.merge(&style.style.style.clone().into());
     widget.inner.style = widget.style.as_style();
     widget.block = std::mem::take(&mut widget.block).map(|b| b.style(widget.style.as_style()));
 }
 
+fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut Node> {
+    let node = match options.inner {
+
+        MessageInner::Layout { direction, children } => {
+
+            let mut layout = Layout {
+                direction: match direction {
+                    Direction::vertical => ratatui::layout::Direction::Vertical,
+                    Direction::horizontal => ratatui::layout::Direction::Horizontal,
+                },
+                children: vec![],
+            };
+
+            for child in children {
+                match child {
+                    LayoutChild::Message(child_options) => {
+                        let child = process_message(tui, child_options)?;
+                        layout.children.push(child.id);
+                    },
+                    LayoutChild::WidgetRef(id) if tui.get_node(id).is_none() => {
+                        anyhow::bail!("can't find widget with id {id}");
+                    },
+                    LayoutChild::WidgetRef(id) => {
+                        layout.children.push(id);
+                    },
+                }
+            }
+            for &child in &layout.children {
+                tui.nodes.remove_child_from_parent(child);
+            }
+
+            let node = if let Some(id) = options.id {
+                match tui.get_node_mut(id) {
+                    Some(node) => {
+                        node.kind = NodeKind::Layout(layout);
+                        node
+                    },
+                    None => anyhow::bail!("can't find node with id {id}"),
+                }
+            } else {
+                tui.nodes.add(NodeKind::Layout(layout))
+            };
+            node
+        },
+
+        MessageInner::Widget { style, text } => {
+            let node = if let Some(id) = options.id {
+                match tui.get_node_mut(id) {
+                    Some(node) => {
+                        if !matches!(node.kind, NodeKind::Widget(_)) {
+                            node.kind = NodeKind::Widget(tui::widget::Widget::default());
+                        }
+                        node
+                    },
+                    None => anyhow::bail!("can't find node with id {id}"),
+                }
+            } else {
+                tui.nodes.add(NodeKind::Widget(tui::widget::Widget::default()))
+            };
+
+            let NodeKind::Widget(widget) = &mut node.kind
+                else { unreachable!() };
+
+            if let Some(text) = text {
+                parse_text_parts(text, &mut widget.inner);
+            }
+            set_widget_options(widget, &style);
+
+            node
+        },
+    };
+
+    // Apply node options (persist/hidden/constraint)
+    if let Some(persist) = options.persist {
+        node.persist = persist;
+    }
+    if let Some(hidden) = options.hidden {
+        node.hidden = hidden;
+    }
+    if let Some(constraint) = options.height {
+        node.constraint = Some(constraint.0);
+    }
+
+    Ok(node)
+}
+
 async fn set_message(ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
-    let options: Option<WidgetOptions> = lua.from_value(val)?;
+    let options: MessageOptions = lua.from_value(val)?;
 
     let ui = ui.get();
     let tui = &mut ui.borrow_mut().tui;
-    let (id, widget) = match options.as_ref().and_then(|o| o.options.id).map(|id| (id, tui.get_mut(id))) {
-        Some((id, Some(widget))) => (id, widget),
-        None => {
-            let widget = tui::widget::Widget::default();
-            tui.add(widget)
-        },
-        Some((id, None)) => anyhow::bail!("can't find widget with id {}", id),
-    };
-
-    if let Some(options) = options {
-        if let Some(text) = options.text {
-            parse_text_parts(text, &mut widget.inner);
-        }
-        set_widget_options(widget, options.options);
-    }
     tui.dirty = true;
+
+    let node = process_message(tui, options)?;
+    // Only add newly created top-level nodes to root; existing nodes keep their position
+    if node.parent_id.is_some() {
+        return Ok(node.id)
+    }
+
+    node.parent_id = Some(0);
+    let id = node.id;
+    tui.nodes.add_child(id);
     Ok(id)
 }
 
@@ -336,7 +434,7 @@ async fn clear_messages(ui: Ui, _lua: Lua, all: bool) -> Result<()> {
 }
 
 async fn check_message(ui: Ui, _lua: Lua, id: usize) -> Result<bool> {
-    Ok(ui.get().borrow().tui.get_index(id).is_some())
+    Ok(ui.get().borrow().tui.get_node(id).is_some())
 }
 
 async fn remove_message(ui: Ui, _lua: Lua, id: usize) -> Result<()> {
@@ -406,13 +504,14 @@ async fn feed_ansi_message(ui: Ui, _lua: Lua, (id, value): (usize, LuaString)) -
     let ui = ui.get();
     let tui = &mut ui.borrow_mut().tui;
 
-    match tui.get_mut(id) {
-        Some(widget) => {
+    match tui.get_node_mut(id) {
+        Some(Node{ kind: NodeKind::Widget(widget), .. }) => {
             widget.feed_ansi((&*value.as_bytes()).into());
             tui.dirty = true;
             Ok(())
         },
-        _ => anyhow::bail!("can't find widget with id {}", id),
+        Some(_) => anyhow::bail!("can't add text to layout with id {id}"),
+        _ => anyhow::bail!("can't find widget with id {id}"),
     }
 }
 
@@ -420,23 +519,21 @@ async fn clear_message(ui: Ui, _lua: Lua, id: usize) -> Result<()> {
     let ui = ui.get();
     let tui = &mut ui.borrow_mut().tui;
 
-    match tui.get_mut(id) {
-        Some(widget) => {
-            widget.clear();
-            tui.dirty = true;
-            Ok(())
-        },
-        _ => anyhow::bail!("can't find widget with id {}", id),
+    match tui.get_node_mut(id) {
+        Some(node) => node.clear(),
+        _ => anyhow::bail!("can't find widget with id {id}"),
     }
+    Ok(())
 }
 
 async fn get_message_text(ui: Ui, _lua: Lua, id: usize) -> Result<Vec<BString>> {
     let ui = ui.get();
     let tui = &ui.borrow().tui;
 
-    match tui.get(id) {
-        Some(msg) => Ok(msg.inner.get().into()),
-        _ => anyhow::bail!("can't find widget with id {}", id),
+    match tui.get_node(id) {
+        Some(Node{ kind: NodeKind::Widget(widget), .. }) => Ok(widget.inner.get().into()),
+        Some(_) => anyhow::bail!("can't get text from layout with id {id}"),
+        _ => anyhow::bail!("can't find widget with id {id}"),
     }
 }
 
@@ -452,15 +549,21 @@ async fn message_to_ansi_string(ui: Ui, _lua: Lua, (id, width): (usize, Option<u
 
 async fn set_status_bar(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
     let ui = ui.get();
-    let options: Option<WidgetOptions> = lua.from_value(val)?;
+    let options: Option<MessageOptions> = lua.from_value(val)?;
     let mut ui = ui.borrow_mut();
     if let Some(options) = options {
-        let widget = ui.status_bar.inner.get_or_insert_default();
-        if let Some(text) = options.text {
-            widget.inner.clear();
-            parse_text_parts(text, &mut widget.inner);
+        match options.inner {
+            MessageInner::Widget { style, text } => {
+                let widget = ui.status_bar.inner.get_or_insert_default();
+                if let Some(text) = text {
+                    widget.inner.clear();
+                    parse_text_parts(text, &mut widget.inner);
+                }
+                // StatusBar is standalone, node options (persist/hidden/constraint) are ignored
+                set_widget_options(widget, &style);
+            },
+            _ => anyhow::bail!("status bar only accepts widget options"),
         }
-        set_widget_options(widget, options.options);
     }
     ui.status_bar.dirty = true;
     Ok(())

@@ -4,14 +4,15 @@ use bstr::{BStr, BString, ByteVec, ByteSlice};
 use unicode_width::UnicodeWidthStr;
 use ratatui::style::{Style};
 use ratatui::text::{Line, Span};
-use ratatui::layout::{Alignment, Rect};
-use ratatui::widgets::{Block, WidgetRef};
-use ratatui::buffer::{Buffer, Cell};
+use ratatui::layout::{Alignment};
+use ratatui::widgets::{Block};
+use ratatui::buffer::{Cell};
 use crate::tui::{Drawer, Canvas};
 use super::wrap::WrapToken;
+mod renderer;
+pub use renderer::{Renderer, TextRenderer};
 
 pub(super) const TAB_WIDTH: usize = 4;
-const SCROLLBAR_CHAR: &str = "▕";
 
 #[derive(Debug, Clone)]
 pub struct Highlight<T> {
@@ -258,18 +259,29 @@ impl<T> Text<T> {
         }
     }
 
-    pub fn get_alignment_indent(&self, max_width: usize, line_width: usize) -> usize {
-        match self.alignment {
-            Alignment::Left => 0,
-            Alignment::Right => max_width.saturating_sub(line_width),
-            Alignment::Center => max_width.saturating_sub(line_width) / 2,
-        }
+    pub fn make_renderer<'a, W, C, I>(
+        &'a self,
+        drawer: &mut Drawer<W, C>,
+        block: Option<&'a Block<'a>>,
+        max_width: Option<usize>,
+        max_height: Option<(usize, Scroll)>,
+        extra_highlights: I,
+    ) -> renderer::TextRenderer<'a>
+    where
+        T: 'a,
+        W :Write,
+        C: Canvas,
+        I: Clone + Iterator<Item=&'a HighlightedRange<T>>,
+    {
+        renderer::TextRenderer::new(self, drawer, block, max_width, max_height, extra_highlights)
     }
 
     pub fn render<'a, W, C, I>(
         &'a self,
         drawer: &mut Drawer<W, C>,
-        block: Option<(&Block<'_>, &mut Buffer)>,
+        newlines: bool,
+        block: Option<&'a Block<'a>>,
+        max_width: Option<usize>,
         max_height: Option<(usize, Scroll)>,
         extra_highlights: I,
     ) -> std::io::Result<()>
@@ -279,16 +291,26 @@ impl<T> Text<T> {
         C: Canvas,
         I: Clone + Iterator<Item=&'a HighlightedRange<T>>,
     {
-        self.render_with_callback::<W, C, I, fn(&mut Drawer<W, C>, usize, usize, usize)>(drawer, block, max_height, extra_highlights, None)
+        self.render_with_callback::<W, C, I, fn(&mut Drawer<W, C>, usize, usize, usize)>(
+            drawer,
+            newlines,
+            block,
+            max_width,
+            max_height,
+            extra_highlights,
+            None,
+        )
     }
 
     pub fn render_with_callback<'a, W, C, I, F>(
         &'a self,
         drawer: &mut Drawer<W, C>,
-        mut block: Option<(&Block<'_>, &mut Buffer)>,
+        newlines: bool,
+        block: Option<&'a Block<'a>>,
+        max_width: Option<usize>,
         max_height: Option<(usize, Scroll)>,
         extra_highlights: I,
-        mut callback: Option<F>,
+        callback: Option<F>,
     ) -> std::io::Result<()>
     where
         T: 'a,
@@ -297,169 +319,8 @@ impl<T> Text<T> {
         I: Clone + Iterator<Item=&'a HighlightedRange<T>>,
         F: FnMut(&mut Drawer<W, C>, usize, usize, usize),
     {
-
-        struct Borders<'a> {
-            top: &'a [Cell],
-            bottom: &'a [Cell],
-            left: &'a [Cell],
-            right: &'a [Cell],
-        }
-
-        let full_width = drawer.term_width() as usize;
-        let full_height = drawer.term_height() as usize;
-        let mut area = Rect{ x: 0, y: 0, height: full_height as u16, width: full_width as u16 };
-
-        // setup the borders
-        let borders = if let Some((block, ref mut buffer)) = block {
-            // 3 lines in case you have borders
-            buffer.resize(Rect{ height: 3, ..area });
-            buffer.reset();
-            block.render_ref(buffer.area, buffer);
-            let inner_area = block.inner(buffer.area);
-            // since the border buffer height is different, the inner height will be wrong
-            area = Rect{ height: full_height as u16 - (buffer.area.height - inner_area.height), ..inner_area };
-
-            let cells = &buffer.content;
-            Some(Borders{
-                top: &cells[.. full_width * inner_area.y as usize],
-                bottom: &cells[full_width * (inner_area.y + inner_area.height) as usize ..],
-                left: &cells[full_width * inner_area.y as usize ..][.. inner_area.x as usize],
-                right: &cells[full_width * inner_area.y as usize ..][(inner_area.x + inner_area.width) as usize .. full_width],
-            })
-        } else {
-            None
-        };
-
-        let (max_height, scroll) = if let Some((max_height, scroll)) = max_height {
-            (max_height, scroll)
-        } else {
-            (usize::MAX, Scroll{ show_scrollbar: false, position: super::scroll::ScrollPosition::Line(0) })
-        };
-        let mut max_height = max_height.min(full_height - drawer.get_pos().1 as usize);
-        let border_bottom_height = full_height - (area.y + area.height) as usize;
-
-        let clear_cell = self.make_default_style_cell();
-        let mut indent_cell = Cell::EMPTY;
-        indent_cell.set_style(self.style);
-
-        let mut need_newline = None;
-
-        // draw top border
-        if let Some(borders) = &borders {
-            let height = max_height.min(borders.top.len() / full_width);
-            if height > 0 {
-                drawer.draw_lines(borders.top.chunks(full_width as _).take(height))?;
-                need_newline = Some(None);
-                max_height -= height;
-            }
-        }
-
-        let initial = drawer.get_pos().0 as usize % full_width;
-        let max_lines = max_height.saturating_sub(border_bottom_height);
-        let scrolled = super::scroll::wrap(
-            &self.lines,
-            self.highlights.iter().chain(extra_highlights),
-            Some(self.style),
-            area.width as usize,
-            max_lines,
-            initial,
-            scroll.position,
-        );
-        max_height -= scrolled.range.len();
-
-        let scrollbar_range = if scroll.show_scrollbar {
-            area.width -= 1;
-
-            let mut start = scrolled.range.start * scrolled.range.len() / scrolled.total_line_count.max(1);
-            if scrolled.range.start > 0 && start == 0 {
-                start = 1;
-            }
-            let mut end = scrolled.range.end * scrolled.range.len() / scrolled.total_line_count.max(1);
-            if scrolled.range.end < scrolled.total_line_count && end == scrolled.range.len() {
-                end = end.saturating_sub(1);
-            }
-
-            let mut cell = Cell::new(SCROLLBAR_CHAR);
-            cell.set_style(self.style);
-            Some((start .. end, cell))
-        } else {
-            None
-        };
-
-        for (i, line) in scrolled.lines().enumerate() {
-
-            if let Some(need_newline) = need_newline.take() {
-                drawer.goto_newline(need_newline)?;
-            }
-            need_newline = Some(clear_cell.as_ref());
-
-            // draw left border
-            if let Some(borders) = &borders {
-                for cell in borders.left {
-                    drawer.draw_cell(cell, false)?;
-                }
-            }
-
-            let line_width = line.iter()
-                .map(|token| if let WrapToken::String(str) = &token.inner {
-                    str.width()
-                } else {
-                    0
-                }).sum();
-
-            // draw the indent
-            for _ in 0 .. self.get_alignment_indent(area.width as _, line_width) {
-                drawer.draw_cell(&indent_cell, false)?;
-            }
-
-            // draw the line
-            let mut cell = Cell::EMPTY;
-            for token in line {
-                if let WrapToken::String(symbol) = &token.inner {
-                    cell.reset();
-                    cell.set_symbol(symbol);
-                    cell.set_style(token.style.unwrap());
-                    drawer.draw_cell(&cell, false)?;
-                }
-                if let Some(callback) = &mut callback {
-                    callback(drawer, token.lineno, token.start, token.end);
-                }
-            }
-
-            // draw the scrollbar
-            if let Some((scrollbar_range, cell)) = &scrollbar_range && scrollbar_range.contains(&i) {
-                drawer.clear_to_end_of_line(clear_cell.as_ref())?;
-                let pos = drawer.get_pos();
-                drawer.move_to((area.x + area.width, pos.1));
-                drawer.draw_cell(cell, false)?;
-            }
-
-            // draw right border
-            if let Some(borders) = &borders && !borders.right.is_empty()  {
-                drawer.clear_to_end_of_line(clear_cell.as_ref())?;
-                let pos = drawer.get_pos();
-                drawer.move_to(((full_width - borders.right.len()) as _, pos.1));
-                for cell in borders.right {
-                    drawer.draw_cell(cell, false)?;
-                }
-            }
-        }
-
-        // draw bottom border
-        if let Some(borders) = &borders {
-            let height = max_height.min(borders.bottom.len() / full_width);
-            if height > 0 {
-                if let Some(need_newline) = need_newline.take() {
-                    drawer.goto_newline(need_newline)?;
-                }
-                drawer.draw_lines(borders.bottom.chunks(full_width).take(height))?;
-                // max_height -= border_height;
-            }
-        }
-
-        drawer.clear_to_end_of_line(need_newline.unwrap_or(None))?;
-
-        Ok(())
+        self.make_renderer(drawer, block, max_width, max_height, extra_highlights)
+            .render(drawer, newlines, callback)
     }
 
 }

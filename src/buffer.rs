@@ -232,7 +232,7 @@ impl Buffer {
         drawer: &mut Drawer<W, C>,
         callback: Option<F>,
     ) -> std::io::Result<()> {
-        self.contents.render_with_callback(drawer, None, None, [].iter(), callback)
+        self.contents.render_with_callback(drawer, true, None, None, None, [].iter(), callback)
     }
 
 }

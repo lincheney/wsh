@@ -5,7 +5,6 @@ use ratatui::{
     layout::*,
     widgets::*,
     style::*,
-    buffer::Buffer,
 };
 mod ansi;
 
@@ -94,8 +93,6 @@ impl StyleOptions {
 
 #[derive(Default, Debug)]
 pub struct Widget {
-    pub(super) id: usize,
-    pub constraint: Option<Constraint>,
     pub inner: super::text::Text,
     pub style: StyleOptions,
     pub border_sides: Option<Borders>,
@@ -104,48 +101,52 @@ pub struct Widget {
     pub border_show_empty: bool,
     pub border_title: Option<super::text::Text>,
     pub block: Option<Block<'static>>,
-    pub persist: bool,
-    pub hidden: bool,
+    // line_count is used by StatusBar for standalone rendering
     pub(super) line_count: u16,
 
     pub(super) ansi: ansi::Parser,
     pub ansi_show_cursor: bool,
+    pub cursor_space_hl: Option<super::text::HighlightedRange<()>>,
 }
 
 impl Widget {
 
-    fn make_cursor_space_hl(&self) -> super::text::HighlightedRange<()> {
-        let pos = ansi::Parser::to_byte_pos(&self.inner, self.ansi.cursor_x);
-        let line = self.inner.get().last().unwrap();
-        let need_space = pos == line.len();
+    pub(in crate::tui) fn make_cursor_space_hl(&mut self) {
+        if self.ansi_show_cursor {
+            let pos = ansi::Parser::to_byte_pos(&self.inner, self.ansi.cursor_x);
+            let line = self.inner.get().last().unwrap();
+            let need_space = pos == line.len();
 
-        super::text::HighlightedRange{
-            lineno: self.inner.len().saturating_sub(1),
-            start: pos,
-            end: pos + 1,
-            inner: super::text::Highlight {
-                style: ratatui::style::Modifier::REVERSED.into(),
-                blend: true,
-                namespace: (),
-                virtual_text: need_space.then(|| b" ".into()),
-                conceal: None,
-            },
+            self.cursor_space_hl = Some(super::text::HighlightedRange{
+                lineno: self.inner.len().saturating_sub(1),
+                start: pos,
+                end: pos + 1,
+                inner: super::text::Highlight {
+                    style: ratatui::style::Modifier::REVERSED.into(),
+                    blend: true,
+                    namespace: (),
+                    virtual_text: need_space.then(|| b" ".into()),
+                    conceal: None,
+                },
+            });
+        } else {
+            self.cursor_space_hl = None;
         }
     }
 
     pub(super) fn render<W: Write, C: super::Canvas>(
         &self,
         drawer: &mut super::Drawer<W, C>,
-        buffer: &mut Buffer,
+        newlines: bool,
+        max_width: Option<usize>,
         max_height: Option<usize>,
     ) -> std::io::Result<()> {
 
-        // this is such a hack
-        let cursor_highlight = self.ansi_show_cursor.then(|| self.make_cursor_space_hl());
-
         self.inner.render(
             drawer,
-            self.block.as_ref().map(|block| (block, buffer)),
+            newlines,
+            self.block.as_ref(),
+            max_width,
             max_height.map(|w| {
                 (
                     w,
@@ -155,15 +156,15 @@ impl Widget {
                     },
                 )
             }),
-            cursor_highlight.iter(),
+            self.cursor_space_hl.iter(),
         )
     }
 
-    pub(super) fn get_height_for_width(&self, mut area: Rect) -> u16 {
+    pub(super) fn get_height_for_width(&self, mut area: Rect, height_constraint: Option<Constraint>) -> u16 {
         let mut height = 0;
         let mut min_height = None;
         let mut max_height = None;
-        match self.constraint {
+        match height_constraint {
             Some(Constraint::Min(min)) => min_height = Some(min),
             Some(Constraint::Max(max)) => max_height = Some(max),
             _ => (),
@@ -176,9 +177,7 @@ impl Widget {
             area = inner;
         }
 
-        let cursor_highlight = self.ansi_show_cursor.then(|| self.make_cursor_space_hl());
-
-        height = height.max(self.inner.get_size(area.width as _, 0, cursor_highlight.iter()).1 as _);
+        height = height.max(self.inner.get_size(area.width as _, 0, self.cursor_space_hl.iter()).1 as _);
 
         if self.border_show_empty || height > 0 {
             height += border_height;

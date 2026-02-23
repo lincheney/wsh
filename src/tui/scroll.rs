@@ -26,19 +26,44 @@ pub struct Scrolled<'a> {
     pub in_view: Vec<ScrollWrapToken<'a>>,
 }
 
-impl Scrolled<'_> {
-    pub fn lines(&self) -> impl Iterator<Item=&[ScrollWrapToken<'_>]> {
-        let mut start = 0;
-        self.in_view.iter()
-            .enumerate()
-            .filter(|(_, x)| matches!(x.inner, WrapToken::LineBreak))
-            .map(|(i, _)| i)
-            .chain(std::iter::once(self.in_view.len()))
-            .map(move |i| {
-                let slice = &self.in_view[start .. i];
-                start = i;
-                slice
-            })
+pub struct ScrolledLinesIter<'a> {
+    inner: Vec<ScrollWrapToken<'a>>,
+    start: usize,
+}
+
+impl ScrolledLinesIter<'_> {
+    pub fn slice(&self, range: std::ops::Range<usize>) -> &[ScrollWrapToken<'_>] {
+        &self.inner[range]
+    }
+}
+
+impl Iterator for ScrolledLinesIter<'_> {
+    type Item = std::ops::Range<usize>;
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut end = self.start + 1;
+        if end >= self.inner.len() {
+            return None
+        }
+
+        let end = loop {
+            match self.inner.get(end) {
+                Some(x) if matches!(x.inner, WrapToken::LineBreak) => break end,
+                Some(_) => { end += 1; },
+                None => break self.inner.len(),
+            }
+        };
+        let result = self.start .. end;
+        self.start = end;
+        Some(result)
+    }
+}
+
+impl<'a> Scrolled<'a> {
+    pub fn into_lines(self) -> ScrolledLinesIter<'a> {
+        ScrolledLinesIter{
+            inner: self.in_view,
+            start: 0,
+        }
     }
 }
 

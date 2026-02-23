@@ -89,7 +89,7 @@ impl Canvas for DummyCanvas {
     }
 }
 
-pub struct Drawer<'a, 'b, W: Write, C: Canvas> {
+pub struct Drawer<'a, 'b, W, C> {
     canvas: &'a mut C,
     pub writer: &'b mut W,
     real_pos: (u16, u16),
@@ -100,7 +100,7 @@ pub struct Drawer<'a, 'b, W: Write, C: Canvas> {
     modifier: Modifier,
 }
 
-impl<'a, 'b, W: Write, C: Canvas> Drawer<'a, 'b, W, C> {
+impl<'a, 'b, W, C> Drawer<'a, 'b, W, C> {
     pub fn new(canvas: &'a mut C, writer: &'b mut W, pos: (u16, u16)) -> Self {
         Self {
             canvas,
@@ -112,14 +112,6 @@ impl<'a, 'b, W: Write, C: Canvas> Drawer<'a, 'b, W, C> {
             underline_color: Color::default(),
             modifier: Modifier::default(),
         }
-    }
-
-    pub fn term_height(&self) -> u16 {
-        self.canvas.get_size().1
-    }
-
-    pub fn term_width(&self) -> u16 {
-        self.canvas.get_size().0
     }
 
     pub fn set_pos(&mut self, pos: (u16, u16)) {
@@ -134,7 +126,19 @@ impl<'a, 'b, W: Write, C: Canvas> Drawer<'a, 'b, W, C> {
     pub fn move_to(&mut self, pos: (u16, u16)) {
         self.pos = pos;
     }
+}
 
+impl<'a, 'b, W, C: Canvas> Drawer<'a, 'b, W, C> {
+    pub fn term_height(&self) -> u16 {
+        self.canvas.get_size().1
+    }
+
+    pub fn term_width(&self) -> u16 {
+        self.canvas.get_size().0
+    }
+}
+
+impl<'a, 'b, W: Write, C: Canvas> Drawer<'a, 'b, W, C> {
     pub fn move_to_pos(&mut self, pos: (u16, u16)) -> Result<()> {
         if pos == (0, self.real_pos.1 + 1) {
             queue!(self.writer, Print("\r\n"))?;
