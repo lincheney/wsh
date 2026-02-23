@@ -113,7 +113,10 @@ function M.run_in_background(command)
             -- got some data
             wish.feed_ansi_message(msg, data)
             if string.find(data, '%S') then
-                if job.output_marker == 0 or job.waiting_for_input then
+                local output_marker = job.output_marker
+                job.output_marker = job.output_marker + 1
+
+                if output_marker == 0 or job.waiting_for_input then
                     job.waiting_for_input = false
                     update_message(job)
                 end
@@ -123,7 +126,7 @@ function M.run_in_background(command)
                 if string.find(lines[#lines], '[:?] ?$') then
                     -- its a prompt, wait a bit to see if there is any more output
                     wish.schedule(function()
-                        local marker = job.output_marker
+                        local marker = output_marker
                         wish.sleep(M.PROMPT_TIMEOUT)
                         -- marker has not changed, so output/prompt has not changed
                         if marker == job.output_marker and jobs[msg] then
@@ -132,8 +135,6 @@ function M.run_in_background(command)
                         end
                     end)
                 end
-
-                job.output_marker = job.output_marker + 1
             end
             wish.redraw()
         end
