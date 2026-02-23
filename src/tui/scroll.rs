@@ -60,14 +60,13 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
     let mut total_line_count = 0;
     let mut tokens = vec![];
     let mut start = 0;
-    // F: FnMut(usize, usize, WrapToken<'a>, Option<Style>) -> ControlFlow<()>
     for (i, line) in lines.iter().enumerate() {
         if i < lineno {
             start = total_line_count;
         }
         super::wrap::wrap(
             line.as_ref(),
-            highlights.clone().filter(|hl| hl.lineno == lineno),
+            highlights.clone().filter(|hl| hl.lineno == i),
             init_style,
             max_width,
             initial_indent,
