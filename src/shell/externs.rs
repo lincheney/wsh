@@ -70,7 +70,7 @@ impl GlobalState {
     pub fn with<T, F: FnOnce(&Rc<Self>) -> T>(f: F) -> Result<T> {
         STATE.with(|state| {
             if let Some(state) = &*state.borrow() {
-                Ok(f(&*state.read()))
+                Ok(f(&state.read()))
             } else {
                 anyhow::bail!("wish is not running")
             }

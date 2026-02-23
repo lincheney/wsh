@@ -25,7 +25,7 @@ impl Layout {
             Direction::Vertical => {
                 let mut total = 0;
                 for child_id in &self.children {
-                    if let Some(child) = map.get(&child_id) && !child.hidden {
+                    if let Some(child) = map.get(child_id) && !child.hidden {
                         let area = Rect{ height: area.height - total, ..area};
                         child.refresh(map, area);
                         total += child.size.get().1;
@@ -162,17 +162,14 @@ impl Nodes {
     pub fn remove(&mut self, id: usize) -> Option<Node> {
         self.remove_child_from_parent(id);
         let node = self.map.remove(&id);
-        match &node {
-            Some(Node{ kind: NodeKind::Layout(layout), .. }) => {
-                // orphan the children
-                for child in &layout.children {
-                    if let Some(node) = self.map.get_mut(&child) {
-                        node.parent_id = None;
-                        node.hidden = true;
-                    }
+        if let Some(Node{ kind: NodeKind::Layout(layout), .. }) = &node {
+            // orphan the children
+            for child in &layout.children {
+                if let Some(node) = self.map.get_mut(child) {
+                    node.parent_id = None;
+                    node.hidden = true;
                 }
-            },
-            _ => (),
+            }
         }
         node
     }
@@ -347,7 +344,7 @@ impl<'a> Renderer for NodeRenderer<'a, std::slice::Iter<'a, usize>> {
                     if child.is_none() {
                         if let Some(id) = children.next() {
                             *child = map.get(id)
-                                .and_then(|node| NodeRenderer::new(&node, map, drawer, *max_height))
+                                .and_then(|node| NodeRenderer::new(node, map, drawer, *max_height))
                                 .map(Box::new);
                         } else {
                             // no more children

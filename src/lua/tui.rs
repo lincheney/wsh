@@ -348,7 +348,7 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
                 tui.nodes.remove_child_from_parent(child);
             }
 
-            let node = if let Some(id) = options.id {
+            if let Some(id) = options.id {
                 match tui.get_node_mut(id) {
                     Some(node) => {
                         node.kind = NodeKind::Layout(layout);
@@ -358,8 +358,7 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
                 }
             } else {
                 tui.nodes.add(NodeKind::Layout(layout))
-            };
-            node
+            }
         },
 
         MessageInner::Widget { style, text } => {
