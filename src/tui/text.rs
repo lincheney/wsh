@@ -1,13 +1,10 @@
-use std::io::{Write};
 use std::ops::Range;
 use bstr::{BStr, BString, ByteVec, ByteSlice};
 use unicode_width::UnicodeWidthStr;
 use ratatui::style::{Style};
 use ratatui::text::{Line, Span};
 use ratatui::layout::{Alignment};
-use ratatui::widgets::{Block};
 use ratatui::buffer::{Cell};
-use crate::tui::{Drawer, Canvas};
 use super::wrap::WrapToken;
 mod renderer;
 pub use renderer::{Renderer, TextRenderer};
@@ -35,7 +32,7 @@ impl<T: Default> From<Style> for Highlight<T> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HighlightedRange<T> {
     pub lineno: usize,
     pub start: usize,
@@ -75,7 +72,7 @@ pub struct Scroll {
     pub position: super::scroll::ScrollPosition,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Text<T=()> {
     lines: Vec<BString>,
     pub alignment: Alignment,
@@ -253,74 +250,10 @@ impl<T> Text<T> {
         if self.style == Style::default() {
             None
         } else {
-            let mut cell = Cell::new("");
+            let mut cell = Cell::new(" ");
             cell.set_style(self.style);
             Some(cell)
         }
-    }
-
-    pub fn make_renderer<'a, W, C, I>(
-        &'a self,
-        drawer: &mut Drawer<W, C>,
-        block: Option<&'a Block<'a>>,
-        max_width: Option<usize>,
-        max_height: Option<(usize, Scroll)>,
-        extra_highlights: I,
-    ) -> renderer::TextRenderer<'a>
-    where
-        T: 'a,
-        W :Write,
-        C: Canvas,
-        I: Clone + Iterator<Item=&'a HighlightedRange<T>>,
-    {
-        renderer::TextRenderer::new(self, drawer, block, max_width, max_height, extra_highlights)
-    }
-
-    pub fn render<'a, W, C, I>(
-        &'a self,
-        drawer: &mut Drawer<W, C>,
-        newlines: bool,
-        block: Option<&'a Block<'a>>,
-        max_width: Option<usize>,
-        max_height: Option<(usize, Scroll)>,
-        extra_highlights: I,
-    ) -> std::io::Result<()>
-    where
-        T: 'a,
-        W :Write,
-        C: Canvas,
-        I: Clone + Iterator<Item=&'a HighlightedRange<T>>,
-    {
-        self.render_with_callback::<W, C, I, fn(&mut Drawer<W, C>, usize, usize, usize)>(
-            drawer,
-            newlines,
-            block,
-            max_width,
-            max_height,
-            extra_highlights,
-            None,
-        )
-    }
-
-    pub fn render_with_callback<'a, W, C, I, F>(
-        &'a self,
-        drawer: &mut Drawer<W, C>,
-        newlines: bool,
-        block: Option<&'a Block<'a>>,
-        max_width: Option<usize>,
-        max_height: Option<(usize, Scroll)>,
-        extra_highlights: I,
-        callback: Option<F>,
-    ) -> std::io::Result<()>
-    where
-        T: 'a,
-        W :Write,
-        C: Canvas,
-        I: Clone + Iterator<Item=&'a HighlightedRange<T>>,
-        F: FnMut(&mut Drawer<W, C>, usize, usize, usize),
-    {
-        self.make_renderer(drawer, block, max_width, max_height, extra_highlights)
-            .render(drawer, newlines, (0, &Cell::EMPTY), callback)
     }
 
 }

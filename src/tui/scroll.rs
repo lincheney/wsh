@@ -35,16 +35,20 @@ impl ScrolledLinesIter<'_> {
     pub fn slice(&self, range: std::ops::Range<usize>) -> &[ScrollWrapToken<'_>] {
         &self.inner[range]
     }
+
+    pub fn has_more(&self) -> bool {
+        self.start < self.inner.len()
+    }
 }
 
 impl Iterator for ScrolledLinesIter<'_> {
     type Item = std::ops::Range<usize>;
     fn next(&mut self) -> Option<Self::Item> {
-        let mut end = self.start + 1;
-        if end >= self.inner.len() {
+        if !self.has_more() {
             return None
         }
 
+        let mut end = self.start + 1;
         let end = loop {
             match self.inner.get(end) {
                 Some(x) if matches!(x.inner, WrapToken::LineBreak) => break end,
@@ -72,7 +76,7 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
     highlights: I,
     init_style: Option<Style>,
     max_width: usize,
-    max_height: usize,
+    max_height: Option<usize>,
     mut initial_indent: usize,
     scroll: ScrollPosition,
 ) -> Scrolled<'a> {
@@ -85,6 +89,7 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
     let mut total_line_count = 0;
     let mut tokens = vec![];
     let mut start = 0;
+    let end;
     for (i, line) in lines.iter().enumerate() {
         if i < lineno {
             start = total_line_count;
@@ -126,10 +131,16 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
     // pop the trailing line break
     tokens.pop();
 
-    start = start.saturating_sub(max_height / 2);
-    let end = (start + max_height).min(total_line_count);
-    if end - start < max_height {
-        start = end.saturating_sub(max_height);
+    if let Some(h) = max_height {
+        start = start.saturating_sub(h / 2);
+        end = (start + h).min(total_line_count);
+        if end - start < h {
+            start = end.saturating_sub(h);
+        }
+    } else {
+        // infinite height
+        start = 0;
+        end = total_line_count;
     }
 
     tokens.retain(|t| start <= t.visual_lineno && t.visual_lineno < end);

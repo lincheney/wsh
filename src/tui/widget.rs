@@ -1,6 +1,5 @@
 use bstr::BStr;
 use std::default::Default;
-use std::io::{Write};
 use ratatui::{
     layout::*,
     widgets::*,
@@ -16,7 +15,7 @@ pub enum UnderlineOption {
     Color(Color),
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct StyleOptions {
     pub fg: Option<Color>,
     pub bg: Option<Color>,
@@ -91,7 +90,7 @@ impl StyleOptions {
 
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct Widget {
     pub inner: super::text::Text,
     pub style: StyleOptions,
@@ -134,59 +133,32 @@ impl Widget {
         }
     }
 
-    pub(super) fn render<W: Write, C: super::Canvas>(
+    pub(super) fn get_height_for_width(
         &self,
-        drawer: &mut super::Drawer<W, C>,
-        newlines: bool,
-        max_width: Option<usize>,
-        max_height: Option<usize>,
-    ) -> std::io::Result<()> {
-
-        self.inner.render(
-            drawer,
-            newlines,
-            self.block.as_ref(),
-            max_width,
-            max_height.map(|w| {
-                (
-                    w,
-                    super::text::Scroll{
-                        show_scrollbar: true,
-                        position: super::scroll::ScrollPosition::StickyBottom,
-                    },
-                )
-            }),
-            self.cursor_space_hl.iter(),
-        )
-    }
-
-    pub(super) fn get_height_for_width(&self, mut area: Rect, height_constraint: Option<Constraint>) -> u16 {
-        let mut height = 0;
-        let mut min_height = None;
-        let mut max_height = None;
-        match height_constraint {
-            Some(Constraint::Min(min)) => min_height = Some(min),
-            Some(Constraint::Max(max)) => max_height = Some(max),
-            _ => (),
-        }
+        max_width: u16,
+        height_constraint: Option<Constraint>,
+    ) -> u16 {
 
         let mut border_height = 0;
         if let Some(ref block) = self.block {
+            let area = Rect{x: 0, y: 0, height: 10, width: max_width};
             let inner = block.inner(area);
             border_height = area.height - inner.height;
-            area = inner;
         }
 
-        height = height.max(self.inner.get_size(area.width as _, 0, self.cursor_space_hl.iter()).1 as _);
-
+        let mut height = self.inner.get_size(max_width as _, 0, self.cursor_space_hl.iter()).1 as u16;
         if self.border_show_empty || height > 0 {
             height += border_height;
         }
-        if let Some(min_height) = min_height {
-            height = height.max(min_height);
-        }
-        if let Some(max_height) = max_height {
-            height = height.min(max_height);
+
+        match height_constraint {
+            Some(Constraint::Min(min)) => {
+                height = height.max(min);
+            },
+            Some(Constraint::Max(max)) => {
+                height = height.min(max);
+            },
+            _ => (),
         }
         height
     }

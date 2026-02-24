@@ -136,6 +136,9 @@ impl Tui {
         let width = width.unwrap_or(self.buffer.area.width);
         let width = std::num::NonZero::new(width).map_or(80, |w| w.get());
 
+        // refresh tmp size
+        node.refresh(&self.nodes.map, width, None, true);
+
         let mut string = vec![];
         let mut writer = Cursor::new(&mut string);
         // always start with a reset
@@ -144,7 +147,7 @@ impl Tui {
         canvas.size = (width, u16::MAX);
         let mut drawer = drawer::Drawer::new(&mut canvas, &mut writer, (0, 0));
 
-        self.nodes.render_node(node, &mut drawer, None).unwrap();
+        self.nodes.render_node(node, &mut drawer, true).unwrap();
         Some(string.into())
     }
 
@@ -185,6 +188,7 @@ impl Tui {
             )?;
         }
 
+        let height = height.min(self.max_height);
         // resize buffers
         let area = Rect{x: 0, y: 0, width: width as _, height: height as _};
         self.buffer.resize(area);
@@ -210,11 +214,14 @@ impl Tui {
         if cmdline.is_dirty() {
             cmdline.refresh(area);
         }
-        if self.dirty {
-            self.nodes.refresh(Rect{ height: (height as u16).saturating_sub(status_bar.get_height()), ..area });
-        }
         if status_bar.dirty {
             status_bar.refresh(area);
+        }
+        if self.dirty {
+            self.nodes.refresh(
+                area.width,
+                Some((height as u16).saturating_sub(status_bar.get_height() + cmdline.get_height() as u16)),
+            );
         }
 
         // new heights
@@ -257,7 +264,7 @@ impl Tui {
             // go to next line after end of buffer
             drawer.move_to(cmdline.draw_end_pos);
             drawer.goto_newline(None)?;
-            self.nodes.render(&mut drawer, Some(new_widgets_height))?;
+            self.nodes.render(&mut drawer, false)?;
         }
 
         // the prompt/buffer/widgets used to be bigger, so clear the extra bits
@@ -273,7 +280,7 @@ impl Tui {
         // go back to the cursor
         drawer.move_to_pos(cmdline.cursor_coord)?;
 
-        if new_status_bar_height > 0 && (clear || status_bar.dirty) && let Some(widget) = &status_bar.inner {
+        if new_status_bar_height > 0 && (clear || status_bar.dirty) && status_bar.is_visible() {
             // save cursor position so we can go back to it
             queue!(drawer.writer, cursor::SavePosition)?;
 
@@ -288,7 +295,7 @@ impl Tui {
                 cursor::MoveToColumn(0),
             )?;
             drawer.set_pos((0, area.height - new_status_bar_height as u16));
-            widget.render(&mut drawer, true, None, None)?;
+            status_bar.render(&mut drawer)?;
             // clear everything else below
             // drawer.clear_to_end_of_screen(None)?;
 

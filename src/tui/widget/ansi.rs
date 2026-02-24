@@ -19,7 +19,7 @@ enum State {
     CsiOther,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Parser {
     buffer: BString,
     style: Style,

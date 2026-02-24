@@ -8,7 +8,7 @@ use super::widget::Widget;
 use super::drawer::{Drawer, Canvas};
 use super::text::{Renderer, TextRenderer};
 
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct Layout {
     pub direction: Direction,
     pub children: Vec<usize>,
@@ -16,25 +16,23 @@ pub struct Layout {
 
 impl Layout {
 
-    fn is_visible(&self, map: &HashMap<usize, Node>) -> bool {
-        self.children.iter().any(|c| map.get(c).is_some_and(|node| node.is_visible(map)))
+    fn is_visible(&self, map: &HashMap<usize, Node>, tmp: bool) -> bool {
+        self.children.iter().any(|c| map.get(c).is_some_and(|node| node.is_visible(map, tmp)))
     }
 
-    fn refresh(&self, map: &HashMap<usize, Node>, area: Rect) -> u16 {
+    fn refresh(&self, map: &HashMap<usize, Node>, max_width: u16, max_height: Option<u16>, tmp: bool) -> u16 {
         match self.direction {
             Direction::Vertical => {
                 let mut total = 0;
                 for child_id in &self.children {
                     if let Some(child) = map.get(child_id) && !child.hidden {
-                        let area = Rect{ height: area.height - total, ..area};
-                        child.refresh(map, area);
-                        total += child.size.get().1;
-                    }
-                    if total >= area.height {
-                        continue
+                        total += child.refresh(map, max_width, max_height.map(|h| h - total), tmp);
+                        if max_height.is_some_and(|h| total >= h) {
+                            break
+                        }
                     }
                 }
-                total.min(area.height)
+                total.min(max_height.unwrap_or(u16::MAX))
             },
             Direction::Horizontal => {
                 let visible: Vec<&Node> = self.children.iter()
@@ -50,26 +48,27 @@ impl Layout {
                     .map(|n| n.constraint.unwrap_or(Constraint::Fill(1)))
                     .collect();
 
+                // height doesnt really matter
+                let area = Rect{x: 0, y: 0, height: 10, width: max_width};
                 let areas = ratatui::layout::Layout::horizontal(constraints).split(area);
 
-                let mut max_height = 0;
+                let mut height = 0;
                 for (child, child_area) in visible.iter().zip(areas.iter()) {
-                    child.refresh(map, *child_area);
-                    max_height = max_height.max(child.size.get().1);
+                    height = height.max(child.refresh(map, child_area.width, Some(child_area.height), tmp));
                 }
-                max_height.min(area.height)
+                height.min(max_height.unwrap_or(u16::MAX))
             },
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum NodeKind {
     Widget(Widget),
     Layout(Layout),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Node {
     pub id: usize,
     pub has_parent: bool,
@@ -79,14 +78,23 @@ pub struct Node {
     pub hidden: bool,
     // cached width,height after refresh
     pub(super) size: Cell<(u16, u16)>,
+    pub(super) tmp_size: Cell<(u16, u16)>,
 }
 
 impl Node {
 
-    fn is_visible(&self, map: &HashMap<usize, Node>) -> bool {
-        if self.hidden || self.size.get().1 == 0 {
+    fn get_size(&self, tmp: bool) -> (u16, u16) {
+        if tmp {
+            self.tmp_size.get()
+        } else {
+            self.size.get()
+        }
+    }
+
+    fn is_visible(&self, map: &HashMap<usize, Node>, tmp: bool) -> bool {
+        if self.hidden || self.get_size(tmp).1 == 0 {
             false
-        } else if let NodeKind::Layout(layout) = &self.kind && !layout.is_visible(map) {
+        } else if let NodeKind::Layout(layout) = &self.kind && !layout.is_visible(map, tmp) {
             false
         } else {
             true
@@ -100,23 +108,28 @@ impl Node {
         }
     }
 
-    fn refresh(&self, map: &HashMap<usize, Node>, area: Rect) {
-        if self.hidden {
-            self.size.set((0, 0));
-            return;
+    pub(super) fn refresh(&self, map: &HashMap<usize, Node>, max_width: u16, max_height: Option<u16>, tmp: bool) -> u16 {
+        let mut dim = (0, 0);
+        if !self.hidden {
+            let height = match &self.kind {
+                NodeKind::Widget(widget) => widget.get_height_for_width(max_width, self.constraint),
+                NodeKind::Layout(layout) => layout.refresh(map, max_width, max_height, tmp),
+            };
+            dim = (max_width, height);
         }
 
-        let height = match &self.kind {
-            NodeKind::Widget(widget) => widget.get_height_for_width(area, self.constraint),
-            NodeKind::Layout(layout) => layout.refresh(map, area),
-        };
-        self.size.set((area.width, height));
+        if tmp {
+            self.tmp_size.set(dim);
+        } else {
+            self.size.set(dim);
+        }
+        dim.1
     }
 }
 
 #[derive(Default)]
 pub struct Nodes {
-    map: HashMap<usize, Node>,
+    pub(super) map: HashMap<usize, Node>,
     root: Layout,
     counter: usize,
     pub height: Cell<u16>,
@@ -138,6 +151,7 @@ impl Nodes {
             persist: false,
             hidden: false,
             size: Cell::new((0, 0)),
+            tmp_size: Cell::new((0, 0)),
         }).into_mut()
     }
 
@@ -207,7 +221,7 @@ impl Nodes {
         self.height.get()
     }
 
-    pub fn refresh(&mut self, area: Rect) {
+    pub fn refresh(&mut self, max_width: u16, max_height: Option<u16>) {
         // draw any cursors
         // this is such a hack
         for node in self.map.values_mut() {
@@ -216,34 +230,30 @@ impl Nodes {
             }
         }
 
-        self.height.set(self.root.refresh(&self.map, area));
+        self.height.set(self.root.refresh(&self.map, max_width, max_height, false));
     }
 
     pub fn render<W: Write, C: Canvas>(
         &self,
         drawer: &mut Drawer<W, C>,
-        max_height: Option<usize>,
+        tmp: bool,
     ) -> std::io::Result<()> {
-        if let Some(mut renderer) = NodeRenderer::new_for_layout(&self.root, &self.map, drawer, max_height) {
-            let callback: Option<fn(&mut Drawer<W, C>, usize, usize, usize)> = None;
-            renderer.render(drawer, true, (0, &ratatui::buffer::Cell::EMPTY), callback)
-        } else {
-            Ok(())
-        }
+        let mut renderer = NodeRenderer::new_for_layout(&self.root, &self.map, tmp);
+        let callback: Option<fn(&mut Drawer<W, C>, usize, usize, usize)> = None;
+        renderer.render(drawer, false, true, callback)?;
+        drawer.clear_to_end_of_line(None)
     }
 
     pub fn render_node<W: Write, C: Canvas>(
         &self,
         node: &Node,
         drawer: &mut Drawer<W, C>,
-        max_height: Option<usize>,
+        tmp: bool,
     ) -> std::io::Result<()> {
-        if let Some(mut renderer) = NodeRenderer::new(node, &self.map, drawer, max_height) {
-            let callback: Option<fn(&mut Drawer<W, C>, usize, usize, usize)> = None;
-            renderer.render(drawer, true, (0, &ratatui::buffer::Cell::EMPTY), callback)
-        } else {
-            Ok(())
-        }
+        let mut renderer = NodeRenderer::new(node, &self.map, tmp);
+        let callback: Option<fn(&mut Drawer<W, C>, usize, usize, usize)> = None;
+        renderer.render(drawer, false, true, callback)?;
+        drawer.clear_to_end_of_line(None)
     }
 }
 
@@ -252,7 +262,7 @@ enum NodeRenderer<'a, I> {
         children: I,
         child: Option<Box<NodeRenderer<'a, I>>>,
         map: &'a HashMap<usize, Node>,
-        max_height: Option<usize>,
+        tmp: bool,
     },
     HorizontalLayout {
         children: Vec<(&'a Node, NodeRenderer<'a, I>, bool)>,
@@ -264,73 +274,100 @@ enum NodeRenderer<'a, I> {
 
 impl<'a> NodeRenderer<'a, std::slice::Iter<'a, usize>> {
 
-    fn new_for_layout<W, C: Canvas>(
+    fn new_for_layout(
         layout: &'a Layout,
         map: &'a HashMap<usize, Node>,
-        drawer: &mut Drawer<W, C>,
-        max_height: Option<usize>,
-    ) -> Option<Self> {
+        tmp: bool,
+    ) -> Self {
 
-        if !layout.is_visible(map) {
-            return None
-        }
-
-        Some(match layout {
+        match layout {
             Layout{ direction: Direction::Vertical, children } => {
-                NodeRenderer::VerticalLayout{children: children.iter(), child: None, map, max_height}
+                NodeRenderer::VerticalLayout{
+                    children: children.iter(),
+                    child: None,
+                    map,
+                    tmp,
+                }
             },
             Layout{ direction: Direction::Horizontal, children } => {
                 let children = children.iter()
                     .filter_map(|id| map.get(id))
-                    .filter_map(|node| Some((node, NodeRenderer::new(node, map, drawer, max_height)?, false)))
+                    .filter(|node| node.is_visible(map, tmp))
+                    .map(|node| (node, NodeRenderer::new(node, map, tmp), false))
                     .collect();
                 NodeRenderer::HorizontalLayout{children}
             },
-        })
+        }
     }
 
-    fn new<W, C: Canvas>(
+    fn new(
         node: &'a Node,
         map: &'a HashMap<usize, Node>,
-        drawer: &mut Drawer<W, C>,
-        max_height: Option<usize>,
-    ) -> Option<Self> {
-
-        if !node.is_visible(map) {
-            return None
-        }
+        tmp: bool,
+    ) -> Self {
 
         match &node.kind {
-            NodeKind::Layout(layout) => Self::new_for_layout(layout, map, drawer, max_height),
+            NodeKind::Layout(layout) => Self::new_for_layout(layout, map, tmp),
             NodeKind::Widget(widget) => {
+                let size = node.get_size(tmp);
                 let renderer = TextRenderer::new(
                     &widget.inner,
-                    drawer,
+                    0,
                     widget.block.as_ref(),
-                    Some(node.size.get().0 as usize),
-                    max_height.map(|w| {
-                        (
-                            w,
-                            super::text::Scroll{
-                                show_scrollbar: true,
-                                position: super::scroll::ScrollPosition::StickyBottom,
-                            },
-                        )
-                    }),
+                    size.0 as _,
+                    Some((
+                        size.1 as _,
+                        super::text::Scroll{
+                            show_scrollbar: true,
+                            position: super::scroll::ScrollPosition::StickyBottom,
+                        },
+                    )),
                     widget.cursor_space_hl.iter(),
                 );
-                Some(NodeRenderer::Widget{renderer})
+                NodeRenderer::Widget{renderer}
             },
         }
     }
 }
 
 impl<'a> Renderer for NodeRenderer<'a, std::slice::Iter<'a, usize>> {
+    fn finished(&mut self) -> bool {
+        match self {
+            NodeRenderer::VerticalLayout{children, child, map, tmp} => {
+                if child.as_mut().is_some_and(|child| !child.finished()) {
+                    return false
+                }
+                for id in children {
+                    if let Some(node) = map.get(id) && node.is_visible(map, *tmp) {
+                        let mut renderer = NodeRenderer::new(node, map, *tmp);
+                        if !renderer.finished() {
+                            *child = Some(Box::new(renderer));
+                            return false
+                        }
+                    }
+                }
+                *child = None;
+                true
+            },
+            NodeRenderer::HorizontalLayout{children} => {
+                let mut all_finished = true;
+                for (_node, renderer, finished) in children.iter_mut() {
+                    if !*finished && renderer.finished() {
+                        *finished = true;
+                    }
+                    all_finished = all_finished && *finished;
+                }
+                all_finished
+            },
+            NodeRenderer::Widget{renderer} => renderer.finished(),
+        }
+    }
+
     fn draw_one_line<W, C, F>(
         &mut self,
         drawer: &mut Drawer<W, C>,
-        newlines: bool,
-        pad_to: (u16, &ratatui::buffer::Cell),
+        newline: bool,
+        pad: bool,
         callback: &mut Option<F>,
     ) -> std::io::Result<bool>
     where
@@ -339,53 +376,41 @@ impl<'a> Renderer for NodeRenderer<'a, std::slice::Iter<'a, usize>> {
         F: FnMut(&mut Drawer<W, C>, usize, usize, usize)
     {
 
-        let result = match self {
-            NodeRenderer::VerticalLayout{children, child, map, max_height} => {
-                // draw one child at a time
-                loop {
-                    if child.is_none() {
-                        if let Some(id) = children.next() {
-                            *child = map.get(id)
-                                .and_then(|node| NodeRenderer::new(node, map, drawer, *max_height))
-                                .map(Box::new);
-                        } else {
-                            // no more children
-                            break Ok(false)
-                        }
-                    }
+        if self.finished() {
+            return Ok(false)
+        }
 
-                    if let Some(child) = child && child.draw_one_line(drawer, false, pad_to, callback)? {
-                        break Ok(true)
-                    }
-                    *child = None;
-                }
+        match self {
+            NodeRenderer::VerticalLayout{child, ..} => {
+                // draw one child at a time
+                // child must exist otherwise we would have returned earlier when checking finished
+                child.as_mut().unwrap().draw_one_line(drawer, newline, pad, callback)
             },
             NodeRenderer::HorizontalLayout{children} => {
-                // draw lines from each child
-                if children.iter().all(|(_, _, done)| *done) {
-                    return Ok(false)
-                }
+                // draw one line from each child
+                let mut all_finished = true;
+                let len = children.len();
+                for (i, (node, renderer, finished)) in children.iter_mut().enumerate() {
+                    // newline only if rist
+                    let first = i == 0;
+                    // pad if not the last one
+                    let last = i == len - 1;
 
-                let mut all_done = true;
-                let mut startx: u16 = pad_to.0;
-                for (node, renderer, done) in children.iter_mut() {
-                    // need to add padding
-                    let endx = drawer.get_pos().0 + node.size.get().0;
-                    if !*done {
-                        *done = !renderer.draw_one_line(drawer, false, (startx, pad_to.1), callback)?;
-                        all_done = all_done && *done;
+                    if !*finished {
+                        *finished = !renderer.draw_one_line(drawer, newline && first, !last, callback)?;
+                        all_finished = all_finished && *finished;
+                    } else if !last {
+                        if newline && first {
+                            drawer.goto_newline(None)?;
+                        }
+                        drawer.draw_cell_n_times(&ratatui::buffer::Cell::EMPTY, false, node.size.get().0)?;
                     }
-                    startx = endx;
                 }
-                Ok(!all_done)
+                Ok(!all_finished)
             },
             NodeRenderer::Widget{renderer} => {
-                renderer.draw_one_line(drawer, false, pad_to, callback)
+                renderer.draw_one_line(drawer, newline, pad, callback)
             },
-        }?;
-        if newlines {
-            drawer.goto_newline(None)?;
         }
-        Ok(result)
     }
 }

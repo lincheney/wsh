@@ -1,6 +1,7 @@
 use std::io::Write;
 use bstr::{BStr, BString, ByteSlice};
-use crate::tui::{Drawer, Canvas, text::Text, text::HighlightedRange};
+use crate::tui::{Drawer, Canvas};
+use crate::tui::text::{Text, HighlightedRange, TextRenderer, Renderer};
 
 #[derive(Debug)]
 pub struct Edit {
@@ -230,9 +231,20 @@ impl Buffer {
     pub fn render<W :Write, C: Canvas, F: FnMut(&mut Drawer<W, C>, usize, usize, usize)>(
         &self,
         drawer: &mut Drawer<W, C>,
+        initial_indent: u16,
         callback: Option<F>,
     ) -> std::io::Result<()> {
-        self.contents.render_with_callback(drawer, true, None, None, None, [].iter(), callback)
+
+        TextRenderer::new(
+            &self.contents,
+            initial_indent as _,
+            None,
+            drawer.term_width() as _,
+            None,
+            [].iter(),
+        ).render(drawer, false, false, callback)?;
+        drawer.clear_to_end_of_line(None)?;
+        Ok(())
     }
 
 }

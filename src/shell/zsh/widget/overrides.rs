@@ -10,7 +10,7 @@ use crate::lua::HasEventCallbacks;
 unsafe fn get_widget(name: &MetaStr) -> Result<*mut bindings::widget> {
     unsafe {
         let getnode = (*bindings::thingytab).getnode.unwrap();
-        let thingy = getnode(bindings::thingytab, name.as_ptr()) as *mut bindings::thingy;
+        let thingy = getnode(bindings::thingytab, name.as_ptr()).cast() as *mut bindings::thingy;
         if thingy.is_null() {
             anyhow::bail!("widget_override: could not find {name:?} in thingytab");
         }

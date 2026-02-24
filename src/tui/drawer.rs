@@ -128,7 +128,7 @@ impl<'a, 'b, W, C> Drawer<'a, 'b, W, C> {
     }
 }
 
-impl<'a, 'b, W, C: Canvas> Drawer<'a, 'b, W, C> {
+impl<W, C: Canvas> Drawer<'_, '_, W, C> {
     pub fn term_height(&self) -> u16 {
         self.canvas.get_size().1
     }
@@ -138,7 +138,7 @@ impl<'a, 'b, W, C: Canvas> Drawer<'a, 'b, W, C> {
     }
 }
 
-impl<'a, 'b, W: Write, C: Canvas> Drawer<'a, 'b, W, C> {
+impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
     pub fn move_to_pos(&mut self, pos: (u16, u16)) -> Result<()> {
         if pos == (0, self.real_pos.1 + 1) {
             queue!(self.writer, Print("\r\n"))?;
@@ -280,25 +280,23 @@ impl<'a, 'b, W: Write, C: Canvas> Drawer<'a, 'b, W, C> {
         Ok(())
     }
 
-    pub fn draw_lines<'c, I: Iterator<Item=&'c [Cell]>>(&mut self, lines: I) -> Result<()> {
-        for (i, line) in lines.enumerate() {
-            if i > 0 {
-                self.goto_newline(None)?;
-            }
-            let mut skip = 0;
-            for (i, cell) in line.iter().enumerate() {
-                if skip > 0 {
-                    skip -= 1;
-                } else if super::cell_is_empty(cell) && line[i..].iter().all(super::cell_is_empty) {
-                    self.clear_to_end_of_line(None)?;
-                    break
-                } else {
-                    skip = cell.symbol().width() - 1;
-                    self.draw_cell(cell, false)?;
-                }
+    pub fn draw_cell_n_times(&mut self, cell: &Cell, force: bool, n: u16) -> Result<()> {
+        if self.pos.0 + n == self.term_width() {
+            // just clear
+            self.clear_to_end_of_line(Some(cell))?;
+            self.move_to((self.pos.0 + n, self.pos.1));
+        } else {
+            for _ in 0 .. n {
+                self.draw_cell(cell, force)?;
             }
         }
-        self.clear_to_end_of_line(None)?;
+        Ok(())
+    }
+
+    pub fn draw_cells(&mut self, cells: &[Cell], force: bool) -> Result<()> {
+        for cell in cells {
+            self.draw_cell(cell, force)?;
+        }
         Ok(())
     }
 
