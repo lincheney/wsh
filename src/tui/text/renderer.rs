@@ -33,10 +33,26 @@ impl Drop for BufferRef {
 }
 
 pub trait Renderer {
+    fn pad_to<W, C>(
+        drawer: &mut Drawer<W, C>,
+        x: u16,
+        cell: &Cell,
+    ) -> std::io::Result<()>
+    where
+        W :Write,
+        C: Canvas
+    {
+        for _ in 0 .. x.saturating_sub(drawer.get_pos().0) {
+            drawer.draw_cell(cell, false)?;
+        }
+        Ok(())
+    }
+
     fn draw_one_line<W, C, F>(
         &mut self,
         drawer: &mut Drawer<W, C>,
         newlines: bool,
+        pad_to: (u16, &Cell),
         callback: &mut Option<F>,
     ) -> std::io::Result<bool>
     where
@@ -49,6 +65,7 @@ pub trait Renderer {
         &mut self,
         drawer: &mut Drawer<W, C>,
         newlines: bool,
+        pad_to: (u16, &Cell),
         mut callback: Option<F>,
     ) -> std::io::Result<()>
     where
@@ -56,7 +73,7 @@ pub trait Renderer {
         C: Canvas,
         F: FnMut(&mut Drawer<W, C>, usize, usize, usize),
     {
-        while self.draw_one_line(drawer, newlines, &mut callback)? { }
+        while self.draw_one_line(drawer, newlines, pad_to, &mut callback)? { }
         Ok(())
     }
 }
@@ -223,6 +240,7 @@ impl Renderer for TextRenderer<'_> {
         &mut self,
         drawer: &mut Drawer<W, C>,
         newlines: bool,
+        pad_to: (u16, &Cell),
         callback: &mut Option<F>,
     ) -> std::io::Result<bool>
     where
@@ -233,6 +251,7 @@ impl Renderer for TextRenderer<'_> {
 
         // draw top border
         if let Some(borders) = &mut self.borders && borders.top && !borders.top().is_empty() {
+            Self::pad_to(drawer, pad_to.0, pad_to.1)?;
             for cell in &borders.top()[..self.max_width] {
                 drawer.draw_cell(cell, false)?;
             }
@@ -243,6 +262,7 @@ impl Renderer for TextRenderer<'_> {
 
         // draw a line
         if let Some(slice) = self.lines.next() {
+            Self::pad_to(drawer, pad_to.0, pad_to.1)?;
             let line = self.lines.slice(slice);
             let lineno = self.line_count;
             self.line_count += 1;
@@ -311,6 +331,7 @@ impl Renderer for TextRenderer<'_> {
 
         // draw bottom border
         if let Some(borders) = &mut self.borders && borders.bottom && !borders.bottom().is_empty() {
+            Self::pad_to(drawer, pad_to.0, pad_to.1)?;
             if newlines && let Some(need_newline) = self.need_newline.take() {
                 drawer.goto_newline(need_newline.as_ref())?;
             }

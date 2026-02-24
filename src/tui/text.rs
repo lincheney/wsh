@@ -320,7 +320,7 @@ impl<T> Text<T> {
         F: FnMut(&mut Drawer<W, C>, usize, usize, usize),
     {
         self.make_renderer(drawer, block, max_width, max_height, extra_highlights)
-            .render(drawer, newlines, callback)
+            .render(drawer, newlines, (0, &Cell::EMPTY), callback)
     }
 
 }

@@ -226,7 +226,7 @@ impl Nodes {
     ) -> std::io::Result<()> {
         if let Some(mut renderer) = NodeRenderer::new_for_layout(&self.root, &self.map, drawer, max_height) {
             let callback: Option<fn(&mut Drawer<W, C>, usize, usize, usize)> = None;
-            renderer.render(drawer, true, callback)
+            renderer.render(drawer, true, (0, &ratatui::buffer::Cell::EMPTY), callback)
         } else {
             Ok(())
         }
@@ -240,7 +240,7 @@ impl Nodes {
     ) -> std::io::Result<()> {
         if let Some(mut renderer) = NodeRenderer::new(node, &self.map, drawer, max_height) {
             let callback: Option<fn(&mut Drawer<W, C>, usize, usize, usize)> = None;
-            renderer.render(drawer, true, callback)
+            renderer.render(drawer, true, (0, &ratatui::buffer::Cell::EMPTY), callback)
         } else {
             Ok(())
         }
@@ -330,6 +330,7 @@ impl<'a> Renderer for NodeRenderer<'a, std::slice::Iter<'a, usize>> {
         &mut self,
         drawer: &mut Drawer<W, C>,
         newlines: bool,
+        pad_to: (u16, &ratatui::buffer::Cell),
         callback: &mut Option<F>,
     ) -> std::io::Result<bool>
     where
@@ -353,7 +354,7 @@ impl<'a> Renderer for NodeRenderer<'a, std::slice::Iter<'a, usize>> {
                         }
                     }
 
-                    if let Some(child) = child && child.draw_one_line(drawer, false, callback)? {
+                    if let Some(child) = child && child.draw_one_line(drawer, false, pad_to, callback)? {
                         break Ok(true)
                     }
                     *child = None;
@@ -361,20 +362,25 @@ impl<'a> Renderer for NodeRenderer<'a, std::slice::Iter<'a, usize>> {
             },
             NodeRenderer::HorizontalLayout{children} => {
                 // draw lines from each child
+                if children.iter().all(|(_, _, done)| *done) {
+                    return Ok(false)
+                }
+
                 let mut all_done = true;
+                let mut startx: u16 = pad_to.0;
                 for (node, renderer, done) in children.iter_mut() {
                     // need to add padding
-                    let pos = drawer.get_pos();
+                    let endx = drawer.get_pos().0 + node.size.get().0;
                     if !*done {
-                        *done = !renderer.draw_one_line(drawer, false, callback)?;
+                        *done = !renderer.draw_one_line(drawer, false, (startx, pad_to.1), callback)?;
                         all_done = all_done && *done;
                     }
-                    drawer.move_to((pos.0 + node.size.get().0, pos.1));
+                    startx = endx;
                 }
                 Ok(!all_done)
             },
             NodeRenderer::Widget{renderer} => {
-                renderer.draw_one_line(drawer, false, callback)
+                renderer.draw_one_line(drawer, false, pad_to, callback)
             },
         }?;
         if newlines {
