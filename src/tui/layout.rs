@@ -8,7 +8,7 @@ use super::widget::Widget;
 use super::drawer::{Drawer, Canvas};
 use super::text::{Renderer, TextRenderer};
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Layout {
     pub direction: Direction,
     pub children: Vec<usize>,
@@ -52,25 +52,27 @@ impl Layout {
 
                 let areas = ratatui::layout::Layout::horizontal(constraints).split(area);
 
+                let mut max_height = 0;
                 for (child, child_area) in visible.iter().zip(areas.iter()) {
                     child.refresh(map, *child_area);
+                    max_height = max_height.max(child.size.get().1);
                 }
-
-                let max_height = visible.iter().map(|n| n.size.get().1).max().unwrap();
                 max_height.min(area.height)
             },
         }
     }
 }
 
+#[derive(Debug)]
 pub enum NodeKind {
     Widget(Widget),
     Layout(Layout),
 }
 
+#[derive(Debug)]
 pub struct Node {
     pub id: usize,
-    pub parent_id: Option<usize>,
+    pub has_parent: bool,
     pub kind: NodeKind,
     pub constraint: Option<Constraint>,
     pub persist: bool,
@@ -130,7 +132,7 @@ impl Nodes {
         let id = self.next_id();
         self.map.entry(id).insert_entry(Node {
             id,
-            parent_id: None,
+            has_parent: false,
             kind,
             constraint: None,
             persist: false,
@@ -166,7 +168,7 @@ impl Nodes {
             // orphan the children
             for child in &layout.children {
                 if let Some(node) = self.map.get_mut(child) {
-                    node.parent_id = None;
+                    node.has_parent = false;
                     node.hidden = true;
                 }
             }
@@ -182,7 +184,6 @@ impl Nodes {
     }
 
     /// Add an existing node as a child of a layout. Removes it from any current parent first.
-    /// parent_id None means root. Returns false if parent not found or parent is not a layout.
     pub fn add_child(&mut self, child_id: usize) {
         self.remove_child_from_parent(child_id);
         self.root.children.push(child_id);

@@ -343,18 +343,17 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
                 match child {
                     LayoutChild::Message(child_options) => {
                         let child = process_message(tui, child_options)?;
+                        child.has_parent = true;
                         layout.children.push(child.id);
                     },
-                    LayoutChild::WidgetRef(id) if tui.get_node(id).is_none() => {
-                        anyhow::bail!("can't find widget with id {id}");
-                    },
                     LayoutChild::WidgetRef(id) => {
+                        tui.nodes.remove_child_from_parent(id);
+                        let Some(node) = tui.get_node_mut(id)
+                            else { anyhow::bail!("can't find widget with id {id}") };
+                        node.has_parent = true;
                         layout.children.push(id);
                     },
                 }
-            }
-            for &child in &layout.children {
-                tui.nodes.remove_child_from_parent(child);
             }
 
             if let Some(id) = options.id {
@@ -430,14 +429,12 @@ async fn set_message(ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
     tui.dirty = true;
 
     let node = process_message(tui, options)?;
-    // Only add newly created top-level nodes to root; existing nodes keep their position
-    if node.parent_id.is_some() {
-        return Ok(node.id)
-    }
-
-    node.parent_id = Some(0);
     let id = node.id;
-    tui.nodes.add_child(id);
+    // Only add newly created top-level nodes to root; existing nodes keep their position
+    if !node.has_parent {
+        node.has_parent = true;
+        tui.nodes.add_child(id);
+    }
     Ok(id)
 }
 
