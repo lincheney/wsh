@@ -81,7 +81,7 @@ local function apply_highlight_matcher(matcher, token, str, highlights, priority
             matcher.hlregex = wish.regex(matcher.hlregex)
         end
 
-        local tokstr = string.sub(str, token.start+1, token.finish)
+        local tokstr = string.sub(str, token.start, token.finish)
         local captures = matcher.hlregex:captures_all(tokstr)
         for _, capture in ipairs(captures) do
             local index = capture[2] or capture[1]
