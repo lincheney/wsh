@@ -231,7 +231,11 @@ mod_export char * zlegetline(int *ll, int *cs);
 mod_export void selectlocalmap(Keymap m);
 int selectkeymap(char *name, int fb);
 mod_export char *zlemetaline;
+mod_export char *zleline;
 mod_export int zlemetacs, zlemetall;
+/* Cursor position and line length in zle */
+mod_export int zlecs, zlell;
+
 
 mod_export void zsetterm(void);
 struct ttyinfo {
