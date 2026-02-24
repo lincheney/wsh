@@ -49,6 +49,17 @@ pub(super) fn sighandler() -> c_int {
     }
 }
 
+fn close_self_pipe() {
+    let fd = SELF_PIPE.swap(-1, Ordering::AcqRel);
+    if fd != -1 {
+        let _ = nix::unistd::close(fd);
+    }
+}
+
+pub(super) fn cleanup() {
+    close_self_pipe();
+}
+
 pub(super) fn init() -> Result<()> {
     fetch_term_size_from_zsh();
     let (sender, receiver) = watch::channel(get_term_size_from_zsh());

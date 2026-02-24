@@ -133,6 +133,7 @@ impl GlobalState {
 
 impl Drop for GlobalState {
     fn drop(&mut self) {
+        zsh::signals::cleanup();
         zsh::completion::restore_compadd();
         zsh::widget::overrides::restore_all();
         zsh::bin_zle::restore_zle();

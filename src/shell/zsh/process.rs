@@ -132,6 +132,20 @@ extern "C" fn before_trap_hook(_hook: zsh_sys::Hookdef, _arg: *mut c_void) -> c_
     0
 }
 
+fn close_self_pipe() {
+    let fd = SELF_PIPE.swap(-1, Ordering::AcqRel);
+    if fd != -1 {
+        let _ = nix::unistd::close(fd);
+    }
+}
+
+pub(super) fn cleanup() {
+    unsafe {
+        zsh_sys::deletehookfunc(c"before_trap".as_ptr().cast_mut(), Some(before_trap_hook));
+    }
+    close_self_pipe();
+}
+
 pub(super) fn init(ui: &crate::ui::Ui) -> Result<()> {
     // spawn a reader task
     let ui = ui.clone();

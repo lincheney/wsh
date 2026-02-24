@@ -2,8 +2,11 @@ use anyhow::Result;
 use nix::sys::signal;
 use std::os::raw::{c_int};
 use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::Mutex;
 use tokio::io::AsyncReadExt;
 pub mod sigwinch;
+
+static ORIGINAL_SIGACTIONS: Mutex<Vec<(signal::Signal, signal::SigAction)>> = Mutex::new(Vec::new());
 
 // how the heck does this work
 //
@@ -86,7 +89,8 @@ pub(super) fn hook_signal(signal: signal::Signal) -> Result<()> {
         // set the sighandler
         let handler = signal::SigHandler::Handler(sighandler);
         let action = signal::SigAction::new(handler, signal::SaFlags::empty(), signal::SigSet::empty());
-        signal::sigaction(signal, &action)?;
+        let old_action = signal::sigaction(signal, &action)?;
+        ORIGINAL_SIGACTIONS.lock().unwrap().push((signal, old_action));
 
         // now set the trap
         let signal = convert_to_custom_signal(signal as _);
@@ -138,4 +142,14 @@ pub fn init(ui: &crate::ui::Ui) -> Result<()> {
     sigwinch::init()?;
 
     Ok(())
+}
+
+pub fn cleanup() {
+    // restore original signal handlers
+    for (sig, old_action) in ORIGINAL_SIGACTIONS.lock().unwrap().drain(..) {
+        crate::log_if_err(unsafe { signal::sigaction(sig, &old_action) });
+    }
+
+    super::process::cleanup();
+    sigwinch::cleanup();
 }
