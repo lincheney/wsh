@@ -82,16 +82,25 @@ async fn create_dynamic_var(
     (name, typ, get, set, unset): (BString, LuaValue, LuaFunction, Option<LuaFunction>, Option<LuaFunction>),
 ) -> Result<()> {
 
+    let weak = lua.weak();
+
     macro_rules! make_dynamic_var_func {
         (|$($arg:ident),*| $result:expr) => (
-            Box::new(move |$($arg),*| {
-                match crate::shell::run_with_shell($result) {
-                    Ok(Ok(val)) => return val,
-                    Ok(Err(err)) => ::log::error!("{}", err),
-                    Err(err) => ::log::error!("{}", err),
-                }
-                Default::default()
-            })
+            {
+                let weak = weak.clone();
+                Box::new(move |$($arg),*| {
+                    if weak.try_upgrade().is_none() {
+                        eprintln!("Lua instance is destroyed")
+                    } else {
+                        match crate::shell::run_with_shell($result) {
+                            Ok(Ok(val)) => return val,
+                            Ok(Err(err)) => ::log::error!("{}", err),
+                            Err(err) => ::log::error!("{}", err),
+                        }
+                    }
+                    Default::default()
+                })
+            }
         )
     }
 
