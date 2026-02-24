@@ -251,11 +251,14 @@ impl Variable {
         get: Box<dyn Send + Fn() -> T>,
         set: Option<Box<dyn Send + Fn(T)>>,
         unset: Option<Box<dyn Send + Fn(bool)>>,
-    ) {
+    ) -> Result<()> {
         let flag = T::FLAG | zsh_sys::PM_SPECIAL | zsh_sys::PM_REMOVABLE | zsh_sys::PM_LOCAL;
         let gsu = CustomGSU { get, set, unset };
         unsafe {
             let param = zsh_sys::createparam(name.as_ptr().cast_mut(), flag as _);
+            if param.is_null() {
+                anyhow::bail!("parameter {name} already exists");
+            }
             (*param).level = zsh_sys::locallevel;
             // stuff the actual gsu into the data field
             (*param).u.data = Box::into_raw(Box::new(gsu)).cast();
@@ -274,6 +277,7 @@ impl Variable {
                 unreachable!();
             }
         }
+        Ok(())
     }
 
 }

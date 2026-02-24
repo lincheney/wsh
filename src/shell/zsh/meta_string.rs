@@ -210,6 +210,12 @@ impl MetaStr {
     }
 }
 
+impl std::fmt::Display for MetaStr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+         write!(f, "{:?}", &self.inner)
+    }
+}
+
 impl ToOwned for MetaStr {
     type Owned = MetaString;
     fn to_owned(&self) -> Self::Owned {
