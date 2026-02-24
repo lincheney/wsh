@@ -12,6 +12,23 @@ local msg = wish.set_message{
         type = 'Rounded',
     },
 }
+local saved_msg = wish.set_message{
+    hidden = true,
+    persist = true,
+    dim = true,
+    height = 'min:3',
+    border = {
+        fg = 'cyan',
+        dim = false,
+        type = 'Rounded',
+    },
+}
+local layout_msg = wish.set_message{
+    hidden = true,
+    persist = true,
+    direction = 'horizontal',
+    children = {msg, saved_msg},
+}
 local buffer_change_callback = nil
 local accept_line_callback = nil
 local current_preview = nil
@@ -36,23 +53,16 @@ local function debounce(delay, func)
     end
 end
 
-local function preview(buffer)
+local function preview(command)
 
-    if not buffer:find('%S') then
+    if not command:find('%S') then
         current_preview = nil
-        wish.set_message{id = msg, hidden = true}
+        wish.set_message{id = layout_msg, hidden = true}
         wish.redraw()
         return
     end
 
-    -- -- this ought to be using something like zpty
-    -- local proc = wish.async.spawn{
-        -- args = {'bash', '-c', 'exec 2>&1; ' .. buffer},
-        -- stdin = 'null',
-        -- stdout = 'piped',
-        -- stderr = 'null',
-    -- }
-    local proc = wish.async.zpty(buffer)
+    local proc = wish.async.zpty(command)
     -- kill any old proc
     if current_preview then
         current_preview.proc:term()
@@ -60,9 +70,10 @@ local function preview(buffer)
 
     -- become the new preview
     current_preview = {
-        buffer = buffer,
+        command = command,
         need_clear = true,
-        stdout = '',
+        buffer = '',
+        output = '',
         proc = proc,
         is_current = function(self) return self == current_preview end,
         read_once = function(self)
@@ -71,7 +82,7 @@ local function preview(buffer)
                 return false
             end
             if data then
-                self.stdout = self.stdout .. data
+                self.buffer = self.buffer .. data
             end
             self:flush()
             return data
@@ -81,24 +92,27 @@ local function preview(buffer)
                 return
             end
 
-            local value = self.stdout
-            self.stdout = ''
+            local value = self.buffer
+            self.buffer = ''
 
             -- clear old msg
             if self.need_clear then
                 self.need_clear = false
+                self.output = ''
                 wish.clear_message(msg)
             end
 
+            self.output = self.output .. value
             wish.feed_ansi_message(msg, value)
             wish.set_message{
                 id = msg,
-                hidden = false,
                 border = {
                     dim = self.proc:is_finished(),
-                    title = {text = self.buffer},
+                    title = {text = self.command},
                 },
+                hidden = false,
             }
+            wish.set_message{id = layout_msg, hidden = false}
             wish.redraw()
         end),
     }
@@ -106,8 +120,8 @@ local function preview(buffer)
 end
 
 local live_preview = debounce(0.2, function()
-    local buffer = wish.get_buffer()
-    local preview = preview(buffer)
+    local command = wish.get_buffer()
+    local preview = preview(command)
     while preview and preview:read_once() do
     end
 end)
@@ -115,14 +129,13 @@ end)
 local function stop()
     wish.remove_event_callback(buffer_change_callback)
     wish.remove_event_callback(accept_line_callback)
-    wish.set_message{id = msg, hidden = true}
+    wish.set_message{id = layout_msg, hidden = true}
+    wish.set_message{id = saved_msg, hidden = true}
     active = false
     wish.redraw()
 end
 
 local function start()
-    wish.set_message{text = 'live'}
-
     buffer_change_callback = wish.add_event_callback('buffer_change', function(arg)
         live_preview()
     end)
@@ -141,6 +154,25 @@ wish.set_keymap('<a-p>', function()
     else
         start()
     end
+end)
+
+wish.set_keymap('<a-s>', function()
+    if not active or not current_preview then
+        return
+    end
+
+    -- clear saved widget and replay accumulated ANSI data
+    wish.clear_message(saved_msg)
+    wish.feed_ansi_message(saved_msg, current_preview.output)
+    wish.set_message{
+        id = saved_msg,
+        hidden = false,
+        border = {
+            dim = true,
+            title = {text = current_preview.command .. ' (saved)'},
+        },
+    }
+    wish.redraw()
 end)
 
 return M
