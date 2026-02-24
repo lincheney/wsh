@@ -64,6 +64,15 @@ struct MessageStyleOptions {
     pub show_cursor: Option<bool>,
 }
 
+impl MessageStyleOptions {
+    fn is_none(&self) -> bool {
+        self.style.align.is_none()
+            && self.style.style.is_none()
+            && self.border.is_none()
+            && self.show_cursor.is_none()
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[allow(nonstandard_style)]
 enum Direction {
@@ -170,7 +179,7 @@ pub struct StyleOptions {
 }
 
 impl StyleOptions {
-    fn is_default(&self) -> bool {
+    fn is_none(&self) -> bool {
         self.fg.is_none() &&
             self.bg.is_none() &&
             self.bold.is_none() &&
@@ -219,7 +228,7 @@ fn parse_text_parts<T: Default+Clone>(parts: TextParts, text: &mut tui::text::Te
             text.push_lines(part.split('\n').map(|s| s.into()), None);
         },
         TextParts::Detailed(part) => {
-            let hl = if part.style.style.is_default() {
+            let hl = if part.style.style.is_none() {
                 None
             } else {
                 let style: tui::widget::StyleOptions = part.style.style.into();
@@ -245,7 +254,7 @@ fn parse_text_parts<T: Default+Clone>(parts: TextParts, text: &mut tui::text::Te
             text.push_line(b"".into(), None);
             for part in parts {
                 if let Some(string) = part.text {
-                    let hl = if part.style.style.is_default() {
+                    let hl = if part.style.style.is_none() {
                         None
                     } else {
                         let style: tui::widget::StyleOptions = part.style.style.into();
@@ -358,6 +367,17 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
                 }
             } else {
                 tui.nodes.add(NodeKind::Layout(layout))
+            }
+        },
+
+        MessageInner::Widget { style, text } if text.is_none() && style.is_none() => {
+            if let Some(id) = options.id {
+                match tui.get_node_mut(id) {
+                    Some(node) => node,
+                    None => anyhow::bail!("can't find node with id {id}"),
+                }
+            } else {
+                tui.nodes.add(NodeKind::Widget(tui::widget::Widget::default()))
             }
         },
 
@@ -561,7 +581,7 @@ async fn set_status_bar(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
                 // StatusBar is standalone, node options (persist/hidden/constraint) are ignored
                 set_widget_options(widget, &style);
             },
-            _ => anyhow::bail!("status bar only accepts widget options"),
+            MessageInner::Layout { .. } => anyhow::bail!("status bar only accepts widget options"),
         }
     }
     ui.status_bar.dirty = true;
