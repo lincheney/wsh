@@ -5,7 +5,7 @@ pub fn init() {
         .target(env_logger::Target::Pipe(log_file))
         .format_source_path(true)
         .format_timestamp_millis()
-        .init();
+        .try_init().ok();
 }
 
 pub fn log_if_err<T, E: std::fmt::Debug>(result: Result<T, E>) -> Option<T> {
