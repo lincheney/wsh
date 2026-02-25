@@ -15,6 +15,7 @@ pub struct ForkState {
 }
 
 static FORK_STATE: Mutex<Option<ForkState>> = Mutex::new(None);
+static ATFORK_INIT: std::sync::Once = std::sync::Once::new();
 
 extern "C" fn prefork() {
     *FORK_STATE.lock().unwrap() = ForkState::new();
@@ -26,9 +27,9 @@ extern "C" fn postfork() {
 
 impl ForkState {
     pub fn init() {
-        unsafe {
+        ATFORK_INIT.call_once(|| unsafe {
             nix::libc::pthread_atfork(Some(prefork), Some(postfork), Some(postfork));
-        }
+        });
     }
 
     fn new() -> Option<Self> {
