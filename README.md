@@ -102,7 +102,7 @@ i wish i could have
 * [ ] control c style escape hatch
 * [ ] TMOUT
 * [x] scrolling widgets
-* [ ] horizontal widget layout
+* [x] horizontal widget layout
 * [ ] highlight colour system
 * [ ] make zle undo work
 * [x] make zle history work
@@ -112,4 +112,5 @@ i wish i could have
 * [x] terminal resize
 * [ ] exit causes shell.func().await to panic
 * [x] what exactly needs to be metafied?
+* [x] try recover from panic
 * [ ]
