@@ -164,15 +164,32 @@ impl EventStream {
 
     }
 
-    pub fn spawn(self, ui: &crate::ui::Ui) {
+    pub fn spawn<F: 'static + Sync + Send + Fn()>(self, ui: &crate::ui::Ui, abort: F) {
         // spawn a task to take care of keyboard input
+        let handle = {
+            let ui = ui.clone();
+            crate::spawn_and_log(async move {
+                let tty = std::fs::File::open("/dev/tty")?;
+                // move to an fd >= 10
+                let tty = crate::utils::move_fd(tty)?;
+                crate::utils::set_nonblocking_fd(&tty)?;
+                self.run(tty, ui).await
+            })
+        };
+
         let ui = ui.clone();
-        crate::spawn_and_log(async move {
-            let tty = std::fs::File::open("/dev/tty")?;
-            // move to an fd >= 10
-            let tty = crate::utils::move_fd(tty)?;
-            crate::utils::set_nonblocking_fd(&tty)?;
-            self.run(tty, ui).await
+        tokio::task::spawn(async move {
+            if let Err(e) = handle.await {
+                // it panicked
+                // unload the module
+                ui.shell.run(move |_| abort()).await;
+                // restore the shell settings
+                crate::log_if_err(ui.get().borrow_mut().deactivate());
+                // break out of shell loop if necessary
+                crate::log_if_err(ui.shell.accept_line_trampoline(Some("".into())).await);
+                // log the original error
+                crate::log_if_err::<(), _>(Err(e));
+            }
         });
     }
 }

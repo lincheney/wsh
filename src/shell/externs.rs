@@ -27,6 +27,10 @@ thread_local! {
 static ORIGINAL_ZLE_ENTRY_PTR: OnceLock<zsh_sys::ZleEntryPoint> = OnceLock::new();
 static IS_RUNNING: Mutex<()> = Mutex::new(());
 
+fn teardown() {
+    STATE.with(|state| state.take());
+}
+
 impl GlobalState {
     fn new() -> Result<Self> {
         crate::logging::init();
@@ -43,7 +47,7 @@ impl GlobalState {
             zsh::signals::init(&ui)?;
 
             if !crate::is_forked() {
-                events.spawn(&ui);
+                events.spawn(&ui, || teardown());
                 ui.report_error(ui.init_lua());
                 ui.get().inner.read().await.activate()?;
                 zsh::bin_zle::override_zle();
@@ -386,6 +390,6 @@ pub unsafe extern "C" fn cleanup_(module: zsh_sys::Module) -> c_int {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn finish_() -> c_int {
-    STATE.with(|state| state.take());
+    teardown();
     0
 }
