@@ -3,7 +3,7 @@ use super::text::{HighlightedRange, Highlight};
 use bstr::BString;
 use std::io::{Write};
 use crate::tui::{Drawer, Canvas};
-use crate::buffer::Buffer;
+use crate::ui::buffer::Buffer;
 use crate::shell::{ShellClient, MetaStr};
 use ratatui::layout::Rect;
 use crate::meta_str;

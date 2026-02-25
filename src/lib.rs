@@ -1,7 +1,6 @@
 mod shell;
 mod fork_lock;
 mod ui;
-mod buffer;
 mod tui;
 mod event_stream;
 mod lua;

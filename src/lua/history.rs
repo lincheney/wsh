@@ -52,10 +52,12 @@ async fn goto_history_internal(ui: Ui, index: HistoryIndex) {
         let new_buffer = (new_buffer != *buffer).then_some(new_buffer);
         let new_cursor = (new_cursor != cursor).then_some(new_cursor);
 
-        if new_buffer.is_some() || new_cursor.is_some() {
+        if let Some(new_buffer) = &new_buffer {
+            ui.insert_or_set_buffer(false, &new_buffer, new_cursor).await;
+        } else if new_cursor.is_some() {
             let ui = ui.get();
             let mut ui = ui.inner.blocking_write();
-            ui.buffer.insert_or_set(new_buffer.as_ref().map(|x| x.as_ref()), new_cursor);
+            ui.buffer.set(None, new_cursor);
         }
 
         new_buffer.is_some()

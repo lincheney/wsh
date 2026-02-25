@@ -24,6 +24,7 @@ use crate::tui::{
 use crate::timed_lock::{RwLock};
 use crate::shell::{ShellClient, KeybindValue, process::PidMap};
 use crate::lua::{EventCallbacks, HasEventCallbacks};
+pub mod buffer;
 
 const UNHANDLED_OUTPUT: usize = 1;
 const UI_FROZEN: usize = UNHANDLED_OUTPUT | 2;
@@ -52,7 +53,7 @@ pub struct UiInner {
     pub keybinds: Vec<crate::lua::KeybindMapping>,
     pub keybind_layer_counter: usize,
 
-    pub buffer: crate::buffer::Buffer,
+    pub buffer: buffer::Buffer,
     pub status_bar: crate::tui::status_bar::StatusBar,
 
     pub stdout: std::io::Stdout,
@@ -107,7 +108,7 @@ impl Ui {
             dirty: true,
             tui: Default::default(),
             cmdline: Default::default(),
-            buffer: crate::buffer::Buffer::new(),
+            buffer: buffer::Buffer::new(),
             status_bar: Default::default(),
             keybinds: Default::default(),
             keybind_layer_counter: Default::default(),
@@ -233,11 +234,13 @@ impl Ui {
         if let Event::Key(event) = event {
             self.trigger_key_callbacks(&event.into(), &event_buffer).await;
             if let Some(result) = self.handle_key(event, event_buffer.as_ref()).await {
+                self.cancel_completion_suffix();
                 return result
             }
 
         }
         self.handle_key_default(event, event_buffer.as_ref()).await?;
+        self.cancel_completion_suffix();
         Ok(true)
     }
 
@@ -567,8 +570,12 @@ impl Ui {
 
         match result? {
             Value::String(string) => Some(KeybindOutput::String(string)),
-            Value::Widget{buffer, cursor, output, accept_line} => {
+            Value::Widget{buffer, mut cursor, output, accept_line} => {
                 {
+                    if let Some(buffer) = &buffer {
+                        self.insert_or_set_buffer(false, &buffer, cursor.take()).await;
+                    }
+
                     let this = self.get();
                     let mut ui = this.borrow_mut();
 
@@ -576,7 +583,7 @@ impl Ui {
                     if let Some(output) = &output {
                         ui.tui.add_zle_message(output.as_ref());
                     }
-                    ui.buffer.insert_or_set(buffer.as_ref().map(|x| x.as_ref()), cursor);
+                    ui.buffer.set(None, cursor);
                     // anything could have happened, so trigger a redraw
                     ui.dirty = true;
                 }
@@ -605,12 +612,9 @@ impl Ui {
             },
 
             Event::Key(KeyEvent{ key: Key::Char(c), modifiers }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
-                {
-                    let mut buf = [0; 4];
-                    let this = self.get();
-                    let mut ui = this.borrow_mut();
-                    ui.buffer.insert_at_cursor(c.encode_utf8(&mut buf).as_bytes());
-                }
+                let mut buf = [0; 4];
+                let c = c.encode_utf8(&mut buf).as_bytes();
+                self.insert_or_set_buffer(true, c, None).await;
                 self.trigger_buffer_change_callbacks().await;
                 self.queue_draw();
             },
@@ -626,6 +630,74 @@ impl Ui {
             _ => (),
         }
         Ok(true)
+    }
+
+    fn cancel_completion_suffix(&self) {
+        self.get().borrow_mut().buffer.replace_completion_suffix(None);
+    }
+
+    pub async fn insert_or_set_buffer(&self, insert: bool, data: &[u8], cursor: Option<usize>) {
+        // if we need to invoke a shfunc, need to trampline out
+        let (func, num_chars, old_buffer, old_cursor) = {
+            let ui = self.get();
+            let buffer = &mut ui.borrow_mut().buffer;
+
+            let insert = if insert {
+                Some(data)
+            } else {
+                buffer.convert_to_insert(data)
+            };
+
+            if let Some(insert) = insert {
+                // check suffix auto removal
+                if let Some((pos, suffix)) = buffer.replace_completion_suffix(None)
+                    && pos == buffer.get_cursor()
+                    && buffer.cursor_byte_pos() >= suffix.byte_len
+                    && suffix.matches(Some(insert.into()))
+                {
+
+                    match suffix.try_into_func() {
+                        Err(suffix) => {
+                            // easy, but no longer a plain insert
+                            buffer.splice_at(buffer.cursor_byte_pos() - suffix.byte_len, insert, Some(suffix.byte_len), true);
+                            buffer.set(None, cursor);
+                            return
+                        },
+                        Ok((func, num_chars)) => {
+                            // pita = trampoline
+                            (func, num_chars, buffer.get_contents().clone(), buffer.get_cursor())
+                        },
+                    }
+
+                } else {
+                    buffer.insert_at_cursor(insert);
+                    buffer.set(None, cursor);
+                    return
+                }
+
+            } else {
+                buffer.set(Some(data), cursor);
+                return
+            }
+        };
+
+        // invoke the func, then reacquire the buf
+
+        // execute the func
+        // a func may run subprocesses so lock the ui
+        let lock = self.has_foreground_process.lock().await;
+        let zle = self.shell.run(move |shell| {
+            shell.set_zle_buffer(old_buffer, old_cursor as _);
+            shell.exec_function_by_name(func, vec![num_chars.to_string().into()]);
+            shell.get_zle_buffer()
+        }).await;
+        drop(lock);
+
+        let ui = self.get();
+        let buffer = &mut ui.borrow_mut().buffer;
+        buffer.set(Some(&zle.0), Some(zle.1.unwrap_or(zle.0.len() as _) as usize));
+        // finally add the data we wanted originally
+        buffer.set(Some(data), cursor);
     }
 
     pub fn add_thread(&self, id: nix::unistd::Pid) {

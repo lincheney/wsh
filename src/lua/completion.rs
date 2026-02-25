@@ -82,12 +82,13 @@ async fn insert_completion(ui: Ui, _lua: Lua, val: Match) -> Result<()> {
         this.borrow().buffer.get_contents().clone()
     };
 
-    let (new_buffer, new_pos) = ui.shell.insert_completion(buffer, val.inner).await;
+    let (new_buffer, new_pos, suffix) = ui.shell.insert_completion(buffer, val.inner).await;
     {
         // see if this can be done as an insert
         let this = ui.unlocked.read();
         let mut ui = this.borrow_mut();
         ui.buffer.insert_or_set(Some(new_buffer.as_ref()), Some(new_pos));
+        ui.buffer.replace_completion_suffix(suffix);
     }
 
     ui.trigger_buffer_change_callbacks().await;

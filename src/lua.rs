@@ -64,27 +64,7 @@ fn set_cursor(ui: &Ui, _lua: &Lua, val: usize) -> Result<()> {
 }
 
 async fn set_buffer(ui: Ui, _lua: Lua, (val, cursor): (mlua::String, Option<usize>)) -> Result<()> {
-    {
-        let ui = ui.get();
-        let buffer = &mut ui.borrow_mut().buffer;
-        buffer.splice_at(0, &val.as_bytes(), None, true);
-        if let Some(cursor) = cursor {
-            buffer.set_cursor(cursor.saturating_sub(1));
-        }
-    }
-    ui.trigger_buffer_change_callbacks().await;
-    Ok(())
-}
-
-async fn splice_buffer(ui: Ui, _lua: Lua, (val, len, cursor): (mlua::String, Option<usize>, Option<usize>)) -> Result<()> {
-    {
-        let ui = ui.get();
-        let buffer = &mut ui.borrow_mut().buffer;
-        buffer.splice_at(buffer.get_cursor(), &val.as_bytes(), len, true);
-        if let Some(cursor) = cursor {
-            buffer.set_cursor(cursor.saturating_sub(1));
-        }
-    }
+    ui.insert_or_set_buffer(false, &val.as_bytes(), cursor).await;
     ui.trigger_buffer_change_callbacks().await;
     Ok(())
 }
@@ -224,7 +204,6 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_fn("get_buffer", get_buffer)?;
     ui.set_lua_fn("set_cursor", set_cursor)?;
     ui.set_lua_async_fn("set_buffer", set_buffer)?;
-    ui.set_lua_async_fn("splice_buffer", splice_buffer)?;
     ui.set_lua_async_fn("undo_buffer", undo_buffer)?;
     ui.set_lua_async_fn("redo_buffer", redo_buffer)?;
     ui.set_lua_async_fn("accept_line", accept_line)?;

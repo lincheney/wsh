@@ -1,14 +1,18 @@
 use crate::unsafe_send::UnsafeSend;
 use std::collections::HashSet;
 use tokio::sync::{mpsc};
+use regex::bytes::Regex;
 use anyhow::Result;
 use std::sync::{Mutex};
 use std::os::raw::*;
 use std::ptr::{null_mut};
 use std::default::Default;
-use bstr::{BString};
+use bstr::{BString, ByteSlice};
 use super::{bindings, builtin::Builtin};
 use super::MetaStr;
+use crate::ui::buffer::suffix::{Suffix, RemovalTrigger};
+
+const CMF_REMOVE: i32 =   1<< 1;	/* remove the suffix */
 
 pub struct Match {
     inner: UnsafeSend<bindings::cmatch>,
@@ -64,6 +68,35 @@ impl Match {
     pub fn get_orig(&self) -> Option<&MetaStr> {
         self.inner.as_ref().get_orig()
     }
+
+    pub fn as_suffix(&self) -> Option<Suffix> {
+        let m = self.inner.as_ref();
+        if (m.flags & CMF_REMOVE) == 0 {
+            return None
+        }
+
+        let suf = m.get_suf()?.unmetafy();
+        let byte_len = suf.len();
+        let removal_trigger = if let Some(name) = m.get_remf() {
+            RemovalTrigger::Function{name: name.to_owned(), len: suf.graphemes().count()}
+        } else if let Some(chars) = m.get_rems() {
+            let mut regex = format!("^[{}]", chars.to_owned().unmetafy());
+            let match_empty = regex.contains("\\-");
+            if match_empty {
+                regex = regex.replace("\\-", "");
+            }
+            let regex = Regex::new(&regex).ok()?;
+            RemovalTrigger::Chars{regex, match_empty}
+        } else {
+            RemovalTrigger::Default(suf.into_owned())
+        };
+
+        Some(Suffix {
+            removal_trigger,
+            byte_len,
+        })
+    }
+
 }
 
 impl Drop for Match {
@@ -209,11 +242,13 @@ pub fn get_completions(line: BString, sink: mpsc::UnboundedSender<Vec<Match>>) {
     }
 }
 
-pub fn insert_completion(line: BString, m: &Match) -> (BString, usize) {
+pub fn insert_completion(line: BString, m: &Match) -> (BString, usize, Option<Suffix>) {
     unsafe {
         // set the zle buffer
         let len = line.len();
         super::set_zle_buffer(line, len as i64 + 1);
+
+        let suffix = m.as_suffix();
 
         // set start and end of word being completed
         zsh_sys::we = len as i32;
@@ -225,6 +260,6 @@ pub fn insert_completion(line: BString, m: &Match) -> (BString, usize) {
 
         let (buffer, cursor) = super::get_zle_buffer();
         let buflen = buffer.len() as _;
-        (buffer, cursor.unwrap_or(buflen) as _)
+        (buffer, cursor.unwrap_or(buflen) as _, suffix)
     }
 }

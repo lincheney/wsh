@@ -236,7 +236,7 @@ crate::TokioActor! {
             Ok(msg)
         }
 
-        pub fn insert_completion(&self, string: BString, m: Arc<zsh::completion::Match>) -> (BString, usize) {
+        pub fn insert_completion(&self, string: BString, m: Arc<completion::Match>) -> (BString, usize, Option<crate::ui::buffer::suffix::Suffix>) {
             zsh::completion::insert_completion(string, &m)
         }
 
@@ -464,6 +464,14 @@ crate::TokioActor! {
             args: Vec<MetaString>
         ) -> c_int {
             function.execute(arg0.as_ref().map(|x| x.as_ref()), args.iter().map(|x| x.as_ref()))
+        }
+
+        pub fn exec_function_by_name(
+            &self,
+            function: MetaString,
+            args: Vec<MetaString>
+        ) -> Option<c_int> {
+            zsh::functions::Function::execute_by_name(function.as_ref(), args.iter().map(|x| x.as_ref()))
         }
 
         pub fn get_function_source(&self, function: Arc<zsh::functions::Function>) -> BString {

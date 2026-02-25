@@ -2,12 +2,23 @@ use std::io::Write;
 use bstr::{BStr, BString, ByteSlice};
 use crate::tui::{Drawer, Canvas};
 use crate::tui::text::{Text, HighlightedRange, TextRenderer, Renderer};
+pub mod suffix;
 
 #[derive(Debug)]
 pub struct Edit {
     before: BString,
     after: BString,
     position: usize,
+}
+
+impl Edit {
+    pub fn get_before(&self) -> &BStr {
+        self.before.as_ref()
+    }
+
+    pub fn get_after(&self) -> &BStr {
+        self.after.as_ref()
+    }
 }
 
 #[derive(Debug, Default)]
@@ -22,6 +33,8 @@ pub struct Buffer {
 
     saved_contents: BString,
     saved_cursor: usize,
+
+    completion_suffix: Option<(usize, suffix::Suffix)>,
 
     pub dirty: bool,
     pub highlight_counter: usize,
@@ -92,18 +105,23 @@ impl Buffer {
         self.fix_cursor();
     }
 
-    pub fn insert_or_set(&mut self, contents: Option<&[u8]>, cursor: Option<usize>) {
-        if let Some(contents) = contents {
-            // see if this can be done as an insert
-            let (prefix, suffix) = &self.get_contents().split_at_checked(self.cursor).unwrap_or((self.get_contents().as_ref(), b""));
-            if contents.starts_with(prefix) && contents.ends_with(suffix) {
-                let contents = &contents[prefix.len() .. contents.len() - suffix.len()];
-                self.insert_at_cursor(contents);
-                self.set(None, cursor);
-                return
-            }
+    pub(super) fn convert_to_insert<'a>(&self, contents: &'a [u8]) -> Option<&'a [u8]> {
+        // see if this can be done as an insert
+        let (prefix, suffix) = &self.get_contents().split_at_checked(self.cursor).unwrap_or((self.get_contents().as_ref(), b""));
+        if contents.starts_with(prefix) && contents.ends_with(suffix) {
+            Some(&contents[prefix.len() .. contents.len() - suffix.len()])
+        } else {
+            None
         }
-        self.set(contents, cursor);
+    }
+
+    pub fn insert_or_set(&mut self, contents: Option<&[u8]>, cursor: Option<usize>) {
+        if let Some(contents) = contents && let Some(insert) = self.convert_to_insert(contents) {
+            self.insert_at_cursor(insert);
+            self.set(None, cursor);
+        } else {
+            self.set(contents, cursor);
+        }
     }
 
     pub fn set_contents(&mut self, contents: &[u8]) {
@@ -114,7 +132,7 @@ impl Buffer {
         self.set(None, Some(cursor));
     }
 
-    pub fn splice_at(&mut self, start: usize, data: &[u8], replace_len: Option<usize>, minimise: bool) {
+    pub(super) fn splice_at(&mut self, start: usize, data: &[u8], replace_len: Option<usize>, minimise: bool) {
         // turn it into an edit
         let end = if let Some(replace_len) = replace_len {
             self.byte_pos(start + replace_len)
@@ -172,7 +190,14 @@ impl Buffer {
         self.fix_cursor();
     }
 
+    pub fn replace_completion_suffix(&mut self, suffix: Option<suffix::Suffix>) -> Option<(usize, suffix::Suffix)> {
+        let old = self.completion_suffix.take();
+        self.completion_suffix = suffix.map(|s| (self.get_cursor(), s));
+        old
+    }
+
     pub fn move_in_history(&mut self, forward: bool) -> bool {
+        self.completion_suffix.take();
         if forward && self.history_index < self.history.len() {
             self.apply_edit(self.history_index, false);
             self.history_index += 1;
@@ -186,8 +211,18 @@ impl Buffer {
         }
     }
 
+    fn auto_remove_suffix(&mut self, data: Option<&[u8]>) {
+        if let Some((cursor, suffix)) = self.completion_suffix.take()
+            && cursor == self.get_cursor()
+            && suffix.matches(data.map(|d| d.into()))
+        {
+        }
+    }
+
     pub fn insert_at_cursor(&mut self, data: &[u8]) {
-        self.splice_at(self.cursor_byte_pos(), data, Some(0), false);
+        self.auto_remove_suffix(Some(data));
+        let cursor = self.cursor_byte_pos();
+        self.splice_at(cursor, data, Some(0), false);
     }
 
     pub fn save(&mut self) {
