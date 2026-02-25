@@ -118,9 +118,13 @@ where
     crate::spawn_and_log::<_, (), anyhow::Error>(async move {
         let mut buf = [0];
         loop {
-            reader.read_exact(&mut buf).await?;
-            callback()?;
+            match reader.read_exact(&mut buf).await {
+                Ok(_) => { callback()?; }
+                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+                Err(e) => return Err(e.into()),
+            }
         }
+        Ok(())
     });
 
     Ok(writer)
