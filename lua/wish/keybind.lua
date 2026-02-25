@@ -2,9 +2,9 @@ local utf8 = require('wish/utf8')
 
 local CUT_CONTENTS = nil
 
-wish.create_dynamic_var('CLIPBOARD', 'string', function()
-    return wish.async.spawn{args={'wl-paste'}, foreground=false, stdout='piped'}.stdout:read()
-end)
+-- wish.create_dynamic_var('CLIPBOARD', 'string', function()
+    -- return wish.async.spawn{args={'wl-paste'}, foreground=false, stdout='piped'}.stdout:read()
+-- end)
 
 wish.set_keymap('<bs>', function()
     local buffer, cursor = wish.get_buffer()

@@ -36,7 +36,7 @@ impl GlobalState {
         let result: Result<_> = runtime.block_on(async {
             let (events, event_ctrl) = crate::event_stream::EventStream::new();
             let (shell, shell_client) = Shell::make();
-            let ui = Ui::new(&FORK_LOCK, event_ctrl, shell_client)?;
+            let mut ui = Ui::new(&FORK_LOCK, event_ctrl, shell_client)?;
 
             zsh::completion::override_compadd()?;
             zsh::widget::overrides::override_all()?;
@@ -44,7 +44,7 @@ impl GlobalState {
 
             if !crate::is_forked() {
                 events.spawn(&ui);
-                ui.init_lua()?;
+                ui.report_error(ui.init_lua());
                 ui.get().inner.read().await.activate()?;
                 zsh::bin_zle::override_zle();
                 zsh::zle_watch_fds::init(&ui);
