@@ -540,10 +540,11 @@ impl Ui {
                     // execute the widget
                     // a widget may run subprocesses so lock the ui
                     let lock = ui.has_foreground_process.blocking_lock();
-                    let this = ui.get();
-                    let ui = this.inner.blocking_write();
-                    let buffer = ui.buffer.get_contents();
-                    let cursor = ui.buffer.get_cursor();
+                    let (buffer, cursor) = {
+                        let this = ui.get();
+                        let ui = this.inner.blocking_write();
+                        (ui.buffer.get_contents().clone(), ui.buffer.get_cursor())
+                    };
 
                     widget.shell.set_zle_buffer(buffer.clone(), cursor as _);
 
@@ -552,7 +553,7 @@ impl Ui {
                     let (output, _) = tokio::task::block_in_place(|| widget.exec_and_get_output(None, [].into_iter()));
                     let (new_buffer, new_cursor) = shell.get_zle_buffer();
                     let new_cursor = new_cursor.unwrap_or(new_buffer.len() as _) as _;
-                    let new_buffer = (new_buffer != *buffer).then_some(new_buffer);
+                    let new_buffer = (new_buffer != buffer).then_some(new_buffer);
                     let new_cursor = (new_cursor != cursor).then_some(new_cursor);
                     let accept_line = shell.has_accepted_line();
                     drop(lock);
