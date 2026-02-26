@@ -93,11 +93,8 @@ impl Buffer {
 
     pub fn set(&mut self, contents: Option<&[u8]>, cursor: Option<usize>) {
         if let Some(contents) = contents {
-            // all highlights are now invalid!
             let len = self.get_contents().len();
-            self.contents.delete_str(0, 0, len);
-            self.cursor = 0;
-            self.splice_at(self.cursor, contents, None, false);
+            self.splice_at(0, contents, Some(len), true);
         }
         if let Some(cursor) = cursor {
             self.cursor = cursor;
