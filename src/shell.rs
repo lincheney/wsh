@@ -236,7 +236,7 @@ crate::TokioActor! {
             Ok(msg)
         }
 
-        pub fn insert_completion(&self, string: BString, m: Arc<completion::Match>) -> (BString, usize, Option<crate::ui::buffer::suffix::Suffix>) {
+        pub fn insert_completion(&self, string: BString, m: Arc<completion::Match>) -> (BString, usize) {
             zsh::completion::insert_completion(string, &m)
         }
 

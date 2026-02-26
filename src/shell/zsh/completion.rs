@@ -242,13 +242,11 @@ pub fn get_completions(line: BString, sink: mpsc::UnboundedSender<Vec<Match>>) {
     }
 }
 
-pub fn insert_completion(line: BString, m: &Match) -> (BString, usize, Option<Suffix>) {
+pub fn insert_completion(line: BString, m: &Match) -> (BString, usize) {
     unsafe {
         // set the zle buffer
         let len = line.len();
         super::set_zle_buffer(line, len as i64 + 1);
-
-        let suffix = m.as_suffix();
 
         // set start and end of word being completed
         zsh_sys::we = len as i32;
@@ -260,6 +258,6 @@ pub fn insert_completion(line: BString, m: &Match) -> (BString, usize, Option<Su
 
         let (buffer, cursor) = super::get_zle_buffer();
         let buflen = buffer.len() as _;
-        (buffer, cursor.unwrap_or(buflen) as _, suffix)
+        (buffer, cursor.unwrap_or(buflen) as _)
     }
 }
