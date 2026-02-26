@@ -28,8 +28,8 @@ end)
 
 wish.set_keymap('<c-k>', function()
     local buffer, cursor = wish.get_buffer()
-    CUT_CONTENTS = utf8.sub(buffer, cursor+1)
-    wish.set_buffer(utf8.sub(buffer, 1, cursor))
+    CUT_CONTENTS = utf8.sub(buffer, cursor)
+    wish.set_buffer(utf8.sub(buffer, 1, cursor-1))
 end)
 
 wish.set_keymap('<c-y>', function()
