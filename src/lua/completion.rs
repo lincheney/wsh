@@ -40,6 +40,14 @@ impl UserData for Match {
         methods.add_meta_method(MetaMethod::ToString, |_lua, m, ()| {
             Ok(m.inner.get_orig().map(|s| s.to_string_lossy().into_owned()))
         });
+
+        methods.add_method("mode", |_lua, m, ()| {
+            Ok(m.inner.get_mode())
+        });
+
+        methods.add_method("fmode", |_lua, m, ()| {
+            Ok(m.inner.get_fmode())
+        });
     }
 }
 

@@ -69,6 +69,14 @@ impl Match {
         self.inner.as_ref().get_orig()
     }
 
+    pub fn get_mode(&self) -> u32 {
+        self.inner.as_ref().mode
+    }
+
+    pub fn get_fmode(&self) -> u32 {
+        self.inner.as_ref().fmode
+    }
+
     pub fn as_suffix(&self) -> Option<Suffix> {
         let m = self.inner.as_ref();
         if (m.flags & CMF_REMOVE) == 0 {
