@@ -63,12 +63,8 @@ async fn get_completions(mut ui: Ui, _lua: Lua, val: Option<String>) -> Result<S
 
     // run this in another thread so it doesn't block us returning
     tokio::task::spawn(async move {
-        let tid = nix::unistd::gettid();
-        ui.add_thread(tid);
-
         match ui.shell.get_completions(val, sender).await {
             Ok(msg) => {
-                ui.remove_thread(tid);
                 if !msg.is_empty() {
                     let this = ui.unlocked.read();
                     let mut ui = this.borrow_mut();

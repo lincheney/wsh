@@ -1,7 +1,6 @@
 use bstr::{BStr, BString};
 use std::future::Future;
 use std::sync::{Arc, atomic::{AtomicUsize, AtomicBool, Ordering}};
-use std::collections::HashSet;
 use std::default::Default;
 use mlua::prelude::*;
 use anyhow::Result;
@@ -85,7 +84,6 @@ crate::strong_weak_wrapper! {
         pub events: ForkLock<'static, crate::event_stream::EventController>,
         pub has_foreground_process: tokio::sync::Mutex<()>,
         preparing_for_unhandled_output: AtomicUsize,
-        threads: ForkLock<'static, std::sync::Mutex<HashSet<nix::unistd::Pid>>>,
         is_drawing: AtomicBool,
 
         pub pid_map: ForkLock<'static, std::sync::Mutex<PidMap>>,
@@ -131,7 +129,6 @@ impl Ui {
             shell: Arc::new(shell),
             has_foreground_process: Default::default(),
             preparing_for_unhandled_output: Default::default(),
-            threads: Arc::new(lock.wrap(std::sync::Mutex::new(HashSet::new()))),
             is_drawing: Arc::new(false.into()),
             pid_map: Arc::new(lock.wrap(Default::default())),
         };
@@ -608,10 +605,6 @@ impl Ui {
     async fn handle_key_default(&mut self, event: Event, _buf: &BStr) -> Result<bool> {
         match event {
 
-            Event::Key(KeyEvent{ key: Key::Escape, .. }) => {
-                self.cancel()?;
-            },
-
             Event::Key(KeyEvent{ key: Key::Char(c), modifiers }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
                 let mut buf = [0; 4];
                 let c = c.encode_utf8(&mut buf).as_bytes();
@@ -699,22 +692,6 @@ impl Ui {
         buffer.set(Some(&zle.0), Some(zle.1.unwrap_or(zle.0.len() as _) as usize));
         // finally add the data we wanted originally
         buffer.set(Some(data), cursor);
-    }
-
-    pub fn add_thread(&self, id: nix::unistd::Pid) {
-        self.threads.read().lock().unwrap().insert(id);
-    }
-
-    pub fn remove_thread(&self, id: nix::unistd::Pid) {
-        self.threads.read().lock().unwrap().remove(&id);
-    }
-
-    fn cancel(&self) -> Result<()> {
-        nix::sys::signal::kill(nix::unistd::Pid::from_raw(0), nix::sys::signal::Signal::SIGTERM)?;
-        for pid in self.threads.read().lock().unwrap().iter() {
-            nix::sys::signal::kill(*pid, nix::sys::signal::Signal::SIGINT)?;
-        }
-        Ok(())
     }
 
     pub async fn freeze_if<T, F: Future<Output = T>>(
