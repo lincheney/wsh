@@ -15,7 +15,7 @@ wish.set_keymap('<bs>', function()
 end)
 
 wish.set_keymap('<delete>', function()
-    wish.splice_buffer('', 1)
+    wish.delete_at_cursor(1)
 end)
 
 wish.set_keymap('<c-u>', function()
@@ -34,7 +34,7 @@ end)
 
 wish.set_keymap('<c-y>', function()
     if CUT_CONTENTS then
-        wish.splice_buffer(CUT_CONTENTS, 0)
+        wish.insert_at_cursor(CUT_CONTENTS)
     end
 end)
 
@@ -107,7 +107,7 @@ wish.set_keymap('<a-_>', function()
 end)
 
 wish.set_keymap('<a-cr>', function()
-    wish.splice_buffer('\n')
+    wish.insert_at_cursor('\n')
 end)
 
 -- there ought to be a better way of doing this
@@ -236,7 +236,7 @@ wish.add_event_callback('paste', function(data)
         local buffer, cursor = wish.get_buffer()
 
         -- paste
-        wish.splice_buffer(data, 0)
+        wish.insert_at_cursor(data)
 
         -- flash blue for a bit
         wish.add_buf_highlight{

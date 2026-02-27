@@ -69,6 +69,18 @@ async fn set_buffer(ui: Ui, _lua: Lua, (val, cursor): (mlua::String, Option<usiz
     Ok(())
 }
 
+async fn insert_at_cursor(ui: Ui, _lua: Lua, val: mlua::String) -> Result<()> {
+    ui.insert_or_set_buffer(true, &val.as_bytes(), None).await;
+    ui.trigger_buffer_change_callbacks().await;
+    Ok(())
+}
+
+async fn delete_at_cursor(ui: Ui, _lua: Lua, count: isize) -> Result<()> {
+    ui.get().borrow_mut().buffer.delete_at_cursor(count.unsigned_abs(), count >= 0);
+    ui.trigger_buffer_change_callbacks().await;
+    Ok(())
+}
+
 async fn undo_buffer(ui: Ui, _lua: Lua, (): ()) -> Result<()> {
     if ui.get().borrow_mut().buffer.move_in_history(false) {
         ui.trigger_buffer_change_callbacks().await;
@@ -204,6 +216,8 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_fn("get_buffer", get_buffer)?;
     ui.set_lua_fn("set_cursor", set_cursor)?;
     ui.set_lua_async_fn("set_buffer", set_buffer)?;
+    ui.set_lua_async_fn("insert_at_cursor", insert_at_cursor)?;
+    ui.set_lua_async_fn("delete_at_cursor", delete_at_cursor)?;
     ui.set_lua_async_fn("undo_buffer", undo_buffer)?;
     ui.set_lua_async_fn("redo_buffer", redo_buffer)?;
     ui.set_lua_async_fn("accept_line", accept_line)?;

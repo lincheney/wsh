@@ -93,8 +93,7 @@ impl Buffer {
 
     pub fn set(&mut self, contents: Option<&[u8]>, cursor: Option<usize>) {
         if let Some(contents) = contents {
-            let len = self.get_contents().len();
-            self.splice_at(0, contents, Some(len), true);
+            self.splice_at(0, contents, self.get_contents().len(), true);
         }
         if let Some(cursor) = cursor {
             self.cursor = cursor;
@@ -129,13 +128,9 @@ impl Buffer {
         self.set(None, Some(cursor));
     }
 
-    pub(super) fn splice_at(&mut self, start: usize, data: &[u8], replace_len: Option<usize>, minimise: bool) {
+    pub fn splice_at(&mut self, start: usize, data: &[u8], replace_len: usize, minimise: bool) {
         // turn it into an edit
-        let end = if let Some(replace_len) = replace_len {
-            self.byte_pos(start + replace_len)
-        } else {
-            self.get_contents().len()
-        };
+        let end = self.byte_pos(start + replace_len);
         let mut start = self.byte_pos(start);
         let mut old = &self.get_contents()[start .. end];
         let mut new: &BStr = data.into();
@@ -208,18 +203,16 @@ impl Buffer {
         }
     }
 
-    fn auto_remove_suffix(&mut self, data: Option<&[u8]>) {
-        if let Some((cursor, suffix)) = self.completion_suffix.take()
-            && cursor == self.get_cursor()
-            && suffix.matches(data.map(|d| d.into()))
-        {
-        }
+    pub fn insert_at_cursor(&mut self, data: &[u8]) {
+        self.splice_at(self.get_cursor(), data, 0, false);
     }
 
-    pub fn insert_at_cursor(&mut self, data: &[u8]) {
-        self.auto_remove_suffix(Some(data));
-        let cursor = self.cursor_byte_pos();
-        self.splice_at(cursor, data, Some(0), false);
+    pub fn delete_at_cursor(&mut self, count: usize, forwards: bool) {
+        if forwards {
+            self.splice_at(self.cursor, b"", count, false);
+        } else {
+            self.splice_at(self.cursor.saturating_sub(count), b"", count, false);
+        }
     }
 
     pub fn save(&mut self) {

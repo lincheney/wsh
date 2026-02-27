@@ -357,7 +357,7 @@ impl Ui {
             self.start_cmd().await?;
 
         } else {
-            self.get().borrow_mut().buffer.insert_at_cursor(b"\n");
+            self.insert_or_set_buffer(true, b"\n", None).await;
             self.trigger_buffer_change_callbacks().await;
             self.draw().await?;
         }
@@ -653,7 +653,7 @@ impl Ui {
                     match suffix.try_into_func() {
                         Err(suffix) => {
                             // easy, but no longer a plain insert
-                            buffer.splice_at(buffer.cursor_byte_pos() - suffix.byte_len, insert, Some(suffix.byte_len), true);
+                            buffer.splice_at(buffer.cursor_byte_pos() - suffix.byte_len, insert, suffix.byte_len, true);
                             buffer.set(None, cursor);
                             return
                         },
