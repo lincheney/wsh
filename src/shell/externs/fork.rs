@@ -42,21 +42,27 @@ impl ForkState {
             // as we are probably on a non main thread
             let state = state.borrow();
             let state = state.as_ref()?;
-            // this is the big global fork lock
-            let fork_lock = super::FORK_LOCK.write();
-            let state = state.read_with_lock(&fork_lock);
 
             // i can take a lock on lua by acquiring a ref to the app data
             // then i just have to hold on to it as the ref holds the lock guard
-            state.ui.lua.set_app_data(());
-            // ui.lua.gc_stop();
-            let app_data = state.ui.lua.app_data_ref().unwrap();
-            let lua = Some((
-                unsafe {
-                    UnsafeSend::new(transmute::<mlua::AppDataRef<'_, ()>, mlua::AppDataRef<'static, ()>>(app_data))
-                },
-                state.ui.lua.clone(),
-            ));
+            // take the lua lock BEFORE fork lock -
+            // this is because lua callbacks take lua lock then might use the fork lock
+            // so we need to be the same order
+            let lua = {
+                let state = state.read();
+                state.ui.lua.set_app_data(());
+                // ui.lua.gc_stop();
+                let app_data = state.ui.lua.app_data_ref().unwrap();
+                Some((
+                    unsafe {
+                        UnsafeSend::new(transmute::<mlua::AppDataRef<'_, ()>, mlua::AppDataRef<'static, ()>>(app_data))
+                    },
+                    state.ui.lua.clone(),
+                ))
+            };
+
+            // this is the big global fork lock
+            let fork_lock = super::FORK_LOCK.write();
 
             Some(Self {
                 pid: std::process::id(),
