@@ -9,7 +9,7 @@ pub mod tracing {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
-    pub static MAP: Mutex<Option<HashMap<usize, String>>> = Mutex::new(None);
+    static MAP: Mutex<Option<HashMap<usize, String>>> = Mutex::new(None);
 
     pub struct TraceKey(usize);
 

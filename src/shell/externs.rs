@@ -9,7 +9,7 @@ use std::sync::{LazyLock, OnceLock, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::Result;
 use crate::shell::{Shell, ShellMsg, zsh, MetaString, MetaArray};
-use crate::fork_lock::{RawForkLock, ForkLock};
+use crate::fork_lock::{RawForkLock};
 
 static FORK_LOCK: RawForkLock = RawForkLock::new();
 
@@ -21,7 +21,7 @@ pub(in crate::shell) struct GlobalState {
 }
 
 thread_local! {
-    static STATE: RefCell<Option<ForkLock<'static, Rc<GlobalState>>>> = const{ RefCell::new(None) };
+    static STATE: RefCell<Option<Rc<GlobalState>>> = const{ RefCell::new(None) };
 }
 
 static ORIGINAL_ZLE_ENTRY_PTR: OnceLock<zsh_sys::ZleEntryPoint> = OnceLock::new();
@@ -74,7 +74,7 @@ impl GlobalState {
     pub fn with<T, F: FnOnce(&Rc<Self>) -> T>(f: F) -> Result<T> {
         STATE.with(|state| {
             if let Some(state) = &*state.borrow() {
-                Ok(f(&state.read()))
+                Ok(f(&state))
             } else {
                 anyhow::bail!("wish is not running")
             }
@@ -344,7 +344,7 @@ pub extern "C" fn setup_() -> c_int {
     match GlobalState::new() {
         Ok(value) => {
             STATE.with(|state| {
-                *state.borrow_mut() = Some(FORK_LOCK.wrap(Rc::new(value)));
+                *state.borrow_mut() = Some(Rc::new(value));
             });
             0
         },
