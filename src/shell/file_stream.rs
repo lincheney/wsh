@@ -1,9 +1,7 @@
-use std::io::Read;
-use std::sync::{mpsc};
-use std::os::fd::AsRawFd;
-use bstr::{BString, ByteVec};
+use std::os::raw::c_char;
+use std::ptr::{null_mut, NonNull};
+use bstr::{BString};
 use anyhow::Result;
-use tokio::io::unix::AsyncFd;
 use crate::unsafe_send::UnsafeSend;
 
 unsafe extern "C" {
@@ -11,157 +9,115 @@ unsafe extern "C" {
     static mut stderr: *mut nix::libc::FILE;
 }
 
-const BUF_SIZE: usize = 1024;
-type BufResult = std::io::Result<(usize, [u8; BUF_SIZE])>;
-
 pub struct Sink {
-    output: mpsc::Receiver<BufResult>,
-    flusher: tokio::sync::mpsc::Sender<mpsc::Sender<()>>,
-    #[allow(dead_code)]
-    writer: std::io::PipeWriter,
-    writer_ptr: UnsafeSend<*mut nix::libc::FILE>,
+    file: UnsafeSend<NonNull<nix::libc::FILE>>,
+    buffer: Box<UnsafeSend<*mut c_char>>,
+    bufsize: Box<nix::libc::size_t>,
 }
 
 impl Sink {
-
     pub fn new() -> Result<Self> {
-        let (reader, writer) = std::io::pipe()?;
-        let writer_ptr = unsafe{ nix::libc::fdopen(writer.as_raw_fd(), c"w".as_ptr()) };
-        if writer_ptr.is_null() {
-            return Err(std::io::Error::last_os_error())?;
+        unsafe {
+            // allocate stable holders on heap and keep raw pointers to them
+            let mut buffer = Box::new(UnsafeSend::new(null_mut()));
+            let mut bufsize = Box::new(0);
+
+            if let Some(file) = NonNull::new(nix::libc::open_memstream(buffer.as_mut().as_mut() as _, &raw mut *bufsize)) {
+                Ok(Self {
+                    file: UnsafeSend::new(file),
+                    buffer,
+                    bufsize,
+                })
+            } else {
+                Err(std::io::Error::last_os_error().into())
+            }
         }
-        crate::utils::set_nonblocking_fd(&reader)?;
-        let writer_ptr = unsafe{ UnsafeSend::new(writer_ptr) };
+    }
 
-        let (flusher, flushable) = tokio::sync::mpsc::channel(1);
-        let (sender, receiver) = mpsc::channel();
-        // spawn a thread to read from the sink
-        tokio::task::spawn(Sink::read_loop(reader, writer_ptr, sender, flushable));
-
-        Ok(Self {
-            output: receiver,
-            flusher,
-            writer,
-            writer_ptr,
-        })
+    fn check_err(error: i32) -> Result<(), std::io::Error> {
+        if error == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::from_raw_os_error(error))
+        }
     }
 
     pub fn clear(&mut self) -> Result<(), std::io::Error> {
-        self.output.try_iter()
-            .find_map(|x| x.err())
-            .map_or(Ok(()), Err)
+        // nothing buffered in-memory; nothing to clear
+        let buffer = *self.buffer.as_ref();
+        if !buffer.into_inner().is_null() {
+            let file = self.file.into_inner();
+            unsafe {
+                Self::check_err(nix::libc::fseek(file.as_ptr(), 0, nix::libc::SEEK_SET))?;
+                Self::check_err(nix::libc::fflush(file.as_ptr()))?;
+            }
+        }
+        Ok(())
     }
 
     pub fn read(&mut self) -> Result<BString, std::io::Error> {
-        let (sender, receiver) = mpsc::channel();
-        // ask it to finish
-        if self.flusher.blocking_send(sender).is_ok() {
-            let _ = receiver.recv();
-        }
+        unsafe {
+            Self::check_err(nix::libc::fflush(self.file.into_inner().as_ptr()))?;
 
-        let mut result = BString::new(vec![]);
-        for value in self.output.try_iter() {
-            match value {
-                Ok((size, buf)) => {
-                    result.push_str(&buf[..size]);
-                },
-                Err(err) => return Err(err),
-            }
-        }
-        Ok(result)
-    }
-
-    async fn read_loop(
-        mut reader: std::io::PipeReader,
-        writer_ptr: UnsafeSend<*mut nix::libc::FILE>,
-        queue: mpsc::Sender<BufResult>,
-        mut flushable: tokio::sync::mpsc::Receiver<mpsc::Sender<()>>,
-    ) {
-
-        let mut flush_notifier: Option<mpsc::Sender<()>> = None;
-        let fd = AsyncFd::new(reader.as_raw_fd()).unwrap();
-
-        loop {
-            flush_notifier.take();
-
-            // Wait for the pipe to be readable
-            tokio::select!(
-                result = fd.readable() => {
-                    match result {
-                        Ok(mut guard) => {
-                            guard.clear_ready();
-                        },
-                        Err(err) => {
-                            let _ = queue.send(Err(err));
-                            return
-                        },
-                    }
-                },
-                sender = flushable.recv() => {
-                    flush_notifier = sender;
-                    if flush_notifier.is_some() {
-                        // flush as requested
-                        unsafe {
-                            nix::libc::fflush(writer_ptr.into_inner()); // ignore errors?
-                        }
-                    }
-                },
-            );
-
-            loop {
-                let mut buf = [0; BUF_SIZE];
-                // Try to read data, this may still fail with `WouldBlock`
-                // if the readiness event is a false positive.
-                let x = reader.read(&mut buf);
-                match x {
-                    Ok(n) => if queue.send(Ok((n, buf))).is_err() {
-                        return
-                    } else if n < BUF_SIZE {
-                        break
-                    },
-                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                    Err(e) => {
-                        let _ = queue.send(Err(e));
-                        return
-                    },
-                }
+            if *self.bufsize == 0 {
+                Ok("".into())
+            } else if self.buffer.into_inner().is_null() {
+                Err(std::io::Error::other("buffer is null"))
+            } else {
+                // i only need to clear if there was any data
+                let result = std::slice::from_raw_parts(self.buffer.into_inner() as *const u8, *self.bufsize).into();
+                self.clear()?;
+                Ok(result)
             }
         }
     }
 
-    pub fn override_file(&self, file: UnsafeSend<*mut *mut nix::libc::FILE>) -> FileGuard<'_> {
+    pub fn override_file(&mut self, file: UnsafeSend<*mut *mut nix::libc::FILE>) -> FileGuard<'_> {
         FileGuard::new(self, file)
     }
 
-    pub fn override_stdout(&self) -> FileGuard<'_> {
+    pub fn override_stdout(&mut self) -> FileGuard<'_> {
         self.override_file(unsafe{ UnsafeSend::new(&raw mut stdout) })
     }
 
-    pub fn override_stderr(&self) -> FileGuard<'_> {
+    pub fn override_stderr(&mut self) -> FileGuard<'_> {
         self.override_file(unsafe{ UnsafeSend::new(&raw mut stderr) })
     }
 
-    pub fn override_shout(&self) -> FileGuard<'_> {
+    pub fn override_shout(&mut self) -> FileGuard<'_> {
         self.override_file(unsafe{ UnsafeSend::new((&raw mut zsh_sys::shout).cast()) })
     }
+}
 
+impl Drop for Sink {
+    fn drop(&mut self) {
+        unsafe {
+            nix::libc::fclose(self.file.into_inner().as_ptr());
+
+            if !self.buffer.into_inner().is_null() {
+                nix::libc::free(self.buffer.into_inner().cast());
+            }
+        }
+    }
 }
 
 pub struct FileGuard<'a> {
     #[allow(dead_code)]
-    pub inner: &'a Sink,
+    pub inner: &'a mut Sink,
     dest: UnsafeSend<*mut *mut nix::libc::FILE>,
     old_file: UnsafeSend<*mut nix::libc::FILE>,
 }
 
-impl FileGuard<'_> {
-    pub fn new(parent: &Sink, file: UnsafeSend<*mut *mut nix::libc::FILE>) -> FileGuard<'_> {
-        let old_file = unsafe{ UnsafeSend::new(*file.into_inner()) };
-        unsafe{ *file.into_inner() = parent.writer_ptr.into_inner(); }
-        FileGuard{
-            inner: parent,
-            dest: file,
-            old_file,
+impl<'a> FileGuard<'a> {
+    pub fn new(parent: &'a mut Sink, file: UnsafeSend<*mut *mut nix::libc::FILE>) -> FileGuard<'a> {
+        unsafe {
+            let old_file = UnsafeSend::new(*file.into_inner());
+            *file.into_inner() = parent.file.into_inner().as_ptr();
+            FileGuard{
+                inner: parent,
+                dest: file,
+                old_file,
+            }
         }
     }
 }
