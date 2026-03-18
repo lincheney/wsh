@@ -2,9 +2,14 @@ use anyhow::Result;
 use mlua::{prelude::*};
 use crate::ui::Ui;
 use bstr::{ByteSlice};
+use unicode_width::UnicodeWidthStr;
 
 fn len(_lua: &Lua, string: LuaString) -> LuaResult<usize> {
     Ok(string.as_bytes().grapheme_indices().count())
+}
+
+fn width(_lua: &Lua, string: String) -> LuaResult<usize> {
+    Ok(string.width())
 }
 
 fn to_byte_pos(_lua: &Lua, (string, index): (mlua::String, usize)) -> LuaResult<(Option<usize>, Option<usize>)> {
@@ -32,6 +37,7 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     lua_api.set("str", &tbl)?;
 
     tbl.set("len", ui.lua.create_function(len)?)?;
+    tbl.set("width", ui.lua.create_function(width)?)?;
     tbl.set("to_byte_pos", ui.lua.create_function(to_byte_pos)?)?;
     tbl.set("from_byte_pos", ui.lua.create_function(from_byte_pos)?)?;
 
