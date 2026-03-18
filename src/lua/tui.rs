@@ -1,6 +1,6 @@
 use bstr::BString;
 use std::default::Default;
-use serde::{Deserialize, Deserializer, de};
+use serde::{Deserialize, Deserializer, de, Serialize};
 use anyhow::Result;
 use ratatui::{
     layout::*,
@@ -152,19 +152,19 @@ pub struct BorderOptions {
     pub style: StyleOptions,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct UnderlineStyleOptions {
     color: SerdeWrap<Color>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum UnderlineOption {
     Bool(bool),
     Options(UnderlineStyleOptions),
 }
 
-#[derive(Debug, Default, Clone, Deserialize)]
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct StyleOptions {
     pub fg: Option<SerdeWrap<Color>>,
@@ -178,6 +178,12 @@ pub struct StyleOptions {
     pub blink: Option<bool>,
 }
 
+impl FromLua for StyleOptions {
+    fn from_lua(value: LuaValue, lua: &Lua) -> LuaResult<Self> {
+        lua.from_value(value)
+    }
+}
+
 impl StyleOptions {
     fn is_none(&self) -> bool {
         self.fg.is_none() &&
@@ -189,6 +195,38 @@ impl StyleOptions {
             self.strikethrough.is_none() &&
             self.reversed.is_none() &&
             self.blink.is_none()
+    }
+}
+
+impl From<Style> for StyleOptions {
+    fn from(style: Style) -> Self {
+        macro_rules! get_modifier {
+            ($value:expr) => {
+                if style.add_modifier.contains($value) {
+                    Some(true)
+                } else if style.sub_modifier.contains($value) {
+                    Some(false)
+                } else {
+                    None
+                }
+            }
+        }
+
+        Self {
+            fg: style.fg.map(SerdeWrap),
+            bg: style.bg.map(SerdeWrap),
+            bold: get_modifier!(Modifier::BOLD),
+            dim: get_modifier!(Modifier::DIM),
+            italic: get_modifier!(Modifier::ITALIC),
+            underline: if let Some(color) = style.underline_color {
+                Some(UnderlineOption::Options(UnderlineStyleOptions { color: SerdeWrap(color) }))
+            } else {
+                get_modifier!(Modifier::UNDERLINED).map(UnderlineOption::Bool)
+            },
+            strikethrough: get_modifier!(Modifier::CROSSED_OUT),
+            reversed: get_modifier!(Modifier::REVERSED),
+            blink: get_modifier!(Modifier::SLOW_BLINK),
+        }
     }
 }
 
@@ -585,6 +623,32 @@ async fn set_status_bar(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
     Ok(())
 }
 
+fn sgr_to_style(_ui: &Ui, lua: &Lua, sgr: String) -> Result<LuaValue> {
+    let sgr = if sgr.starts_with("\x1b[") && sgr.ends_with('m') {
+        &sgr[2..sgr.len()-1]
+    } else {
+        &sgr
+    };
+    let style = tui::widget::parse_ansi_col(Style::default(), sgr.into());
+    let options = StyleOptions::from(style);
+    Ok(lua.to_value(&options)?)
+}
+
+fn style_to_sgr(_ui: &Ui, _lua: &Lua, options: StyleOptions) -> Result<BString> {
+    let style: tui::widget::StyleOptions = options.into();
+    let style = style.as_style();
+    let mut cell = ratatui::buffer::Cell::default();
+    cell.set_style(style);
+
+    let mut buf = vec![];
+    let mut canvas = tui::DummyCanvas::default();
+    let mut drawer = tui::Drawer::new(&mut canvas, &mut buf, (0, 0));
+    // print_style_of_cell will write the SGR codes needed to reach the cell's style.
+    drawer.print_style_of_cell(&cell)?;
+
+    Ok(buf.into())
+}
+
 async fn allocate_height(_ui: Ui, _lua: Lua, height: u16) -> Result<()> {
     tui::allocate_height(&mut std::io::stdout(), height)?;
     Ok(())
@@ -592,6 +656,8 @@ async fn allocate_height(_ui: Ui, _lua: Lua, height: u16) -> Result<()> {
 
 pub fn init_lua(ui: &Ui) -> Result<()> {
 
+    ui.set_lua_fn("sgr_to_style", sgr_to_style)?;
+    ui.set_lua_fn("style_to_sgr", style_to_sgr)?;
     ui.set_lua_async_fn("allocate_height", allocate_height)?;
     ui.set_lua_async_fn("set_message", set_message)?;
     ui.set_lua_async_fn("check_message", check_message)?;

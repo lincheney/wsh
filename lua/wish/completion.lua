@@ -1,5 +1,6 @@
 local M = {}
 local SELECTION = require('wish/selection-widget')
+local LS_COLORS = require('wish/ls_colors')
 local msg = wish.set_message{hidden = true, persist = true}
 
 function M.complete()
@@ -45,7 +46,10 @@ function M.complete()
                             local text = tostring(chunk[i])
                             if text then
                                 table.insert(matches, chunk[i])
-                                table.insert(filtered_chunk, {text = text})
+                                local sgr = LS_COLORS.sgr_for(text, chunk[i]:mode())
+                                local props = sgr and wish.sgr_to_style(sgr) or {}
+                                props.text = text
+                                table.insert(filtered_chunk, props)
                             end
                         end
 

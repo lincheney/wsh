@@ -29,7 +29,7 @@ pub struct Parser {
     pub ocrnl: bool,
 }
 
-fn parse_ansi_col(mut style: Style, string: &BStr) -> Style {
+pub fn parse_ansi_col(mut style: Style, string: &BStr) -> Style {
     let string = if string.is_empty() {
         b";".as_bstr()
     } else {

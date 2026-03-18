@@ -24,7 +24,7 @@ pub mod command_line;
 pub mod status_bar;
 pub mod text;
 pub mod layout;
-pub use drawer::{Drawer, Canvas};
+pub use drawer::{Drawer, Canvas, DummyCanvas};
 
 pub struct MoveUp(pub u16);
 impl crossterm::Command for MoveUp {

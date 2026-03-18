@@ -35,6 +35,15 @@ impl<'de, T: FromStr> Deserialize<'de> for SerdeWrap<T>
     }
 }
 
+impl<T: ToString> serde::Serialize for SerdeWrap<T> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(&self.0.to_string())
+    }
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct RedrawOptions {

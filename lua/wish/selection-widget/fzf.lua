@@ -22,6 +22,7 @@ local function start_proc()
         args = {
             'fzf',
             '--read0',
+            '--ansi',
             '--exit-0',
             '--height=40%',
             '--reverse',
@@ -105,7 +106,8 @@ function M.add_lines(lines)
     if lines and #lines > 0 then
         local str = {}
         for i = 1, #lines do
-            table.insert(str, string.format('%i\t%s\0', state.count + i, lines[i].text))
+            local sgr = wish.style_to_sgr(lines[i])
+            table.insert(str, string.format('%i\t%s%s\x1b[0m\0', state.count + i, sgr or '', lines[i].text))
         end
         state.count = state.count + #lines
 

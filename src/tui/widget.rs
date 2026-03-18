@@ -6,6 +6,7 @@ use ratatui::{
     style::*,
 };
 mod ansi;
+pub use ansi::parse_ansi_col;
 
 #[derive(Default, Debug, Clone, Copy)]
 pub enum UnderlineOption {

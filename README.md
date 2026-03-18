@@ -62,7 +62,8 @@ i wish i could have
 * [x] remove extra zle prompt after accept line
 * [x] lag when exiting. does it happen in release?
 * [ ] calling exit within widget causes hang
-* [ ] magic space for completion
+* [x] magic space for completion
+* [x] file ls colour for completion
 * [ ] snippets?
 * [ ] capture job status reporting
 * [x] recursive keymaps
