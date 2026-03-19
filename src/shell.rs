@@ -288,6 +288,23 @@ crate::TokioActor! {
             result
         }
 
+        pub fn get_vars(&self, names: Vec<MetaString>, zle: bool) -> anyhow::Result<Vec<Option<variables::Value>>> {
+            if zle {
+                self.start_zle_scope();
+            }
+            let results = names.into_iter().map(|name| {
+                if let Some(mut v) = Variable::get(name.as_ref()) {
+                    v.as_value().map(Some)
+                } else {
+                    Ok(None)
+                }
+            }).collect::<Result<Vec<_>>>();
+            if zle {
+                self.end_zle_scope();
+            }
+            results
+        }
+
         pub fn get_var_as_string(&self, name: MetaString, zle: bool) -> anyhow::Result<Option<BString>> {
             if zle {
                 self.start_zle_scope();

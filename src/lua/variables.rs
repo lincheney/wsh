@@ -5,16 +5,33 @@ use anyhow::Result;
 use mlua::prelude::*;
 use crate::shell::variables;
 
-async fn get_var(ui: Ui, lua: Lua, (name, zle): (BString, Option<bool>)) -> Result<LuaValue> {
-    let val = match ui.shell.get_var(name.into(), zle.unwrap_or(false)).await? {
-        Some(variables::Value::String(val)) => val.into_lua(&lua)?,
-        Some(variables::Value::Array(val)) => val.into_lua(&lua)?,
-        Some(variables::Value::HashMap(val)) => val.into_lua(&lua)?,
-        Some(variables::Value::Integer(val)) => val.into_lua(&lua)?,
-        Some(variables::Value::Float(val)) => val.into_lua(&lua)?,
+fn value_to_lua(lua: &Lua, val: Option<variables::Value>) -> Result<LuaValue> {
+    let val = match val {
+        Some(variables::Value::String(val)) => val.into_lua(lua)?,
+        Some(variables::Value::Array(val)) => val.into_lua(lua)?,
+        Some(variables::Value::HashMap(val)) => val.into_lua(lua)?,
+        Some(variables::Value::Integer(val)) => val.into_lua(lua)?,
+        Some(variables::Value::Float(val)) => val.into_lua(lua)?,
         None => LuaValue::Nil,
     };
     Ok(val)
+}
+
+async fn get_var(ui: Ui, lua: Lua, (name, zle): (BString, Option<bool>)) -> Result<LuaValue> {
+    value_to_lua(&lua, ui.shell.get_var(name.into(), zle.unwrap_or(false)).await?)
+}
+
+async fn get_vars(ui: Ui, lua: Lua, (names, zle): (Vec<BString>, Option<bool>)) -> Result<LuaTable> {
+    let varnames = names.iter().map(|n| n.clone().into()).collect();
+    let results = ui.shell.get_vars(varnames, zle.unwrap_or(false)).await?;
+
+    let table = lua.create_table()?;
+    for (name, val) in names.into_iter().zip(results) {
+        if val.is_some() {
+            table.set(name.to_string(), value_to_lua(&lua, val)?)?;
+        }
+    }
+    Ok(table)
 }
 
 async fn set_var(ui: Ui, lua: Lua, (name, val, global): (BString, LuaValue, Option<bool>)) -> Result<()> {
@@ -136,6 +153,7 @@ async fn create_dynamic_var(
 pub fn init_lua(ui: &Ui) -> Result<()> {
 
     ui.set_lua_async_fn("get_var", get_var)?;
+    ui.set_lua_async_fn("get_vars", get_vars)?;
     ui.set_lua_async_fn("set_var", set_var)?;
     ui.set_lua_async_fn("unset_var", unset_var)?;
     ui.set_lua_async_fn("export_var", export_var)?;
