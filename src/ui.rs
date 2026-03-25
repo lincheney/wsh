@@ -145,8 +145,8 @@ impl Ui {
         self.lua.globals().get("wish")
     }
 
-    pub async fn start_cmd(&self) -> Result<()> {
-        self.trigger_precmd_callbacks().await;
+    pub async fn start_cmd(&self, buffer: Option<&BString>) -> Result<()> {
+        self.trigger_precmd_callbacks(buffer).await;
         self.draw().await
     }
 
@@ -244,7 +244,7 @@ impl Ui {
     pub async fn handle_window_resize(&self, width: u32, height: u32) -> Result<bool> {
         self.get().borrow_mut().size = (width, height);
         self.queue_draw();
-        self.trigger_window_resize_callbacks(&width, &height).await;
+        self.trigger_window_resize_callbacks(width, height).await;
         Ok(true)
     }
 
@@ -340,7 +340,7 @@ impl Ui {
 
         // time to execute
         if let Some(buffer) = buffer {
-            self.trigger_accept_line_callbacks().await;
+            self.trigger_accept_line_callbacks(&buffer).await;
             {
                 let lock = self.has_foreground_process.lock().await;
                 // last draw
@@ -348,13 +348,13 @@ impl Ui {
                 self.pre_accept_line()?;
                 // acceptline doesn't actually accept the line right now
                 // only when we return control to zle using the trampoline
-                if self.shell.accept_line_trampoline(Some(buffer)).await.is_err() {
+                if self.shell.accept_line_trampoline(Some(buffer.clone())).await.is_err() {
                     return Ok(false)
                 }
                 drop(lock);
             }
             self.post_accept_line().await?;
-            self.start_cmd().await?;
+            self.start_cmd(Some(&buffer)).await?;
 
         } else {
             self.insert_or_set_buffer(true, b"\n", None).await;

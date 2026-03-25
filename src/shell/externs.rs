@@ -1,3 +1,4 @@
+use crate::lua::{ HasEventCallbacks};
 mod fork;
 use bstr::BString;
 use crate::ui::{Ui};
@@ -49,7 +50,7 @@ impl GlobalState {
             if !crate::is_forked() {
                 events.spawn(&ui, || teardown());
                 ui.report_error(ui.init_lua());
-                ui.get().inner.read().await.activate()?;
+                ui.get().borrow().activate()?;
                 zsh::bin_zle::override_zle();
                 zsh::zle_watch_fds::init(&ui);
 
@@ -229,9 +230,15 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                         if let Some(size) = zsh::signals::sigwinch::get_term_size() {
                             state.ui.handle_window_resize(size.0, size.1).await?;
                         }
-                        state.ui.start_cmd().await?;
+                        state.ui.start_cmd(None).await?;
                         Ok(())
                     }));
+
+                    let ui = state.ui.clone();
+                    crate::log_if_err::<_, anyhow::Error>(state.shell_loop_oneshot(async move {
+                        ui.trigger_init_callbacks().await
+                    }));
+
                     state.first_drawn.store(true, Ordering::Relaxed);
                 }
 

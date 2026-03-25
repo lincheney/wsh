@@ -78,16 +78,21 @@ macro_rules! event_types {
         pub trait HasEventCallbacks {
         $(
             #[allow(unused_parens)]
-            async fn [<trigger_ $name _callbacks>](&self, $($arg: &$type),*);
+            async fn [<trigger_ $name _callbacks>](&self, $($arg: $type),*);
         )*
         }
 
         impl HasEventCallbacks for Ui {
         $(
             #[allow(unused_parens)]
-            async fn [<trigger_ $name _callbacks>](&self, $($arg: &$type),*) {
+            async fn [<trigger_ $name _callbacks>](&self, $($arg: $type),*) {
                 if let Some(callbacks) = get_non_empty_owned_callbacks(&self, EventType::$name) {
-                    let args = ($(self.lua.to_value($arg).unwrap()),*);
+                    let args = ($(
+                        self.lua.to_value_with(
+                            &$arg,
+                            mlua::SerializeOptions::new().serialize_none_to_null(false),
+                        ).unwrap()
+                    ),*);
                     let args = self.lua.pack_multi(args).unwrap();
                     trigger_callbacks_multi_value(&self, callbacks, args).await;
                 }
@@ -135,11 +140,12 @@ impl From<crate::keybind::parser::KeyEvent> for KeyEvent {
 }
 
 event_types!(
-    key(key: KeyEvent, data: BString),
-    accept_line(),
+    init(),
+    key(key: &KeyEvent, data: &BString),
+    accept_line(data: &BString),
     buffer_change(),
-    precmd(),
-    paste(data: BString),
+    precmd(data: Option<&BString>),
+    paste(data: &BString),
     window_resize(width: u32, height: u32),
 );
 
