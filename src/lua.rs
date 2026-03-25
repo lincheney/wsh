@@ -170,6 +170,12 @@ async fn sleep(_lua: Lua, seconds: f64) -> LuaResult<()> {
     Ok(())
 }
 
+fn shell_quote(_lua: &Lua, val: BString) -> LuaResult<BString> {
+    let meta_val: crate::shell::MetaString = val.into();
+    let quoted = crate::shell::shell_quote(meta_val);
+    Ok(quoted.unmetafy())
+}
+
 async fn lua_try(lua: Lua, (func, catch, finally): (LuaFunction, Option<LuaFunction>, Option<LuaFunction>)) -> LuaResult<LuaMultiValue> {
     let mut result = func.call_async(()).await;
 
@@ -238,6 +244,7 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_async_fn("print", print)?;
     ui.get_lua_api()?.set("sleep", ui.lua.create_async_function(sleep)?)?;
     ui.get_lua_api()?.set("time", ui.lua.create_function(time)?)?;
+    ui.get_lua_api()?.set("shell_quote", ui.lua.create_function(shell_quote)?)?;
     ui.get_lua_api()?.set("try", ui.lua.create_async_function(lua_try)?)?;
     ui.set_lua_async_fn("__laggy", __laggy)?;
 
