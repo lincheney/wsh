@@ -424,10 +424,7 @@ impl Ui {
         crate::lua::init_lua(self)?;
 
         self.lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;
-        if let Err(err) = self.lua.load("require('wish')").exec() {
-            log::error!("{}", err);
-        }
-
+        self.lua.load("require('wish')").exec()?;
         Ok(())
     }
 
