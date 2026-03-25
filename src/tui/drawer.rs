@@ -137,9 +137,13 @@ impl<W, C: Canvas> Drawer<'_, '_, W, C> {
         self.canvas.get_size().0
     }
 
-    pub fn try_move_to(&mut self, pos: (u16, u16)) -> bool {
+    pub fn validate_pos(&self, pos: (u16, u16)) -> bool {
         let size = self.canvas.get_size();
-        if pos.0 <= size.0 && pos.1 < size.1 {
+        pos.0 <= size.0 && pos.1 < size.1
+    }
+
+    pub fn try_move_to(&mut self, pos: (u16, u16)) -> bool {
+        if self.validate_pos(pos) {
             self.pos = pos;
             true
         } else {
