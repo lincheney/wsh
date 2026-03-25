@@ -127,23 +127,21 @@ pub fn wrap<
         pos
     };
 
-    let mut len = 0;
-    for (i, (start, end, grapheme)) in line.grapheme_indices().enumerate() {
-        len = i + 1;
+    for (start, end, grapheme) in line.grapheme_indices() {
         let mut conceal = false;
 
-        if highlights.clone().any(|h| h.start == i || h.end == i) {
+        if highlights.clone().any(|h| h.start == start || h.end == start) {
 
             style = init_style.map(|s| {
                 let highlights = highlights.clone()
-                    .filter(|h| h.start <= i && i < h.end)
+                    .filter(|h| h.start <= start && start < h.end)
                     .map(|hl| &hl.inner);
                 merge_highlights(s, highlights)
             });
 
             conceal = merge_conceal(
                 highlights.clone()
-                    .filter(|h| h.start <= i && i < h.end)
+                    .filter(|h| h.start <= start && start < h.end)
                     .map(|hl| &hl.inner)
             );
 
@@ -151,9 +149,9 @@ pub fn wrap<
             // use the end pos if concealed
             // so that at least buffer will place the cursor on the
             // end of the virt text
-            let x = if conceal { end } else { i };
+            let x = if conceal { end } else { start };
             for hl in highlights.clone() {
-                if hl.start == i {
+                if hl.start == start {
                     pos = handle_virtual_text(hl, x, pos, &mut callback);
                 }
             }
@@ -166,7 +164,7 @@ pub fn wrap<
 
     // virtual text
     for hl in highlights {
-        if hl.start >= len {
+        if hl.start >= line.len() {
             pos = handle_virtual_text(hl, hl.start, pos, &mut callback);
         }
     }
