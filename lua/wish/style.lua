@@ -28,5 +28,6 @@ M.comment = {fg = 'grey'}
 M.env_var_key = {fg = '#aa77ff'}
 M.env_var_value = {fg = '#77aaff'}
 M.error = {bg = 'red'}
+M.number = {fg = '#ffccaa'}
 
 return M

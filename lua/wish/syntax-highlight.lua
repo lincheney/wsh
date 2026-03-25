@@ -48,6 +48,7 @@ local RULES = {
     { {kind='STRING|command', contains={
         {hl='normal', kind='substitution'},
     } } },
+    { {hl='number', kind='STRING', regex='^\\d+$' } },
     { {hl='flag', kind='STRING', regex='^-', hlregex='^-[^=]*'} },
     { {hl='flag_value', kind='STRING', regex='^-.*=', hlregex='^-[^=]*=(.+)'} },
     { {kind='heredoc_body', contains={ {contains={ {hl='normal', kind='substitution'} } } } } },
