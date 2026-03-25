@@ -316,6 +316,7 @@ impl Ui {
         }
         self.events.read().unpause();
         self.recover_from_unhandled_output(None, false).await?;
+        self.trigger_buffer_change_callbacks().await;
         Ok(())
     }
 
