@@ -143,7 +143,13 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
         end = total_line_count;
     }
 
-    tokens.retain(|t| start <= t.visual_lineno && t.visual_lineno < end);
+    tokens.retain(|t| {
+        start <= t.visual_lineno
+        && (
+            t.visual_lineno < end - 1
+            || (t.visual_lineno < end && !matches!(&t.inner, WrapToken::LineBreak))
+        )
+    });
     Scrolled {
         total_line_count,
         range: start .. end,
