@@ -170,7 +170,7 @@ impl Tui {
     }
 
     fn clear_error(&mut self) {
-        if let Some(mut error_msg) = self.error_msg {
+        if let Some(error_msg) = &mut self.error_msg {
             error_msg.clear(&mut self.nodes);
             self.dirty = true;
         }

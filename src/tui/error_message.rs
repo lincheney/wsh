@@ -1,7 +1,7 @@
 use super::layout::Nodes;
 use ratatui::style::{Style, Color, Modifier};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug)]
 pub struct ErrorMessage {
     pub id: usize,    // Persistent widget node ID
     pub count: usize,      // Total errors encountered since last clear
