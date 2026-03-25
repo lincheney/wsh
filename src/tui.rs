@@ -247,7 +247,7 @@ impl Tui {
                 // we don't know where exactly the status bar is,
                 // but it possibly overlaps with the new drawing area
                 // so we clear it
-                drawer.move_to((0, self.prev_status_bar_position as _));
+                drawer.try_move_to((0, self.prev_status_bar_position as _));
                 drawer.clear_to_end_of_screen(None)?;
                 // it now needs to be redrawn
                 status_bar.dirty = true;
@@ -270,45 +270,51 @@ impl Tui {
         // if cmdline height has changed then the widgets get repositioned
         if (clear || self.dirty || old_cmdline_height != new_cmdline_height) && new_widgets_height > 0 {
             // go to next line after end of buffer
-            drawer.move_to(cmdline.draw_end_pos);
-            drawer.goto_newline(None)?;
-            self.nodes.render(&mut drawer, false)?;
+            if drawer.try_move_to(cmdline.draw_end_pos) {
+                drawer.goto_newline(None)?;
+                self.nodes.render(&mut drawer, false)?;
+            }
         }
 
         // the prompt/buffer/widgets used to be bigger, so clear the extra bits
         let trailing_height = (old_cmdline_height + old_widgets_height).saturating_sub(new_cmdline_height + new_widgets_height);
         if trailing_height > 0 {
-            drawer.move_to((area.width, (new_cmdline_height + new_widgets_height - 1) as _));
-            for _ in 0 .. trailing_height {
-                drawer.goto_newline(None)?;
+            if drawer.try_move_to((area.width, (new_cmdline_height + new_widgets_height - 1) as _)) {
+                for _ in 0 .. trailing_height {
+                    drawer.goto_newline(None)?;
+                }
+                drawer.clear_to_end_of_line(None)?;
             }
-            drawer.clear_to_end_of_line(None)?;
         }
 
         // go back to the cursor
-        drawer.move_to_pos(cmdline.cursor_coord)?;
+        if drawer.validate_pos(cmdline.cursor_coord) {
+            drawer.move_to_pos(cmdline.cursor_coord)?;
 
-        if new_status_bar_height > 0 && (clear || status_bar.dirty) && status_bar.is_visible() {
-            // save cursor position so we can go back to it
-            queue!(drawer.writer, cursor::SavePosition)?;
+            if new_status_bar_height > 0 && (clear || status_bar.dirty) && status_bar.is_visible() {
+                // save cursor position so we can go back to it
+                queue!(drawer.writer, cursor::SavePosition)?;
 
-            // redraw status bar
-            // go to the bottom of the screen
-            queue!(
-                drawer.writer,
-                // i dont actually know how far down the bottom of the screen is
-                // so just go down by a bigger than amount than it could possibly be
-                MoveDown(area.height * 10),
-                MoveUp(new_status_bar_height as u16 - 1),
-                cursor::MoveToColumn(0),
-            )?;
-            drawer.set_pos((0, area.height - new_status_bar_height as u16));
-            status_bar.render(&mut drawer)?;
-            // clear everything else below
-            // drawer.clear_to_end_of_screen(None)?;
+                // redraw status bar
+                // go to the bottom of the screen
+                queue!(
+                    drawer.writer,
+                    // i dont actually know how far down the bottom of the screen is
+                    // so just go down by a bigger than amount than it could possibly be
+                    MoveDown(area.height * 10),
+                    MoveUp(new_status_bar_height as u16 - 1),
+                    cursor::MoveToColumn(0),
+                )?;
+                if area.height >= new_status_bar_height as _ {
+                    drawer.set_pos((0, area.height - new_status_bar_height as u16));
+                    status_bar.render(&mut drawer)?;
+                }
+                // clear everything else below
+                // drawer.clear_to_end_of_screen(None)?;
 
-            // go back to cursor
-            queue!(drawer.writer, cursor::RestorePosition)?;
+                // go back to cursor
+                queue!(drawer.writer, cursor::RestorePosition)?;
+            }
         }
 
         drawer.reset_colours()?;

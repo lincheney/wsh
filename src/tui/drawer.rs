@@ -136,6 +136,16 @@ impl<W, C: Canvas> Drawer<'_, '_, W, C> {
     pub fn term_width(&self) -> u16 {
         self.canvas.get_size().0
     }
+
+    pub fn try_move_to(&mut self, pos: (u16, u16)) -> bool {
+        let size = self.canvas.get_size();
+        if pos.0 <= size.0 && pos.1 < size.1 {
+            self.pos = pos;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {

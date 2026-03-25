@@ -162,7 +162,10 @@ impl CommandLine<'_> {
         // redraw the buffer
         if dirty || self.buffer.dirty {
             // draw buffer starting from end of prompt
-            drawer.move_to(prompt_end);
+            if !drawer.try_move_to(prompt_end) {
+                // no space for the buffer
+                return Ok(())
+            }
 
             // also record where is the cursor
             let cursor = self.buffer.cursor_byte_pos();
