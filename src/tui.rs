@@ -24,7 +24,9 @@ pub mod command_line;
 pub mod status_bar;
 pub mod text;
 pub mod layout;
+pub mod error_message;
 pub use drawer::{Drawer, Canvas, DummyCanvas};
+pub use error_message::ErrorMessage;
 
 pub struct MoveUp(pub u16);
 impl crossterm::Command for MoveUp {
@@ -77,6 +79,7 @@ pub struct Tui {
     prev_status_bar_position: usize,
     pub max_height: u32,
     pub dirty: bool,
+    error_msg: Option<ErrorMessage>,
 }
 
 impl Tui {
@@ -87,9 +90,7 @@ impl Tui {
 
     pub fn add(&mut self, widget: Widget) -> usize {
         self.dirty = true;
-        let id = self.nodes.add(layout::NodeKind::Widget(widget)).id;
-        self.nodes.add_child(id);
-        id
+        self.nodes.add(layout::NodeKind::Widget(widget)).id
     }
 
     pub fn add_message(&mut self, message: &str) -> usize {
@@ -102,12 +103,10 @@ impl Tui {
     }
 
     pub fn add_error_message(&mut self, message: &str) -> usize {
-        let mut widget = widget::Widget::default();
-        widget.inner.clear();
-        for line in message.split('\n') {
-            widget.inner.push_line(line.into(), Some(Style::new().fg(Color::Red).into()));
-        }
-        self.add(widget)
+        self.dirty = true;
+        let error = self.error_msg.get_or_insert_with(|| ErrorMessage::new(&mut self.nodes));
+        error.add_error(message, &mut self.nodes);
+        error.id
     }
 
     pub fn add_zle_message(&mut self, message: &[u8]) -> usize {
@@ -152,11 +151,13 @@ impl Tui {
     }
 
     pub fn clear_all(&mut self) {
+        self.clear_error();
         self.nodes.clear_all();
         self.dirty = true;
     }
 
     pub fn clear_non_persistent(&mut self) {
+        self.clear_error();
         self.nodes.clear_non_persistent();
         self.dirty = true;
     }
@@ -166,6 +167,13 @@ impl Tui {
         self.buffer.reset();
         self.nodes.height.set(0);
         self.dirty = true;
+    }
+
+    fn clear_error(&mut self) {
+        if let Some(mut error_msg) = self.error_msg {
+            error_msg.clear(&mut self.nodes);
+            self.dirty = true;
+        }
     }
 
     pub fn draw<W: Write>(

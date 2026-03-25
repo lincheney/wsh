@@ -148,6 +148,7 @@ impl Nodes {
 
     pub fn add(&mut self, kind: NodeKind) -> &mut Node {
         let id = self.next_id();
+        self.add_child(id);
         self.map.entry(id).insert_entry(Node {
             id,
             has_parent: false,
