@@ -26,9 +26,10 @@ impl Layout {
                 let mut total = 0;
                 for child_id in &self.children {
                     if let Some(child) = map.get(child_id) && !child.hidden {
-                        total += child.refresh(map, max_width, max_height.map(|h| h - total), tmp);
                         if max_height.is_some_and(|h| total >= h) {
-                            break
+                            child.set_size((0, 0), tmp);
+                        } else {
+                            total += child.refresh(map, max_width, max_height.map(|h| h - total), tmp);
                         }
                     }
                 }
@@ -83,6 +84,14 @@ pub struct Node {
 
 impl Node {
 
+    fn set_size(&self, size: (u16, u16), tmp: bool) {
+        if tmp {
+            self.tmp_size.set(size);
+        } else {
+            self.size.set(size);
+        }
+    }
+
     fn get_size(&self, tmp: bool) -> (u16, u16) {
         if tmp {
             self.tmp_size.get()
@@ -115,14 +124,10 @@ impl Node {
                 NodeKind::Widget(widget) => widget.get_height_for_width(max_width, self.constraint),
                 NodeKind::Layout(layout) => layout.refresh(map, max_width, max_height, tmp),
             };
-            dim = (max_width, height);
+            dim = (max_width, height.min(max_height.unwrap_or(u16::MAX)));
         }
 
-        if tmp {
-            self.tmp_size.set(dim);
-        } else {
-            self.size.set(dim);
-        }
+        self.set_size(dim, tmp);
         dim.1
     }
 }
