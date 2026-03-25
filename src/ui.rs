@@ -274,12 +274,12 @@ impl Ui {
         }
     }
 
-    pub async fn recover_from_unhandled_output(&self, flag: Option<usize>) -> Result<bool> {
+    pub async fn recover_from_unhandled_output(&self, flag: Option<usize>, check_foreground_lock: bool) -> Result<bool> {
         let flag = flag.unwrap_or(UNHANDLED_OUTPUT);
         let old_flag = self.preparing_for_unhandled_output.fetch_and(!flag, Ordering::Relaxed);
         if old_flag == 0 {
             Ok(false)
-        } else if old_flag & !flag != 0 || self.has_foreground_process.try_lock().is_err() {
+        } else if old_flag & !flag != 0 || (check_foreground_lock && self.has_foreground_process.try_lock().is_err()) {
             // foreground process, can't recover yet
             // reset it back
             self.preparing_for_unhandled_output.store(old_flag, Ordering::Relaxed);
@@ -315,7 +315,7 @@ impl Ui {
             ui.reset();
         }
         self.events.read().unpause();
-        self.recover_from_unhandled_output(None).await?;
+        self.recover_from_unhandled_output(None, false).await?;
         Ok(())
     }
 
@@ -712,11 +712,13 @@ impl Ui {
         let result = f.await;
 
         if let Some(lock) = lock.take() {
-            drop(lock);
             if freeze_events {
                 self.events.read().unpause();
             }
-            if crate::log_if_err(self.recover_from_unhandled_output(Some(UI_FROZEN)).await) == Some(true) {
+            // don't check the lock bc we still hold it
+            let recovered = self.recover_from_unhandled_output(Some(UI_FROZEN), false).await;
+            drop(lock);
+            if crate::log_if_err(recovered) == Some(true) {
                 self.queue_draw();
             }
         }
