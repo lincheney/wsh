@@ -14,6 +14,7 @@ impl ErrorMessage {
     pub fn new(nodes: &mut Nodes) -> Self {
         let node = nodes.add(super::layout::NodeKind::Widget(super::widget::Widget::default()));
         node.persist = true;
+        node.constraint = Some(ratatui::layout::Constraint::Max(7));
         Self{ id: node.id, count: 0 }
     }
 
