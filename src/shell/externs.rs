@@ -127,7 +127,7 @@ impl GlobalState {
 
             // sometimes zsh will trash zle without refreshing
             // redraw the ui
-            if zle && self.runtime.block_on(self.ui.recover_from_unhandled_output(None, false)).unwrap() {
+            if zle && self.runtime.block_on(self.ui.zle_cmd_refresh()).unwrap() {
                 // draw LATER
                 self.ui.queue_draw();
             }
@@ -273,13 +273,13 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
             } else if cmd == zsh_sys::ZLE_CMD_TRASH as _ {
                 // something is probably going to print (error msgs etc) to the terminal
                 if let Ok(_lock) = state.ui.has_foreground_process.try_lock() {
-                    state.ui.prepare_for_unhandled_output(None).unwrap();
+                    state.ui.zle_cmd_trash().unwrap();
                 }
                 return null_mut()
 
             } else if cmd == zsh_sys::ZLE_CMD_REFRESH as _ {
                 // redraw the ui
-                if state.runtime.block_on(state.ui.recover_from_unhandled_output(None, false)).unwrap() {
+                if state.runtime.block_on(state.ui.zle_cmd_refresh()).unwrap() {
                     crate::log_if_err(state.runtime.block_on(state.ui.clone().draw()));
                 }
                 return null_mut()

@@ -25,9 +25,6 @@ use crate::shell::{ShellClient, KeybindValue, process::PidMap};
 use crate::lua::{EventCallbacks, HasEventCallbacks};
 pub mod buffer;
 
-const UNHANDLED_OUTPUT: usize = 1;
-const UI_FROZEN: usize = UNHANDLED_OUTPUT | 2;
-
 fn lua_error<T>(msg: &str) -> Result<T, mlua::Error> {
     Err(mlua::Error::RuntimeError(msg.to_string()))
 }
@@ -83,7 +80,10 @@ crate::strong_weak_wrapper! {
         pub lua: Lua,
         pub events: ForkLock<'static, crate::event_stream::EventController>,
         pub has_foreground_process: tokio::sync::Mutex<()>,
-        preparing_for_unhandled_output: AtomicUsize,
+
+        unhandled_output_count: AtomicUsize,
+        zle_trash: AtomicBool,
+        print_lock: spin::mutex::SpinMutex<()>,
         is_drawing: AtomicBool,
 
         pub pid_map: ForkLock<'static, std::sync::Mutex<PidMap>>,
@@ -128,7 +128,9 @@ impl Ui {
             events: Arc::new(lock.wrap(events)),
             shell: Arc::new(shell),
             has_foreground_process: Default::default(),
-            preparing_for_unhandled_output: Default::default(),
+            unhandled_output_count: Default::default(),
+            zle_trash: Default::default(),
+            print_lock: Default::default(),
             is_drawing: Arc::new(false.into()),
             pid_map: Arc::new(lock.wrap(Default::default())),
         };
@@ -157,11 +159,15 @@ impl Ui {
     }
 
     pub async fn draw(&self) -> Result<()> {
-        if self.preparing_for_unhandled_output.load(Ordering::Relaxed) != 0 {
-            // the shell will draw it later
-            return Ok(())
-        }
+        let Some(lock) = self.print_lock.try_lock()
+            else {
+                // the shell will draw it later
+                return Ok(())
+            };
+        self.draw_with_lock(&lock).await
+    }
 
+    async fn draw_with_lock(&self, _lock: &spin::mutex::SpinMutexGuard<'_, ()>) -> Result<()> {
         self.is_drawing.store(false, Ordering::Release);
 
         let mut size = None;
@@ -248,7 +254,7 @@ impl Ui {
         Ok(true)
     }
 
-    pub fn pre_accept_line(&self) -> Result<()> {
+    fn pre_accept_line(&self, lock: &spin::mutex::SpinMutexGuard<'_, ()>) -> Result<()> {
         {
             let this = &*self.unlocked.read();
             let mut ui = this.borrow_mut();
@@ -258,33 +264,45 @@ impl Ui {
             // TODO handle errors here properly
         }
         self.events.read().pause();
-        self.prepare_for_unhandled_output(None)?;
+        self.prepare_for_unhandled_output(Some(lock))?;
         Ok(())
     }
 
-    pub fn prepare_for_unhandled_output(&self, flag: Option<usize>) -> Result<bool> {
+    pub fn zle_cmd_trash(&self) -> Result<bool> {
+        if self.zle_trash.swap(true, Ordering::Relaxed) {
+            Ok(false)
+        } else {
+            self.prepare_for_unhandled_output(None)
+        }
+    }
+
+    pub fn prepare_for_unhandled_output(&self, lock: Option<&spin::mutex::SpinMutexGuard<'_, ()>>) -> Result<bool> {
         // TODO if forked and trashed, zsh will NOT recover
         // we're going go to end up with janky output
         // how do we solve this?
-        if !crate::is_forked() && self.preparing_for_unhandled_output.fetch_or(flag.unwrap_or(UNHANDLED_OUTPUT), Ordering::Relaxed) == 0 {
+        if !crate::is_forked() && self.unhandled_output_count.fetch_add(1, Ordering::Relaxed) == 0 {
+            let print_lock = lock.is_none().then(|| self.print_lock.lock());
             self.unlocked.read().borrow_mut().prepare_for_unhandled_output()?;
+            drop(print_lock);
             Ok(true)
         } else {
             Ok(false)
         }
     }
 
-    pub async fn recover_from_unhandled_output(&self, flag: Option<usize>, check_foreground_lock: bool) -> Result<bool> {
-        let flag = flag.unwrap_or(UNHANDLED_OUTPUT);
-        let old_flag = self.preparing_for_unhandled_output.fetch_and(!flag, Ordering::Relaxed);
-        if old_flag == 0 {
-            Ok(false)
-        } else if old_flag & !flag != 0 || (check_foreground_lock && self.has_foreground_process.try_lock().is_err()) {
-            // foreground process, can't recover yet
-            // reset it back
-            self.preparing_for_unhandled_output.store(old_flag, Ordering::Relaxed);
-            Ok(false)
+    pub async fn zle_cmd_refresh(&self) -> Result<bool> {
+        if self.zle_trash.swap(false, Ordering::Relaxed) {
+            self.recover_from_unhandled_output(None).await
         } else {
+            Ok(false)
+        }
+    }
+
+    pub async fn recover_from_unhandled_output(&self, lock: Option<&spin::mutex::SpinMutexGuard<'_, ()>>) -> Result<bool> {
+        let old = self.unhandled_output_count.fetch_sub(1, Ordering::Relaxed);
+        assert_ne!(old, 0);
+        if old == 1 {
+            let print_lock = lock.is_none().then(|| self.print_lock.lock());
 
             {
                 let this = self.unlocked.read();
@@ -304,19 +322,22 @@ impl Ui {
             execute!(ui.stdout, style::ResetColor)?;
             ui.cmdline.make_command_line(&mut ui.buffer).hard_reset();
             ui.dirty = true;
+
+            drop(print_lock);
             Ok(true)
+        } else {
+            Ok(false)
         }
     }
 
-    pub async fn post_accept_line(&self) -> Result<()> {
+    async fn post_accept_line(&self, lock: &spin::mutex::SpinMutexGuard<'_, ()>) -> Result<()> {
         {
             let this = &*self.unlocked.read();
             let mut ui = this.borrow_mut();
             ui.reset();
         }
         self.events.read().unpause();
-        self.recover_from_unhandled_output(None, false).await?;
-        self.trigger_buffer_change_callbacks().await;
+        self.recover_from_unhandled_output(Some(lock)).await?;
         Ok(())
     }
 
@@ -342,19 +363,24 @@ impl Ui {
         // time to execute
         if let Some(buffer) = buffer {
             self.trigger_accept_line_callbacks(&buffer).await;
+
             {
-                let lock = self.has_foreground_process.lock().await;
+                let fg_lock = self.has_foreground_process.lock().await;
+                let print_lock = self.print_lock.lock();
                 // last draw
-                crate::log_if_err(self.draw().await);
-                self.pre_accept_line()?;
+                crate::log_if_err(self.draw_with_lock(&print_lock).await);
+                self.pre_accept_line(&print_lock)?;
                 // acceptline doesn't actually accept the line right now
                 // only when we return control to zle using the trampoline
                 if self.shell.accept_line_trampoline(Some(buffer.clone())).await.is_err() {
                     return Ok(false)
                 }
-                drop(lock);
+                self.post_accept_line(&print_lock).await?;
+                drop(print_lock);
+                drop(fg_lock);
             }
-            self.post_accept_line().await?;
+
+            self.trigger_buffer_change_callbacks().await;
             self.start_cmd(Some(&buffer)).await?;
 
         } else {
@@ -704,7 +730,7 @@ impl Ui {
             if freeze_events {
                 self.events.read().pause();
             }
-            self.prepare_for_unhandled_output(Some(UI_FROZEN))?;
+            self.prepare_for_unhandled_output(None)?;
             Some(self.has_foreground_process.lock().await)
         } else {
             None
@@ -716,8 +742,7 @@ impl Ui {
             if freeze_events {
                 self.events.read().unpause();
             }
-            // don't check the lock bc we still hold it
-            let recovered = self.recover_from_unhandled_output(Some(UI_FROZEN), false).await;
+            let recovered = self.recover_from_unhandled_output(None).await;
             drop(lock);
             if crate::log_if_err(recovered) == Some(true) {
                 self.queue_draw();

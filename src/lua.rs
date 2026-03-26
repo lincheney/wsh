@@ -157,7 +157,6 @@ async fn print(ui: Ui, _lua: Lua, value: BString) -> Result<()> {
     ui.freeze_if(true, false, async {
         ui.get().borrow_mut().stdout.write_all(value.as_ref())
     }).await??;
-    crate::log_if_err(ui.draw().await);
     Ok(())
 }
 
