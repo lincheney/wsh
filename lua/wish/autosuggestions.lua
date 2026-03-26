@@ -18,13 +18,13 @@ wish.add_event_callback('buffer_change', function()
     -- check if prev text still matches
     if buffer == '' then
         suggestion = nil
-    elseif not suggestion or suggestion:sub(1, #buffer) ~= buffer then
+    elseif not suggestion or not wish.str.startswith(suggestion, buffer) then
         suggestion = nil
         -- refetch history
         history = history or ({wish.get_history()})[2]
         -- find a new one
         for i = 1, #history do
-            if history[i].text:sub(1, #buffer) == buffer then
+            if wish.str.startswith(history[i].text, buffer) then
                 -- got one
                 suggestion = history[i].text
                 break

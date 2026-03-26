@@ -100,3 +100,35 @@ function wish.shell_split(str)
         return wish.get_var('str')
     end)
 end
+
+function wish.str.startswith(str, pattern)
+    return string.sub(str, 1, #pattern) == pattern
+end
+
+function wish.str.endswith(str, pattern)
+    return pattern == '' or string.sub(str, -#pattern) == pattern
+end
+
+function wish.str.lstrip(str)
+    return string.gsub(str, '^%s+', '')
+end
+
+function wish.str.rstrip(str)
+    return string.gsub(str, '%s+$', '')
+end
+
+function wish.str.strip(str)
+    return wish.str.lstrip(wish.str.rstrip(str))
+end
+
+function wish.str.removeprefix(str, prefix)
+    if wish.str.startswith(str, prefix) then
+        return str:sub(#prefix + 1)
+    end
+end
+
+function wish.str.removesuffix(str, suffix)
+    if wish.str.endswith(str, suffix) then
+        return str:sub(1, -#suffix - 1)
+    end
+end

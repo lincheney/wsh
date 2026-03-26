@@ -53,7 +53,7 @@ local function recalc_filter()
     local buffer = wish.get_buffer()
     local filter = buffer:sub(#state.buffer + 1)
 
-    if state.filter and (buffer:sub(1, #state.buffer) ~= state.buffer or filter:find('%s$')) then
+    if state.filter and (not wish.str.startswith(buffer, state.buffer) or filter:find('%s$')) then
         state.resume()
         return
     end
