@@ -103,8 +103,8 @@ impl Buffer {
 
     pub(super) fn convert_to_insert<'a>(&self, contents: &'a [u8]) -> Option<&'a [u8]> {
         // see if this can be done as an insert
-        let (prefix, suffix) = &self.get_contents().split_at_checked(self.cursor).unwrap_or((self.get_contents().as_ref(), b""));
-        if contents.starts_with(prefix) && contents.ends_with(suffix) {
+        let (prefix, suffix) = self.get_contents().split_at_checked(self.cursor).unwrap_or((self.get_contents().as_ref(), b""));
+        if contents.starts_with(prefix) && contents[prefix.len()..].ends_with(suffix) {
             Some(&contents[prefix.len() .. contents.len() - suffix.len()])
         } else {
             None
