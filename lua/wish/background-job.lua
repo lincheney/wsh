@@ -123,7 +123,7 @@ function M.run_in_background(command)
 
                 -- check if it matches a prompt
                 local lines = wish.get_message_text(msg)
-                if string.find(lines[#lines], '[:?] ?$') then
+                if #lines > 0 and string.find(lines[#lines], '[:?] ?$') then
                     -- its a prompt, wait a bit to see if there is any more output
                     wish.schedule(function()
                         local marker = output_marker
