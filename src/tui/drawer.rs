@@ -287,10 +287,12 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
         Ok(())
     }
 
-    pub fn write_raw(&mut self, data: &[u8], pos: (u16, u16)) -> Result<()> {
+    pub fn write_raw(&mut self, data: &[u8], pos: Option<(u16, u16)>) -> Result<()> {
         self.move_to_cur_pos()?;
         self.writer.write_all(data)?;
-        self.set_pos(pos);
+        if let Some(pos) = pos {
+            self.set_pos(pos);
+        }
         Ok(())
     }
 

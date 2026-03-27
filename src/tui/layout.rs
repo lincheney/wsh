@@ -29,7 +29,7 @@ impl Layout {
                         if max_height.is_some_and(|h| total >= h) {
                             child.set_size((0, 0), tmp);
                         } else {
-                            total += child.refresh(map, max_width, max_height.map(|h| h - total), tmp);
+                            total += child.refresh(map, max_width, max_height.map(|h| h - total), None, tmp);
                         }
                     }
                 }
@@ -55,7 +55,7 @@ impl Layout {
 
                 let mut height = 0;
                 for (child, child_area) in visible.iter().zip(areas.iter()) {
-                    height = height.max(child.refresh(map, child_area.width, Some(child_area.height), tmp));
+                    height = height.max(child.refresh(map, child_area.width, Some(child_area.height), None, tmp));
                 }
                 height.min(max_height.unwrap_or(u16::MAX))
             },
@@ -275,6 +275,7 @@ enum NodeRenderer<'a, I> {
     },
     Widget {
         renderer: TextRenderer<'a>,
+        widget: &'a Widget,
     },
 }
 
@@ -330,7 +331,7 @@ impl<'a> NodeRenderer<'a, std::slice::Iter<'a, usize>> {
                     )),
                     widget.cursor_space_hl.iter(),
                 );
-                NodeRenderer::Widget{renderer}
+                NodeRenderer::Widget{renderer, widget}
             },
         }
     }
@@ -365,7 +366,7 @@ impl<'a> Renderer for NodeRenderer<'a, std::slice::Iter<'a, usize>> {
                 }
                 all_finished
             },
-            NodeRenderer::Widget{renderer} => renderer.finished(),
+            NodeRenderer::Widget{renderer, ..} => renderer.finished(),
         }
     }
 
@@ -414,7 +415,8 @@ impl<'a> Renderer for NodeRenderer<'a, std::slice::Iter<'a, usize>> {
                 }
                 Ok(!all_finished)
             },
-            NodeRenderer::Widget{renderer} => {
+            NodeRenderer::Widget{renderer, widget} => {
+                widget.ansi.render(drawer)?;
                 renderer.draw_one_line(drawer, newline, pad, callback)
             },
         }

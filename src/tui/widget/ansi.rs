@@ -17,6 +17,7 @@ enum State {
     CsiParams,
     EscOther,
     CsiOther,
+    Apc,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -27,6 +28,7 @@ pub struct Parser {
     pub cursor_x: usize,
     need_newline: bool,
     pub ocrnl: bool,
+    pub captured_sequences: std::cell::RefCell<BString>,
 }
 
 pub fn parse_ansi_col(mut style: Style, string: &BStr) -> Style {
@@ -211,6 +213,36 @@ impl Parser {
             self.state = match (old_state, c) {
                 (State::None, b'\x1b') => State::Esc,
                 (State::Esc, b'[') => State::Csi,
+                (State::Esc, b'_') => State::Apc,
+
+                (State::Apc, b'\x07') => {
+                    if self.buffer.starts_with(b"G") {
+                        let mut captured = self.captured_sequences.borrow_mut();
+                        captured.push(b'\x1b');
+                        captured.push(b'_');
+                        captured.extend_from_slice(&self.buffer);
+                        captured.push(b'\x07');
+                    }
+                    self.buffer.clear();
+                    State::None
+                },
+                (State::Apc, b'\\') if self.buffer.ends_with(b"\x1b") => {
+                    self.buffer.pop(); // remove the ESC
+                    if self.buffer.starts_with(b"G") {
+                        let mut captured = self.captured_sequences.borrow_mut();
+                        captured.push(b'\x1b');
+                        captured.push(b'_');
+                        captured.extend_from_slice(&self.buffer);
+                        captured.push(b'\x1b');
+                        captured.push(b'\\');
+                    }
+                    self.buffer.clear();
+                    State::None
+                },
+                (State::Apc, _) => {
+                    self.buffer.push(*c);
+                    State::Apc
+                },
 
                 (State::Csi | State::CsiParams, b'0'..=b'9' | b';' | b':') => {
                     self.buffer.push(*c);
@@ -313,6 +345,15 @@ impl Parser {
         self.state = State::None;
         self.cursor_x = 0;
         self.need_newline = false;
+        self.captured_sequences.borrow_mut().clear();
     }
 
+    pub fn render<W: std::io::Write, C: crate::tui::Canvas>(&self, drawer: &mut crate::tui::Drawer<W, C>) -> std::io::Result<()> {
+        let mut captured = self.captured_sequences.borrow_mut();
+        if !captured.is_empty() {
+            drawer.write_raw(&captured, None)?;
+            captured.clear();
+        }
+        Ok(())
+    }
 }

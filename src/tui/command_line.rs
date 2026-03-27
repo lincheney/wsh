@@ -156,7 +156,7 @@ impl CommandLine<'_> {
 
         // redraw the prompt
         if dirty || self.prompt_dirty {
-            drawer.write_raw(&self.shell_vars.prompt, prompt_end)?;
+            drawer.write_raw(&self.shell_vars.prompt, Some(prompt_end))?;
         }
 
         // redraw the buffer
