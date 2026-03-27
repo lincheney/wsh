@@ -80,7 +80,9 @@ pub fn invoke_signal_handler(arg: Option<&[u8]>) -> c_int {
 
 fn resize_array<T: Copy + Default>(dst: &mut *mut T, old_len: usize, new_len: usize) {
     let mut new = vec![T::default(); new_len];
-    new[..old_len].copy_from_slice(unsafe{ std::slice::from_raw_parts(*dst, old_len) });
+    if !(*dst).is_null() {
+        new[..old_len].copy_from_slice(unsafe{ std::slice::from_raw_parts(*dst, old_len) });
+    }
     *dst = Box::into_raw(new.into_boxed_slice()).cast();
 }
 

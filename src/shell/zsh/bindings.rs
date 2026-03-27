@@ -6,7 +6,7 @@
 
 use super::MetaStr;
 use paste::paste;
-use zsh_sys::*;
+use zsh_sys::{LinkList, Eprog, HashTable};
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
