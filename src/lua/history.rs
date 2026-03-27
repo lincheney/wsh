@@ -53,7 +53,7 @@ async fn goto_history_internal(ui: Ui, index: HistoryIndex) -> Result<()> {
         let new_cursor = (new_cursor != cursor).then_some(new_cursor);
 
         if let Some(new_buffer) = &new_buffer {
-            ui.insert_or_set_buffer(false, &new_buffer, new_cursor).await;
+            ui.insert_or_set_buffer(false, new_buffer, new_cursor).await;
         } else if new_cursor.is_some() {
             let ui = ui.get();
             let mut ui = ui.inner.blocking_write();

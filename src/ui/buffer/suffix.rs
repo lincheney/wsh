@@ -28,7 +28,7 @@ impl Suffix {
                         return true
                     }
                     // matches if char is same as suffix
-                    return buf.graphemes().next().map(|x| x.into()) == Some(suf.as_bstr())
+                    buf.graphemes().next().map(|x| x.into()) == Some(suf.as_bstr())
                 } else {
                     // matches if no changes
                     true

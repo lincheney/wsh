@@ -48,7 +48,7 @@ impl GlobalState {
             zsh::signals::init(&ui)?;
 
             if !crate::is_forked() {
-                events.spawn(&ui, || teardown());
+                events.spawn(&ui, teardown);
                 ui.report_error(ui.init_lua());
                 ui.get().borrow().activate()?;
                 zsh::bin_zle::override_zle();
@@ -75,7 +75,7 @@ impl GlobalState {
     pub fn with<T, F: FnOnce(&Rc<Self>) -> T>(f: F) -> Result<T> {
         STATE.with(|state| {
             if let Some(state) = &*state.borrow() {
-                Ok(f(&state))
+                Ok(f(state))
             } else {
                 anyhow::bail!("wish is not running")
             }

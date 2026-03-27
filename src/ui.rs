@@ -30,13 +30,6 @@ fn lua_error<T>(msg: &str) -> Result<T, mlua::Error> {
     Err(mlua::Error::RuntimeError(msg.to_string()))
 }
 
-struct SetScrollRegion(u16, u16);
-impl crossterm::Command for SetScrollRegion {
-    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
-        write!(f, "\x1b[{};{}r", self.0, self.1)
-    }
-}
-
 enum KeybindOutput {
     String(BString),
     Value(Result<bool>),
@@ -619,7 +612,7 @@ impl Ui {
             Value::Widget{buffer, mut cursor, output, accept_line} => {
                 {
                     if let Some(buffer) = &buffer {
-                        self.insert_or_set_buffer(false, &buffer, cursor.take()).await;
+                        self.insert_or_set_buffer(false, buffer, cursor.take()).await;
                     }
 
                     let this = self.get();

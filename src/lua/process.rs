@@ -426,7 +426,7 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
                             ShellRunCmd::Function{func, args, arg0} => {
                                 let arg0 = arg0.map(|x| x.into());
                                 let args = args.into_iter().map(|x| x.into()).collect();
-                                shell.exec_function(func.clone(), arg0, args) as _
+                                shell.exec_function(func.clone(), arg0, args).into()
                             },
                             ShellRunCmd::Subshell(_) => unreachable!(),
                         };

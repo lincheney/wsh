@@ -63,15 +63,6 @@ fn cell_is_empty(cell: &ratatui::buffer::Cell) -> bool {
     cell.symbol() == " " && cell.bg == Color::Reset && !cell.modifier.intersects(Modifier::UNDERLINED | Modifier::REVERSED | Modifier::CROSSED_OUT)
 }
 
-fn buffer_nonempty_height(buffer: &Buffer) -> u16 {
-    let trailing_empty_lines = buffer.content()
-        .chunks(buffer.area.width as _)
-        .rev()
-        .take_while(|line| line.iter().all(cell_is_empty))
-        .count();
-    buffer.area.height - trailing_empty_lines as u16
-}
-
 #[derive(Default)]
 pub struct Tui {
     pub nodes: layout::Nodes,
@@ -278,13 +269,13 @@ impl Tui {
 
         // the prompt/buffer/widgets used to be bigger, so clear the extra bits
         let trailing_height = (old_cmdline_height + old_widgets_height).saturating_sub(new_cmdline_height + new_widgets_height);
-        if trailing_height > 0 {
-            if drawer.try_move_to((area.width, (new_cmdline_height + new_widgets_height - 1) as _)) {
-                for _ in 0 .. trailing_height {
-                    drawer.goto_newline(None)?;
-                }
-                drawer.clear_to_end_of_line(None)?;
+        if trailing_height > 0
+            && drawer.try_move_to((area.width, (new_cmdline_height + new_widgets_height - 1) as _))
+        {
+            for _ in 0 .. trailing_height {
+                drawer.goto_newline(None)?;
             }
+            drawer.clear_to_end_of_line(None)?;
         }
 
         // go back to the cursor

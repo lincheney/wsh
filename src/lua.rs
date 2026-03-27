@@ -139,7 +139,7 @@ async fn exit(mut ui: Ui, _lua: Lua, code: Option<i32>) -> Result<()> {
 }
 
 async fn get_cwd(ui: Ui, _lua: Lua, (): ()) -> Result<BString> {
-    Ok(ui.shell.get_cwd().await?)
+    ui.shell.get_cwd().await
 }
 
 fn get_size(ui: &Ui, _lua: &Lua, (): ()) -> Result<(u32, u32)> {
