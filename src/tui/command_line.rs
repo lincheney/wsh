@@ -53,7 +53,7 @@ impl CommandLineState {
         self.draw_end_pos.1 - self.cursor_coord.1
     }
 
-    pub async fn get_shell_vars(shell: &ShellClient, width: u32) -> ShellVars {
+    pub async fn get_shell_vars(shell: &ShellClient, width: u32) -> anyhow::Result<ShellVars> {
         shell.run(move |shell| {
 
             shell.start_zle_scope();

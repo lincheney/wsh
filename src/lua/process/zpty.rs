@@ -102,7 +102,7 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         width: args.width,
     };
     // TODO capture shout
-    let zpty = ui.shell.zpty(name.into(), cmd, opts).await?;
+    let zpty = ui.shell.zpty(name.into(), cmd, opts).await??;
 
     // do not drop the pty fd as zsh will do it for us
     // so we dup the fd to one we own instead
@@ -117,8 +117,8 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         // get the status
         let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, false);
         let code = match ui.shell.check_pid_status(pid as _).await {
-            None | Some(-1) => pid_waiter.await.unwrap_or(-1),
-            Some(code) => code,
+            Err(_) | Ok(None | Some(-1)) => pid_waiter.await.unwrap_or(-1),
+            Ok(Some(code)) => code,
         };
         // send the code out
         let _ = sender.send(Some(Ok(code as _)));

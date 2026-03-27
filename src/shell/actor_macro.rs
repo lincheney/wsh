@@ -37,14 +37,19 @@ macro_rules! TokioActor {
             #[allow(dead_code)]
             impl [<$name Client>] {
                 $(
-                pub async fn $fn(&self, $($arg: $argtype),*) $(-> $rettype)? {
+                pub async fn $fn(&self, $($arg: $argtype),*) -> Result<X<$($rettype)?>> {
                     let thread = ::std::thread::current().id();
                     if thread == self.inner.main_thread {
-                        tokio::task::block_in_place(|| self.inner.$fn($($arg),*))
+                        Ok(tokio::task::block_in_place(|| self.inner.$fn($($arg),*)))
                     } else {
                         let (sender, receiver) = ::tokio::sync::oneshot::channel();
-                        self.queue.send([<$name Msg>]::$fn{$( $arg, )* returnvalue: sender}).unwrap();
-                        receiver.await.unwrap()
+                        if self.queue.send([<$name Msg>]::$fn{$( $arg, )* returnvalue: sender}).is_ok()
+                            && let Ok(result) = receiver.await
+                        {
+                            Ok(result)
+                        } else {
+                            anyhow::bail!("shell is not running")
+                        }
                     }
                 }
                 )*

@@ -114,4 +114,5 @@ i wish i could have
 * [ ] exit causes shell.func().await to panic
 * [x] what exactly needs to be metafied?
 * [x] try recover from panic
+* [x] panic on exit when main thread shell has exited but something tries to invoke it
 * [ ]

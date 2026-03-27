@@ -182,7 +182,7 @@ impl EventStream {
             if let Err(e) = handle.await {
                 // it panicked
                 // unload the module
-                ui.shell.run(move |_| abort()).await;
+                crate::log_if_err(ui.shell.run(move |_| abort()).await);
                 // restore the shell settings
                 crate::log_if_err(ui.get().borrow_mut().deactivate());
                 // break out of shell loop if necessary

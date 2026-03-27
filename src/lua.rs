@@ -133,13 +133,13 @@ async fn redraw(ui: Ui, lua: Lua, val: Option<LuaValue>) -> Result<()> {
 }
 
 async fn exit(mut ui: Ui, _lua: Lua, code: Option<i32>) -> Result<()> {
-    ui.shell.exit(code.unwrap_or(0)).await;
+    ui.shell.exit(code.unwrap_or(0)).await?;
     ui.accept_line().await?;
     Ok(())
 }
 
 async fn get_cwd(ui: Ui, _lua: Lua, (): ()) -> Result<BString> {
-    Ok(ui.shell.get_cwd().await)
+    Ok(ui.shell.get_cwd().await?)
 }
 
 fn get_size(ui: &Ui, _lua: &Lua, (): ()) -> Result<(u32, u32)> {
@@ -150,7 +150,7 @@ async fn call_hook_func(ui: Ui, _lua: Lua, mut args: Vec<BString>) -> Result<Opt
     let arg0 = args.remove(0);
     ui.freeze_if(true, true, async {
         ui.shell.call_hook_func(Cow::Owned(arg0.into()), args.into_iter().map(|x| x.into()).collect()).await
-    }).await
+    }).await?
 }
 
 async fn print(ui: Ui, _lua: Lua, value: BString) -> Result<()> {

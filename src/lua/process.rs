@@ -441,7 +441,7 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
 
                         Ok((code, errors))
 
-                    }).await?;
+                    }).await??;
 
                     for (dst, src) in errors.iter_mut().zip(errs) {
                         *dst = src;
@@ -453,14 +453,14 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
                 ShellRunCmd::Subshell(cmd) => {
                     // fork it now to get the pid
                     let redirections = streams.iter().flatten().map(|s| (s.fd, s.replacement)).collect();
-                    let pid = ui.shell.exec_subshell(cmd, false, redirections).await? as _;
+                    let pid = ui.shell.exec_subshell(cmd, false, redirections).await?? as _;
                     // send streams back to caller
                     let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
                     // get the status
                     let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, false);
                     match ui.shell.check_pid_status(pid as _).await {
-                        None | Some(-1) => pid_waiter.await.unwrap_or(-1) as _,
-                        Some(code) => code as _,
+                        Err(_) | Ok(None | Some(-1)) => pid_waiter.await.unwrap_or(-1) as _,
+                        Ok(Some(code)) => code as _,
                     }
                 },
             };

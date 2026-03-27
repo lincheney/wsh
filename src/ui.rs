@@ -201,7 +201,7 @@ impl Ui {
             };
 
             // get the shell vars then reacquire the ui
-            shell_vars = Some(crate::tui::command_line::CommandLineState::get_shell_vars(&self.shell, size.0).await);
+            shell_vars = Some(crate::tui::command_line::CommandLineState::get_shell_vars(&self.shell, size.0).await?);
         }
     }
 
@@ -374,7 +374,7 @@ impl Ui {
                 let ui = this.borrow();
                 ui.buffer.get_contents().clone()
             };
-            let (complete, _tokens) = self.shell.parse(buffer.clone(), Default::default()).await;
+            let (complete, _tokens) = self.shell.parse(buffer.clone(), Default::default()).await?;
             if complete {
                 Some(buffer)
             } else {
@@ -612,8 +612,9 @@ impl Ui {
                 None => None,
             }
         }).await;
+        let result = crate::log_if_err(result)??;
 
-        match result? {
+        match result {
             Value::String(string) => Some(KeybindOutput::String(string)),
             Value::Widget{buffer, mut cursor, output, accept_line} => {
                 {
@@ -736,7 +737,9 @@ impl Ui {
 
         let ui = self.get();
         let buffer = &mut ui.borrow_mut().buffer;
-        buffer.set(Some(&zle.0), Some(zle.1.unwrap_or(zle.0.len() as _) as usize));
+        if let Some(zle) = crate::log_if_err(zle) {
+            buffer.set(Some(&zle.0), Some(zle.1.unwrap_or(zle.0.len() as _) as usize));
+        }
         // finally add the data we wanted originally
         buffer.set(Some(data), cursor);
     }

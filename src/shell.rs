@@ -94,8 +94,8 @@ impl ShellClient {
         receiver.await
     }
 
-    pub async fn run<T: 'static + Send, F: 'static + Sync + Send + FnOnce(&ShellInternal) -> T>(&self, func: F) -> T {
-        *self.inner.run(Box::new(move |shell| Box::new(func(shell)))).await.downcast().unwrap()
+    pub async fn run<T: 'static + Send, F: 'static + Sync + Send + FnOnce(&ShellInternal) -> T>(&self, func: F) -> Result<T> {
+        Ok(*self.inner.run(Box::new(move |shell| Box::new(func(shell)))).await?.downcast().unwrap())
     }
 }
 

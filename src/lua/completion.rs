@@ -64,15 +64,19 @@ async fn get_completions(mut ui: Ui, _lua: Lua, val: Option<String>) -> Result<S
     // run this in another thread so it doesn't block us returning
     tokio::task::spawn(async move {
         match ui.shell.get_completions(val, sender).await {
-            Ok(msg) => {
+            Ok(Ok(msg)) => {
                 if !msg.is_empty() {
                     let this = ui.unlocked.read();
                     let mut ui = this.borrow_mut();
                     ui.tui.add_zle_message(msg.as_ref());
                 }
             },
-            err => {
+            Ok(err) => {
                 ui.report_error(err);
+            },
+            e => {
+                // shell is not running
+                crate::log_if_err(e);
             },
         }
     });
@@ -83,7 +87,7 @@ async fn get_completions(mut ui: Ui, _lua: Lua, val: Option<String>) -> Result<S
 async fn insert_completion(ui: Ui, _lua: Lua, val: Match) -> Result<()> {
     let buffer = ui.get().borrow().buffer.get_contents().clone();
     let suffix = val.inner.as_suffix();
-    let (new_buffer, new_pos) = ui.shell.insert_completion(buffer, val.inner).await;
+    let (new_buffer, new_pos) = ui.shell.insert_completion(buffer, val.inner).await?;
     {
         // see if this can be done as an insert
         let this = ui.get();

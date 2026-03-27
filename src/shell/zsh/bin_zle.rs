@@ -51,13 +51,13 @@ impl FdChangeHook {
         shell: &crate::shell::ShellClient,
         fd: RawFd,
         error: Option<std::io::Error>,
-    ) -> bool {
+    ) -> anyhow::Result<bool> {
         let hook = hook.lock().unwrap().clone();
         if let Some(hook) = hook {
-            shell.run_watch_fd(hook, fd, error).await;
-            true
+            shell.run_watch_fd(hook, fd, error).await?;
+            Ok(true)
         } else {
-            false
+            Ok(false)
         }
     }
 

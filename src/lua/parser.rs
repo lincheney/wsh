@@ -25,7 +25,7 @@ async fn parse(ui: Ui, lua: Lua, (val, options): (bstr::BString, Option<LuaValue
     } else {
         Default::default()
     };
-    let (complete, tokens) = ui.shell.parse(val, options).await;
+    let (complete, tokens) = ui.shell.parse(val, options).await?;
     let tokens = tokens_to_lua(&tokens, &lua)?;
     Ok((complete, tokens))
 }
