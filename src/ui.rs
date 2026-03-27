@@ -74,7 +74,6 @@ crate::strong_weak_wrapper! {
         pub events: ForkLock<'static, crate::event_stream::EventController>,
         pub has_foreground_process: tokio::sync::Mutex<()>,
 
-        zle_trash: AtomicBool,
         print_lock: PrintLock,
         is_drawing: AtomicBool,
 
@@ -120,7 +119,6 @@ impl Ui {
             events: Arc::new(lock.wrap(events)),
             shell: Arc::new(shell),
             has_foreground_process: Default::default(),
-            zle_trash: Default::default(),
             print_lock: Default::default(),
             is_drawing: Arc::new(false.into()),
             pid_map: Arc::new(lock.wrap(Default::default())),
@@ -259,10 +257,10 @@ impl Ui {
     }
 
     pub fn zle_cmd_trash(&self) -> Result<bool> {
-        if self.zle_trash.swap(true, Ordering::Relaxed) {
-            Ok(false)
-        } else {
+        if self.print_lock.zle_cmd_trash() {
             self.prepare_for_unhandled_output_blocking(None)
+        } else {
+            Ok(false)
         }
     }
 
@@ -302,7 +300,7 @@ impl Ui {
     }
 
     pub async fn zle_cmd_refresh(&self) -> Result<bool> {
-        if self.zle_trash.swap(false, Ordering::Relaxed) {
+        if self.print_lock.zle_cmd_refresh() {
             self.recover_from_unhandled_output(None).await
         } else {
             Ok(false)
