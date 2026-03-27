@@ -1,5 +1,6 @@
 use crate::meta_str;
 use std::sync::{Arc};
+use std::num::NonZeroU16;
 use bstr::BString;
 use std::time::SystemTime;
 use std::default::Default;
@@ -18,8 +19,8 @@ use crate::lua::asyncio::{ReadableFile, WriteableFile};
 #[serde(default)]
 struct FullZptyArgs {
     args: BString,
-    height: Option<usize>,
-    width: Option<usize>,
+    height: Option<NonZeroU16>,
+    width: Option<NonZeroU16>,
     no_echo_input: bool,
 }
 
@@ -97,6 +98,8 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let opts = crate::shell::ZptyOpts{
         echo_input: !args.no_echo_input,
         non_blocking: true,
+        height: args.height,
+        width: args.width,
     };
     // TODO capture shout
     let zpty = ui.shell.zpty(name.into(), cmd, opts).await?;

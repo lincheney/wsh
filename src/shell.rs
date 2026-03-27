@@ -30,6 +30,7 @@ pub use zsh::{
     parser::{Token},
     ZptyOpts,
     Zpty,
+    set_zpty_size,
     MetaStr,
     MetaString,
     MetaArray,

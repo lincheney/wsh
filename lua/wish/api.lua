@@ -82,6 +82,7 @@ function wish.async.zpty(...)
         wait = function(self) return proc:wait() end,
         kill = function(self, ...) return proc:kill(...) end,
         term = function(self) return proc:kill('SIGTERM') end,
+        set_tty_size = function(self, ...) return stdout:set_tty_size(...) end,
     }
 end
 

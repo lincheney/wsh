@@ -1,4 +1,7 @@
+use std::os::fd::AsRawFd;
+use std::num::NonZeroU16;
 use nix::sys::signal;
+use nix::libc;
 use std::sync::{LazyLock};
 use std::os::fd::{RawFd};
 use std::os::raw::*;
@@ -71,12 +74,49 @@ pub fn execstring(cmd: &MetaStr, opts: ExecstringOpts) -> c_long {
 pub struct ZptyOpts {
     pub echo_input: bool,
     pub non_blocking: bool,
+    pub height: Option<std::num::NonZeroU16>,
+    pub width: Option<std::num::NonZeroU16>,
 }
 
 pub struct Zpty {
     pub pid: u32,
     pub fd: RawFd,
     pub name: MetaString,
+}
+
+pub fn set_zpty_size(fd: RawFd, tty: Option<RawFd>, rows: Option<NonZeroU16>, cols: Option<NonZeroU16>) -> std::io::Result<()> {
+    let mut ws = libc::winsize {
+        ws_row: 0,
+        ws_col: 0,
+        ws_xpixel: 0,
+        ws_ypixel: 0,
+    };
+
+    let tty_file;
+    let tty = if let Some(tty) = tty {
+        tty
+    } else {
+        tty_file = std::fs::File::open("/dev/tty")?;
+        tty_file.as_raw_fd()
+    };
+
+    unsafe {
+        // get pixels from the stdin
+        if libc::ioctl(tty, libc::TIOCGWINSZ, &raw mut ws) == 0 {
+            if let Some(rows) = rows {
+                ws.ws_ypixel = ws.ws_ypixel / ws.ws_row * rows.get();
+                ws.ws_row = rows.get();
+            }
+            if let Some(cols) = cols {
+                ws.ws_xpixel = ws.ws_xpixel / ws.ws_col * cols.get();
+                ws.ws_col = cols.get();
+            }
+            if libc::ioctl(fd, libc::TIOCSWINSZ, &ws) == 0 {
+                return Ok(())
+            }
+        }
+    }
+    Err(std::io::Error::last_os_error())
 }
 
 pub fn zpty(name: MetaString, cmd: &MetaStr, opts: ZptyOpts) -> anyhow::Result<Zpty> {
@@ -157,6 +197,8 @@ pub fn zpty(name: MetaString, cmd: &MetaStr, opts: ZptyOpts) -> anyhow::Result<Z
         let Some(pid) = pid else { anyhow::bail!("could not get pid") };
         let pid = std::str::from_utf8(pid)?.parse()?;
         add_pid(pid as _);
+
+        set_zpty_size(fd as _, None, opts.height, opts.width)?;
 
         // tell the zpty to start
         let fd = fd as _;

@@ -1,3 +1,4 @@
+use std::num::NonZeroU16;
 use std::os::fd::{AsRawFd};
 use mlua::{prelude::*, UserData, UserDataMethods};
 use tokio::io::{
@@ -118,6 +119,29 @@ impl<T: AsyncRead + AsRawFd + Unpin + mlua::MaybeSend + 'static> UserData for Re
             Ok(())
         });
 
+        methods.add_method_mut("set_tty_size", |_lua, file, (rows, cols): (Option<u16>, Option<u16>)| {
+            if !file.is_tty_master() {
+                return Err(LuaError::RuntimeError("not a tty master".into()))
+            }
+
+            let rows = if let Some(rows) = rows {
+                Some(NonZeroU16::new(rows).ok_or(LuaError::RuntimeError("rows must be > 0".into()))?)
+            } else {
+                None
+            };
+            let cols = if let Some(cols) = cols {
+                Some(NonZeroU16::new(cols).ok_or(LuaError::RuntimeError("cols must be > 0".into()))?)
+            } else {
+                None
+            };
+
+            if let Some(file) = file.0.as_ref() {
+                let fd = file.get_ref().as_raw_fd();
+                crate::shell::set_zpty_size(fd, None, rows, cols).map_err(|e| LuaError::RuntimeError(e.to_string()))?;
+            }
+            Ok(())
+        });
+
         add_readable_methods(methods);
         add_bufreadable_methods(methods);
     }
@@ -141,6 +165,6 @@ impl<T: AsyncWrite + AsRawFd + Unpin + mlua::MaybeSend + 'static> UserData for W
             Ok(())
         });
 
-        add_writeable_methods(methods);
+        add_writeable_methods::<BufWriter<T>, Self, M>(methods);
     }
 }
