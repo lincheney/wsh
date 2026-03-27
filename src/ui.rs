@@ -832,15 +832,26 @@ impl UiInner {
 
     fn prepare_for_unhandled_output(&mut self) -> Result<()> {
         self.deactivate()?;
-        self.dirty = true;
-        // move to last line of buffer
         let y_offset = self.cmdline.y_offset_to_end();
-        execute!(
+        self.dirty = true;
+
+        // move to last line of buffer
+        queue!(
             self.stdout,
             BeginSynchronizedUpdate,
             MoveDown(y_offset),
-            style::Print('\n'),
-            MoveToColumn(0),
+        )?;
+
+        if self.cmdline.cursor_coord.0 != 0 {
+            queue!(
+                self.stdout,
+                style::Print('\n'),
+                MoveToColumn(0),
+            )?;
+        }
+
+        execute!(
+            self.stdout,
             Clear(ClearType::FromCursorDown),
             EndSynchronizedUpdate,
         )?;
