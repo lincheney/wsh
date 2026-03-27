@@ -21,7 +21,7 @@ pub struct ShellVars {
     prompt_size: (usize, usize),
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct CommandLineState {
     pub cursor_coord: (u16, u16),
     pub draw_end_pos: (u16, u16),
