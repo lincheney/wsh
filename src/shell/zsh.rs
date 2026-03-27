@@ -423,6 +423,7 @@ pub fn winch_unblock() {
 }
 
 pub fn zistype(x: c_char, y: c_short) -> bool {
+    let x = x as c_uchar;
     unsafe {
         zsh_sys::typtab[x as usize] & y > 0
     }
