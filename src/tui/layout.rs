@@ -117,11 +117,19 @@ impl Node {
         }
     }
 
-    pub(super) fn refresh(&self, map: &HashMap<usize, Node>, max_width: u16, max_height: Option<u16>, tmp: bool) -> u16 {
+    pub(super) fn refresh(
+        &self,
+        map: &HashMap<usize, Node>,
+        max_width: u16,
+        max_height: Option<u16>,
+        constraint: Option<Constraint>,
+        tmp: bool,
+    ) -> u16 {
+
         let mut dim = (0, 0);
         if !self.hidden {
             let height = match &self.kind {
-                NodeKind::Widget(widget) => widget.get_height_for_width(max_width, self.constraint),
+                NodeKind::Widget(widget) => widget.get_height_for_width(max_width, constraint.or(self.constraint)),
                 NodeKind::Layout(layout) => layout.refresh(map, max_width, max_height, tmp),
             };
             dim = (max_width, height.min(max_height.unwrap_or(u16::MAX)));

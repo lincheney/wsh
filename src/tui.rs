@@ -136,7 +136,7 @@ impl Tui {
         let width = std::num::NonZero::new(width).map_or(80, |w| w.get());
 
         // refresh tmp size
-        node.refresh(&self.nodes.map, width, None, true);
+        node.refresh(&self.nodes.map, width, None, Some(Constraint::Min(0)), true);
 
         let mut string = vec![];
         let mut writer = Cursor::new(&mut string);
