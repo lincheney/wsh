@@ -72,7 +72,7 @@ pub fn wrap_grapheme<
         }
         pos + width
 
-    } else if grapheme.width() > 0 && grapheme != "\u{FFFD}" {
+    } else if grapheme.width() > 0 && (grapheme != "\u{FFFD}" || line[start..end] == grapheme) {
         if pos + grapheme.width() > max_width {
             pos = 0;
             callback(start, start, WrapToken::LineBreak, None);
