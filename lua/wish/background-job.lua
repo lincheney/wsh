@@ -3,6 +3,8 @@ local M = {}
 local jobs = {}
 local active_job = nil
 
+local NAMESPACE = wish.add_buf_highlight_namespace()
+
 M.PROMPT_TIMEOUT = 0.04 -- same as rlwrap
 
 M.BORDER_RUNNING = 'lightblue'
@@ -19,46 +21,42 @@ local function update_message(job)
     local props = {
         id = job.msg,
         border = {
-            title = {fg = M.TITLE_RUNNING, bold = true, text = ' ' .. job.command .. ' ' },
+            title = {
+                {fg = M.BORDER_RUNNING, text = ''},
+                {text = ''},
+                {fg = 'black', bg = M.TITLE_WAITING, dim = false, bold = true, text = '' },
+                {fg = M.TITLE_RUNNING, bold = true, text = ' ' .. job.command .. ' '}
+            },
         },
     }
 
     if active_job and job == active_job.job then
         props.dim = false
         props.show_cursor = true
+        wish.add_buf_highlight{namespace = NAMESPACE, start = 0, finish = 2^32 - 1, dim = true}
     else
         props.dim = true
         props.show_cursor = false
     end
 
-    if job.output_marker == 0 then
+    if job.output_marker == 0 and not props.show_cursor then
         props.border.sides = 'Top'
-        props.border.title = {
-            { fg = M.BORDER_RUNNING, text = '─' },
-            props.border.title,
-        }
+        props.border.title[1].text = '─'
     else
         props.border.sides = 'All'
     end
 
     if job.code then
-        props.border.title.fg = job.code > 0 and M.TITLE_FAILED or M.TITLE_SUCCEEDED
-        if job.output_marker > 0 then
-            props.border.title = {
-                { fg = job.code > 0 and M.BORDER_FAILED or M.BORDER_SUCCEEDED, text = '─' },
-                props.border.title,
-            }
-        end
-        props.border.dim = false
         props.border.fg = job.code > 0 and M.BORDER_FAILED or M.BORDER_SUCCEEDED
+        props.border.title[1].fg = props.border.fg
+        props.border.title[4].fg = job.code > 0 and M.TITLE_FAILED or M.TITLE_SUCCEEDED
+        props.border.dim = false
+
     elseif job.waiting_for_input then
         props.border.fg = M.BORDER_WAITING
-        props.border.title.fg = M.TITLE_WAITING
-        props.border.title = {
-            {text = ' '},
-            {fg = 'black', bg = M.TITLE_WAITING, dim = false, bold = true, text = 'input' },
-            props.border.title,
-        }
+        props.border.title[2].text = ' '
+        props.border.title[3].text = 'input'
+        props.border.title[4].fg = M.TITLE_WAITING
     else
         props.border.fg = M.BORDER_RUNNING
     end
@@ -69,6 +67,7 @@ end
 
 local function unfocus()
     if active_job then
+        wish.clear_buf_highlights(NAMESPACE)
         local job = active_job.job
         -- focus back on the buffer
         if active_job.keymap_layer then
