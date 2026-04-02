@@ -158,7 +158,9 @@ impl Parser {
     }
 
     pub fn to_byte_pos<T>(text: &Text<T>, pos: usize) -> usize {
-        let line = text.get().last().unwrap();
+        let Some(line) = text.get().last() else {
+            return 0;
+        };
         let mut width = 0;
         let mut byte_pos = 0;
         for (s, _, c) in line.grapheme_indices().chain(std::iter::once((line.len(), line.len(), " "))) {

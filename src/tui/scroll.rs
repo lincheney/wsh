@@ -98,6 +98,9 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
         }
 
         let past_end = i >= lines.len();
+        if past_end && !highlights.clone().any(|hl| hl.lineno >= i && hl.inner.virtual_text.is_some()) {
+            continue
+        }
 
         super::wrap::wrap(
             line,
@@ -151,7 +154,7 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
     tokens.retain(|t| {
         start <= t.visual_lineno
         && (
-            t.visual_lineno < end - 1
+            t.visual_lineno + 1 < end
             || (t.visual_lineno < end && !matches!(&t.inner, WrapToken::LineBreak))
         )
     });

@@ -229,6 +229,11 @@ impl<T> Text<T> {
                 .chain(extra_highlights.clone())
                 .filter(|h| h.lineno == i || (past_end && h.lineno > i));
 
+            // dont draw the dummy line if there is no virtual text
+            if past_end && !highlights.clone().any(|hl| hl.inner.virtual_text.is_some()) {
+                continue
+            }
+
             super::wrap::wrap(line, highlights, None, width, initial_indent, |_, _, token, _| {
                 match token {
                     WrapToken::LineBreak => {
@@ -241,7 +246,7 @@ impl<T> Text<T> {
             });
             initial_indent = 0;
 
-            if i != self.lines.len() - 1 {
+            if i + 1 != self.lines.len() {
                 pos = (0, pos.1 + 1);
             }
         }

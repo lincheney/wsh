@@ -114,11 +114,14 @@ impl Widget {
     pub(in crate::tui) fn make_cursor_space_hl(&mut self) {
         if self.ansi_show_cursor {
             let pos = ansi::Parser::to_byte_pos(&self.inner, self.ansi.cursor_x);
-            let line = self.inner.get().last().unwrap();
-            let need_space = pos == line.len();
+            let (lineno, need_space) = if let Some(line) = self.inner.get().last() {
+                (self.inner.len().saturating_sub(1), pos == line.len())
+            } else {
+                (0, true)
+            };
 
             self.cursor_space_hl = Some(super::text::HighlightedRange{
-                lineno: self.inner.len().saturating_sub(1),
+                lineno,
                 start: pos,
                 end: pos + 1,
                 inner: super::text::Highlight {
