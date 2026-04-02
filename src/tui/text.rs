@@ -221,9 +221,15 @@ impl<T> Text<T> {
 
         let mut pos = (initial_indent, 0);
 
-        for (lineno, line) in self.lines.iter().enumerate() {
-            let highlights = self.highlights.iter().chain(extra_highlights.clone()).filter(|h| h.lineno == lineno);
-            super::wrap::wrap(line.as_ref(), highlights, None, width, initial_indent, |_, _, token, _| {
+        // add a dummy line at the end
+        for (i, line) in self.lines.iter().map(|l| l.as_ref()).chain(std::iter::once(BStr::new(b""))).enumerate() {
+            let past_end = i >= self.lines.len();
+
+            let highlights = self.highlights.iter()
+                .chain(extra_highlights.clone())
+                .filter(|h| h.lineno == i || (past_end && h.lineno > i));
+
+            super::wrap::wrap(line, highlights, None, width, initial_indent, |_, _, token, _| {
                 match token {
                     WrapToken::LineBreak => {
                         pos = (0, pos.1 + 1);
@@ -235,7 +241,7 @@ impl<T> Text<T> {
             });
             initial_indent = 0;
 
-            if lineno != self.lines.len() - 1 {
+            if i != self.lines.len() - 1 {
                 pos = (0, pos.1 + 1);
             }
         }

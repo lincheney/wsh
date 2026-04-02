@@ -1,7 +1,7 @@
 use std::ops::Range;
 use super::text::{HighlightedRange};
 use ratatui::style::{Style};
-use bstr::{BString};
+use bstr::{BString, BStr};
 use super::wrap::WrapToken;
 
 #[derive(Clone, Copy)]
@@ -90,13 +90,18 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
     let mut tokens = vec![];
     let mut start = 0;
     let end;
-    for (i, line) in lines.iter().enumerate() {
+
+    // add a dummy line at the end
+    for (i, line) in lines.iter().map(|l| l.as_ref()).chain(std::iter::once(BStr::new(b""))).enumerate() {
         if i < lineno {
             start = total_line_count;
         }
+
+        let past_end = i >= lines.len();
+
         super::wrap::wrap(
-            line.as_ref(),
-            highlights.clone().filter(|hl| hl.lineno == i),
+            line,
+            highlights.clone().filter(|hl| hl.lineno == i || (past_end && hl.lineno > i)),
             init_style,
             max_width,
             initial_indent,
