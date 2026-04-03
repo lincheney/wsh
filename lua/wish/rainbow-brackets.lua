@@ -34,7 +34,7 @@ QUERY.add_buffer_callback(function(tokens, str)
 
     -- match up the brackets
     for i = 1, #brackets do
-        local tokstr = string.sub(str, brackets[i].start+1, brackets[i].finish)
+        local tokstr = string.sub(str, brackets[i].start, brackets[i].finish)
         table.insert(items, {brackets[i], MATCHING_BRACKET[tokstr]})
 
         if MATCHING_BRACKET[tokstr] then
