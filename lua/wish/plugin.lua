@@ -7,6 +7,7 @@ return function(plugin_fn)
         messages = {},
         highlight_namespaces = {},
         processes = {},
+        vars = {},
     }
 
     local plugin_obj = {}
@@ -53,6 +54,12 @@ return function(plugin_fn)
         for id in pairs(state.messages) do
             wish.remove_message(id)
             state.messages[id] = nil
+        end
+
+        -- unset vars
+        for i = #state.vars, 1, -1 do
+            wish.unset_var(state.vars[i])
+            state.vars[i] = nil
         end
 
     end
@@ -134,9 +141,10 @@ return function(plugin_fn)
                 return track_process(wish.silent_cmd(...))
             end,
 
-            -- create_dynamic_var = function(...)
-                -- TODO
-            -- end,
+            create_dynamic_var = function(name, ...)
+                wish.create_dynamic_var(name, ...)
+                table.insert(vars, name)
+            end,
 
         }, { __index = wish })
 
