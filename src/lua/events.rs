@@ -65,11 +65,7 @@ macro_rules! event_types {
 
             fn remove_event_callback(&mut self, id: usize) {
             $(
-                let callbacks = &mut self.[<callbacks_ $name>];
-                if let Some(i) = callbacks.iter().position(|(i, _)| *i == id) {
-                    callbacks.remove(i);
-                    return
-                }
+                self.[<callbacks_ $name>].retain(|(i, _)| *i != id);
             )*
             }
 
