@@ -78,20 +78,40 @@ impl Borders {
     fn top(&self) -> Option<&[Cell]> {
         let buffer = self.buffer.as_ref()?;
         let width = buffer.inner.area.width;
-        Some(&buffer.inner.content[(width * self.top_y) as usize .. (width * self.inner.y) as usize])
+        let cells = &buffer.inner.content[(width * self.top_y) as usize .. (width * self.inner.y) as usize];
+        if cells.is_empty() {
+            None
+        } else {
+            Some(cells)
+        }
     }
     fn bottom(&self) -> Option<&[Cell]> {
         let buffer = self.buffer.as_ref()?;
-        Some(&buffer.inner.content[buffer.inner.area.width as usize * (self.inner.y + self.inner.height) as usize ..])
+        let cells = &buffer.inner.content[buffer.inner.area.width as usize * (self.inner.y + self.inner.height) as usize ..];
+        if cells.is_empty() {
+            None
+        } else {
+            Some(cells)
+        }
     }
     fn left(&self) -> Option<&[Cell]> {
         let buffer = self.buffer.as_ref()?;
-        Some(&buffer.inner.content[(buffer.inner.area.width * self.inner.y) as usize ..][.. self.inner.x as usize])
+        let cells = &buffer.inner.content[(buffer.inner.area.width * self.inner.y) as usize ..][.. self.inner.x as usize];
+        if cells.is_empty() {
+            None
+        } else {
+            Some(cells)
+        }
     }
     fn right(&self) -> Option<&[Cell]> {
         let buffer = self.buffer.as_ref()?;
         let width = buffer.inner.area.width as usize;
-        Some(&buffer.inner.content[width * self.inner.y as usize ..][(self.inner.x + self.inner.width) as usize .. width])
+        let cells = &buffer.inner.content[width * self.inner.y as usize ..][(self.inner.x + self.inner.width) as usize .. width];
+        if cells.is_empty() {
+            None
+        } else {
+            Some(cells)
+        }
     }
 }
 

@@ -20,6 +20,7 @@ pub struct ScrollWrapToken<'a> {
     pub style: Option<Style>,
 }
 
+#[derive(Debug)]
 pub struct Scrolled<'a> {
     pub total_line_count: usize,
     pub range: Range<usize>,
