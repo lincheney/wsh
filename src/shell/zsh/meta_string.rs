@@ -60,6 +60,10 @@ impl MetaString {
         self.inner.into_raw()
     }
 
+    pub fn as_ptr(&self) -> *const c_char {
+        self.inner.as_ptr()
+    }
+
     pub unsafe fn from_raw(ptr: *mut c_char) -> Self {
         Self{ inner: unsafe{ CString::from_raw(ptr) } }
     }

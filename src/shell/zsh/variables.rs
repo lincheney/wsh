@@ -116,13 +116,13 @@ impl Variable {
             Value::HashMap(value) => {
                 let value: MetaArray = value.into_iter()
                     .flat_map(|(k, v)| [k, v])
-                    .map(|x| x.into())
+                    .map(|x| MetaString::from(x))
                     .collect();
                 unsafe{ zsh_sys::sethparam(name, value.into_raw()) }
             },
             Value::Array(value) => {
                 let value: MetaArray = value.into_iter()
-                    .map(|x| x.into())
+                    .map(|x| MetaString::from(x))
                     .collect();
                 unsafe{ zsh_sys::setaparam(name, value.into_raw()) }
             },
@@ -253,7 +253,7 @@ impl Variable {
         unset: Option<Box<dyn Send + Fn(bool)>>,
     ) -> Result<()> {
         let flag = T::FLAG | zsh_sys::PM_SPECIAL | zsh_sys::PM_REMOVABLE | zsh_sys::PM_LOCAL;
-        let gsu = CustomGSU { get, set, unset };
+        let gsu = CustomGSU { get, set, unset, data: None };
         unsafe {
             let param = zsh_sys::createparam(name.as_ptr().cast_mut(), flag as _);
             if param.is_null() {
@@ -282,10 +282,12 @@ impl Variable {
 
 }
 
-pub struct CustomGSU<T> {
+pub struct CustomGSU<T: VariableGSU> {
     get: Box<dyn Send + Fn() -> T>,
     set: Option<Box<dyn Send + Fn(T)>>,
     unset: Option<Box<dyn Send + Fn(bool)>>,
+    // this field is for the gsu to use when returning temporary values to zsh
+    data: Option<T::Type>,
 }
 
 static CUSTOM_SCALAR_GSU: zsh_sys::gsu_scalar = zsh_sys::gsu_scalar {
@@ -314,12 +316,13 @@ static CUSTOM_HASH_GSU: zsh_sys::gsu_hash = zsh_sys::gsu_hash {
     unsetfn: Some(custom_gsu_unset::<HashMap<BString, BString>>),
 };
 
-unsafe extern "C" fn custom_gsu_get<T: VariableGSU>(param: zsh_sys::Param) -> T::Type {
+unsafe extern "C" fn custom_gsu_get<T: VariableGSU>(param: zsh_sys::Param) -> T::Input {
     unsafe {
-        ((*((*param).u.data as *const CustomGSU<T>)).get)().into_raw()
+        let mut gsu = &mut *((*param).u.data as *mut CustomGSU<T>);
+        (gsu.get)().as_raw(&mut gsu)
     }
 }
-unsafe extern "C" fn custom_gsu_set<T: VariableGSU>(param: zsh_sys::Param, value: T::Type) {
+unsafe extern "C" fn custom_gsu_set<T: VariableGSU>(param: zsh_sys::Param, value: T::Input) {
     unsafe {
         if let Some(set) = &(*((*param).u.data as *const CustomGSU<T>)).set {
             set(T::from_raw(param, value));
@@ -331,24 +334,29 @@ unsafe extern "C" fn custom_gsu_unset<T: VariableGSU>(param: zsh_sys::Param, exp
         let ptr = (*param).u.data as *mut CustomGSU<T>;
         if let Some(unset) = &(*ptr).unset {
             unset(explicit > 0);
-            drop(Box::from_raw(ptr));
         }
+        drop(Box::from_raw(ptr));
     }
 }
 
 pub trait VariableGSU {
     const FLAG: u32;
+    type Input;
     type Type;
 
-    fn from_raw(param: zsh_sys::Param, value: Self::Type) -> Self;
-    fn into_raw(self) -> Self::Type;
+    fn from_raw(param: zsh_sys::Param, value: Self::Input) -> Self;
+    fn into_raw(self) -> Self::Input;
+    fn as_raw(self, _gsu: &mut CustomGSU<Self>) -> Self::Input where Self: Sized {
+        self.into_raw()
+    }
 }
 
 impl VariableGSU for BString {
     const FLAG: u32 = zsh_sys::PM_SCALAR;
-    type Type = *mut c_char;
+    type Input = *mut c_char;
+    type Type = MetaString;
 
-    fn from_raw(param: zsh_sys::Param, ptr: Self::Type) -> Self {
+    fn from_raw(param: zsh_sys::Param, ptr: Self::Input) -> Self {
         unsafe {
             let string = MetaString::from_raw(ptr).unmetafy();
             // zsh may try to strlen afterwards but we will have already freed the pointer
@@ -357,7 +365,11 @@ impl VariableGSU for BString {
         }
     }
 
-    fn into_raw(self) -> Self::Type {
+    fn as_raw(self, gsu: &mut CustomGSU<Self>) -> Self::Input {
+        gsu.data.insert(MetaString::from(self)).as_ptr().cast_mut()
+    }
+
+    fn into_raw(self) -> Self::Input {
         MetaString::from(self).into_raw()
     }
 }
@@ -365,11 +377,12 @@ impl VariableGSU for BString {
 impl VariableGSU for c_long {
     const FLAG: u32 = zsh_sys::PM_INTEGER;
     type Type = c_long;
+    type Input = c_long;
 
-    fn from_raw(_param: zsh_sys::Param, value: Self::Type) -> Self {
+    fn from_raw(_param: zsh_sys::Param, value: Self::Input) -> Self {
         value
     }
-    fn into_raw(self) -> Self::Type {
+    fn into_raw(self) -> Self::Input {
         self
     }
 }
@@ -377,20 +390,22 @@ impl VariableGSU for c_long {
 impl VariableGSU for f64 {
     const FLAG: u32 = zsh_sys::PM_FFLOAT;
     type Type = f64;
+    type Input = f64;
 
-    fn from_raw(_param: zsh_sys::Param, value: Self::Type) -> Self {
+    fn from_raw(_param: zsh_sys::Param, value: Self::Input) -> Self {
         value
     }
-    fn into_raw(self) -> Self::Type {
+    fn into_raw(self) -> Self::Input {
         self
     }
 }
 
 impl VariableGSU for Vec<BString> {
     const FLAG: u32 = zsh_sys::PM_ARRAY;
-    type Type = *mut *mut c_char;
+    type Type = MetaArray;
+    type Input = *mut *mut c_char;
 
-    fn from_raw(_param: zsh_sys::Param, ptr: Self::Type) -> Self {
+    fn from_raw(_param: zsh_sys::Param, ptr: Self::Input) -> Self {
         unsafe{
             let result = MetaArray::iter_ptr(ptr.cast()).map(|x| x.unmetafy().into_owned()).collect();
             zsh_sys::freearray(ptr);
@@ -398,7 +413,14 @@ impl VariableGSU for Vec<BString> {
         }
     }
 
-    fn into_raw(self) -> Self::Type {
+    fn as_raw(self, gsu: &mut CustomGSU<Self>) -> Self::Input {
+        let array = self.into_iter()
+            .map(|x| x.into())
+            .collect();
+        gsu.data.insert(array).as_ptr().cast_mut()
+    }
+
+    fn into_raw(self) -> Self::Input {
         self.into_iter()
             .map(|x| x.into())
             .collect::<MetaArray>()
@@ -409,6 +431,7 @@ impl VariableGSU for Vec<BString> {
 impl VariableGSU for HashMap<BString, BString> {
     const FLAG: u32 = zsh_sys::PM_HASHED;
     type Type = zsh_sys::HashTable;
+    type Input = zsh_sys::HashTable;
 
     fn from_raw(_param: zsh_sys::Param, ptr: Self::Type) -> Self {
         let map = try_hashtable_to_hashmap(ptr);
@@ -417,6 +440,11 @@ impl VariableGSU for HashMap<BString, BString> {
         }
         map.unwrap()
     }
+
+    fn as_raw(self, gsu: &mut CustomGSU<Self>) -> Self::Type {
+        *gsu.data.insert(self.into_raw())
+    }
+
     fn into_raw(self) -> Self::Type {
         unsafe {
             // why 17???
