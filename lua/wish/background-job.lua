@@ -141,9 +141,8 @@ function M.run_in_background(command)
         job.code = job.proc:wait()
         if active_job and job == active_job.job then
             unfocus()
-        else
-            update_message(job)
         end
+        update_message(job)
         local output = wish.message_to_ansi_string(msg)
         jobs[msg] = nil
         wish.remove_message(msg)
