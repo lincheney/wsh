@@ -128,7 +128,7 @@ pub fn zpty(name: MetaString, cmd: &MetaStr, opts: ZptyOpts) -> anyhow::Result<Z
     let mut cmd = shell_quote(cmd).to_owned();
     // reversed
     // add a read so that we have time to get the pid
-    cmd.insert_str(0, meta_str!(c" '\\builtin read -k1;'"));
+    cmd.insert_str(0, meta_str!(c" '\\builtin read -s -k1;'"));
     cmd.insert_str(0, shell_quote(name.as_ref()));
     if opts.echo_input {
         cmd.insert_str(0, meta_str!(c"-e "));
