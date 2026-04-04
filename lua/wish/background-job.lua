@@ -124,8 +124,8 @@ function M.run_in_background(command)
                 local lines = wish.get_message_text(msg)
                 if #lines > 0 and string.find(lines[#lines], '[:?] ?$') then
                     -- its a prompt, wait a bit to see if there is any more output
+                    local marker = job.output_marker
                     wish.schedule(function()
-                        local marker = output_marker
                         wish.sleep(M.PROMPT_TIMEOUT)
                         -- marker has not changed, so output/prompt has not changed
                         if marker == job.output_marker and jobs[msg] then
