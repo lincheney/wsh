@@ -9,7 +9,7 @@ use std::ptr::null_mut;
 use std::sync::{LazyLock, OnceLock, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::Result;
-use crate::shell::{Shell, ShellMsg, zsh, MetaString, MetaArray};
+use crate::shell::{Shell, ShellMsg, zsh, MetaString, MetaSlice};
 use crate::fork_lock::{RawForkLock};
 
 static FORK_LOCK: RawForkLock = RawForkLock::new();
@@ -152,7 +152,7 @@ pub fn run_with_shell<F: 'static + Send + Future<Output: Send>>(future: F) -> Re
 
 unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _options: zsh_sys::Options, _func: c_int) -> c_int {
 
-    let iter = unsafe{ MetaArray::iter_ptr(argv as _) };
+    let iter = unsafe{ MetaSlice::iter_ptr(argv as _) };
     let mut iter = iter.map(|s| s.to_bytes());
     match iter.next() {
         Some(b"lua") => {

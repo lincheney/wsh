@@ -33,7 +33,7 @@ pub use zsh::{
     set_zpty_size,
     MetaStr,
     MetaString,
-    MetaArray,
+    MetaSlice,
 };
 pub use externs::{run_with_shell};
 pub use variables::Variable;

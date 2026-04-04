@@ -3,7 +3,7 @@ use std::ptr::NonNull;
 use std::os::raw::{c_int, c_long, c_char};
 use anyhow::Result;
 use bstr::{BStr, BString};
-use super::{MetaStr, MetaString, MetaArray};
+use super::{MetaStr, MetaString, MetaArray, MetaSlice};
 
 fn pm_type(flags: c_int) -> c_int {
     flags & (zsh_sys::PM_SCALAR | zsh_sys::PM_INTEGER | zsh_sys::PM_EFLOAT | zsh_sys::PM_FFLOAT | zsh_sys::PM_ARRAY | zsh_sys::PM_HASHED) as c_int
@@ -69,8 +69,8 @@ fn try_hashtable_to_hashmap(table: zsh_sys::HashTable) -> Result<HashMap<BString
     let mut hashmap = HashMap::new();
     unsafe {
         // paramvalarr allocates on the arena; do not free
-        let keys = MetaArray::iter_ptr(zsh_sys::paramvalarr(table, zsh_sys::SCANPM_WANTKEYS as c_int).cast());
-        let values = MetaArray::iter_ptr(zsh_sys::paramvalarr(table, zsh_sys::SCANPM_WANTVALS as c_int).cast());
+        let keys = MetaSlice::iter_ptr(zsh_sys::paramvalarr(table, zsh_sys::SCANPM_WANTKEYS as c_int).cast());
+        let values = MetaSlice::iter_ptr(zsh_sys::paramvalarr(table, zsh_sys::SCANPM_WANTVALS as c_int).cast());
 
         let keys = keys.map(Some).chain(std::iter::repeat(None));
         let values = values.map(Some).chain(std::iter::repeat(None));
@@ -202,7 +202,7 @@ impl Variable {
 
     pub fn try_as_array(&mut self) -> Option<Vec<BString>> {
         if self.value.isarr != 0 {
-            let array = unsafe{ MetaArray::iter_ptr(zsh_sys::getarrvalue(&raw mut self.value) as _) };
+            let array = unsafe{ MetaSlice::iter_ptr(zsh_sys::getarrvalue(&raw mut self.value) as _) };
             Some(array.map(|x| x.unmetafy().into_owned()).collect())
         } else {
             None
@@ -407,9 +407,7 @@ impl VariableGSU for Vec<BString> {
 
     fn from_raw(_param: zsh_sys::Param, ptr: Self::Input) -> Self {
         unsafe{
-            let result = MetaArray::iter_ptr(ptr.cast()).map(|x| x.unmetafy().into_owned()).collect();
-            zsh_sys::freearray(ptr);
-            result
+            MetaArray::from_raw(ptr).into_iter().map(|x| x.unmetafy()).collect()
         }
     }
 

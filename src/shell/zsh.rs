@@ -27,7 +27,7 @@ pub mod bin_zle;
 pub mod parser;
 pub(super) use bindings::*;
 use variables::{Variable};
-pub use meta_string::{MetaStr, MetaString, array::MetaArray};
+pub use meta_string::{MetaStr, MetaString, array::{MetaArray, MetaSlice}};
 
 pub static JOB: LazyLock<c_int> = LazyLock::new(|| unsafe{ zsh_sys::initjob() });
 
