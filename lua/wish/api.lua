@@ -58,6 +58,7 @@ function wish.cmd(...)
         stdin = stdin,
         stdout = stdout,
         stderr = stderr,
+        is_finished = function(self) return proc:is_finished() end,
         wait = function(self) return proc:wait() end,
         kill = function(self, ...) return proc:kill(...) end,
         term = function(self) return proc:kill('SIGTERM') end,

@@ -50,9 +50,9 @@ return function(plugin_fn)
         state.plugin_keymap_layer = nil
 
         -- remove messages
-        for i = #state.messages, 1, -1 do
-            wish.remove_message(state.messages[i])
-            state.messages[i] = nil
+        for id in pairs(state.messages) do
+            wish.remove_message(id)
+            state.messages[id] = nil
         end
 
     end
@@ -110,9 +110,14 @@ return function(plugin_fn)
             set_message = function(opts)
                 local id = wish.set_message(opts)
                 if not opts.id then
-                    table.insert(state.messages, id)
+                    state.messages[id] = true
                 end
                 return id
+            end,
+
+            remove_message = function(id)
+                state.messages[id] = nil
+                return wish.remove_message(id)
             end,
 
             add_buf_highlight_namespace = function(...)
