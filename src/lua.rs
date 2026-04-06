@@ -177,13 +177,15 @@ fn shell_quote(_lua: &Lua, val: BString) -> LuaResult<BString> {
 
 async fn lua_try(lua: Lua, (func, catch, finally): (LuaFunction, Option<LuaFunction>, Option<LuaFunction>)) -> LuaResult<LuaMultiValue> {
     let mut result = func.call_async(()).await;
+    let mut error = None;
 
     if let Some(catch) = catch {
         result = match result {
             Ok(x) => Ok(x),
             Err(e) => {
                 let err = e.clone().into_lua(&lua).unwrap();
-                let catch_result: LuaResult<LuaValue> = catch.call_async(err).await;
+                let catch_result: LuaResult<LuaValue> = catch.call_async(err.clone()).await;
+                error = Some(err);
                 match catch_result {
                     Ok(_) => Ok(LuaMultiValue::new()),
                     Err(new_err) if new_err.to_string() == e.to_string() => Err(e),
@@ -195,7 +197,7 @@ async fn lua_try(lua: Lua, (func, catch, finally): (LuaFunction, Option<LuaFunct
 
 
     if let Some(finally) = finally {
-        let finally_result: LuaResult<()> = finally.call_async(()).await;
+        let finally_result: LuaResult<()> = finally.call_async(error).await;
         result = match (result, finally_result) {
             (x, Ok(_)) => x,
             (Ok(_), Err(e)) => Err(e),
