@@ -464,7 +464,14 @@ impl Ui {
     pub fn init_lua(&self) -> Result<()> {
         crate::lua::init_lua(self)?;
 
-        self.lua.load("package.path = '/home/qianli/Documents/wish/lua/?.lua;' .. package.path").exec()?;
+        self.lua.load(/*lua*/ r#"
+            local xdg_data = os.getenv('XDG_DATA_HOME')
+            local home = os.getenv('HOME')
+            local base = xdg_data or (home and home .. '/.local/share')
+            local wish_path = base and (base .. '/wish/lua/?.lua;') or ''
+            local p = (';' .. package.path .. ';'):gsub(';%./%?%.lua;', ''):gsub('^;', ''):gsub(';$', '')
+            package.path = wish_path .. p
+        "#).exec()?;
         self.lua.load("require('wish')").exec()?;
         Ok(())
     }
