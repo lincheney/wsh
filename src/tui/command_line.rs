@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use super::text::{HighlightedRange, Highlight};
-use bstr::BString;
+use bstr::{BString, BStr};
 use std::io::{Write};
 use crate::tui::{Drawer, Canvas};
 use crate::ui::buffer::Buffer;
@@ -17,7 +17,7 @@ const POSTDISPLAY_NS: usize = PREDISPLAY_NS - 1;
 pub struct ShellVars {
     predisplay: Option<BString>,
     postdisplay: Option<BString>,
-    prompt: BString,
+    prompt: Cow<'static, BStr>,
     prompt_size: (usize, usize),
 }
 
@@ -61,13 +61,16 @@ impl CommandLineState {
             let postdisplay = crate::shell::get_var(shell, meta_str!(c"POSTDISPLAY")).map(|mut v| v.as_bytes());
             let prompt = shell.get_prompt(None, true).map_or(Cow::Borrowed(FALLBACK_PROMPT), Cow::Owned);
             let prompt_size = shell.get_prompt_size(prompt.clone(), Some(width as _));
-            let prompt = crate::shell::remove_invisible_chars(prompt).into_owned();
+            let prompt = match crate::shell::remove_invisible_chars(prompt) {
+                Cow::Owned(prompt) => Cow::Owned(prompt.unmetafy()),
+                Cow::Borrowed(prompt) => prompt.unmetafy(),
+            };
             shell.end_zle_scope();
 
             ShellVars {
                 predisplay,
                 postdisplay,
-                prompt: prompt.as_bytes().into(),
+                prompt,
                 prompt_size,
             }
         }).await
