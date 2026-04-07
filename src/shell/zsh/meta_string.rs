@@ -37,10 +37,10 @@ const fn is_trivially_meta(string: &[u8]) -> bool {
 }
 
 pub fn unmetafy(bytes: &BStr) -> Cow<'_, BStr> {
-    if is_trivially_meta(bytes) {
-        Cow::Borrowed(bytes)
+    if bytes.contains(&super::Meta) {
+        Cow::Owned(MetaString{ inner: CString::new(bytes.to_owned()).unwrap() }.unmetafy())
     } else {
-        Cow::Owned(MetaString::from(bytes.to_owned()).unmetafy())
+        Cow::Borrowed(bytes)
     }
 }
 
@@ -108,7 +108,7 @@ impl From<Vec<u8>> for MetaString {
                 let ptr = val.as_mut_ptr().cast();
                 // since we have already allocated memory,
                 // this should be safe to use outside the main thread
-                let ret = zsh_sys::metafy(ptr, val.len() as _, zsh_sys::META_NOALLOC as _);
+                let ret = zsh_sys::metafy(ptr, old_len as _, zsh_sys::META_NOALLOC as _);
                 debug_assert_eq!(ret, ptr);
             }
         }
