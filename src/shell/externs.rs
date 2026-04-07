@@ -224,8 +224,19 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                 zsh_sys::adjustwinsize(0);
                 zsh::signals::sigwinch::fetch_term_size_from_zsh();
 
+                let first_drawn = state.first_drawn.load(Ordering::Relaxed);
+                crate::log_if_err::<_, anyhow::Error>(state.runtime.block_on(async {
+                    // sometimes zsh will trash zle without refreshing
+                    // redraw the ui
+                    if state.ui.zle_cmd_refresh().await? && first_drawn {
+                        // draw LATER
+                        state.ui.queue_draw();
+                    }
+                    Ok(())
+                }));
+
                 // this is the only thread we should ever run this func
-                if !state.first_drawn.load(Ordering::Relaxed) {
+                if !first_drawn {
                     crate::log_if_err::<_, anyhow::Error>(state.runtime.block_on(async {
                         if let Some(size) = zsh::signals::sigwinch::get_term_size() {
                             state.ui.handle_window_resize(size.0, size.1).await?;
