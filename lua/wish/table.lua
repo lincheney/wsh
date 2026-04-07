@@ -32,26 +32,6 @@ function M.deep_merge(tbl, ...)
     return tbl
 end
 
-function M.extend(tbl, other)
-    local ITER = require('wish/iter')
-    if type(other) == 'table' then
-        other = ITER(other)
-    end
-
-    for k, v in other do
-        if v == nil then
-            v = k
-            k = #tbl + 1
-        end
-
-        if type(k) == 'number' and k % 1 == 0 and k >= 1 and tbl[k] ~= nil then
-            k = #tbl + 1
-        end
-        tbl[k] = v
-    end
-    return tbl
-end
-
 function M.sort_by(tbl, key)
     local func = key
     if type(key) == 'function' then
@@ -61,6 +41,13 @@ function M.sort_by(tbl, key)
     end
     table.sort(tbl, func)
     return tbl
+end
+
+function M.append(first, second)
+    for i = 1, #second do
+        first[#first + 1] = second[i]
+    end
+    return first
 end
 
 return M

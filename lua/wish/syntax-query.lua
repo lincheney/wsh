@@ -57,7 +57,7 @@ local function apply_matcher(matcher, token, str)
     local values = {{matcher, token}}
     if matcher.contains then
         local matched = M.apply_seq(matcher.contains, token.nested, str, function(matches)
-            wish.table.extend(values, matches)
+            wish.table.append(values, matches)
         end)
         if not matched then
             return
@@ -85,7 +85,7 @@ local function apply_seq_at(seq, seq_index, tokens, str, token_index)
                     return index, non_greedy_values
                 end
 
-                non_greedy_values = wish.iter(values):chain(non_greedy_values):collect()
+                non_greedy_values = wish.table.append(wish.table.copy(values), non_greedy_values)
                 -- non greedy match when we wanted greedy, save for later in case the greedy match doesn't work
                 non_greedy = {index, non_greedy_values}
             end
@@ -114,7 +114,7 @@ local function apply_seq_at(seq, seq_index, tokens, str, token_index)
 
             local matches = apply_matcher(matcher, token, str)
             if matches then
-                wish.table.extend(values, matches)
+                wish.table.append(values, matches)
                 token_index = token_index + 1
             end
 
