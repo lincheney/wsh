@@ -116,13 +116,9 @@ fn parse_internal(
     let mut start = 0;
     let mut metafied_start = 0;
 
-    let mut push_token = |tokens: &mut Vec<Token>, tokstr: &[u8], kind: Option<TokenKind>, has_meta| {
-        let range = if has_meta {
-            let tokstr = super::meta_string::unmetafy(tokstr.into());
-            find_str(&tokstr, cmd, start).unwrap()
-        } else {
-            find_str(tokstr.into(), cmd, start).unwrap()
-        };
+    let mut push_token = |tokens: &mut Vec<Token>, tokstr: &[u8], kind: Option<TokenKind>| {
+        let tokstr = super::meta_string::unmetafy(tokstr.into());
+        let range = find_str(&tokstr, cmd, start).unwrap();
         start = range.end;
         tokens.push(Token{range: range.start + range_offset .. range.end + range_offset, kind, nested: None});
     };
@@ -167,8 +163,7 @@ fn parse_internal(
                 metafied_start += metafied.to_bytes()[metafied_start..].iter().position(|c| !super::zistype(*c as _, zsh_sys::IBLANK as _)).unwrap();
                 let range = metafied_start .. metalen - zsh_sys::inbufct as usize;
                 let bytes = &metafied.to_bytes()[range];
-                let has_meta = bytes.contains(&Meta);
-                push_token(&mut tokens, bytes, kind, has_meta);
+                push_token(&mut tokens, bytes, kind);
 
             } else {
                 // tokstr metafied and tokenized
@@ -178,7 +173,6 @@ fn parse_internal(
 
                 let mut slice_start = 0;
                 let mut meta = false;
-                let mut has_meta = false;
 
                 let mut nested = vec![];
                 for (i, c) in tokstr.iter().enumerate() {
@@ -186,18 +180,16 @@ fn parse_internal(
                         meta = false;
                     } else if *c == Meta {
                         meta = true;
-                        has_meta = true;
                     } else if *c >= token::Pound as _ && *c < token::Nularg as _ { // token
 
                         if i > slice_start {
-                            push_token(&mut nested, &tokstr[slice_start..i], None, has_meta);
+                            push_token(&mut nested, &tokstr[slice_start..i], None);
                         }
-                        has_meta = false;
                         slice_start = i + 1;
 
                         let kind: Option<TokenKind> = num::FromPrimitive::from_u8(*c).map(TokenKind::Token);
                         let c = [*ztokens.add((*c - token::Pound as u8) as usize) as u8];
-                        push_token(&mut nested, &c[..], kind, false);
+                        push_token(&mut nested, &c[..], kind);
                     }
                 }
 
@@ -209,11 +201,11 @@ fn parse_internal(
 
                 if slice_start == 0 {
                     // no inner tokens
-                    push_token(&mut tokens, tokstr, kind, has_meta);
+                    push_token(&mut tokens, tokstr, kind);
 
                 } else {
                     if tokstr.len() > slice_start {
-                        push_token(&mut nested, &tokstr[slice_start..], None, has_meta);
+                        push_token(&mut nested, &tokstr[slice_start..], None);
                     }
                     if options.custom {
                         let len = nested.len();
