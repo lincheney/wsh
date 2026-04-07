@@ -2,7 +2,7 @@ use anyhow::Result;
 use mlua::{prelude::*};
 use crate::ui::Ui;
 use bstr::{ByteSlice};
-use unicode_width::UnicodeWidthStr;
+use unicode_width::{UnicodeWidthStr, UnicodeWidthChar};
 
 fn len(_lua: &Lua, string: LuaString) -> LuaResult<usize> {
     Ok(string.as_bytes().grapheme_indices().count())
@@ -10,6 +10,19 @@ fn len(_lua: &Lua, string: LuaString) -> LuaResult<usize> {
 
 fn width(_lua: &Lua, string: String) -> LuaResult<usize> {
     Ok(string.width())
+}
+
+fn truncate(_lua: &Lua, (mut string, max_width): (String, usize)) -> LuaResult<String> {
+    let mut current_width = 0;
+    for (i, c) in string.chars().enumerate() {
+        let w = c.width().unwrap_or(0);
+        if current_width + w > max_width {
+            string.truncate(i);
+            break;
+        }
+        current_width += w;
+    }
+    Ok(string)
 }
 
 fn to_byte_pos(_lua: &Lua, (string, index): (mlua::String, usize)) -> LuaResult<(Option<usize>, Option<usize>)> {
@@ -40,6 +53,7 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     tbl.set("width", ui.lua.create_function(width)?)?;
     tbl.set("to_byte_pos", ui.lua.create_function(to_byte_pos)?)?;
     tbl.set("from_byte_pos", ui.lua.create_function(from_byte_pos)?)?;
+    tbl.set("truncate", ui.lua.create_function(truncate)?)?;
 
     Ok(())
 }
