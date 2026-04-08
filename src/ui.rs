@@ -706,6 +706,13 @@ impl Ui {
                 return self.accept_line().await;
             },
 
+            Event::Key(KeyEvent{ key: Key::Char('d'), modifiers: KeyModifiers::CONTROL }) => {
+                if self.get().borrow().buffer.get_contents().is_empty() {
+                    self.shell.exit(0).await?;
+                    self.shell.accept_line_trampoline(None).await?;
+                }
+            },
+
             Event::BracketedPaste(data) => {
                 self.trigger_paste_callbacks(&data).await;
             },
