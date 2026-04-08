@@ -4,7 +4,7 @@ use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::default::Default;
 use mlua::prelude::*;
 use anyhow::Result;
-use crate::keybind::parser::{Event, KeyEvent, Key, KeyModifiers, CONTROL_C_BYTE};
+use crate::keybind::parser::{Event, KeyEvent, Key, KeyModifiers};
 use crate::fork_lock::{ForkLock, RawForkLock, ForkLockReadGuard};
 use crate::print_lock::{PrintLock, PrintLockGuard};
 use nix::sys::termios;
@@ -35,6 +35,11 @@ enum KeybindOutput {
     Value(Result<bool>),
 }
 
+pub struct TermiosInputFlags {
+    pub intr: u8,
+    pub eof: u8,
+}
+
 pub struct UiInner {
     pub tui: crate::tui::Tui,
     pub cmdline: crate::tui::command_line::CommandLineState,
@@ -49,7 +54,8 @@ pub struct UiInner {
     pub stdout: std::io::Stdout,
     enhanced_keyboard: bool,
     pub size: (u32, u32),
-    pub intr: u8,
+
+    pub termios_input_flags: TermiosInputFlags,
 }
 
 pub struct UnlockedUi {
@@ -94,6 +100,9 @@ impl Ui {
         let lua_api = lua.create_table()?;
         lua.globals().set("wish", &lua_api)?;
 
+        let stdout = std::io::stdout();
+        let termios = termios::tcgetattr(&stdout)?;
+
         let mut ui = UiInner{
             dirty: true,
             tui: Default::default(),
@@ -102,10 +111,13 @@ impl Ui {
             status_bar: Default::default(),
             keybinds: Default::default(),
             keybind_layer_counter: Default::default(),
-            stdout: std::io::stdout(),
+            stdout,
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
             size: (1, 1),
-            intr: CONTROL_C_BYTE,
+            termios_input_flags: TermiosInputFlags {
+                intr: crate::keybind::parser::CONTROL_C_BYTE,
+                eof: termios.control_chars[termios::SpecialCharacterIndices::VEOF as usize],
+            },
         };
         ui.keybinds.push(Default::default());
 
@@ -262,7 +274,7 @@ impl Ui {
 
         let this = self.get();
         let mut ui = this.borrow_mut();
-        ui.intr = intr;
+        ui.termios_input_flags.intr = intr;
         ui.apply_intr(intr)?;
         Ok(())
     }
@@ -363,9 +375,7 @@ impl Ui {
         if print_lock.get_value() == 1 {
 
             {
-                let this = self.unlocked.read();
-                let ui = this.borrow();
-                ui.activate()?;
+                self.unlocked.read().borrow().activate()?;
             }
 
             // move down one line if not at start of line
@@ -602,6 +612,23 @@ impl Ui {
             None => (), // fallthrough
         }
 
+        if buf.len() == 1 {
+            // zsh doesn't run widgets if eof
+            let is_eof = {
+                let this = self.get();
+                let ui = this.borrow();
+                buf == &[ui.termios_input_flags.eof] && ui.buffer.get_contents().is_empty()
+            };
+            if is_eof {
+                if let Err(e) = self.shell.exit(0).await {
+                    return Some(KeybindOutput::Value(Err(e)));
+                }
+                // this should error as we exit
+                let _ = self.shell.accept_line_trampoline(None).await;
+                return None;
+            }
+        }
+
         let mut lastchar = [0; 4];
         let len = buf.len().min(lastchar.len());
         lastchar[..len].copy_from_slice(&buf[..len]);
@@ -704,13 +731,6 @@ impl Ui {
 
             Event::Key(KeyEvent{ key: Key::Enter, modifiers }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
                 return self.accept_line().await;
-            },
-
-            Event::Key(KeyEvent{ key: Key::Char('d'), modifiers: KeyModifiers::CONTROL }) => {
-                if self.get().borrow().buffer.get_contents().is_empty() {
-                    self.shell.exit(0).await?;
-                    self.shell.accept_line_trampoline(None).await?;
-                }
             },
 
             Event::BracketedPaste(data) => {
@@ -836,7 +856,7 @@ impl UiInner {
         let mut attrs = termios::tcgetattr(&self.stdout)?;
         attrs.output_flags.insert(termios::OutputFlags::OPOST | termios::OutputFlags::ONLCR);
         attrs.local_flags.insert(termios::LocalFlags::ISIG);
-        attrs.control_chars[termios::SpecialCharacterIndices::VINTR as usize] = self.intr;
+        attrs.control_chars[termios::SpecialCharacterIndices::VINTR as usize] = self.termios_input_flags.intr;
         nix::sys::termios::tcsetattr(&self.stdout, termios::SetArg::TCSADRAIN, &attrs)?;
 
         if self.enhanced_keyboard {
@@ -872,7 +892,7 @@ impl UiInner {
             // queue!(self.stdout, event::PopKeyboardEnhancementFlags)?;
         }
 
-        self.apply_intr(CONTROL_C_BYTE)?; // control c
+        self.apply_intr(crate::keybind::parser::CONTROL_C_BYTE)?; // control c
 
         execute!(
             self.stdout,
