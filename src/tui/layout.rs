@@ -284,6 +284,8 @@ enum NodeRenderer<'a, I> {
     Widget {
         renderer: TextRenderer<'a>,
         widget: &'a Widget,
+        tmp: bool,
+        pos_recorded: bool,
     },
 }
 
@@ -339,7 +341,12 @@ impl<'a> NodeRenderer<'a, std::slice::Iter<'a, usize>> {
                     )),
                     widget.cursor_space_hl.iter(),
                 );
-                NodeRenderer::Widget{renderer, widget}
+                NodeRenderer::Widget {
+                    renderer,
+                    widget,
+                    tmp,
+                    pos_recorded: false,
+                }
             },
         }
     }
@@ -423,7 +430,16 @@ impl<'a> Renderer for NodeRenderer<'a, std::slice::Iter<'a, usize>> {
                 }
                 Ok(!all_finished)
             },
-            NodeRenderer::Widget{renderer, widget} => {
+            NodeRenderer::Widget{ renderer, widget, tmp, pos_recorded } => {
+                if !*tmp && !*pos_recorded {
+                    let mut pos = drawer.get_pos();
+                    if newline {
+                        pos.1 += 1;
+                        pos.0 = 0;
+                    }
+                    widget.draw_pos.set(Some(pos));
+                    *pos_recorded = true;
+                }
                 widget.ansi.render(drawer)?;
                 renderer.draw_one_line(drawer, newline, pad, callback)
             },

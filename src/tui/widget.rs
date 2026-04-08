@@ -107,6 +107,7 @@ pub struct Widget {
     pub(super) ansi: ansi::Parser,
     pub ansi_show_cursor: bool,
     pub cursor_space_hl: Option<super::text::HighlightedRange<()>>,
+    pub draw_pos: std::cell::Cell<Option<(u16, u16)>>,
 }
 
 impl Widget {
