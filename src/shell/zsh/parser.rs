@@ -134,6 +134,7 @@ fn parse_internal(
         let old_noaliases = zsh_sys::noaliases;
         zsh_sys::noaliases = 1;
         zsh_sys::incmdpos = 1;
+        zsh_sys::errflag = 0;
 
         let old_lexflags = zsh_sys::lexflags;
         let mut new_lexflags = zsh_sys::LEXFLAGS_ACTIVE | zsh_sys::LEXFLAGS_ZLE;
@@ -222,7 +223,7 @@ fn parse_internal(
 
             }
 
-            if zsh_sys::tok == zsh_sys::lextok_LEXERR || (zsh_sys::errflag & zsh_sys::errflag_bits_ERRFLAG_INT as i32) > 0 {
+            if zsh_sys::tok == zsh_sys::lextok_LEXERR {
                 complete = false;
                 break
             }
@@ -251,7 +252,7 @@ fn parse_internal(
             if !matches!(last.kind, Some(TokenKind::Comment)) {
                 complete = false;
             }
-            last.range.end -= dummy.len();
+            last.range.end = last.range.end.min(cmd.len() - dummy.len());
             if last.range.is_empty() {
                 tokens.pop();
             } else {
