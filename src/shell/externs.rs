@@ -219,7 +219,10 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                 zsh::selectkeymap(keymap.as_mut_ptr().cast(), 1);
                 zsh::initundo();
                 zsh::selectlocalmap(null_mut());
+                // need to do this all the time because zsh keeps resetting it
+                crate::log_if_err(zsh::signals::sigint::install_signal_handler());
                 zsh_sys::zleactive = 1;
+                zsh_sys::errflag = 0;
                 // window size may have changed since we last ran
                 zsh_sys::adjustwinsize(0);
                 zsh::signals::sigwinch::fetch_term_size_from_zsh();
@@ -254,6 +257,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                 }
 
                 let result = tokio::task::block_in_place(|| state.shell_loop());
+                zsh_sys::errflag = 0;
 
                 // zsh will reset the tty settings to its saved values
                 // but it may have saved it at a bad time!

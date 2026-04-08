@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Mutex;
 use tokio::io::AsyncReadExt;
 pub mod sigwinch;
+pub mod sigint;
 
 static ORIGINAL_SIGACTIONS: Mutex<Vec<(signal::Signal, signal::SigAction)>> = Mutex::new(Vec::new());
 
@@ -74,6 +75,7 @@ pub fn invoke_signal_handler(arg: Option<&[u8]>) -> c_int {
     match signal.try_into() {
         Ok(signal::Signal::SIGCHLD) => super::process::sighandler(),
         Ok(signal::Signal::SIGWINCH) => sigwinch::sighandler(),
+        Ok(signal::Signal::SIGINT) => sigint::sighandler(),
         _ => 1, // unknown
     }
 }
@@ -86,14 +88,22 @@ fn resize_array<T: Copy + Default>(dst: &mut *mut T, old_len: usize, new_len: us
     *dst = Box::into_raw(new.into_boxed_slice()).cast();
 }
 
-pub(super) fn hook_signal(signal: signal::Signal) -> Result<()> {
+pub(super) fn install_signal_handler(signal: signal::Signal, save_original: bool) -> Result<()> {
     unsafe {
         // set the sighandler
         let handler = signal::SigHandler::Handler(sighandler);
         let action = signal::SigAction::new(handler, signal::SaFlags::empty(), signal::SigSet::empty());
         let old_action = signal::sigaction(signal, &action)?;
-        ORIGINAL_SIGACTIONS.lock().unwrap().push((signal, old_action));
+        if save_original {
+            ORIGINAL_SIGACTIONS.lock().unwrap().push((signal, old_action));
+        }
+    }
+    Ok(())
+}
 
+pub(super) fn hook_signal(signal: signal::Signal) -> Result<()> {
+    install_signal_handler(signal, true)?;
+    unsafe {
         // now set the trap
         let signal = convert_to_custom_signal(signal as _);
         let script: super::MetaString = format!("\\builtin wsh .invoke-signal-handler {signal}").into();
@@ -146,6 +156,7 @@ pub fn init(ui: &crate::ui::Ui) -> Result<()> {
 
     super::process::init(ui)?;
     sigwinch::init()?;
+    sigint::init()?;
 
     Ok(())
 }
@@ -158,4 +169,5 @@ pub fn cleanup() {
 
     super::process::cleanup();
     sigwinch::cleanup();
+    sigint::cleanup();
 }

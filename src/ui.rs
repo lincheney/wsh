@@ -254,6 +254,24 @@ impl Ui {
         Ok(true)
     }
 
+    pub async fn handle_interrupt(&self) -> Result<bool> {
+        // sigint
+        // cancel the current command line?
+
+        self.insert_or_set_buffer(false, b"", None).await;
+        if self.shell.accept_line_trampoline(Some("".into())).await.is_err() {
+            return Ok(false)
+        }
+        {
+            let this = &*self.unlocked.read();
+            let mut ui = this.borrow_mut();
+            ui.reset();
+        }
+        self.trigger_buffer_change_callbacks().await;
+        self.start_cmd(Some(&"".into())).await?;
+        Ok(true)
+    }
+
     fn pre_accept_line<'a>(&'a self, lock: &mut PrintLockGuard<'a>) -> Result<()> {
         {
             let this = &*self.unlocked.read();
@@ -797,6 +815,8 @@ impl UiInner {
         // onlcr in case bg processes are outputting things
         let mut attrs = termios::tcgetattr(&self.stdout)?;
         attrs.output_flags.insert(termios::OutputFlags::OPOST | termios::OutputFlags::ONLCR);
+        attrs.local_flags.insert(termios::LocalFlags::ISIG);
+        attrs.control_chars[termios::SpecialCharacterIndices::VINTR as usize] = b'x';
         nix::sys::termios::tcsetattr(&self.stdout, termios::SetArg::TCSADRAIN, &attrs)?;
 
         if self.enhanced_keyboard {

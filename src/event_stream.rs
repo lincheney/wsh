@@ -14,6 +14,7 @@ enum Message {
     Exit(i32),
     Draw,
     WindowResize(u32, u32),
+    Interrupt,
 }
 
 #[derive(Clone)]
@@ -121,12 +122,12 @@ impl EventStream {
             }
         });
 
+        // sigwinch
         let queue_sender = self.queue_sender.clone();
         let mut pausable = self.pausable.clone();
         crate::spawn_and_log::<_, _, anyhow::Error>(async move {
             let Some(mut window_size) = crate::shell::signals::sigwinch::get_subscriber()
                 else { anyhow::bail!("cannot subscribe to window resize events"); };
-
             loop {
                 match pausable.run(window_size.changed()).await {
                     None => (),
@@ -137,6 +138,25 @@ impl EventStream {
                     },
                 }
             }
+        });
+
+        // sigint
+        let queue_sender = self.queue_sender.clone();
+        let mut pausable = self.pausable.clone();
+        crate::spawn_and_log::<_, _, anyhow::Error>(async move {
+            let Some(errflag) = crate::shell::signals::sigint::get_subscriber()
+                else {
+                    anyhow::bail!("cannot subscribe to sigint events");
+                };
+            while let Some(errflag) = errflag.upgrade() {
+                match pausable.run(errflag.notified()).await {
+                    None => (),
+                    Some(()) => {
+                        let _ = queue_sender.send(Message::Interrupt);
+                    },
+                }
+            }
+            Ok(())
         });
 
         // process events
@@ -151,6 +171,11 @@ impl EventStream {
                 },
                 Some(Message::WindowResize(width, height)) => {
                     if !ui.handle_window_resize(width, height).await? {
+                        return Ok(0)
+                    }
+                },
+                Some(Message::Interrupt) => {
+                    if !ui.handle_interrupt().await? {
                         return Ok(0)
                     }
                 },
