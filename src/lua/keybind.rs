@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::default::Default;
 use anyhow::Result;
 use mlua::{prelude::*, Function};
-use crate::keybind::parser::{Key, KeyModifiers};
+use crate::keybind::parser::{Key, KeyEvent, KeyModifiers};
 use crate::ui::{Ui};
 
 #[derive(Default)]
@@ -14,62 +14,7 @@ pub struct KeybindMapping {
 
 
 async fn set_keymap(ui: Ui, _lua: Lua, (key, callback, layer): (String, Function, Option<usize>)) -> Result<()> {
-    let mut modifiers = KeyModifiers::empty();
-
-    let original = &key;
-    let mut key = key.as_str();
-    let special = key.starts_with('<') && key.ends_with('>');
-
-    if special {
-        key = &key[1..key.len()-1];
-
-        if key.contains('-') {
-            // this has modifiers
-            for modifier in key.rsplit('-').skip(1) {
-                match modifier {
-                    "c" => modifiers |= KeyModifiers::CONTROL,
-                    "s" => modifiers |= KeyModifiers::SHIFT,
-                    "a" => modifiers |= KeyModifiers::ALT,
-                    _ => return Err(anyhow::anyhow!("invalid keybind: {:?}", original)),
-                }
-            }
-            key = key.rsplit('-').next().unwrap();
-        }
-    }
-
-    let key = match key {
-        "bs" if special => Key::Backspace,
-        "cr" if special => Key::Enter,
-        "left" if special => Key::Left,
-        "right" if special => Key::Right,
-        "up" if special => Key::Up,
-        "down" if special => Key::Down,
-        "home" if special => Key::Home,
-        "end" if special => Key::End,
-        "pageup" if special => Key::Pageup,
-        "pagedown" if special => Key::Pagedown,
-        "tab" if special => Key::Char('\t'),
-        // "backtab" if special => Key::BackTab,
-        "delete" if special => Key::Delete,
-        "insert" if special => Key::Insert,
-        "esc" if special => Key::Escape,
-        // "capslock" if special => Key::CapsLock,
-        // "scrolllock" if special => Key::ScrollLock,
-        // "numlock" if special => Key::NumLock,
-        // "printscreen" if special => Key::PrintScreen,
-        // "pause" if special => Key::Pause,
-        // "menu" if special => Key::Menu,
-
-        "lt" if special => Key::Char('<'),
-        key if key.len() == 1 && &key[0..1] != "<" && key.is_ascii() => Key::Char(key.chars().next().unwrap()),
-        key if special && key.starts_with('f') && key[1..].parse::<u8>().is_ok() => {
-            Key::Function(key[1..].parse().unwrap())
-        },
-
-        _ => {
-            return Err(anyhow::anyhow!("invalid keybind: {:?}", original))
-        },
-    };
+    let KeyEvent { key, modifiers } = KeyEvent::parse_from_label(&key)?;
 
     let ui = ui.get();
     let mut ui = ui.borrow_mut();

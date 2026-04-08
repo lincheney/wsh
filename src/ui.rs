@@ -49,6 +49,7 @@ pub struct UiInner {
     pub stdout: std::io::Stdout,
     enhanced_keyboard: bool,
     pub size: (u32, u32),
+    pub intr: u8,
 }
 
 pub struct UnlockedUi {
@@ -104,6 +105,7 @@ impl Ui {
             stdout: std::io::stdout(),
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
             size: (1, 1),
+            intr: 3, // control c
         };
         ui.keybinds.push(Default::default());
 
@@ -252,6 +254,17 @@ impl Ui {
         self.queue_draw();
         self.trigger_window_resize_callbacks(width, height).await;
         Ok(true)
+    }
+
+    pub async fn set_vintr(&self, intr: u8) -> Result<()> {
+        let _fg_lock = self.has_foreground_process.lock().await;
+        let _print_lock = self.print_lock.lock_exclusive().await;
+
+        let this = self.get();
+        let mut ui = this.borrow_mut();
+        ui.intr = intr;
+        ui.apply_intr(intr)?;
+        Ok(())
     }
 
     pub async fn handle_interrupt(&self) -> Result<bool> {
@@ -816,7 +829,7 @@ impl UiInner {
         let mut attrs = termios::tcgetattr(&self.stdout)?;
         attrs.output_flags.insert(termios::OutputFlags::OPOST | termios::OutputFlags::ONLCR);
         attrs.local_flags.insert(termios::LocalFlags::ISIG);
-        attrs.control_chars[termios::SpecialCharacterIndices::VINTR as usize] = b'x';
+        attrs.control_chars[termios::SpecialCharacterIndices::VINTR as usize] = self.intr;
         nix::sys::termios::tcsetattr(&self.stdout, termios::SetArg::TCSADRAIN, &attrs)?;
 
         if self.enhanced_keyboard {
@@ -840,10 +853,19 @@ impl UiInner {
         Ok(())
     }
 
+    pub fn apply_intr(&self, intr: u8) -> Result<()> {
+        let mut attrs = termios::tcgetattr(&self.stdout)?;
+        attrs.control_chars[termios::SpecialCharacterIndices::VINTR as usize] = intr;
+        nix::sys::termios::tcsetattr(&self.stdout, termios::SetArg::TCSADRAIN, &attrs)?;
+        Ok(())
+    }
+
     pub fn deactivate(&mut self) -> Result<()> {
         if self.enhanced_keyboard {
             // queue!(self.stdout, event::PopKeyboardEnhancementFlags)?;
         }
+
+        self.apply_intr(3)?; // control c
 
         execute!(
             self.stdout,

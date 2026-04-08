@@ -160,6 +160,13 @@ async fn print(ui: Ui, _lua: Lua, value: BString) -> Result<()> {
     Ok(())
 }
 
+async fn set_interrupt_key(ui: Ui, _lua: Lua, label: String) -> Result<()> {
+    let key_event = crate::keybind::parser::KeyEvent::parse_from_label(&label)?;
+    let byte = key_event.try_into_byte()?;
+    ui.set_vintr(byte).await?;
+    Ok(())
+}
+
 fn time(_lua: &Lua, (): ()) -> LuaResult<f64> {
     Ok(SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64())
 }
@@ -250,6 +257,7 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_fn("get_size", get_size)?;
     ui.set_lua_async_fn("call_hook_func", call_hook_func)?;
     ui.set_lua_async_fn("print", print)?;
+    ui.set_lua_async_fn("set_interrupt_key", set_interrupt_key)?;
     ui.get_lua_api()?.set("sleep", ui.lua.create_async_function(sleep)?)?;
     ui.get_lua_api()?.set("time", ui.lua.create_function(time)?)?;
     ui.get_lua_api()?.set("shell_quote", ui.lua.create_function(shell_quote)?)?;
