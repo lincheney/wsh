@@ -2,6 +2,8 @@ use std::ops::Range;
 use bstr::{BString};
 use std::collections::VecDeque;
 
+pub const CONTROL_C_BYTE: u8 = KeyEvent{ key: Key::Char('c'), modifiers: KeyModifiers::CONTROL }.const_into_byte().unwrap();
+
 #[derive(Debug)]
 pub enum Event {
     Key(KeyEvent),
@@ -114,30 +116,36 @@ impl KeyEvent {
         Ok(KeyEvent { key, modifiers })
     }
 
-    pub fn try_into_byte(&self) -> anyhow::Result<u8> {
-        match (self.key, self.modifiers) {
-            (Key::Char(c), KeyModifiers::NONE) if c.is_ascii() => Ok(c as u8),
-            (Key::Char(c), KeyModifiers::CONTROL) if c.is_ascii() => {
-                let c = c.to_ascii_lowercase();
-                if ('a'..='z').contains(&c) {
-                    Ok(c as u8 - b'a' + 1)
-                } else {
-                    match c {
-                        '[' => Ok(0x1b),
-                        '\\' => Ok(0x1c),
-                        ']' => Ok(0x1d),
-                        '^' => Ok(0x1e),
-                        '_' => Ok(0x1f),
-                        '?' => Ok(0x7f),
-                        _ => Err(anyhow::anyhow!("unsupported control character: {:?}", c)),
+    pub const fn const_into_byte(&self) -> Option<u8> {
+        Some(
+            match (self.key, self.modifiers) {
+                (Key::Char(c), KeyModifiers::NONE) if c.is_ascii() => c as u8,
+                (Key::Char(c), KeyModifiers::CONTROL) if c.is_ascii() => {
+                    let c = c.to_ascii_lowercase();
+                    if matches!(c, 'a'..='z') {
+                        c as u8 - b'a' + 1
+                    } else {
+                        match c {
+                            '[' => 0x1b,
+                            '\\' => 0x1c,
+                            ']' => 0x1d,
+                            '^' => 0x1e,
+                            '_' => 0x1f,
+                            '?' => 0x7f,
+                            _ => return None,
+                        }
                     }
                 }
+                (Key::Enter, KeyModifiers::NONE) => b'\r',
+                (Key::Backspace, KeyModifiers::NONE) => 0x7f,
+                (Key::Escape, KeyModifiers::NONE) => 0x1b,
+                _ => return None,
             }
-            (Key::Enter, KeyModifiers::NONE) => Ok(b'\r'),
-            (Key::Backspace, KeyModifiers::NONE) => Ok(0x7f),
-            (Key::Escape, KeyModifiers::NONE) => Ok(0x1b),
-            _ => Err(anyhow::anyhow!("key cannot be represented as a single byte")),
-        }
+        )
+    }
+
+    pub fn try_into_byte(&self) -> anyhow::Result<u8> {
+        self.const_into_byte().ok_or_else(|| anyhow::anyhow!("{self:?} cannot be represented using one byte"))
     }
 }
 

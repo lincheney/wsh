@@ -4,7 +4,7 @@ use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::default::Default;
 use mlua::prelude::*;
 use anyhow::Result;
-use crate::keybind::parser::{Event, KeyEvent, Key, KeyModifiers};
+use crate::keybind::parser::{Event, KeyEvent, Key, KeyModifiers, CONTROL_C_BYTE};
 use crate::fork_lock::{ForkLock, RawForkLock, ForkLockReadGuard};
 use crate::print_lock::{PrintLock, PrintLockGuard};
 use nix::sys::termios;
@@ -105,7 +105,7 @@ impl Ui {
             stdout: std::io::stdout(),
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
             size: (1, 1),
-            intr: 3, // control c
+            intr: CONTROL_C_BYTE,
         };
         ui.keybinds.push(Default::default());
 
@@ -865,7 +865,7 @@ impl UiInner {
             // queue!(self.stdout, event::PopKeyboardEnhancementFlags)?;
         }
 
-        self.apply_intr(3)?; // control c
+        self.apply_intr(CONTROL_C_BYTE)?; // control c
 
         execute!(
             self.stdout,
