@@ -261,11 +261,15 @@ impl Tui {
                 self.nodes.render(&mut drawer, false)?;
             }
 
-            // clear everything from here to the start of status bar
-            for _ in drawer.get_pos().1 + 1 .. status_bar_y {
-                drawer.goto_newline(None)?;
+            if new_status_bar_height > 0 {
+                // clear everything from here to the start of status bar
+                for _ in drawer.get_pos().1 + 1 .. status_bar_y {
+                    drawer.goto_newline(None)?;
+                }
+                drawer.clear_to_end_of_line(None)?;
+            } else {
+                drawer.clear_to_end_of_screen(None)?;
             }
-            drawer.clear_to_end_of_line(None)?;
         }
 
         // redraw status bar
@@ -275,7 +279,7 @@ impl Tui {
             && new_height >= new_cmdline_height + new_status_bar_height
             && drawer.try_move_to((0, status_bar_y))
         {
-                status_bar.render(&mut drawer)?;
+            status_bar.render(&mut drawer)?;
         }
 
         // go back to the cursor
