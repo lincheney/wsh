@@ -171,6 +171,7 @@ impl Tui {
         &mut self,
         writer: &mut W,
         (width, height): (u32, u32),
+        initial_cursor_y: u32,
         mut cmdline: command_line::CommandLine<'_>,
         status_bar: &mut status_bar::StatusBar,
         clear: bool,
@@ -186,11 +187,6 @@ impl Tui {
                 Clear(ClearType::FromCursorDown),
             )?;
         }
-
-        let height = height.min(self.max_height);
-        // resize buffers
-        let area = Rect{x: 0, y: 0, width: width as _, height: height as _};
-        self.buffer.resize(area);
 
         // quit early if nothing is dirty
         if !clear && !cmdline.is_dirty() && !self.dirty && !status_bar.dirty {
@@ -211,47 +207,43 @@ impl Tui {
 
         // refresh the widgets etc
         if cmdline.is_dirty() {
-            cmdline.refresh(area);
+            cmdline.refresh(width as _);
         }
         if status_bar.dirty {
-            status_bar.refresh(area);
+            status_bar.refresh(width as _);
         }
         if self.dirty {
+            // the nodes are the main part of the ui that can be resized to fit on the screen
+            // even if there is more space we could get by scrolling, we should avoid it because it is jarring
+            // so this is the only one that cares about the height
+            let max_height = self.max_height.saturating_sub(status_bar.get_height() as u32 + cmdline.get_height() as u32);
             self.nodes.refresh(
-                area.width,
-                Some((height as u16).saturating_sub(status_bar.get_height() + cmdline.get_height() as u16)),
+                width as _,
+                Some(max_height as _),
             );
         }
 
         // new heights
         let new_cmdline_height = cmdline.get_height();
         let new_widgets_height = self.nodes.get_height() as usize;
+        ::log::debug!("DEBUG(bushes)\t{}\t= {:?}", stringify!(new_widgets_height), new_widgets_height);
         let new_status_bar_height = status_bar.get_height() as usize;
-        let new_height = new_cmdline_height + new_widgets_height + new_status_bar_height;
+        let new_height = (new_cmdline_height + new_widgets_height + new_status_bar_height).min(self.max_height as _);
+
+        // resize buffers
+        let area = Rect{x: 0, y: 0, width: width as _, height: height as _};
+        self.buffer.resize(area);
 
         let mut drawer = drawer::Drawer::new(&mut self.buffer, writer, cmdline.cursor_coord);
         queue!(drawer.writer, crossterm::terminal::BeginSynchronizedUpdate)?;
         drawer.reset_colours()?;
 
-        if (self.prev_status_bar_position < new_cmdline_height + new_widgets_height) || old_status_bar_height > new_status_bar_height {
-            if !clear && old_status_bar_height > 0 {
-                // we don't know where exactly the status bar is,
-                // but it possibly overlaps with the new drawing area
-                // so we clear it
-                drawer.try_move_to((0, self.prev_status_bar_position as _));
-                drawer.clear_to_end_of_screen(None)?;
-                // it now needs to be redrawn
-                status_bar.dirty = true;
-            }
-            self.prev_status_bar_position = self.prev_status_bar_position.max(new_cmdline_height + new_widgets_height);
-        }
-
         // allocate more height
         if new_height > old_height {
             drawer.move_to((0, 0));
             drawer.allocate_height(new_height as u16 - 1)?;
-            status_bar.dirty = true;
         }
+        let initial_cursor_y = initial_cursor_y.saturating_sub(new_height.saturating_sub(new_height) as _);
 
         // move back to top of drawing area
         drawer.move_to((0, 0));
@@ -259,53 +251,32 @@ impl Tui {
 
         // redraw the widgets
         // if cmdline height has changed then the widgets get repositioned
-        if (clear || self.dirty || old_cmdline_height != new_cmdline_height) && new_widgets_height > 0 {
+        if (clear || self.dirty) && new_widgets_height > 0 {
             // go to next line after end of buffer
             if drawer.try_move_to(cmdline.draw_end_pos) {
                 drawer.goto_newline(None)?;
                 self.nodes.render(&mut drawer, false)?;
+
+                // clear everything from here to the start of status bar
+                let y = drawer.get_pos().1 + 1;
+                for _ in initial_cursor_y + y as u32 .. area.height as u32 - new_status_bar_height as u32 {
+                    drawer.goto_newline(None)?;
+                }
+                drawer.clear_to_end_of_line(None)?;
+
             }
         }
 
-        // the prompt/buffer/widgets used to be bigger, so clear the extra bits
-        let trailing_height = (old_cmdline_height + old_widgets_height).saturating_sub(new_cmdline_height + new_widgets_height);
-        if trailing_height > 0
-            && drawer.try_move_to((area.width, (new_cmdline_height + new_widgets_height - 1) as _))
-        {
-            for _ in 0 .. trailing_height {
-                drawer.goto_newline(None)?;
+        if new_status_bar_height > 0 && (clear || status_bar.dirty) && status_bar.is_visible() {
+            if new_height >= new_status_bar_height as _ {
+                drawer.set_pos((0, (new_height - new_status_bar_height) as u16));
+                status_bar.render(&mut drawer)?;
             }
-            drawer.clear_to_end_of_line(None)?;
         }
 
         // go back to the cursor
         if drawer.validate_pos(cmdline.cursor_coord) {
             drawer.move_to_pos(cmdline.cursor_coord)?;
-
-            if new_status_bar_height > 0 && (clear || status_bar.dirty) && status_bar.is_visible() {
-                // save cursor position so we can go back to it
-                queue!(drawer.writer, cursor::SavePosition)?;
-
-                // redraw status bar
-                // go to the bottom of the screen
-                queue!(
-                    drawer.writer,
-                    // i dont actually know how far down the bottom of the screen is
-                    // so just go down by a bigger than amount than it could possibly be
-                    MoveDown(area.height * 10),
-                    MoveUp(new_status_bar_height as u16 - 1),
-                    cursor::MoveToColumn(0),
-                )?;
-                if area.height >= new_status_bar_height as _ {
-                    drawer.set_pos((0, area.height - new_status_bar_height as u16));
-                    status_bar.render(&mut drawer)?;
-                }
-                // clear everything else below
-                // drawer.clear_to_end_of_screen(None)?;
-
-                // go back to cursor
-                queue!(drawer.writer, cursor::RestorePosition)?;
-            }
         }
 
         drawer.reset_colours()?;

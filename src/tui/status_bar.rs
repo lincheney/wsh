@@ -1,7 +1,6 @@
 use crate::tui::text::{TextRenderer, Renderer};
 use crate::tui::{Drawer, Canvas};
 use std::io::{Write};
-use ratatui::layout::Rect;
 
 #[derive(Default)]
 pub struct StatusBar {
@@ -17,9 +16,9 @@ impl StatusBar {
         self.dirty = true;
     }
 
-    pub fn refresh(&mut self, area: Rect) {
+    pub fn refresh(&mut self, width: u16) {
         if let Some(widget) = &mut self.inner {
-            widget.line_count = widget.get_height_for_width(area.width, None);
+            widget.line_count = widget.get_height_for_width(width, None);
         }
     }
 

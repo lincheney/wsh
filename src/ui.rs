@@ -161,19 +161,22 @@ impl Ui {
         let mut size = None;
         let mut shell_vars = None;
         loop {
+            let cursor_pos_fut = {
+                let events = self.events.read();
+                events.get_cursor_position()
+            };
+            let cursor_pos = cursor_pos_fut.await.unwrap_or((0, 0));
             let size = {
                 let this = self.unlocked.read();
                 let ui = &mut *this.borrow_mut();
 
                 if size == Some(ui.size) {
-                    return ui.draw(shell_vars);
+                    return ui.draw(shell_vars, cursor_pos.1 as u32);
                 }
                 // if the size has changed, recompute everything
 
                 size = Some(ui.size);
                 let (width, height) = ui.size;
-                // take up at most 2/3 of the screen
-                let height = (height * 2 / 3).max(1);
                 // redraw all if dimensions have changed
                 if height != ui.tui.max_height || width != ui.tui.get_size().0 as _ {
                     ui.tui.max_height = height;
@@ -186,7 +189,7 @@ impl Ui {
 
                 if !(ui.dirty || ui.cmdline.is_dirty()) {
                     // don't need the shell vars, draw immediately
-                    return ui.draw(None)
+                    return ui.draw(None, cursor_pos.1 as u32)
                 }
                 ui.size
             };
@@ -860,7 +863,7 @@ impl UiInner {
     }
 
 
-    fn draw(&mut self, shell_vars: Option<crate::tui::command_line::ShellVars>) -> Result<()> {
+    fn draw(&mut self, shell_vars: Option<crate::tui::command_line::ShellVars>, initial_cursor_y: u32) -> Result<()> {
         if let Some(shell_vars) = shell_vars {
             self.cmdline.shell_vars = shell_vars;
         }
@@ -868,6 +871,7 @@ impl UiInner {
         self.tui.draw(
             &mut self.stdout,
             self.size,
+            initial_cursor_y,
             cmdline,
             &mut self.status_bar,
             self.dirty,

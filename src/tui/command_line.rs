@@ -5,7 +5,6 @@ use std::io::{Write};
 use crate::tui::{Drawer, Canvas};
 use crate::ui::buffer::Buffer;
 use crate::shell::{ShellClient, MetaStr};
-use ratatui::layout::Rect;
 use crate::meta_str;
 
 const FALLBACK_PROMPT: &MetaStr = crate::meta_str!(c">>> ");
@@ -132,7 +131,7 @@ impl CommandLine<'_> {
         text
     }
 
-    pub fn refresh(&mut self, area: Rect) {
+    pub fn refresh(&mut self, width: usize) {
         if self.predisplay_dirty {
             self.refresh_display_string(self.shell_vars.predisplay.clone(), PREDISPLAY_NS, 0);
         }
@@ -142,7 +141,7 @@ impl CommandLine<'_> {
 
         if self.buffer.dirty || self.prompt_size != self.shell_vars.prompt_size {
             self.prompt_size = self.shell_vars.prompt_size;
-            let (width, height) = self.buffer.get_size(area.width as _, self.prompt_size.0 as _);
+            let (width, height) = self.buffer.get_size(width, self.prompt_size.0 as _);
             // there is 1 overlapping line
             self.draw_end_pos = (width as _, (height + self.prompt_size.1).saturating_sub(2) as _);
         }
