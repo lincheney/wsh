@@ -175,7 +175,15 @@ fn shell_quote(_lua: &Lua, val: BString) -> LuaResult<BString> {
     Ok(quoted.unmetafy())
 }
 
-async fn lua_try(lua: Lua, (func, catch, finally): (LuaFunction, Option<LuaFunction>, Option<LuaFunction>)) -> LuaResult<LuaMultiValue> {
+async fn lua_try(lua: Lua, args: LuaTable) -> LuaResult<LuaMultiValue> {
+    let func: LuaFunction = args.get("try")?;
+    let catch: Option<LuaFunction> = args.get("catch")?;
+    let finally: Option<LuaFunction> = if catch.is_none() {
+        Some(args.get("finally")?)
+    } else {
+        args.get("finally")?
+    };
+
     let mut result = func.call_async(()).await;
     let mut error = None;
 
@@ -205,7 +213,6 @@ async fn lua_try(lua: Lua, (func, catch, finally): (LuaFunction, Option<LuaFunct
         };
     }
     result
-
 }
 
 pub async fn __laggy(_ui: Ui, lua: Lua, (): ()) -> Result<()> {

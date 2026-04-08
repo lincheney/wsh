@@ -148,12 +148,22 @@ return function(plugin_fn)
 
         }, { __index = wish })
 
-        local ok, err = pcall(plugin_fn, proxy, config)
-        if not ok then
-            wish.log.error("[plugin] error during enable: " .. tostring(err))
-            plugin_obj.disable()
-            error(err)
-        end
+        wish.try{
+            try = function()
+                plugin_fn(proxy, config, plugin_obj)
+
+                if config and config.keybinds then
+                    for k, v in pairs(config.keybinds) do
+                        proxy.set_keymap(k, plugin_obj[v])
+                    end
+                end
+            end,
+            finally = function(err)
+                if err then
+                    plugin_obj.disable()
+                end
+            end,
+        }
     end
 
     return plugin_obj

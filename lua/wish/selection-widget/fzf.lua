@@ -54,20 +54,19 @@ function M.start(opts)
 
     if type(opts.source) == 'function' then
         wish.schedule(function()
-            wish.try(
-                function()
+            wish.try{
+                try = function()
                     for lines in opts.source() do
                         M.add_lines(lines)
                     end
                 end,
-                nil,
-                function(err)
+                finally = function(err)
                     M.add_lines(nil)
                     if state then
                         state.resume()
                     end
-                end
-            )
+                end,
+            }
         end)
     elseif type(opts.source) == 'table' then
         M.add_lines(opts.source)
