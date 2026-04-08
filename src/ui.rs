@@ -164,7 +164,7 @@ impl Ui {
 
         loop {
             let need_shell_vars;
-            let need_cursor_y;
+            let mut need_cursor_y = false;
 
             let size = {
                 let this = self.unlocked.read();
@@ -181,13 +181,13 @@ impl Ui {
                 if height != ui.tui.max_height || width != ui.tui.get_size().0 as _ {
                     ui.tui.max_height = height;
                     ui.dirty = true;
+                    need_cursor_y = true;
                 }
 
                 if !(ui.dirty || ui.buffer.dirty || ui.tui.dirty || ui.status_bar.dirty) {
                     return Ok(())
                 }
 
-                need_cursor_y = ui.dirty;
                 need_shell_vars = ui.dirty || ui.cmdline.is_dirty();
 
                 if !need_cursor_y && !need_shell_vars {

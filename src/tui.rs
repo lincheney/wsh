@@ -154,7 +154,7 @@ impl Tui {
     }
 
     pub fn reset(&mut self) {
-        self.top_y = 0;
+        // self.top_y = 0;
         self.buffer.reset();
         self.nodes.height.set(0);
         self.dirty = true;
@@ -177,6 +177,11 @@ impl Tui {
         clear: bool,
     ) -> Result<()> {
 
+        // quit early if nothing is dirty
+        if !clear && !cmdline.is_dirty() && !self.dirty && !status_bar.dirty {
+            return Ok(())
+        }
+
         if clear {
             self.reset();
             cmdline.reset();
@@ -188,10 +193,13 @@ impl Tui {
             )?;
         }
 
-        // quit early if nothing is dirty
-        if !clear && !cmdline.is_dirty() && !self.dirty && !status_bar.dirty {
-            return Ok(())
-        }
+        // resize buffers
+        let area = Rect{x: 0, y: 0, width: width as _, height: height as _};
+        self.buffer.resize(area);
+
+        let mut drawer = drawer::Drawer::new(&mut self.buffer, writer, cmdline.cursor_coord);
+        queue!(drawer.writer, crossterm::terminal::BeginSynchronizedUpdate)?;
+        drawer.reset_colours()?;
 
         // old heights
         let mut old_cmdline_height = cmdline.get_height();
@@ -228,14 +236,6 @@ impl Tui {
         let new_widgets_height = self.nodes.get_height() as usize;
         let new_status_bar_height = status_bar.get_height() as usize;
         let new_height = (new_cmdline_height + new_widgets_height + new_status_bar_height).min(self.max_height as _);
-
-        // resize buffers
-        let area = Rect{x: 0, y: 0, width: width as _, height: height as _};
-        self.buffer.resize(area);
-
-        let mut drawer = drawer::Drawer::new(&mut self.buffer, writer, cmdline.cursor_coord);
-        queue!(drawer.writer, crossterm::terminal::BeginSynchronizedUpdate)?;
-        drawer.reset_colours()?;
 
         // allocate more height
         if new_height > old_height {
