@@ -2,7 +2,7 @@ use std::ops::Range;
 use bstr::{BString};
 use std::collections::VecDeque;
 
-pub const CONTROL_C_BYTE: u8 = KeyEvent{ key: Key::Char('c'), modifiers: KeyModifiers::CONTROL }.const_into_byte().unwrap();
+pub const CONTROL_C_BYTE: u8 = KeyEvent{ key: Key::Char('c'), modifiers: KeyModifiers::CONTROL }.try_into_byte().unwrap();
 
 #[derive(Debug)]
 pub enum Event {
@@ -116,7 +116,7 @@ impl KeyEvent {
         Ok(KeyEvent { key, modifiers })
     }
 
-    pub const fn const_into_byte(&self) -> Option<u8> {
+    pub const fn try_into_byte(&self) -> Option<u8> {
         Some(
             match (self.key, self.modifiers) {
                 (Key::Char(c), KeyModifiers::NONE) if c.is_ascii() => c as u8,
@@ -136,10 +136,6 @@ impl KeyEvent {
                 _ => return None,
             }
         )
-    }
-
-    pub fn try_into_byte(&self) -> anyhow::Result<u8> {
-        self.const_into_byte().ok_or_else(|| anyhow::anyhow!("{self:?} cannot be represented using one byte"))
     }
 }
 

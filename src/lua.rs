@@ -162,7 +162,10 @@ async fn print(ui: Ui, _lua: Lua, value: BString) -> Result<()> {
 
 async fn set_interrupt_key(ui: Ui, _lua: Lua, label: String) -> Result<()> {
     let key_event = crate::keybind::parser::KeyEvent::parse_from_label(&label)?;
-    let byte = key_event.try_into_byte()?;
+    let Some(byte) = key_event.try_into_byte()
+        else {
+            anyhow::bail!("{key_event:?} cannot be represented using one byte")
+        };
     ui.set_vintr(byte).await?;
     Ok(())
 }
