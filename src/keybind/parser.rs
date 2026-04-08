@@ -121,19 +121,13 @@ impl KeyEvent {
             match (self.key, self.modifiers) {
                 (Key::Char(c), KeyModifiers::NONE) if c.is_ascii() => c as u8,
                 (Key::Char(c), KeyModifiers::CONTROL) if c.is_ascii() => {
-                    let c = c.to_ascii_lowercase();
-                    if c.is_ascii_lowercase() {
-                        c as u8 - b'a' + 1
-                    } else {
-                        match c {
-                            '[' => 0x1b,
-                            '\\' => 0x1c,
-                            ']' => 0x1d,
-                            '^' => 0x1e,
-                            '_' => 0x1f,
-                            '?' => 0x7f,
-                            _ => return None,
-                        }
+                    match c {
+                        '@'..='~' | ' ' => c as u8 & 0x1f,
+                        '2'             => 0,
+                        '3'..='7'       => c as u8 - b'3' + b'\x1b',
+                        '8' | '?'       => b'\x7f',
+                        '-' | '/'       => b'\x1f',
+                        _                  => return None,
                     }
                 }
                 (Key::Enter, KeyModifiers::NONE) => b'\r',
