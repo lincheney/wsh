@@ -67,7 +67,7 @@ fn cell_is_empty(cell: &ratatui::buffer::Cell) -> bool {
 pub struct Tui {
     pub nodes: layout::Nodes,
     buffer: Buffer,
-    prev_status_bar_position: usize,
+    top_y: u32,
     pub max_height: u32,
     pub dirty: bool,
     error_msg: Option<ErrorMessage>,
@@ -154,7 +154,7 @@ impl Tui {
     }
 
     pub fn reset(&mut self) {
-        self.prev_status_bar_position = 0;
+        self.top_y = 0;
         self.buffer.reset();
         self.nodes.height.set(0);
         self.dirty = true;
@@ -171,7 +171,7 @@ impl Tui {
         &mut self,
         writer: &mut W,
         (width, height): (u32, u32),
-        initial_cursor_y: u32,
+        top_y: Option<u32>,
         mut cmdline: command_line::CommandLine<'_>,
         status_bar: &mut status_bar::StatusBar,
         clear: bool,
@@ -226,7 +226,6 @@ impl Tui {
         // new heights
         let new_cmdline_height = cmdline.get_height();
         let new_widgets_height = self.nodes.get_height() as usize;
-        ::log::debug!("DEBUG(bushes)\t{}\t= {:?}", stringify!(new_widgets_height), new_widgets_height);
         let new_status_bar_height = status_bar.get_height() as usize;
         let new_height = (new_cmdline_height + new_widgets_height + new_status_bar_height).min(self.max_height as _);
 
@@ -243,35 +242,49 @@ impl Tui {
             drawer.move_to((0, 0));
             drawer.allocate_height(new_height as u16 - 1)?;
         }
-        let initial_cursor_y = initial_cursor_y.saturating_sub(new_height.saturating_sub(new_height) as _);
+
+        if let Some(top_y) = top_y {
+            self.top_y = top_y;
+        }
+        if self.top_y + new_height as u32 > height {
+            // page has scrolled
+            self.top_y = height - new_height as u32;
+            // invalidate the status bar if the page has scrolled as it needs to stick to the bottom
+            status_bar.dirty = true;
+        }
+        let status_bar_y = area.height.saturating_sub(self.top_y as u16 + new_status_bar_height as u16);
 
         // move back to top of drawing area
         drawer.move_to((0, 0));
+        // draw cmdline
         cmdline.render(&mut drawer, clear)?;
 
         // redraw the widgets
         // if cmdline height has changed then the widgets get repositioned
-        if (clear || self.dirty) && new_widgets_height > 0 {
-            // go to next line after end of buffer
-            if drawer.try_move_to(cmdline.draw_end_pos) {
+        if (clear || self.dirty || old_cmdline_height != new_cmdline_height)
+            && drawer.try_move_to(cmdline.draw_end_pos)
+        {
+            if new_widgets_height > 0 {
+                // go to next line after end of buffer
                 drawer.goto_newline(None)?;
                 self.nodes.render(&mut drawer, false)?;
-
-                // clear everything from here to the start of status bar
-                let y = drawer.get_pos().1 + 1;
-                for _ in initial_cursor_y + y as u32 .. area.height as u32 - new_status_bar_height as u32 {
-                    drawer.goto_newline(None)?;
-                }
-                drawer.clear_to_end_of_line(None)?;
-
             }
+
+            // clear everything from here to the start of status bar
+            for _ in drawer.get_pos().1 + 1 .. status_bar_y {
+                drawer.goto_newline(None)?;
+            }
+            drawer.clear_to_end_of_line(None)?;
         }
 
-        if new_status_bar_height > 0 && (clear || status_bar.dirty) && status_bar.is_visible() {
-            if new_height >= new_status_bar_height as _ {
-                drawer.set_pos((0, (new_height - new_status_bar_height) as u16));
+        // redraw status bar
+        if new_status_bar_height > 0
+            && (clear || status_bar.dirty)
+            && status_bar.is_visible()
+            && new_height >= new_cmdline_height + new_status_bar_height
+            && drawer.try_move_to((0, status_bar_y))
+        {
                 status_bar.render(&mut drawer)?;
-            }
         }
 
         // go back to the cursor

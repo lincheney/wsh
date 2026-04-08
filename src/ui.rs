@@ -160,18 +160,18 @@ impl Ui {
     async fn draw_with_lock(&self, _lock: &mut PrintLockGuard<'_>) -> Result<()> {
         let mut size = None;
         let mut shell_vars = None;
+        let mut cursor_y = None;
+
         loop {
-            let cursor_pos_fut = {
-                let events = self.events.read();
-                events.get_cursor_position()
-            };
-            let cursor_pos = cursor_pos_fut.await.unwrap_or((0, 0));
+            let need_shell_vars;
+            let need_cursor_y;
+
             let size = {
                 let this = self.unlocked.read();
                 let ui = &mut *this.borrow_mut();
 
                 if size == Some(ui.size) {
-                    return ui.draw(shell_vars, cursor_pos.1 as u32);
+                    return ui.draw(shell_vars, cursor_y);
                 }
                 // if the size has changed, recompute everything
 
@@ -187,15 +187,24 @@ impl Ui {
                     return Ok(())
                 }
 
-                if !(ui.dirty || ui.cmdline.is_dirty()) {
-                    // don't need the shell vars, draw immediately
-                    return ui.draw(None, cursor_pos.1 as u32)
+                need_cursor_y = ui.dirty;
+                need_shell_vars = ui.dirty || ui.cmdline.is_dirty();
+
+                if !need_cursor_y && !need_shell_vars {
+                    // don't need to refresh anything, draw immediately
+                    return ui.draw(shell_vars, cursor_y)
                 }
                 ui.size
             };
 
-            // get the shell vars then reacquire the ui
-            shell_vars = Some(crate::tui::command_line::CommandLineState::get_shell_vars(&self.shell, size.0).await?);
+            // get the shell vars and cursor y then reacquire the ui
+            if need_shell_vars {
+                shell_vars = Some(crate::tui::command_line::CommandLineState::get_shell_vars(&self.shell, size.0).await?);
+            }
+            if need_cursor_y {
+                let cursor = self.events.read().get_cursor_position();
+                cursor_y = Some(tokio::time::timeout(crate::timed_lock::DEFAULT_DURATION, cursor).await.unwrap()?.1 as _);
+            }
         }
     }
 
@@ -863,7 +872,7 @@ impl UiInner {
     }
 
 
-    fn draw(&mut self, shell_vars: Option<crate::tui::command_line::ShellVars>, initial_cursor_y: u32) -> Result<()> {
+    fn draw(&mut self, shell_vars: Option<crate::tui::command_line::ShellVars>, cursor_y: Option<u32>) -> Result<()> {
         if let Some(shell_vars) = shell_vars {
             self.cmdline.shell_vars = shell_vars;
         }
@@ -871,7 +880,7 @@ impl UiInner {
         self.tui.draw(
             &mut self.stdout,
             self.size,
-            initial_cursor_y,
+            cursor_y,
             cmdline,
             &mut self.status_bar,
             self.dirty,
