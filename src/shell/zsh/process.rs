@@ -144,6 +144,7 @@ pub(super) fn cleanup() {
         zsh_sys::deletehookfunc(c"before_trap".as_ptr().cast_mut(), Some(before_trap_hook));
     }
     close_self_pipe();
+    pidset::PID_TABLE.clear();
 }
 
 pub(super) fn init(ui: &crate::ui::Ui) -> Result<()> {

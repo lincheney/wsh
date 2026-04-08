@@ -58,6 +58,7 @@ fn close_self_pipe() {
 
 pub(super) fn cleanup() {
     close_self_pipe();
+    *RECEIVER.write().unwrap() = None;
 }
 
 pub(super) fn init() -> Result<()> {
