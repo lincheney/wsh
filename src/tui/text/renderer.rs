@@ -118,6 +118,7 @@ impl Borders {
 pub struct TextRenderer<'a> {
     content_width: usize,
     max_width: usize,
+    min_height: Option<usize>,
     line_count: usize,
     lines: ScrolledLinesIter<'a>,
     alignment: Alignment,
@@ -138,6 +139,7 @@ impl<'a> TextRenderer<'a> {
         block: Option<&Block<'_>>,
         max_width: usize,
         max_height: Option<(usize, Scroll)>,
+        min_height: Option<usize>,
         extra_highlights: H,
     ) -> Self
     where
@@ -210,6 +212,7 @@ impl<'a> TextRenderer<'a> {
         Self {
             content_width: area.width as _,
             max_width,
+            min_height,
             line_count: 0,
             lines: scrolled.into_lines(),
             alignment: text.alignment,
@@ -274,6 +277,14 @@ impl Renderer for TextRenderer<'_> {
         F: FnMut(&mut Drawer<W, C>, usize, usize, usize),
     {
 
+        let min_height = if let Some(min_height) = &mut self.min_height && *min_height > 0 {
+            let old = *min_height;
+            *min_height -= 1;
+            old
+        } else {
+            0
+        };
+
         // draw top border
         if let Some(top) = self.get_top_border() {
             if newline {
@@ -285,9 +296,17 @@ impl Renderer for TextRenderer<'_> {
             return Ok(true)
         }
 
+        let line = if let Some(slice) = self.lines.next() {
+            Some(self.lines.slice(slice))
+        } else if min_height >= 2 || (min_height >= 1 && self.get_bottom_border().is_none()) {
+            // need to fill the min height
+            Some(&[] as _)
+        } else {
+            None
+        };
+
         // draw a line
-        if let Some(slice) = self.lines.next() {
-            let line = self.lines.slice(slice);
+        if let Some(line) = line {
             let lineno = self.line_count;
             self.line_count += 1;
 

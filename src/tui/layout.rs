@@ -352,6 +352,10 @@ impl<'a> NodeRenderer<'a, std::slice::Iter<'a, usize>> {
                             position: super::scroll::ScrollPosition::StickyBottom,
                         },
                     )),
+                    match node.constraint {
+                        Some(Constraint::Min(height)) => Some(height as _),
+                        _ => None,
+                    },
                     widget.cursor_space_hl.iter(),
                 );
                 NodeRenderer::Widget {

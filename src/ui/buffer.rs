@@ -266,6 +266,7 @@ impl Buffer {
             None,
             drawer.term_width() as _,
             None,
+            None,
             [].iter(),
         ).render(drawer, false, false, callback)?;
         drawer.clear_to_end_of_line(None)?;

@@ -46,6 +46,7 @@ impl StatusBar {
             None,
             drawer.term_width() as _,
             None,
+            None,
             [].iter(),
         ).render(drawer, false, true, callback)?;
         drawer.clear_to_end_of_line(None)?;
