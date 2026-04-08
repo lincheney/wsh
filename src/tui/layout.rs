@@ -25,7 +25,7 @@ impl Layout {
             Direction::Vertical => {
                 let mut total = 0;
                 for child_id in &self.children {
-                    if let Some(child) = map.get(child_id) && !child.hidden {
+                    if let Some(child) = map.get(child_id) && !child.is_hidden() {
                         if max_height.is_some_and(|h| total >= h) {
                             child.set_size((0, 0), tmp);
                         } else {
@@ -38,7 +38,7 @@ impl Layout {
             Direction::Horizontal => {
                 let visible: Vec<&Node> = self.children.iter()
                     .filter_map(|cid| map.get(cid))
-                    .filter(|n| !n.hidden)
+                    .filter(|n| !n.is_hidden())
                     .collect();
                 if visible.is_empty() {
                     return 0
@@ -76,13 +76,26 @@ pub struct Node {
     pub kind: NodeKind,
     pub constraint: Option<Constraint>,
     pub persist: bool,
-    pub hidden: bool,
+    hidden: bool,
     // cached width,height after refresh
     pub(super) size: Cell<(u16, u16)>,
     pub(super) tmp_size: Cell<(u16, u16)>,
 }
 
 impl Node {
+
+    pub fn set_hidden(&mut self, hidden: bool) {
+        self.hidden = hidden;
+        if hidden {
+            if let NodeKind::Widget(w) = &self.kind {
+                w.draw_pos.set(None);
+            }
+        }
+    }
+
+    pub fn is_hidden(&self) -> bool {
+        self.hidden
+    }
 
     fn set_size(&self, size: (u16, u16), tmp: bool) {
         if tmp {
@@ -101,7 +114,7 @@ impl Node {
     }
 
     fn is_visible(&self, map: &HashMap<usize, Node>, tmp: bool) -> bool {
-        if self.hidden || self.get_size(tmp).1 == 0 {
+        if self.is_hidden() || self.get_size(tmp).1 == 0 {
             false
         } else if let NodeKind::Layout(layout) = &self.kind && !layout.is_visible(map, tmp) {
             false
@@ -127,7 +140,7 @@ impl Node {
     ) -> u16 {
 
         let mut dim = (0, 0);
-        if !self.hidden {
+        if !self.is_hidden() {
             let height = match &self.kind {
                 NodeKind::Widget(widget) => widget.get_height_for_width(max_width, constraint.or(self.constraint)),
                 NodeKind::Layout(layout) => layout.refresh(map, max_width, max_height, tmp),
@@ -197,7 +210,7 @@ impl Nodes {
             for child in &layout.children {
                 if let Some(node) = self.map.get_mut(child) {
                     node.has_parent = false;
-                    node.hidden = true;
+                    node.set_hidden(true);
                 }
             }
         }
@@ -239,7 +252,7 @@ impl Nodes {
         // draw any cursors
         // this is such a hack
         for node in self.map.values_mut() {
-            if !node.hidden && let NodeKind::Widget(widget) = &mut node.kind {
+            if !node.is_hidden() && let NodeKind::Widget(widget) = &mut node.kind {
                 widget.make_cursor_space_hl();
             }
         }

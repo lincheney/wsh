@@ -450,7 +450,7 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
         node.persist = persist;
     }
     if let Some(hidden) = options.hidden {
-        node.hidden = hidden;
+        node.set_hidden(hidden);
     }
     if let Some(constraint) = options.height {
         node.constraint = Some(constraint.0);

@@ -21,7 +21,7 @@ impl ErrorMessage {
     pub fn add_error(&mut self, message: &str, nodes: &mut Nodes) {
         self.count += 1;
         if let Some(node) = nodes.get_node_mut(self.id) {
-            node.hidden = false;
+            node.set_hidden(false);
             if let super::layout::NodeKind::Widget(widget) = &mut node.kind {
                 widget.inner.clear();
                 widget.inner.push_str(message.into(), Some(Self::TEXT_STYLE.into()));
@@ -46,7 +46,7 @@ impl ErrorMessage {
     pub fn clear(&mut self, nodes: &mut Nodes) {
         self.count = 0;
         if let Some(node) = nodes.get_node_mut(self.id) {
-            node.hidden = true;
+            node.set_hidden(true);
         }
     }
 }
