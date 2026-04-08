@@ -46,8 +46,8 @@ extern "C" fn sighandler(sig: c_int) {
         // we just run a builtin so should be ok
 
         let trap_queueing_enabled = zsh_sys::trap_queueing_enabled;
+        TRAP_QUEUING_ENABLED.store(trap_queueing_enabled, Ordering::Release);
         if trap_queueing_enabled > 0 {
-            TRAP_QUEUING_ENABLED.store(trap_queueing_enabled, Ordering::Release);
             zsh_sys::trap_queueing_enabled = 0;
         }
         // this should call our trap
