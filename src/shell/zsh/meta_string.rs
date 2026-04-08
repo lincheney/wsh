@@ -52,10 +52,6 @@ crate::impl_deref_helper!(self: MetaString, &self.inner => CString);
 
 impl MetaString {
 
-    pub fn into_inner(self) -> CString {
-        self.inner
-    }
-
     pub fn into_raw(self) -> *mut c_char {
         self.inner.into_raw()
     }

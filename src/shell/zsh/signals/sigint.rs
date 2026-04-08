@@ -10,7 +10,7 @@ static SELF_PIPE: AtomicI32 = AtomicI32::new(-1);
 static RECEIVER: RwLock<Option<Arc<Notify>>> = RwLock::new(None);
 
 pub fn get_subscriber() -> Option<Weak<Notify>> {
-    RECEIVER.read().unwrap().as_ref().map(|x| Arc::downgrade(&x))
+    RECEIVER.read().unwrap().as_ref().map(|x| Arc::downgrade(x))
 }
 
 pub(super) fn sighandler() -> c_int {
@@ -48,7 +48,7 @@ pub(super) fn init() -> Result<()> {
 
     // spawn a reader task
     let writer = super::self_pipe::<_, _, std::convert::Infallible>(move || {
-        let _ = notify.notify_waiters();
+        notify.notify_waiters();
         Ok(())
     })?;
 

@@ -122,7 +122,7 @@ impl KeyEvent {
                 (Key::Char(c), KeyModifiers::NONE) if c.is_ascii() => c as u8,
                 (Key::Char(c), KeyModifiers::CONTROL) if c.is_ascii() => {
                     let c = c.to_ascii_lowercase();
-                    if matches!(c, 'a'..='z') {
+                    if c.is_ascii_lowercase() {
                         c as u8 - b'a' + 1
                     } else {
                         match c {

@@ -66,7 +66,7 @@ impl Drop for MetaArray {
 }
 
 pub struct MetaSlice<'a> {
-    inner: &'a [*mut c_char],
+    _inner: &'a [*mut c_char],
 }
 
 impl MetaSlice<'_> {

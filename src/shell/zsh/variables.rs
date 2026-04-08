@@ -116,13 +116,13 @@ impl Variable {
             Value::HashMap(value) => {
                 let value: MetaArray = value.into_iter()
                     .flat_map(|(k, v)| [k, v])
-                    .map(|x| MetaString::from(x))
+                    .map(MetaString::from)
                     .collect();
                 unsafe{ zsh_sys::sethparam(name, value.into_raw()) }
             },
             Value::Array(value) => {
                 let value: MetaArray = value.into_iter()
-                    .map(|x| MetaString::from(x))
+                    .map(MetaString::from)
                     .collect();
                 unsafe{ zsh_sys::setaparam(name, value.into_raw()) }
             },
@@ -318,8 +318,8 @@ static CUSTOM_HASH_GSU: zsh_sys::gsu_hash = zsh_sys::gsu_hash {
 
 unsafe extern "C" fn custom_gsu_get<T: VariableGSU>(param: zsh_sys::Param) -> T::Input {
     unsafe {
-        let mut gsu = &mut *((*param).u.data as *mut CustomGSU<T>);
-        (gsu.get)().as_raw(&mut gsu)
+        let gsu = &mut *((*param).u.data as *mut CustomGSU<T>);
+        (gsu.get)().as_raw(gsu)
     }
 }
 unsafe extern "C" fn custom_gsu_set<T: VariableGSU>(param: zsh_sys::Param, value: T::Input) {

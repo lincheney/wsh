@@ -84,15 +84,6 @@ impl Tui {
         self.nodes.add(layout::NodeKind::Widget(widget)).id
     }
 
-    pub fn add_message(&mut self, message: &str) -> usize {
-        let mut widget = widget::Widget::default();
-        widget.inner.clear();
-        for line in message.split('\n') {
-            widget.inner.push_line(line.into(), None);
-        }
-        self.add(widget)
-    }
-
     pub fn add_error_message(&mut self, message: &str) -> usize {
         self.dirty = true;
         let error = self.error_msg.get_or_insert_with(|| ErrorMessage::new(&mut self.nodes));

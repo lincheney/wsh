@@ -86,10 +86,8 @@ impl Node {
 
     pub fn set_hidden(&mut self, hidden: bool) {
         self.hidden = hidden;
-        if hidden {
-            if let NodeKind::Widget(w) = &self.kind {
-                w.draw_pos.set(None);
-            }
+        if hidden && let NodeKind::Widget(w) = &self.kind {
+            w.draw_pos.set(None);
         }
     }
 
