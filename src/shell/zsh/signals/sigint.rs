@@ -16,7 +16,6 @@ pub fn get_subscriber() -> Option<Weak<Notify>> {
 pub(super) fn sighandler() -> c_int {
     #[allow(static_mut_refs)]
     unsafe {
-        ::log::debug!("DEBUG(lloyd) \t{}\t= {:?}", stringify!(123), 123);
         zsh_sys::zhandler(signal::Signal::SIGINT as _);
         let pipe = SELF_PIPE.load(Ordering::Acquire);
         if pipe != -1 {
