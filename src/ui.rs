@@ -195,8 +195,8 @@ impl Ui {
                 if height != ui.tui.max_height || width != ui.tui.get_size().0 as _ {
                     ui.tui.max_height = height;
                     ui.dirty = true;
-                    need_cursor_y = true;
                 }
+                need_cursor_y = ui.dirty;
 
                 if !(ui.dirty || ui.buffer.dirty || ui.tui.dirty || ui.status_bar.dirty) {
                     return Ok(())
@@ -650,8 +650,14 @@ impl Ui {
                 },
                 Some(KeybindValue::Widget(mut widget)) => {
                     // execute the widget
-                    // a widget may run subprocesses so lock the ui
-                    let lock = ui.has_foreground_process.blocking_lock();
+                    let lock = if widget.is_internal() {
+                        // are all internal widgets safe to run without locking ui?
+                        // they should all output only to shout which we are already capturing?
+                        None
+                    } else {
+                        // a widget may run subprocesses so lock the ui
+                        Some(ui.has_foreground_process.blocking_lock())
+                    };
                     let (buffer, cursor) = {
                         let this = ui.get();
                         let ui = this.inner.blocking_write();
