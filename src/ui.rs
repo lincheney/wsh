@@ -658,11 +658,10 @@ impl Ui {
                         (ui.buffer.get_contents().clone(), ui.buffer.get_cursor())
                     };
 
-                    widget.shell.set_zle_buffer(buffer.clone(), cursor as _);
+                    shell.set_zle_buffer(buffer.clone(), cursor as _);
+                    shell.set_lastchar(lastchar);
 
-                    widget.shell.set_lastchar(lastchar);
-                    // executing a widget may block
-                    let (output, _) = tokio::task::block_in_place(|| widget.exec_and_get_output(None, [].into_iter()));
+                    let (output, _) = widget.exec_and_get_output(None, [].into_iter());
                     let (new_buffer, new_cursor) = shell.get_zle_buffer();
                     let new_cursor = new_cursor.unwrap_or(new_buffer.len() as _) as _;
                     let new_buffer = (new_buffer != buffer).then_some(new_buffer);

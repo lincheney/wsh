@@ -1,22 +1,23 @@
 pub mod overrides;
+use std::cell::Cell;
 use bstr::{BString};
 use std::os::raw::{c_int};
-use std::sync::{OnceLock};
 use std::ptr::NonNull;
 use super::bindings;
 use super::{MetaStr, MetaString, MetaArray};
 
-#[derive(Eq, PartialEq)]
+#[derive(Eq, PartialEq, Clone, Copy)]
 struct Widget(NonNull<bindings::widget>);
-unsafe impl Send for Widget {}
-unsafe impl Sync for Widget {}
 
-static SELF_INSERT: OnceLock<Widget> = OnceLock::new();
-static IMMORTAL_SELF_INSERT: OnceLock<Widget> = OnceLock::new();
-static UNDEFINED_KEY: OnceLock<Widget> = OnceLock::new();
-static IMMORTAL_UNDEFINED_KEY: OnceLock<Widget> = OnceLock::new();
-static ACCEPT_LINE: OnceLock<Widget> = OnceLock::new();
-static IMMORTAL_ACCEPT_LINE: OnceLock<Widget> = OnceLock::new();
+thread_local! {
+    static SELF_INSERT: Cell<Option<Widget>> = Cell::new(None);
+    static IMMORTAL_SELF_INSERT: Cell<Option<Widget>> = Cell::new(None);
+    static UNDEFINED_KEY: Cell<Option<Widget>> = Cell::new(None);
+    static IMMORTAL_UNDEFINED_KEY: Cell<Option<Widget>> = Cell::new(None);
+    static ACCEPT_LINE: Cell<Option<Widget>> = Cell::new(None);
+    static IMMORTAL_ACCEPT_LINE: Cell<Option<Widget>> = Cell::new(None);
+}
+
 
 pub struct ZleWidget<'a> {
     ptr: NonNull<bindings::thingy>,
@@ -40,25 +41,27 @@ impl Default for WidgetArgs {
     }
 }
 
+fn insert_widget_cache(widget: &ZleWidget, cache: &'static std::thread::LocalKey<Cell<Option<Widget>>>, name: &MetaStr) -> bool {
+    if cache.get().is_none() && widget.name() == name && let Some(widget) = widget.widget() {
+        cache.set(Some(widget));
+        true
+    } else {
+        false
+    }
+}
+
 impl<'a> ZleWidget<'a> {
     pub fn new(ptr: NonNull<bindings::thingy>, shell: &'a crate::shell::ShellInternal) -> Self {
         let w = Self{ptr, shell};
 
-        if w.is_internal() && let Some(widget) = w.widget() {
+        if w.is_internal() {
             // these are just caches
-            if SELF_INSERT.get().is_none() && w.name() == meta_str!(c"self-insert") {
-                let _ = SELF_INSERT.set(widget);
-            } else if IMMORTAL_SELF_INSERT.get().is_none() && w.name() == meta_str!(c".self-insert") {
-                let _ = IMMORTAL_SELF_INSERT.set(widget);
-            } else if UNDEFINED_KEY.get().is_none() && w.name() == meta_str!(c"undefined-key") {
-                let _ = UNDEFINED_KEY.set(widget);
-            } else if IMMORTAL_UNDEFINED_KEY.get().is_none() && w.name() == meta_str!(c".undefined-key") {
-                let _ = IMMORTAL_UNDEFINED_KEY.set(widget);
-            } else if ACCEPT_LINE.get().is_none() && w.name() == meta_str!(c"accept-line") {
-                let _ = ACCEPT_LINE.set(widget);
-            } else if IMMORTAL_ACCEPT_LINE.get().is_none() && w.name() == meta_str!(c".accept-line") {
-                let _ = IMMORTAL_ACCEPT_LINE.set(widget);
-            }
+            let _ = insert_widget_cache(&w, &SELF_INSERT, meta_str!(c"self-insert"))
+            || insert_widget_cache(&w, &IMMORTAL_SELF_INSERT, meta_str!(c".self-insert"))
+            || insert_widget_cache(&w, &UNDEFINED_KEY, meta_str!(c"undefined-key"))
+            || insert_widget_cache(&w, &IMMORTAL_UNDEFINED_KEY, meta_str!(c".undefined-key"))
+            || insert_widget_cache(&w, &ACCEPT_LINE, meta_str!(c"accept-line"))
+            || insert_widget_cache(&w, &IMMORTAL_ACCEPT_LINE, meta_str!(c".accept-line"));
         }
 
         w
@@ -66,19 +69,16 @@ impl<'a> ZleWidget<'a> {
 
     pub fn is_self_insert(&self) -> bool {
         let widget = self.widget();
-        let widget = widget.as_ref();
         widget.is_some() && (widget == SELF_INSERT.get() || widget == IMMORTAL_SELF_INSERT.get())
     }
 
     pub fn is_undefined_key(&self) -> bool {
         let widget = self.widget();
-        let widget = widget.as_ref();
         widget.is_some() && (widget == UNDEFINED_KEY.get() || widget == IMMORTAL_UNDEFINED_KEY.get())
     }
 
     pub fn is_accept_line(&self) -> bool {
         let widget = self.widget();
-        let widget = widget.as_ref();
         widget.is_some() && (widget == ACCEPT_LINE.get() || widget == IMMORTAL_ACCEPT_LINE.get())
     }
 
