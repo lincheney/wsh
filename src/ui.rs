@@ -4,7 +4,7 @@ use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::default::Default;
 use mlua::prelude::*;
 use anyhow::Result;
-use crate::keybind::parser::{Event, KeyEvent, Key, KeyModifiers};
+use crate::keybind::{Event, KeyEvent, Key, Modifiers};
 use crate::fork_lock::{ForkLock, RawForkLock, ForkLockReadGuard};
 use crate::print_lock::{PrintLock, PrintLockGuard};
 use nix::sys::termios;
@@ -119,7 +119,7 @@ impl Ui {
             enhanced_keyboard: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
             size: (1, 1),
             termios_input_flags: TermiosInputFlags {
-                intr: crate::keybind::parser::CONTROL_C_BYTE,
+                intr: crate::keybind::CONTROL_C_BYTE,
                 eof: termios.control_chars[termios::SpecialCharacterIndices::VEOF as usize],
             },
             mouse_mode: false,
@@ -741,7 +741,7 @@ impl Ui {
     async fn handle_key_default(&mut self, event: Event, _buf: &BStr) -> Result<bool> {
         match event {
 
-            Event::Key(KeyEvent{ key: Key::Char(c), modifiers }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
+            Event::Key(KeyEvent{ key: Key::Char(c), modifiers }) if modifiers.difference(Modifiers::SHIFT).is_empty() => {
                 let mut buf = [0; 4];
                 let c = c.encode_utf8(&mut buf).as_bytes();
                 self.insert_or_set_buffer(true, c, None).await;
@@ -749,7 +749,7 @@ impl Ui {
                 self.queue_draw();
             },
 
-            Event::Key(KeyEvent{ key: Key::Enter, modifiers }) if modifiers.difference(KeyModifiers::SHIFT).is_empty() => {
+            Event::Key(KeyEvent{ key: Key::Enter, modifiers }) if modifiers.difference(Modifiers::SHIFT).is_empty() => {
                 return self.accept_line().await;
             },
 
@@ -938,7 +938,7 @@ impl UiInner {
             // queue!(self.stdout, event::PopKeyboardEnhancementFlags)?;
         }
 
-        self.apply_intr(crate::keybind::parser::CONTROL_C_BYTE)?; // control c
+        self.apply_intr(crate::keybind::CONTROL_C_BYTE)?; // control c
 
         execute!(
             self.stdout,

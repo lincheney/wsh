@@ -21,7 +21,7 @@ mod parser;
 mod variables;
 mod functions;
 mod regex;
-use crate::keybind::parser::HookableEvent;
+use crate::keybind::EventIndex;
 pub use keybind::KeybindMapping;
 pub use events::{EventCallbacks, HasEventCallbacks};
 
@@ -162,7 +162,7 @@ async fn print(ui: Ui, _lua: Lua, value: BString) -> Result<()> {
 }
 
 async fn set_interrupt_key(ui: Ui, _lua: Lua, label: String) -> Result<()> {
-    if let HookableEvent::Key(key) = HookableEvent::parse_from_label(&label)?
+    if let EventIndex::Key(key) = EventIndex::parse_from_label(&label)?
         && let Some(byte) = key.try_into_byte()
     {
         ui.set_vintr(byte).await?;

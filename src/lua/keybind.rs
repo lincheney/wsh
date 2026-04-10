@@ -2,19 +2,19 @@ use std::collections::HashMap;
 use std::default::Default;
 use anyhow::Result;
 use mlua::{prelude::*, Function};
-use crate::keybind::parser::{HookableEvent};
+use crate::keybind::EventIndex;
 use crate::ui::{Ui};
 
 #[derive(Default)]
 pub struct KeybindMapping {
     id: usize,
-    pub inner: HashMap<HookableEvent, Function>,
+    pub inner: HashMap<EventIndex, Function>,
     pub no_fallthrough: bool,
 }
 
 
 async fn set_keymap(ui: Ui, _lua: Lua, (key, callback, layer): (String, Function, Option<usize>)) -> Result<()> {
-    let key = HookableEvent::parse_from_label(&key)?;
+    let key = EventIndex::parse_from_label(&key)?;
 
     let ui = ui.get();
     let mut ui = ui.borrow_mut();

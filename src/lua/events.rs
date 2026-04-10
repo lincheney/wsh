@@ -3,7 +3,7 @@ use anyhow::Result;
 use mlua::{prelude::*, Function};
 use serde::{Deserialize, Serialize};
 use crate::ui::Ui;
-use crate::keybind::parser;
+use crate::keybind;
 
 fn get_non_empty_owned_callbacks(ui: &Ui, typ: EventType) -> Option<Vec<(usize, Function)>> {
     let ui = ui.get();
@@ -125,13 +125,13 @@ pub struct KeyEvent {
     alt: bool,
 }
 
-impl From<parser::KeyEvent> for KeyEvent {
-    fn from(ev: parser::KeyEvent) -> Self {
+impl From<keybind::KeyEvent> for KeyEvent {
+    fn from(ev: keybind::KeyEvent) -> Self {
         Self {
             key: ev.key.to_string(),
-            control: ev.modifiers.contains(parser::KeyModifiers::CONTROL),
-            shift: ev.modifiers.contains(parser::KeyModifiers::SHIFT),
-            alt: ev.modifiers.contains(parser::KeyModifiers::ALT),
+            control: ev.modifiers.contains(keybind::Modifiers::CONTROL),
+            shift: ev.modifiers.contains(keybind::Modifiers::SHIFT),
+            alt: ev.modifiers.contains(keybind::Modifiers::ALT),
         }
     }
 }
@@ -146,13 +146,13 @@ pub struct MouseEvent {
     pub y: usize,
 }
 
-impl From<parser::MouseEvent> for MouseEvent {
-    fn from(ev: parser::MouseEvent) -> Self {
+impl From<keybind::MouseEvent> for MouseEvent {
+    fn from(ev: keybind::MouseEvent) -> Self {
         Self {
-            key: ev.key.to_string(),
-            control: ev.modifiers.contains(parser::KeyModifiers::CONTROL),
-            shift: ev.modifiers.contains(parser::KeyModifiers::SHIFT),
-            alt: ev.modifiers.contains(parser::KeyModifiers::ALT),
+            key: ev.mouse.to_string(),
+            control: ev.modifiers.contains(keybind::Modifiers::CONTROL),
+            shift: ev.modifiers.contains(keybind::Modifiers::SHIFT),
+            alt: ev.modifiers.contains(keybind::Modifiers::ALT),
             x: ev.x as usize,
             y: ev.y as usize,
         }

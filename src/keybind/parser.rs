@@ -1,270 +1,7 @@
 use std::ops::Range;
 use bstr::{BString};
 use std::collections::VecDeque;
-
-pub const CONTROL_C_BYTE: u8 = KeyEvent{ key: Key::Char('c'), modifiers: KeyModifiers::CONTROL }.try_into_byte().unwrap();
-
-#[derive(Debug)]
-pub enum Event {
-    Key(KeyEvent),
-    Mouse(MouseEvent),
-    BracketedPaste(BString),
-    Focus(bool),
-    CursorPosition{x: usize, y: usize},
-    InvalidUtf8([u8; 4], KeyModifiers),
-    Unknown,
-}
-
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub enum HookableEvent {
-    Key(KeyEvent),
-    Mouse{key: MouseKey, modifiers: KeyModifiers},
-    Focus(bool),
-}
-
-impl TryFrom<&Event> for HookableEvent {
-    type Error = ();
-    fn try_from(value: &Event) -> Result<Self, Self::Error> {
-        match value {
-            Event::Key(ev) => Ok(Self::Key(*ev)),
-            Event::Mouse(ev) => Ok(Self::Mouse{key: ev.key, modifiers: ev.modifiers}),
-            Event::Focus(ev) => Ok(Self::Focus(*ev)),
-            _ => Err(()),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
-pub struct KeyEvent {
-    pub key: Key,
-    pub modifiers: KeyModifiers,
-}
-
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
-pub struct MouseEvent {
-    pub key: MouseKey,
-    pub modifiers: KeyModifiers,
-    pub x: usize,
-    pub y: usize,
-}
-
-bitflags::bitflags! {
-    #[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
-    pub struct KeyModifiers: u8 {
-        const NONE    = 0;
-        const SHIFT   = 1;
-        const ALT     = 2;
-        const CONTROL = 4;
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
-pub enum MouseButton {
-    Left,
-    Right,
-    Middle,
-    Button(usize),
-}
-
-#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
-pub enum Key {
-    Char(char),
-    Enter,
-    Backspace,
-    Escape,
-    Function(u8),
-    Insert,
-    Delete,
-    Up,
-    Down,
-    Left,
-    Right,
-    Begin,
-    Home,
-    End,
-    Pageup,
-    Pagedown,
-}
-
-#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
-pub enum MouseKey {
-    Button{button: MouseButton, release: bool},
-    Move{button: MouseButton},
-    Scroll{down: bool},
-}
-
-impl HookableEvent {
-
-    fn parse_mouse_key(key: &str) -> Option<MouseKey> {
-        Some(match key {
-            "leftmouse" => MouseKey::Button{button: MouseButton::Left, release: false},
-            "leftmouse-release" => MouseKey::Button{button: MouseButton::Left, release: true},
-            "rightmouse" => MouseKey::Button{button: MouseButton::Right, release: false},
-            "rightmouse-release" => MouseKey::Button{button: MouseButton::Right, release: true},
-            "middlemouse" => MouseKey::Button{button: MouseButton::Middle, release: false},
-            "middlemouse-release" => MouseKey::Button{button: MouseButton::Middle, release: true},
-            key if key.starts_with("button") && key.ends_with("-release") && key["button".len() .. key.len() - "-release".len()].parse::<u8>().is_ok() => {
-                let n = key["button".len() .. key.len() - "-release".len()].parse().unwrap();
-                MouseKey::Button{button: MouseButton::Button(n), release: true}
-            },
-            key if key.starts_with("button") && key["button".len() ..].parse::<u8>().is_ok() => {
-                let n = key["button".len() ..].parse().unwrap();
-                MouseKey::Button{button: MouseButton::Button(n), release: false}
-            },
-
-            "leftmouse-move" => MouseKey::Move{button: MouseButton::Left},
-            "rightmouse-move" => MouseKey::Move{button: MouseButton::Right},
-            "middlemouse-move" => MouseKey::Move{button: MouseButton::Middle},
-            key if key.starts_with("button") && key.ends_with("-move") && key["button".len() .. key.len() - "-move".len()].parse::<u8>().is_ok() => {
-                let n = key["button".len() .. key.len() - "-move".len()].parse().unwrap();
-                MouseKey::Move{button: MouseButton::Button(n)}
-            },
-
-            "scrolldown" => MouseKey::Scroll{down: true},
-            "scrollup" => MouseKey::Scroll{down: false},
-
-            _ => return None,
-        })
-    }
-
-    pub fn parse_from_label(key: &str) -> anyhow::Result<Self> {
-        let mut modifiers = KeyModifiers::empty();
-
-        let original = key;
-        let mut key = key;
-        let special = key.starts_with('<') && key.ends_with('>');
-
-        if special {
-            key = &key[1..key.len() - 1];
-
-            if key.contains('-') {
-                // this has modifiers
-                for modifier in key.rsplit('-').skip(1) {
-                    match modifier {
-                        "c" => modifiers |= KeyModifiers::CONTROL,
-                        "s" => modifiers |= KeyModifiers::SHIFT,
-                        "a" => modifiers |= KeyModifiers::ALT,
-                        _ => return Err(anyhow::anyhow!("invalid keybind: {:?}", original)),
-                    }
-                }
-                key = key.rsplit('-').next().unwrap();
-            }
-        }
-
-
-        if special && let Some(key) = Self::parse_mouse_key(key) {
-            return Ok(Self::Mouse{key, modifiers})
-        }
-
-        let key = match key {
-            "focusin" if special => return Ok(Self::Focus(true)),
-            "focusout" if special => return Ok(Self::Focus(false)),
-
-            "bs" | "backspace" if special => Key::Backspace,
-            "cr" | "enter" if special => Key::Enter,
-            "left" if special => Key::Left,
-            "right" if special => Key::Right,
-            "up" if special => Key::Up,
-            "down" if special => Key::Down,
-            "home" if special => Key::Home,
-            "end" if special => Key::End,
-            "pageup" if special => Key::Pageup,
-            "pagedown" if special => Key::Pagedown,
-            "tab" if special => Key::Char('\t'),
-            "delete" if special => Key::Delete,
-            "insert" if special => Key::Insert,
-            "esc" | "escape" if special => Key::Escape,
-
-
-            "lt" if special => Key::Char('<'),
-            key if key.len() == 1 && &key[0..1] != "<" && key.is_ascii() => {
-                Key::Char(key.chars().next().unwrap())
-            }
-            key if special && key.starts_with('f') && key[1..].parse::<u8>().is_ok() => {
-                Key::Function(key[1..].parse().unwrap())
-            }
-
-            _ => return Err(anyhow::anyhow!("invalid keybind: {:?}", original)),
-        };
-
-        Ok(Self::Key(KeyEvent{ key, modifiers }))
-    }
-}
-
-impl KeyEvent {
-    pub const fn try_into_byte(&self) -> Option<u8> {
-        Some(
-            match (self.key, self.modifiers) {
-                (Key::Char(c), KeyModifiers::NONE) if c.is_ascii() => c as u8,
-                (Key::Char(c), KeyModifiers::CONTROL) if c.is_ascii() => {
-                    match c {
-                        '@'..='~' | ' ' => c as u8 & 0x1f,
-                        '2'             => 0,
-                        '3'..='7'       => c as u8 - b'3' + b'\x1b',
-                        '8' | '?'       => b'\x7f',
-                        '-' | '/'       => b'\x1f',
-                        _                  => return None,
-                    }
-                }
-                (Key::Enter, KeyModifiers::NONE) => b'\r',
-                (Key::Backspace, KeyModifiers::NONE) => 0x7f,
-                (Key::Escape, KeyModifiers::NONE) => 0x1b,
-                _ => return None,
-            }
-        )
-    }
-}
-
-impl std::fmt::Display for Key {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        match self {
-            Key::Char('\t') => write!(f, "tab"),
-            Key::Char(c) => write!(f, "{c}"),
-            Key::Function(n) => write!(f, "f{n}"),
-            Key::Enter => write!(f, "enter"),
-            Key::Backspace => write!(f, "backspace"),
-            Key::Escape => write!(f, "escape"),
-            Key::Insert => write!(f, "insert"),
-            Key::Delete => write!(f, "delete"),
-            Key::Up => write!(f, "up"),
-            Key::Down => write!(f, "down"),
-            Key::Left => write!(f, "left"),
-            Key::Right => write!(f, "right"),
-            Key::Begin => write!(f, "begin"),
-            Key::Home => write!(f, "home"),
-            Key::End => write!(f, "end"),
-            Key::Pageup => write!(f, "pageup"),
-            Key::Pagedown => write!(f, "pagedown"),
-        }
-    }
-}
-
-impl std::fmt::Display for MouseKey {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        match self {
-            MouseKey::Button{button: MouseButton::Left, release: true} => write!(f, "leftmouse-release"),
-            MouseKey::Button{button: MouseButton::Left, ..} => write!(f, "leftmouse"),
-            MouseKey::Button{button: MouseButton::Right, release: true} => write!(f, "rightmouse-release"),
-            MouseKey::Button{button: MouseButton::Right, ..} => write!(f, "rightmouse"),
-            MouseKey::Button{button: MouseButton::Middle, release: true} => write!(f, "middlemouse-release"),
-            MouseKey::Button{button: MouseButton::Middle, ..} => write!(f, "middlemouse"),
-            MouseKey::Button{button: MouseButton::Button(n), release: true} => write!(f, "button{n}-release"),
-            MouseKey::Button{button: MouseButton::Button(n), ..} => write!(f, "button{n}"),
-            MouseKey::Move{button: MouseButton::Left} => write!(f, "leftmouse-move"),
-            MouseKey::Move{button: MouseButton::Right} => write!(f, "rightmouse-move"),
-            MouseKey::Move{button: MouseButton::Middle} => write!(f, "middlemouse-move"),
-            MouseKey::Move{button: MouseButton::Button(n)} => write!(f, "button{n}-move"),
-            MouseKey::Scroll{down: true} => write!(f, "scrolldown"),
-            MouseKey::Scroll{..} => write!(f, "scrollup"),
-        }
-    }
-}
-
-impl From<Key> for Event {
-    fn from(key: Key) -> Self {
-        Self::Key(KeyEvent{ key, modifiers: KeyModifiers::NONE })
-    }
-}
+use super::{Event, KeyEvent, Key, Mouse, MouseEvent, mouse::Button};
 
 #[derive(Default)]
 pub struct Parser {
@@ -358,34 +95,34 @@ impl Parser {
         let x = x.saturating_sub(1);
         let y = y.saturating_sub(1);
 
-        let mut modifiers = KeyModifiers::NONE;
+        let mut modifiers = super::Modifiers::NONE;
         if button & 4 > 0 {
-            modifiers.insert(KeyModifiers::SHIFT);
+            modifiers.insert(super::Modifiers::SHIFT);
         }
         if button & 8 > 0 {
-            modifiers.insert(KeyModifiers::ALT);
+            modifiers.insert(super::Modifiers::ALT);
         }
         if button & 16 > 0 {
-            modifiers.insert(KeyModifiers::CONTROL);
+            modifiers.insert(super::Modifiers::CONTROL);
         }
         let is_move = button & 32 > 0;
         let button = button & !4 & !8 & !16 & !32;
         let mouse = match button {
-            64 | 65 => return Some((Event::Mouse(MouseEvent{ x, y, key: MouseKey::Scroll{down: button == 65}, modifiers }), len)),
+            64 | 65 => return Some((Event::Mouse(MouseEvent{ x, y, mouse: Mouse::Scroll{down: button == 65}, modifiers }), len)),
 
-            0  => MouseButton::Left,
-            1  => MouseButton::Middle,
-            2  => MouseButton::Right,
-            n  => MouseButton::Button(n & !64 & !128),
+            0  => Button::Left,
+            1  => Button::Middle,
+            2  => Button::Right,
+            n  => Button::Button(n & !64 & !128),
         };
 
-        let event = if is_move {
-            MouseKey::Move{button: mouse}
+        let mouse = if is_move {
+            Mouse::Move{button: mouse}
         } else {
-            MouseKey::Button{button: mouse, release}
+            Mouse::Button{button: mouse, release}
         };
 
-        Some((Event::Mouse(MouseEvent{ x, y, key: event, modifiers }), len))
+        Some((Event::Mouse(MouseEvent{ x, y, mouse, modifiers }), len))
     }
 
     fn parse_csi(&self) -> Option<(Event, usize)> {
@@ -422,7 +159,7 @@ impl Parser {
             ([Some(y), Some(x)], b'R') => Event::CursorPosition{x: x.saturating_sub(1), y: y.saturating_sub(1)},
 
             ([Some(0), m @ (None | Some(1..=8))], b'P'..=b'S') => {
-                let modifiers = KeyModifiers::from_bits_truncate(m.unwrap_or(1) as u8 - 1);
+                let modifiers = super::Modifiers::from_bits_truncate(m.unwrap_or(1) as u8 - 1);
                 Event::Key(KeyEvent{ key: Key::Function(suffix - b'P' + 1), modifiers })
             },
 
@@ -438,7 +175,7 @@ impl Parser {
                     _ => unreachable!(),
                 };
                 let modifiers = m.get(1).unwrap_or(&None).unwrap_or(1) - 1;
-                let modifiers = KeyModifiers::from_bits_truncate(modifiers as _);
+                let modifiers = super::Modifiers::from_bits_truncate(modifiers as _);
                 Event::Key(KeyEvent{ key, modifiers })
             },
 
@@ -484,7 +221,7 @@ impl Parser {
                 };
 
                 let modifiers = m.first().unwrap_or(&None).unwrap_or(1) - 1;
-                let modifiers = KeyModifiers::from_bits_truncate(modifiers as _);
+                let modifiers = super::Modifiers::from_bits_truncate(modifiers as _);
                 Event::Key(KeyEvent{ key, modifiers })
             },
 
@@ -493,7 +230,7 @@ impl Parser {
         Some((event, len))
     }
 
-    fn parse_char(&self, start: usize, modifiers: KeyModifiers) -> Option<(Event, usize)> {
+    fn parse_char(&self, start: usize, modifiers: super::Modifiers) -> Option<(Event, usize)> {
         let Some(c) = self.buffer.get(start)
             else { return Some((Event::Unknown, 0)) }; // incomplete
 
@@ -532,14 +269,14 @@ impl Parser {
 
         let c = self.buffer.front()?;
         let event;
-        let event = match self.parse_char(0, KeyModifiers::NONE) {
+        let event = match self.parse_char(0, super::Modifiers::NONE) {
 
             Some((_, 0)) => return None,
             Some((e, l)) => { len = l; e },
 
             None => match c {
-                b'\x00'..=b'\x1a'   => Event::Key(KeyEvent{ key: Key::Char((c + 0x60).into()), modifiers: KeyModifiers::CONTROL }),
-                b'\x1c'..=b'\x1f'   => Event::Key(KeyEvent{ key: Key::Char((c + b'3' - 0x1b).into()), modifiers: KeyModifiers::CONTROL }),
+                b'\x00'..=b'\x1a'   => Event::Key(KeyEvent{ key: Key::Char((c + 0x60).into()), modifiers: super::Modifiers::CONTROL }),
+                b'\x1c'..=b'\x1f'   => Event::Key(KeyEvent{ key: Key::Char((c + b'3' - 0x1b).into()), modifiers: super::Modifiers::CONTROL }),
 
                 b'\x1b' => match self.buffer.get(1) {
                     Some(b'[') => {
@@ -571,7 +308,7 @@ impl Parser {
                     // no more data, probably just a single escape key
                     None => Key::Escape.into(),
                     // check for alt-key otherwise treat as a single escape key
-                    _ => match self.parse_char(1, KeyModifiers::ALT) {
+                    _ => match self.parse_char(1, super::Modifiers::ALT) {
                         Some((_, 0)) => return None,
                         Some((event, l)) => {
                             len = l + 1;

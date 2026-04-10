@@ -5,12 +5,12 @@ use std::io::Read;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tokio::io::unix::AsyncFd;
-use crate::keybind::parser;
+use crate::keybind;
 use crate::pauser;
 
 #[derive(Debug)]
 enum Message {
-    Event(parser::Event, BString),
+    Event(keybind::Event, BString),
     Exit(i32),
     Draw,
     WindowResize(u32, u32),
@@ -88,7 +88,7 @@ impl EventStream {
 
         // read events
         let mut reader = AsyncFd::new(file)?;
-        let mut parser = parser::Parser::default();
+        let mut parser = keybind::parser::Parser::default();
 
         let queue_sender = self.queue_sender.clone();
         let mut pausable = self.pausable.clone();
@@ -107,7 +107,7 @@ impl EventStream {
                         parser.feed(&buf[..n]);
                         for (event, event_buffer) in parser.iter() {
                             match event {
-                                parser::Event::CursorPosition{x, y} => {
+                                keybind::Event::CursorPosition{x, y} => {
                                     if let Ok(sender) = self.position_queue.try_recv() {
                                         let _ = sender.send((x, y));
                                     }
