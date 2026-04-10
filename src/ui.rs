@@ -26,6 +26,9 @@ use crate::shell::{ShellClient, KeybindValue, process::PidMap};
 use crate::lua::{EventCallbacks, HasEventCallbacks};
 pub mod buffer;
 
+const ENABLE_SGR_MOUSE: style::Print<&str> = style::Print("\x1b[?1000;1006h");
+const DISABLE_SGR_MOUSE: style::Print<&str> = style::Print("\x1b[?1000;1006l");
+
 fn lua_error<T>(msg: &str) -> Result<T, mlua::Error> {
     Err(mlua::Error::RuntimeError(msg.to_string()))
 }
@@ -56,6 +59,7 @@ pub struct UiInner {
     pub size: (u32, u32),
 
     pub termios_input_flags: TermiosInputFlags,
+    pub mouse_mode: bool,
 }
 
 pub struct UnlockedUi {
@@ -81,7 +85,7 @@ crate::strong_weak_wrapper! {
         pub events: ForkLock<'static, crate::event_stream::EventController>,
         pub has_foreground_process: tokio::sync::Mutex<()>,
 
-        print_lock: PrintLock,
+        pub print_lock: PrintLock,
         is_drawing: AtomicBool,
 
         pub pid_map: ForkLock<'static, std::sync::Mutex<PidMap>>,
@@ -118,6 +122,7 @@ impl Ui {
                 intr: crate::keybind::parser::CONTROL_C_BYTE,
                 eof: termios.control_chars[termios::SpecialCharacterIndices::VEOF as usize],
             },
+            mouse_mode: false,
         };
         ui.keybinds.push(Default::default());
 
@@ -178,7 +183,7 @@ impl Ui {
 
         loop {
             let need_shell_vars;
-            let mut need_cursor_y = false;
+            let need_cursor_y;
 
             let size = {
                 let this = self.unlocked.read();
@@ -249,7 +254,13 @@ impl Ui {
 
     pub async fn handle_event(&mut self, event: Event, event_buffer: BString) -> Result<bool> {
         if let Event::Key(event) = event {
-            self.trigger_key_callbacks(&event.into(), &event_buffer).await;
+
+            if event.key.is_mouse() {
+                self.trigger_mouse_callbacks(&event.into(), &event_buffer).await;
+            } else {
+                self.trigger_key_callbacks(&event.into(), &event_buffer).await;
+            }
+
             if let Some(result) = self.handle_key(event, event_buffer.as_ref()).await {
                 self.cancel_completion_suffix();
                 return result
@@ -876,13 +887,28 @@ impl UiInner {
             // )?;
         }
 
+        let mut stdout = self.stdout.lock();
+        if self.mouse_mode {
+            queue!(stdout, ENABLE_SGR_MOUSE)?;
+        }
         execute!(
-            self.stdout.lock(),
+            stdout,
             event::EnableBracketedPaste,
             event::EnableFocusChange,
-            // event::EnableMouseCapture,
         )?;
+
         Ok(())
+    }
+
+    pub fn apply_mouse_mode(&self) -> std::io::Result<()> {
+        execute!(
+            self.stdout.lock(),
+            if self.mouse_mode {
+                ENABLE_SGR_MOUSE
+            } else {
+                DISABLE_SGR_MOUSE
+            }
+        )
     }
 
     pub fn apply_intr(&self, intr: u8) -> Result<()> {
@@ -901,9 +927,9 @@ impl UiInner {
 
         execute!(
             self.stdout,
+            DISABLE_SGR_MOUSE,
             event::DisableBracketedPaste,
             event::DisableFocusChange,
-            // event::DisableMouseCapture
         )?;
 
         crossterm::terminal::disable_raw_mode()?;

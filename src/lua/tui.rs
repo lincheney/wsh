@@ -623,6 +623,54 @@ async fn set_status_bar(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
     Ok(())
 }
 
+async fn enable_mouse_mode(ui: Ui, _lua: Lua, enable: Option<bool>) -> Result<()> {
+    let locks = (
+        ui.has_foreground_process.lock().await,
+        ui.print_lock.lock_exclusive().await,
+    );
+
+    let ui = ui.get();
+    let mut ui = ui.borrow_mut();
+    ui.mouse_mode = enable.unwrap_or(true);
+    ui.apply_mouse_mode()?;
+
+    drop(locks);
+    Ok(())
+}
+
+fn get_message_geometry(ui: &Ui, lua: &Lua, id: usize) -> Result<Option<LuaTable>> {
+    let ui = ui.get();
+    let tui = &ui.borrow().tui;
+
+    if let Some(geom) = tui.get_node_geometry(id) {
+        let table = lua.create_table_from([
+            ("x", geom.x),
+            ("y", geom.y),
+            ("width", geom.width),
+            ("height", geom.height),
+        ])?;
+        Ok(Some(table))
+    } else {
+        Ok(None)
+    }
+}
+
+fn get_status_bar_geometry(ui: &Ui, lua: &Lua, (): ()) -> Result<Option<LuaTable>> {
+    let ui = ui.get();
+    let ui = ui.borrow();
+    if let Some(geom) = ui.tui.get_status_bar_geometry(&ui.status_bar) {
+        let table = lua.create_table_from([
+            ("x", geom.x),
+            ("y", geom.y),
+            ("width", geom.width),
+            ("height", geom.height),
+        ])?;
+        Ok(Some(table))
+    } else {
+        Ok(None)
+    }
+}
+
 fn sgr_to_style(_ui: &Ui, lua: &Lua, sgr: String) -> Result<LuaValue> {
     let sgr = if sgr.starts_with("\x1b[") && sgr.ends_with('m') {
         &sgr[2..sgr.len()-1]
@@ -671,6 +719,9 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_async_fn("get_message_text", get_message_text)?;
     ui.set_lua_async_fn("message_to_ansi_string", message_to_ansi_string)?;
     ui.set_lua_async_fn("set_status_bar", set_status_bar)?;
+    ui.set_lua_async_fn("enable_mouse_mode", enable_mouse_mode)?;
+    ui.set_lua_fn("get_message_geometry", get_message_geometry)?;
+    ui.set_lua_fn("get_status_bar_geometry", get_status_bar_geometry)?;
 
     Ok(())
 }

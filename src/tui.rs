@@ -107,6 +107,33 @@ impl Tui {
         self.nodes.get_node_mut(id)
     }
 
+    pub fn get_node_geometry(&self, id: usize) -> Option<Rect> {
+        let node = self.nodes.get_node(id)?;
+        let pos = node.get_draw_pos(&self.nodes.map)?;
+        let size = node.get_size(false);
+        Some(Rect{
+            x: pos.0,
+            y: pos.1 + self.top_y as u16,
+            width: size.0,
+            height: size.1,
+        })
+    }
+
+    pub fn get_status_bar_geometry(&self, status_bar: &status_bar::StatusBar) -> Option<Rect> {
+        let size = self.get_size();
+        let height = status_bar.get_height();
+        if height == 0 {
+            None
+        } else {
+            Some(Rect{
+                x: 0,
+                y: size.1.saturating_sub(height) + self.top_y as u16,
+                width: size.0,
+                height,
+            })
+        }
+    }
+
     pub fn remove(&mut self, id: usize) -> Option<layout::Node> {
         self.dirty = true;
         self.nodes.remove(id)

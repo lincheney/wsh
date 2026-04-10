@@ -3,6 +3,7 @@ use anyhow::Result;
 use mlua::{prelude::*, Function};
 use serde::{Deserialize, Serialize};
 use crate::ui::Ui;
+use crate::keybind::parser;
 
 fn get_non_empty_owned_callbacks(ui: &Ui, typ: EventType) -> Option<Vec<(usize, Function)>> {
     let ui = ui.get();
@@ -124,13 +125,43 @@ pub struct KeyEvent {
     alt: bool,
 }
 
-impl From<crate::keybind::parser::KeyEvent> for KeyEvent {
-    fn from(ev: crate::keybind::parser::KeyEvent) -> Self {
+impl From<parser::KeyEvent> for KeyEvent {
+    fn from(ev: parser::KeyEvent) -> Self {
         Self {
             key: ev.key.to_string(),
-            control: ev.modifiers.contains(crate::keybind::parser::KeyModifiers::CONTROL),
-            shift: ev.modifiers.contains(crate::keybind::parser::KeyModifiers::SHIFT),
-            alt: ev.modifiers.contains(crate::keybind::parser::KeyModifiers::ALT),
+            control: ev.modifiers.contains(parser::KeyModifiers::CONTROL),
+            shift: ev.modifiers.contains(parser::KeyModifiers::SHIFT),
+            alt: ev.modifiers.contains(parser::KeyModifiers::ALT),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MouseEvent {
+    pub key: String,
+    pub control: bool,
+    pub shift: bool,
+    pub alt: bool,
+    pub x: usize,
+    pub y: usize,
+}
+
+impl From<parser::KeyEvent> for MouseEvent {
+    fn from(ev: parser::KeyEvent) -> Self {
+        let (x, y) = match ev.key {
+            parser::Key::MouseButton{x, y, ..} => (x, y),
+            parser::Key::MouseMove{x, y, ..} => (x, y),
+            parser::Key::MouseScroll{x, y, ..} => (x, y),
+            _ => (0, 0),
+        };
+        Self {
+            key: ev.key.to_string(),
+            control: ev.modifiers.contains(parser::KeyModifiers::CONTROL),
+            shift: ev.modifiers.contains(parser::KeyModifiers::SHIFT),
+            alt: ev.modifiers.contains(parser::KeyModifiers::ALT),
+            // Convert to 1-indexed for Lua
+            x: x as usize + 1,
+            y: y as usize + 1,
         }
     }
 }
@@ -138,6 +169,7 @@ impl From<crate::keybind::parser::KeyEvent> for KeyEvent {
 event_types!(
     init(),
     key(key: &KeyEvent, data: &BString),
+    mouse(event: &MouseEvent, data: &BString),
     accept_line(data: &BString),
     buffer_change(),
     precmd(data: Option<&BString>),

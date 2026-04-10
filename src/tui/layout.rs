@@ -103,7 +103,7 @@ impl Node {
         }
     }
 
-    fn get_size(&self, tmp: bool) -> (u16, u16) {
+    pub fn get_size(&self, tmp: bool) -> (u16, u16) {
         if tmp {
             self.tmp_size.get()
         } else {
@@ -118,6 +118,20 @@ impl Node {
             false
         } else {
             true
+        }
+    }
+
+    pub fn get_draw_pos(&self, map: &HashMap<usize, Node>) -> Option<(u16, u16)> {
+        match &self.kind {
+            NodeKind::Widget(widget) => widget.draw_pos.get(),
+            NodeKind::Layout(layout) => {
+                layout.children
+                    .iter()
+                    .flat_map(|id| map.get(id))
+                    .filter(|child| child.is_visible(map, false))
+                    .flat_map(|child| child.get_draw_pos(map))
+                    .next()
+            }
         }
     }
 

@@ -61,6 +61,12 @@ pub enum Key {
     MouseScroll{x: usize, y: usize, down: bool},
 }
 
+impl Key {
+    pub fn is_mouse(&self) -> bool {
+        matches!(self, Key::MouseButton{..} | Key::MouseMove{..} | Key::MouseScroll{..})
+    }
+}
+
 impl KeyEvent {
     pub fn parse_from_label(key: &str) -> anyhow::Result<Self> {
         let mut modifiers = KeyModifiers::empty();
@@ -289,6 +295,7 @@ impl Parser {
         if button & 16 > 0 {
             modifiers.insert(KeyModifiers::CONTROL);
         }
+        let is_move = button & 32 > 0;
         let button = button & !4 & !8 & !16 & !32;
         let mouse = match button {
             64 | 65 => return Some((Event::Key(KeyEvent{ key: Key::MouseScroll{x, y, down: button == 65}, modifiers }), len)),
@@ -299,7 +306,7 @@ impl Parser {
             n  => MouseButton::Button(n & !64 & !128),
         };
 
-        let event = if button & 32 > 0 {
+        let event = if is_move {
             Key::MouseMove{x, y, button: mouse}
         } else {
             Key::MouseButton{x, y, button: mouse, release}
