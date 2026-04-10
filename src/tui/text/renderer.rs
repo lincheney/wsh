@@ -194,10 +194,11 @@ impl<'a> TextRenderer<'a> {
         let scrollbar_range = if scroll.show_scrollbar && !(scrolled.range == (0 .. scrolled.total_line_count.max(1)))  {
             area.width -= 1;
 
-            let text_height = text_height.unwrap_or(scrolled.total_line_count.max(1));
-            let height = (text_height * scrolled.range.len() / scrolled.total_line_count.max(1)).max(1);
-            let start = text_height * scrolled.range.start / scrolled.total_line_count.max(1);
-            let start = start.min(text_height.saturating_sub(height));
+            let num_lines = scrolled.total_line_count.max(1);
+            let text_height = text_height.unwrap_or(num_lines);
+            let height = (text_height as f64 * scrolled.range.len() as f64 / num_lines as f64).round().max(1.) as usize;
+            let start = text_height as f64 * scrolled.range.start as f64 / num_lines as f64;
+            let start = (start.round().max(0.) as usize).min(text_height.saturating_sub(height));
             let end = start + height.max(1);
 
             let mut cell = Cell::new(SCROLLBAR_CHAR);
