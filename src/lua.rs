@@ -8,7 +8,7 @@ use anyhow::Result;
 use crate::ui::{Ui};
 use std::time::SystemTime;
 
-mod keybind;
+pub mod keybind;
 mod string;
 mod completion;
 mod history;

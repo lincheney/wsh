@@ -596,35 +596,8 @@ impl Ui {
             Widget{buffer: Option<BString>, cursor: Option<usize>, output: Option<BString>, accept_line: bool},
         }
 
-        let key = event.try_into().ok();
-        // look for a lua callback
-        let result = if let Some(key) = key {
-            self.get().borrow().keybinds
-                .iter()
-                .rev()
-                .find_map(|k| {
-                    if let Some(callback) = k.inner.get(&key) {
-                        Some(Some(callback.clone()))
-                    } else if k.no_fallthrough {
-                        Some(None)
-                    } else {
-                        None
-                    }
-                })
-        } else {
-            None
-        };
-
-        match result {
-            Some(Some(callback)) => {
-                self.call_lua_fn(true, callback, ()).await;
-                return Some(KeybindOutput::Value(Ok(true)))
-            },
-            Some(None) => {
-                // no fallthrough
-                return Some(KeybindOutput::Value(Ok(true)))
-            },
-            None => (), // fallthrough
+        if crate::lua::keybind::invoke_keybind_callback(self, event).await {
+            return Some(KeybindOutput::Value(Ok(true)))
         }
 
         if buf.len() == 1 {
