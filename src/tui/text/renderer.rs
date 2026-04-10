@@ -175,12 +175,13 @@ impl<'a> TextRenderer<'a> {
         let mut indent_cell = Cell::EMPTY;
         indent_cell.set_style(text.style);
 
+        let text_height = max_height.map(|h| h - (SCRATCH_HEIGHT - area.height) as usize);
         let scrolled = crate::tui::scroll::wrap(
             &text.lines,
             text.highlights.iter().chain(extra_highlights),
             Some(text.style),
             area.width as usize,
-            max_height.map(|h| h - (SCRATCH_HEIGHT - area.height) as usize),
+            text_height,
             initial_indent,
             scroll.position,
         );
@@ -190,17 +191,14 @@ impl<'a> TextRenderer<'a> {
             borders.inner.height = borders.inner.height.min((h - scrolled.range.len()) as u16 - borders.inner.y);
         }
 
-        let scrollbar_range = if scroll.show_scrollbar && !(scrolled.range == (0 .. scrolled.range.len()))  {
+        let scrollbar_range = if scroll.show_scrollbar && !(scrolled.range == (0 .. scrolled.total_line_count.max(1)))  {
             area.width -= 1;
 
-            let mut start = scrolled.range.start * scrolled.range.len() / scrolled.total_line_count.max(1);
-            if scrolled.range.start > 0 && start == 0 {
-                start = 1;
-            }
-            let mut end = scrolled.range.end * scrolled.range.len() / scrolled.total_line_count.max(1);
-            if scrolled.range.end < scrolled.total_line_count && end == scrolled.range.len() {
-                end = end.saturating_sub(1);
-            }
+            let text_height = text_height.unwrap_or(scrolled.total_line_count.max(1));
+            let height = (text_height * scrolled.range.len() / scrolled.total_line_count.max(1)).max(1);
+            let start = text_height * scrolled.range.start / scrolled.total_line_count.max(1);
+            let start = start.min(text_height.saturating_sub(height));
+            let end = start + height.max(1);
 
             let mut cell = Cell::new(SCROLLBAR_CHAR);
             cell.set_style(text.style);
