@@ -1,3 +1,8 @@
+local init = false
+wish.add_event_callback('init', function()
+    init = true
+end)
+
 return function(plugin_fn)
     local state = {
         enabled = false,
@@ -93,8 +98,13 @@ return function(plugin_fn)
         proxy = setmetatable({
             async = async_proxy,
 
-            add_event_callback = function(...)
-                local id = wish.add_event_callback(...)
+            add_event_callback = function(event, callback)
+                if event == 'init' and init then
+                    callback()
+                    return
+                end
+
+                local id = wish.add_event_callback(event, callback)
                 table.insert(state.event_callbacks, id)
                 return id
             end,
