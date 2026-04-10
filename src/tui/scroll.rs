@@ -4,9 +4,10 @@ use ratatui::style::{Style};
 use bstr::{BString, BStr};
 use super::wrap::WrapToken;
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum ScrollPosition {
     Line(usize),
+    #[default]
     StickyBottom,
 }
 

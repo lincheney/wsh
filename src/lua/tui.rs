@@ -554,6 +554,34 @@ async fn add_buf_highlight_namespace(ui: Ui, _lua: Lua, _val: ()) -> Result<usiz
     Ok(ui.buffer.highlight_counter)
 }
 
+async fn scroll_message(ui: Ui, _lua: Lua, (id, delta): (usize, isize)) -> Result<()> {
+    let ui = ui.get();
+    let tui = &mut ui.borrow_mut().tui;
+    match tui.get_node_mut(id) {
+        Some(Node{ kind: NodeKind::Widget(widget), .. }) => {
+            widget.scroll(delta, true);
+            tui.dirty = true;
+            Ok(())
+        },
+        Some(_) => anyhow::bail!("can't scroll layout with id {id}"),
+        _ => anyhow::bail!("can't find widget with id {id}"),
+    }
+}
+
+async fn scroll_message_to(ui: Ui, _lua: Lua, (id, line): (usize, usize)) -> Result<()> {
+    let ui = ui.get();
+    let tui = &mut ui.borrow_mut().tui;
+    match tui.get_node_mut(id) {
+        Some(Node{ kind: NodeKind::Widget(widget), .. }) => {
+            widget.scroll(line as isize, false);
+            tui.dirty = true;
+            Ok(())
+        },
+        Some(_) => anyhow::bail!("can't scroll layout with id {id}"),
+        _ => anyhow::bail!("can't find widget with id {id}"),
+    }
+}
+
 async fn feed_ansi_message(ui: Ui, _lua: Lua, (id, value): (usize, LuaString)) -> Result<()> {
     let ui = ui.get();
     let tui = &mut ui.borrow_mut().tui;
@@ -712,6 +740,8 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_async_fn("check_message", check_message)?;
     ui.set_lua_async_fn("remove_message", remove_message)?;
     ui.set_lua_async_fn("clear_messages", clear_messages)?;
+    ui.set_lua_async_fn("scroll_message", scroll_message)?;
+    ui.set_lua_async_fn("scroll_message_to", scroll_message_to)?;
     ui.set_lua_async_fn("add_buf_highlight_namespace", add_buf_highlight_namespace)?;
     ui.set_lua_async_fn("add_buf_highlight", add_buf_highlight)?;
     ui.set_lua_async_fn("clear_buf_highlights", clear_buf_highlights)?;

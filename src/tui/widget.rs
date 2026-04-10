@@ -7,6 +7,7 @@ use ratatui::{
 };
 mod ansi;
 pub use ansi::parse_ansi_col;
+use super::scroll::ScrollPosition;
 
 #[derive(Default, Debug, Clone, Copy)]
 pub enum UnderlineOption {
@@ -105,6 +106,7 @@ pub struct Widget {
     pub(super) line_count: u16,
 
     pub(super) ansi: ansi::Parser,
+    pub scroll: ScrollPosition,
     pub ansi_show_cursor: bool,
     pub cursor_space_hl: Option<super::text::HighlightedRange<()>>,
     pub draw_pos: std::cell::Cell<Option<(u16, u16)>>,
@@ -175,6 +177,26 @@ impl Widget {
     pub fn clear(&mut self) {
         self.inner.clear();
         self.ansi.clear();
+    }
+
+    pub fn scroll(&mut self, value: isize, relative: bool) {
+        let max_line = self.inner.len().saturating_sub(1);
+        let value = if relative {
+            let current_line = match self.scroll {
+                super::scroll::ScrollPosition::Line(line) => line,
+                super::scroll::ScrollPosition::StickyBottom => max_line,
+            };
+            current_line as isize + value
+        } else {
+            value
+        };
+        let value = value.max(0) as usize;
+
+        if value >= max_line {
+            self.scroll = super::scroll::ScrollPosition::StickyBottom;
+        } else {
+            self.scroll = super::scroll::ScrollPosition::Line(value);
+        }
     }
 
 }

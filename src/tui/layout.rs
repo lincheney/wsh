@@ -361,7 +361,7 @@ impl<'a> NodeRenderer<'a, std::slice::Iter<'a, usize>> {
                         size.1 as _,
                         super::text::Scroll{
                             show_scrollbar: true,
-                            position: super::scroll::ScrollPosition::StickyBottom,
+                            position: widget.scroll,
                         },
                     )),
                     match node.constraint {
