@@ -253,20 +253,17 @@ impl Ui {
     }
 
     pub async fn handle_event(&mut self, event: Event, event_buffer: BString) -> Result<bool> {
-        if let Event::Key(event) = event {
-
-            if event.key.is_mouse() {
-                self.trigger_mouse_callbacks(&event.into(), &event_buffer).await;
-            } else {
-                self.trigger_key_callbacks(&event.into(), &event_buffer).await;
-            }
-
+        match event {
+            Event::Key(ev) => self.trigger_key_callbacks(&ev.into(), &event_buffer).await,
+            Event::Mouse(ev) => self.trigger_mouse_callbacks(&ev.into(), &event_buffer).await,
             if let Some(result) = self.handle_key(event, event_buffer.as_ref()).await {
-                self.cancel_completion_suffix();
-                return result
-            }
-
         }
+
+        if let Some(result) = self.handle_key(&event, event_buffer.as_ref()).await {
+            self.cancel_completion_suffix();
+            return result
+        }
+
         self.handle_key_default(event, event_buffer.as_ref()).await?;
         self.cancel_completion_suffix();
         Ok(true)
@@ -540,7 +537,7 @@ impl Ui {
         Ok(())
     }
 
-    async fn handle_key(&mut self, event: KeyEvent, buf: &BStr) -> Option<Result<bool>> {
+    async fn handle_key(&mut self, event: &Event, buf: &BStr) -> Option<Result<bool>> {
         let mut mapping = match self.handle_key_simple(event, buf).await? {
             KeybindOutput::Value(x) => return Some(x),
             KeybindOutput::String(string) => string,
@@ -553,21 +550,19 @@ impl Ui {
             parser.feed(mapping.as_ref());
             mapping.clear();
             for (event, buf) in parser.iter() {
-                if let Event::Key(event) = event {
-                    match self.handle_key_simple(event, buf.as_ref()).await {
-                        Some(KeybindOutput::Value(x)) => {
-                            if let Ok(x) = x {
-                                success = success && x;
-                                continue
-                            }
-                            return Some(x) // error
-                        },
-                        Some(KeybindOutput::String(mut string)) => {
-                            mapping.append(&mut string);
+                match self.handle_key_simple(&event, buf.as_ref()).await {
+                    Some(KeybindOutput::Value(x)) => {
+                        if let Ok(x) = x {
+                            success = success && x;
                             continue
-                        },
-                        None => (),
-                    }
+                        }
+                        return Some(x) // error
+                    },
+                    Some(KeybindOutput::String(mut string)) => {
+                        mapping.append(&mut string);
+                        continue
+                    },
+                    None => (),
                 }
 
                 let x = self.handle_key_default(event, buf.as_ref()).await;
@@ -591,18 +586,24 @@ impl Ui {
         Some(Ok(true))
     }
 
-    async fn handle_key_simple(&mut self, event: KeyEvent, buf: &BStr) -> Option<KeybindOutput> {
+    async fn handle_key_simple(&mut self, event: &Event, buf: &BStr) -> Option<KeybindOutput> {
         enum Value {
             String(BString),
             Widget{buffer: Option<BString>, cursor: Option<usize>, output: Option<BString>, accept_line: bool},
         }
+
+        let (key, modifiers) = match event {
+            Event::Key(event) => (event.key, event.modifiers),
+            Event::Mouse(event) => (event.key, event.modifiers),
+            _ => return None,
+        };
 
         // look for a lua callback
         let result = self.get().borrow().keybinds
             .iter()
             .rev()
             .find_map(|k| {
-                if let Some(callback) = k.inner.get(&(event.key, event.modifiers)) {
+                if let Some(callback) = k.inner.get(&(key, modifiers)) {
                     Some(Some(callback.clone()))
                 } else if k.no_fallthrough {
                     Some(None)

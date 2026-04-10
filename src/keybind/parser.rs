@@ -7,6 +7,7 @@ pub const CONTROL_C_BYTE: u8 = KeyEvent{ key: Key::Char('c'), modifiers: KeyModi
 #[derive(Debug)]
 pub enum Event {
     Key(KeyEvent),
+    Mouse(MouseEvent),
     BracketedPaste(BString),
     Focus(bool),
     CursorPosition{x: usize, y: usize},
@@ -18,6 +19,14 @@ pub enum Event {
 pub struct KeyEvent {
     pub key: Key,
     pub modifiers: KeyModifiers,
+}
+
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+pub struct MouseEvent {
+    pub key: Key,
+    pub modifiers: KeyModifiers,
+    pub x: usize,
+    pub y: usize,
 }
 
 bitflags::bitflags! {
@@ -56,9 +65,10 @@ pub enum Key {
     End,
     Pageup,
     Pagedown,
-    MouseButton{x: usize, y: usize, button: MouseButton, release: bool},
-    MouseMove{x: usize, y: usize, button: MouseButton},
-    MouseScroll{x: usize, y: usize, down: bool},
+
+    MouseButton{button: MouseButton, release: bool},
+    MouseMove{button: MouseButton},
+    MouseScroll{down: bool},
 }
 
 impl Key {
@@ -93,8 +103,8 @@ impl KeyEvent {
         }
 
         let key = match key {
-            "bs" if special => Key::Backspace,
-            "cr" if special => Key::Enter,
+            "bs" | "backspace" if special => Key::Backspace,
+            "cr" | "enter" if special => Key::Enter,
             "left" if special => Key::Left,
             "right" if special => Key::Right,
             "up" if special => Key::Up,
@@ -106,7 +116,33 @@ impl KeyEvent {
             "tab" if special => Key::Char('\t'),
             "delete" if special => Key::Delete,
             "insert" if special => Key::Insert,
-            "esc" if special => Key::Escape,
+            "esc" | "escape" if special => Key::Escape,
+
+            "leftmouse" if special => Key::MouseButton{button: MouseButton::Left, release: false},
+            "leftmouse-release" if special => Key::MouseButton{button: MouseButton::Left, release: true},
+            "rightmouse" if special => Key::MouseButton{button: MouseButton::Right, release: false},
+            "rightmouse-release" if special => Key::MouseButton{button: MouseButton::Right, release: true},
+            "middlemouse" if special => Key::MouseButton{button: MouseButton::Middle, release: false},
+            "middlemouse-release" if special => Key::MouseButton{button: MouseButton::Middle, release: true},
+            key if special && key.starts_with("button") && key.ends_with("-release") && key["button".len() .. key.len() - "-release".len()].parse::<u8>().is_ok() => {
+                let n = key["button".len() .. key.len() - "-release".len()].parse().unwrap();
+                Key::MouseButton{button: MouseButton::Button(n), release: true}
+            }
+            key if special && key.starts_with("button") && key["button".len() ..].parse::<u8>().is_ok() => {
+                let n = key["button".len() ..].parse().unwrap();
+                Key::MouseButton{button: MouseButton::Button(n), release: false}
+            }
+
+            "leftmouse-move" if special => Key::MouseMove{button: MouseButton::Left},
+            "rightmouse-move" if special => Key::MouseMove{button: MouseButton::Right},
+            "middlemouse-move" if special => Key::MouseMove{button: MouseButton::Middle},
+            key if special && key.starts_with("button") && key.ends_with("-move") && key["button".len() .. key.len() - "-move".len()].parse::<u8>().is_ok() => {
+                let n = key["button".len() .. key.len() - "-move".len()].parse().unwrap();
+                Key::MouseButton{button: MouseButton::Button(n), release: true}
+            }
+
+            "scrolldown" if special => Key::MouseScroll{down: true},
+            "scrollup" if special => Key::MouseScroll{down: false},
 
             "lt" if special => Key::Char('<'),
             key if key.len() == 1 && &key[0..1] != "<" && key.is_ascii() => {
@@ -298,7 +334,7 @@ impl Parser {
         let is_move = button & 32 > 0;
         let button = button & !4 & !8 & !16 & !32;
         let mouse = match button {
-            64 | 65 => return Some((Event::Key(KeyEvent{ key: Key::MouseScroll{x, y, down: button == 65}, modifiers }), len)),
+            64 | 65 => return Some((Event::Mouse(MouseEvent{ x, y, key: Key::MouseScroll{down: button == 65}, modifiers }), len)),
 
             0  => MouseButton::Left,
             1  => MouseButton::Middle,
@@ -307,12 +343,12 @@ impl Parser {
         };
 
         let event = if is_move {
-            Key::MouseMove{x, y, button: mouse}
+            Key::MouseMove{button: mouse}
         } else {
-            Key::MouseButton{x, y, button: mouse, release}
+            Key::MouseButton{button: mouse, release}
         };
 
-        Some((Event::Key(KeyEvent{ key: event, modifiers }), len))
+        Some((Event::Mouse(MouseEvent{ x, y, key: event, modifiers }), len))
     }
 
     fn parse_csi(&self) -> Option<(Event, usize)> {

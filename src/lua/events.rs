@@ -146,22 +146,15 @@ pub struct MouseEvent {
     pub y: usize,
 }
 
-impl From<parser::KeyEvent> for MouseEvent {
-    fn from(ev: parser::KeyEvent) -> Self {
-        let (x, y) = match ev.key {
-            parser::Key::MouseButton{x, y, ..} => (x, y),
-            parser::Key::MouseMove{x, y, ..} => (x, y),
-            parser::Key::MouseScroll{x, y, ..} => (x, y),
-            _ => (0, 0),
-        };
+impl From<parser::MouseEvent> for MouseEvent {
+    fn from(ev: parser::MouseEvent) -> Self {
         Self {
             key: ev.key.to_string(),
             control: ev.modifiers.contains(parser::KeyModifiers::CONTROL),
             shift: ev.modifiers.contains(parser::KeyModifiers::SHIFT),
             alt: ev.modifiers.contains(parser::KeyModifiers::ALT),
-            // Convert to 1-indexed for Lua
-            x: x as usize + 1,
-            y: y as usize + 1,
+            x: ev.x as usize,
+            y: ev.y as usize,
         }
     }
 }
