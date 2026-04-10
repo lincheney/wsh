@@ -179,7 +179,7 @@ impl Widget {
         self.ansi.clear();
     }
 
-    pub fn scroll(&mut self, value: isize, relative: bool) {
+    pub fn scroll(&mut self, value: isize, relative: bool) -> bool {
         let max_line = self.inner.len().saturating_sub(1);
         let value = if relative {
             let current_line = match self.scroll {
@@ -192,10 +192,17 @@ impl Widget {
         };
         let value = value.max(0) as usize;
 
-        if value >= max_line {
-            self.scroll = super::scroll::ScrollPosition::StickyBottom;
+        let new_scroll = if value >= max_line {
+            super::scroll::ScrollPosition::StickyBottom
         } else {
-            self.scroll = super::scroll::ScrollPosition::Line(value);
+            super::scroll::ScrollPosition::Line(value)
+        };
+
+        if self.scroll == new_scroll {
+            false
+        } else {
+            self.scroll = new_scroll;
+            true
         }
     }
 

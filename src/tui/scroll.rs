@@ -4,7 +4,7 @@ use ratatui::style::{Style};
 use bstr::{BString, BStr};
 use super::wrap::WrapToken;
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default ,PartialEq)]
 pub enum ScrollPosition {
     Line(usize),
     #[default]

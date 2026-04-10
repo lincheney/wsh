@@ -559,8 +559,9 @@ async fn scroll_message(ui: Ui, _lua: Lua, (id, delta): (usize, isize)) -> Resul
     let tui = &mut ui.borrow_mut().tui;
     match tui.get_node_mut(id) {
         Some(Node{ kind: NodeKind::Widget(widget), .. }) => {
-            widget.scroll(delta, true);
-            tui.dirty = true;
+            if widget.scroll(delta, true) {
+                tui.dirty = true;
+            }
             Ok(())
         },
         Some(_) => anyhow::bail!("can't scroll layout with id {id}"),
@@ -573,8 +574,9 @@ async fn scroll_message_to(ui: Ui, _lua: Lua, (id, line): (usize, usize)) -> Res
     let tui = &mut ui.borrow_mut().tui;
     match tui.get_node_mut(id) {
         Some(Node{ kind: NodeKind::Widget(widget), .. }) => {
-            widget.scroll(line as isize, false);
-            tui.dirty = true;
+            if widget.scroll(line as isize, false) {
+                tui.dirty = true;
+            }
             Ok(())
         },
         Some(_) => anyhow::bail!("can't scroll layout with id {id}"),
