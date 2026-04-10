@@ -862,6 +862,17 @@ impl Ui {
         Ok(result)
     }
 
+    pub async fn allocate_height(&self, height: u16) -> Result<()> {
+        let locks = (
+            self.has_foreground_process.lock().await,
+            self.print_lock.lock_exclusive().await,
+        );
+        let mut stdout = self.unlocked.read().borrow().stdout.lock();
+        crate::tui::allocate_height(&mut stdout, height)?;
+        drop(locks);
+        Ok(())
+    }
+
 }
 
 impl UiInner {

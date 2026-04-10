@@ -697,9 +697,8 @@ fn style_to_sgr(_ui: &Ui, _lua: &Lua, options: StyleOptions) -> Result<BString> 
     Ok(buf.into())
 }
 
-async fn allocate_height(_ui: Ui, _lua: Lua, height: u16) -> Result<()> {
-    tui::allocate_height(&mut std::io::stdout(), height)?;
-    Ok(())
+async fn allocate_height(ui: Ui, _lua: Lua, height: u16) -> Result<()> {
+    ui.allocate_height(height).await
 }
 
 pub fn init_lua(ui: &Ui) -> Result<()> {
