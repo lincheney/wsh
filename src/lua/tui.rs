@@ -671,7 +671,7 @@ fn get_status_bar_geometry(ui: &Ui, lua: &Lua, (): ()) -> Result<Option<LuaTable
     }
 }
 
-fn sgr_to_style(_ui: &Ui, lua: &Lua, sgr: String) -> Result<LuaValue> {
+fn sgr_to_style(lua: &Lua, sgr: String) -> LuaResult<LuaValue> {
     let sgr = if sgr.starts_with("\x1b[") && sgr.ends_with('m') {
         &sgr[2..sgr.len()-1]
     } else {
@@ -682,7 +682,7 @@ fn sgr_to_style(_ui: &Ui, lua: &Lua, sgr: String) -> Result<LuaValue> {
     Ok(lua.to_value(&options)?)
 }
 
-fn style_to_sgr(_ui: &Ui, _lua: &Lua, options: StyleOptions) -> Result<BString> {
+fn style_to_sgr(_lua: &Lua, options: StyleOptions) -> LuaResult<BString> {
     let style: tui::widget::StyleOptions = options.into();
     let style = style.as_style();
     let mut cell = ratatui::buffer::Cell::default();
@@ -703,8 +703,10 @@ async fn allocate_height(ui: Ui, _lua: Lua, height: u16) -> Result<()> {
 
 pub fn init_lua(ui: &Ui) -> Result<()> {
 
-    ui.set_lua_fn("sgr_to_style", sgr_to_style)?;
-    ui.set_lua_fn("style_to_sgr", style_to_sgr)?;
+    let lua_api = ui.get_lua_api()?;
+
+    lua_api.set("sgr_to_style", ui.lua.create_function(sgr_to_style)?)?;
+    lua_api.set("style_to_sgr", ui.lua.create_function(style_to_sgr)?)?;
     ui.set_lua_async_fn("allocate_height", allocate_height)?;
     ui.set_lua_async_fn("set_message", set_message)?;
     ui.set_lua_async_fn("check_message", check_message)?;
