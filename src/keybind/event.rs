@@ -55,13 +55,16 @@ impl EventIndex {
                         "c" => modifiers |= super::Modifiers::CONTROL,
                         "s" => modifiers |= super::Modifiers::SHIFT,
                         "a" => modifiers |= super::Modifiers::ALT,
-                        _ => return Err(anyhow::anyhow!("invalid keybind: {:?}", original)),
+                        _ => anyhow::bail!("invalid keybind: {:?}", original),
                     }
                 }
                 key = key.rsplit('-').next().unwrap();
             }
         }
 
+        if let Some(key) = super::Key::parse_normal_from_label(key) {
+            return Ok(Self::Key(super::KeyEvent{key, modifiers}))
+        }
 
         if special {
             if let Some(mouse) = super::Mouse::parse_from_label(key) {
@@ -75,8 +78,6 @@ impl EventIndex {
                     _ => (),
                 }
             }
-        } else if let Some(key) = super::Key::parse_normal_from_label(key) {
-            return Ok(Self::Key(super::KeyEvent{key, modifiers}))
         }
 
         anyhow::bail!("invalid keybind: {:?}", original)
