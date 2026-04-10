@@ -21,6 +21,7 @@ mod parser;
 mod variables;
 mod functions;
 mod regex;
+use crate::keybind::parser::HookableEvent;
 pub use keybind::KeybindMapping;
 pub use events::{EventCallbacks, HasEventCallbacks};
 
@@ -161,13 +162,13 @@ async fn print(ui: Ui, _lua: Lua, value: BString) -> Result<()> {
 }
 
 async fn set_interrupt_key(ui: Ui, _lua: Lua, label: String) -> Result<()> {
-    let key_event = crate::keybind::parser::KeyEvent::parse_from_label(&label)?;
-    let Some(byte) = key_event.try_into_byte()
-        else {
-            anyhow::bail!("{key_event:?} cannot be represented using one byte")
-        };
-    ui.set_vintr(byte).await?;
-    Ok(())
+    if let HookableEvent::Key(key) = HookableEvent::parse_from_label(&label)?
+        && let Some(byte) = key.try_into_byte()
+    {
+        ui.set_vintr(byte).await?;
+        return Ok(())
+    }
+    anyhow::bail!("{label:?} cannot be represented using one byte")
 }
 
 fn time(_lua: &Lua, (): ()) -> LuaResult<f64> {

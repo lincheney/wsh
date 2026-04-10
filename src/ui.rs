@@ -254,9 +254,13 @@ impl Ui {
 
     pub async fn handle_event(&mut self, event: Event, event_buffer: BString) -> Result<bool> {
         match event {
-            Event::Key(ev) => self.trigger_key_callbacks(&ev.into(), &event_buffer).await,
-            Event::Mouse(ev) => self.trigger_mouse_callbacks(&ev.into(), &event_buffer).await,
-            if let Some(result) = self.handle_key(event, event_buffer.as_ref()).await {
+            Event::Key(ev) => {
+                self.trigger_key_callbacks(&ev.into(), &event_buffer).await;
+            },
+            Event::Mouse(ev) => {
+                self.trigger_mouse_callbacks(&ev.into(), &event_buffer).await;
+            },
+            _ => (),
         }
 
         if let Some(result) = self.handle_key(&event, event_buffer.as_ref()).await {
@@ -592,25 +596,24 @@ impl Ui {
             Widget{buffer: Option<BString>, cursor: Option<usize>, output: Option<BString>, accept_line: bool},
         }
 
-        let (key, modifiers) = match event {
-            Event::Key(event) => (event.key, event.modifiers),
-            Event::Mouse(event) => (event.key, event.modifiers),
-            _ => return None,
-        };
-
+        let key = event.try_into().ok();
         // look for a lua callback
-        let result = self.get().borrow().keybinds
-            .iter()
-            .rev()
-            .find_map(|k| {
-                if let Some(callback) = k.inner.get(&(key, modifiers)) {
-                    Some(Some(callback.clone()))
-                } else if k.no_fallthrough {
-                    Some(None)
-                } else {
-                    None
-                }
-            });
+        let result = if let Some(key) = key {
+            self.get().borrow().keybinds
+                .iter()
+                .rev()
+                .find_map(|k| {
+                    if let Some(callback) = k.inner.get(&key) {
+                        Some(Some(callback.clone()))
+                    } else if k.no_fallthrough {
+                        Some(None)
+                    } else {
+                        None
+                    }
+                })
+        } else {
+            None
+        };
 
         match result {
             Some(Some(callback)) => {

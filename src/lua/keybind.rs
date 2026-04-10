@@ -2,19 +2,19 @@ use std::collections::HashMap;
 use std::default::Default;
 use anyhow::Result;
 use mlua::{prelude::*, Function};
-use crate::keybind::parser::{Key, KeyEvent, KeyModifiers};
+use crate::keybind::parser::{HookableEvent};
 use crate::ui::{Ui};
 
 #[derive(Default)]
 pub struct KeybindMapping {
     id: usize,
-    pub inner: HashMap<(Key, KeyModifiers), Function>,
+    pub inner: HashMap<HookableEvent, Function>,
     pub no_fallthrough: bool,
 }
 
 
 async fn set_keymap(ui: Ui, _lua: Lua, (key, callback, layer): (String, Function, Option<usize>)) -> Result<()> {
-    let KeyEvent { key, modifiers } = KeyEvent::parse_from_label(&key)?;
+    let key = HookableEvent::parse_from_label(&key)?;
 
     let ui = ui.get();
     let mut ui = ui.borrow_mut();
@@ -27,7 +27,7 @@ async fn set_keymap(ui: Ui, _lua: Lua, (key, callback, layer): (String, Function
     } else {
         ui.keybinds.last_mut().unwrap()
     };
-    layer.inner.insert((key, modifiers), callback);
+    layer.inner.insert(key, callback);
 
     Ok(())
 }

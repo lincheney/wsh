@@ -15,7 +15,26 @@ pub enum Event {
     Unknown,
 }
 
-#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub enum HookableEvent {
+    Key(KeyEvent),
+    Mouse{key: MouseKey, modifiers: KeyModifiers},
+    Focus(bool),
+}
+
+impl TryFrom<&Event> for HookableEvent {
+    type Error = ();
+    fn try_from(value: &Event) -> Result<Self, Self::Error> {
+        match value {
+            Event::Key(ev) => Ok(Self::Key(*ev)),
+            Event::Mouse(ev) => Ok(Self::Mouse{key: ev.key, modifiers: ev.modifiers}),
+            Event::Focus(ev) => Ok(Self::Focus(*ev)),
+            _ => Err(()),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
 pub struct KeyEvent {
     pub key: Key,
     pub modifiers: KeyModifiers,
@@ -23,7 +42,7 @@ pub struct KeyEvent {
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
 pub struct MouseEvent {
-    pub key: Key,
+    pub key: MouseKey,
     pub modifiers: KeyModifiers,
     pub x: usize,
     pub y: usize,
@@ -65,19 +84,49 @@ pub enum Key {
     End,
     Pageup,
     Pagedown,
-
-    MouseButton{button: MouseButton, release: bool},
-    MouseMove{button: MouseButton},
-    MouseScroll{down: bool},
 }
 
-impl Key {
-    pub fn is_mouse(&self) -> bool {
-        matches!(self, Key::MouseButton{..} | Key::MouseMove{..} | Key::MouseScroll{..})
+#[derive(Debug, PartialEq, Eq, Copy, Clone, Hash)]
+pub enum MouseKey {
+    Button{button: MouseButton, release: bool},
+    Move{button: MouseButton},
+    Scroll{down: bool},
+}
+
+impl HookableEvent {
+
+    fn parse_mouse_key(key: &str) -> Option<MouseKey> {
+        Some(match key {
+            "leftmouse" => MouseKey::Button{button: MouseButton::Left, release: false},
+            "leftmouse-release" => MouseKey::Button{button: MouseButton::Left, release: true},
+            "rightmouse" => MouseKey::Button{button: MouseButton::Right, release: false},
+            "rightmouse-release" => MouseKey::Button{button: MouseButton::Right, release: true},
+            "middlemouse" => MouseKey::Button{button: MouseButton::Middle, release: false},
+            "middlemouse-release" => MouseKey::Button{button: MouseButton::Middle, release: true},
+            key if key.starts_with("button") && key.ends_with("-release") && key["button".len() .. key.len() - "-release".len()].parse::<u8>().is_ok() => {
+                let n = key["button".len() .. key.len() - "-release".len()].parse().unwrap();
+                MouseKey::Button{button: MouseButton::Button(n), release: true}
+            },
+            key if key.starts_with("button") && key["button".len() ..].parse::<u8>().is_ok() => {
+                let n = key["button".len() ..].parse().unwrap();
+                MouseKey::Button{button: MouseButton::Button(n), release: false}
+            },
+
+            "leftmouse-move" => MouseKey::Move{button: MouseButton::Left},
+            "rightmouse-move" => MouseKey::Move{button: MouseButton::Right},
+            "middlemouse-move" => MouseKey::Move{button: MouseButton::Middle},
+            key if key.starts_with("button") && key.ends_with("-move") && key["button".len() .. key.len() - "-move".len()].parse::<u8>().is_ok() => {
+                let n = key["button".len() .. key.len() - "-move".len()].parse().unwrap();
+                MouseKey::Move{button: MouseButton::Button(n)}
+            },
+
+            "scrolldown" => MouseKey::Scroll{down: true},
+            "scrollup" => MouseKey::Scroll{down: false},
+
+            _ => return None,
+        })
     }
-}
 
-impl KeyEvent {
     pub fn parse_from_label(key: &str) -> anyhow::Result<Self> {
         let mut modifiers = KeyModifiers::empty();
 
@@ -102,7 +151,15 @@ impl KeyEvent {
             }
         }
 
+
+        if special && let Some(key) = Self::parse_mouse_key(key) {
+            return Ok(Self::Mouse{key, modifiers})
+        }
+
         let key = match key {
+            "focusin" if special => return Ok(Self::Focus(true)),
+            "focusout" if special => return Ok(Self::Focus(false)),
+
             "bs" | "backspace" if special => Key::Backspace,
             "cr" | "enter" if special => Key::Enter,
             "left" if special => Key::Left,
@@ -118,31 +175,6 @@ impl KeyEvent {
             "insert" if special => Key::Insert,
             "esc" | "escape" if special => Key::Escape,
 
-            "leftmouse" if special => Key::MouseButton{button: MouseButton::Left, release: false},
-            "leftmouse-release" if special => Key::MouseButton{button: MouseButton::Left, release: true},
-            "rightmouse" if special => Key::MouseButton{button: MouseButton::Right, release: false},
-            "rightmouse-release" if special => Key::MouseButton{button: MouseButton::Right, release: true},
-            "middlemouse" if special => Key::MouseButton{button: MouseButton::Middle, release: false},
-            "middlemouse-release" if special => Key::MouseButton{button: MouseButton::Middle, release: true},
-            key if special && key.starts_with("button") && key.ends_with("-release") && key["button".len() .. key.len() - "-release".len()].parse::<u8>().is_ok() => {
-                let n = key["button".len() .. key.len() - "-release".len()].parse().unwrap();
-                Key::MouseButton{button: MouseButton::Button(n), release: true}
-            }
-            key if special && key.starts_with("button") && key["button".len() ..].parse::<u8>().is_ok() => {
-                let n = key["button".len() ..].parse().unwrap();
-                Key::MouseButton{button: MouseButton::Button(n), release: false}
-            }
-
-            "leftmouse-move" if special => Key::MouseMove{button: MouseButton::Left},
-            "rightmouse-move" if special => Key::MouseMove{button: MouseButton::Right},
-            "middlemouse-move" if special => Key::MouseMove{button: MouseButton::Middle},
-            key if special && key.starts_with("button") && key.ends_with("-move") && key["button".len() .. key.len() - "-move".len()].parse::<u8>().is_ok() => {
-                let n = key["button".len() .. key.len() - "-move".len()].parse().unwrap();
-                Key::MouseButton{button: MouseButton::Button(n), release: true}
-            }
-
-            "scrolldown" if special => Key::MouseScroll{down: true},
-            "scrollup" if special => Key::MouseScroll{down: false},
 
             "lt" if special => Key::Char('<'),
             key if key.len() == 1 && &key[0..1] != "<" && key.is_ascii() => {
@@ -155,9 +187,11 @@ impl KeyEvent {
             _ => return Err(anyhow::anyhow!("invalid keybind: {:?}", original)),
         };
 
-        Ok(KeyEvent { key, modifiers })
+        Ok(Self::Key(KeyEvent{ key, modifiers }))
     }
+}
 
+impl KeyEvent {
     pub const fn try_into_byte(&self) -> Option<u8> {
         Some(
             match (self.key, self.modifiers) {
@@ -201,24 +235,27 @@ impl std::fmt::Display for Key {
             Key::End => write!(f, "end"),
             Key::Pageup => write!(f, "pageup"),
             Key::Pagedown => write!(f, "pagedown"),
-            Key::MouseButton{button, release, ..} => match button {
-                MouseButton::Left if *release => write!(f, "leftmouse-release"),
-                MouseButton::Left => write!(f, "leftmouse"),
-                MouseButton::Right if *release => write!(f, "rightmouse-release"),
-                MouseButton::Right => write!(f, "rightmouse"),
-                MouseButton::Middle if *release => write!(f, "middlemouse-release"),
-                MouseButton::Middle => write!(f, "middlemouse"),
-                MouseButton::Button(n) if *release => write!(f, "button{n}-release"),
-                MouseButton::Button(n) => write!(f, "button{n}"),
-            },
-            Key::MouseMove{button, ..} => match button {
-                MouseButton::Left => write!(f, "leftmouse-move"),
-                MouseButton::Right => write!(f, "rightmouse-move"),
-                MouseButton::Middle => write!(f, "middlemouse-move"),
-                MouseButton::Button(n) => write!(f, "button{n}-move"),
-            },
-            Key::MouseScroll{down, ..} if *down => write!(f, "scrolldown"),
-            Key::MouseScroll{..} => write!(f, "scrollup"),
+        }
+    }
+}
+
+impl std::fmt::Display for MouseKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            MouseKey::Button{button: MouseButton::Left, release: true} => write!(f, "leftmouse-release"),
+            MouseKey::Button{button: MouseButton::Left, ..} => write!(f, "leftmouse"),
+            MouseKey::Button{button: MouseButton::Right, release: true} => write!(f, "rightmouse-release"),
+            MouseKey::Button{button: MouseButton::Right, ..} => write!(f, "rightmouse"),
+            MouseKey::Button{button: MouseButton::Middle, release: true} => write!(f, "middlemouse-release"),
+            MouseKey::Button{button: MouseButton::Middle, ..} => write!(f, "middlemouse"),
+            MouseKey::Button{button: MouseButton::Button(n), release: true} => write!(f, "button{n}-release"),
+            MouseKey::Button{button: MouseButton::Button(n), ..} => write!(f, "button{n}"),
+            MouseKey::Move{button: MouseButton::Left} => write!(f, "leftmouse-move"),
+            MouseKey::Move{button: MouseButton::Right} => write!(f, "rightmouse-move"),
+            MouseKey::Move{button: MouseButton::Middle} => write!(f, "middlemouse-move"),
+            MouseKey::Move{button: MouseButton::Button(n)} => write!(f, "button{n}-move"),
+            MouseKey::Scroll{down: true} => write!(f, "scrolldown"),
+            MouseKey::Scroll{..} => write!(f, "scrollup"),
         }
     }
 }
@@ -334,7 +371,7 @@ impl Parser {
         let is_move = button & 32 > 0;
         let button = button & !4 & !8 & !16 & !32;
         let mouse = match button {
-            64 | 65 => return Some((Event::Mouse(MouseEvent{ x, y, key: Key::MouseScroll{down: button == 65}, modifiers }), len)),
+            64 | 65 => return Some((Event::Mouse(MouseEvent{ x, y, key: MouseKey::Scroll{down: button == 65}, modifiers }), len)),
 
             0  => MouseButton::Left,
             1  => MouseButton::Middle,
@@ -343,9 +380,9 @@ impl Parser {
         };
 
         let event = if is_move {
-            Key::MouseMove{button: mouse}
+            MouseKey::Move{button: mouse}
         } else {
-            Key::MouseButton{button: mouse, release}
+            MouseKey::Button{button: mouse, release}
         };
 
         Some((Event::Mouse(MouseEvent{ x, y, key: event, modifiers }), len))
