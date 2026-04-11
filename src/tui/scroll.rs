@@ -90,14 +90,9 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
 
     let mut total_line_count = 0;
     let mut tokens = vec![];
-    let mut start = 0;
-    let end;
 
     // add a dummy line at the end
     for (i, line) in lines.iter().map(|l| l.as_ref()).chain(std::iter::once(BStr::new(b""))).enumerate() {
-        if i < lineno {
-            start = total_line_count;
-        }
 
         let past_end = i >= lines.len();
         if past_end && !highlights.clone().any(|hl| hl.lineno >= i && hl.inner.virtual_text.is_some()) {
@@ -141,25 +136,40 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
     // pop the trailing line break
     tokens.pop();
 
-    if let Some(h) = max_height {
-        start = start.saturating_sub(h / 2);
-        end = (start + h).min(total_line_count);
-        if end - start < h {
-            start = end.saturating_sub(h);
-        }
-    } else {
-        // infinite height
-        start = 0;
-        end = total_line_count;
-    }
+    let max_visual = tokens.last().map_or(0, |t| t.visual_lineno) + 1;
 
-    tokens.retain(|t| {
-        start <= t.visual_lineno
-        && (
-            t.visual_lineno + 1 < end
-            || (t.visual_lineno < end && !matches!(&t.inner, WrapToken::LineBreak))
-        )
+    let (start, end) = if !tokens.is_empty() && let Some(max_height) = max_height {
+
+        let start = tokens.partition_point(|t| t.lineno < lineno);
+        let end = start + tokens[start..].partition_point(|t| t.lineno <= lineno);
+        let start = tokens[start].visual_lineno;
+        let end = tokens[end - 1].visual_lineno + 1;
+        let current_height = end - start;
+
+        let space = max_height.saturating_sub(current_height);
+        if space > 0 {
+            // can fit more lines
+            // prefer to add space on the bottom first?
+            let end = (end + space / 2).min(max_visual);
+            let start = end.saturating_sub(max_height);
+            let end = start + max_height;
+            (start, end)
+        } else {
+            (start, end)
+        }
+
+    } else {
+        // full height
+        (0, max_visual)
+    };
+
+    let partition_start = tokens.partition_point(|t| t.visual_lineno < start);
+    drop(tokens.drain(..partition_start));
+    let partition_end = tokens.partition_point(|t| {
+        t.visual_lineno + 1 < end || (t.visual_lineno < end && !matches!(&t.inner, WrapToken::LineBreak))
     });
+    drop(tokens.drain(partition_end..));
+
     Scrolled {
         total_line_count,
         range: start .. end,
