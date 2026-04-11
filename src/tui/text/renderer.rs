@@ -180,7 +180,7 @@ impl<'a> TextRenderer<'a> {
             &text.lines,
             text.highlights.iter().chain(extra_highlights),
             Some(text.style),
-            area.width as usize,
+            area.width as usize - if scroll.show_scrollbar { 1 } else { 0 },
             text_height,
             initial_indent,
             scroll.position,

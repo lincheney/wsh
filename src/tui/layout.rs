@@ -357,13 +357,7 @@ impl<'a> NodeRenderer<'a, std::slice::Iter<'a, usize>> {
                     0,
                     widget.block.as_ref(),
                     size.0 as _,
-                    Some((
-                        size.1 as _,
-                        super::text::Scroll{
-                            show_scrollbar: true,
-                            position: widget.scroll,
-                        },
-                    )),
+                    Some((size.1 as _, widget.scroll)),
                     match node.constraint {
                         Some(Constraint::Min(height)) => Some(height as _),
                         _ => None,

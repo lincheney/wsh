@@ -8,6 +8,7 @@ use ratatui::{
 mod ansi;
 pub use ansi::parse_ansi_col;
 use super::scroll::ScrollPosition;
+use super::text::Scroll;
 
 #[derive(Default, Debug, Clone, Copy)]
 pub enum UnderlineOption {
@@ -106,7 +107,7 @@ pub struct Widget {
     pub(super) line_count: u16,
 
     pub(super) ansi: ansi::Parser,
-    pub scroll: ScrollPosition,
+    pub scroll: Scroll,
     pub ansi_show_cursor: bool,
     pub cursor_space_hl: Option<super::text::HighlightedRange<()>>,
     pub draw_pos: std::cell::Cell<Option<(u16, u16)>>,
@@ -142,7 +143,7 @@ impl Widget {
 
     pub(super) fn get_height_for_width(
         &self,
-        max_width: u16,
+        mut max_width: u16,
         height_constraint: Option<Constraint>,
     ) -> u16 {
 
@@ -151,6 +152,11 @@ impl Widget {
             let area = Rect{x: 0, y: 0, height: 10, width: max_width};
             let inner = block.inner(area);
             border_height = area.height - inner.height;
+            max_width = area.width - area.width;
+        }
+
+        if self.scroll.show_scrollbar {
+            max_width = max_width.saturating_sub(1);
         }
 
         let mut height = self.inner.get_size(max_width as _, 0, self.cursor_space_hl.iter()).1 as u16;
@@ -182,9 +188,9 @@ impl Widget {
     pub fn scroll(&mut self, value: isize, relative: bool) -> bool {
         let max_line = self.inner.len().saturating_sub(1);
         let value = if relative {
-            let current_line = match self.scroll {
-                super::scroll::ScrollPosition::Line(line) => line,
-                super::scroll::ScrollPosition::StickyBottom => max_line,
+            let current_line = match self.scroll.position {
+                ScrollPosition::Line(line) => line,
+                ScrollPosition::StickyBottom => max_line,
             };
             current_line as isize + value
         } else {
@@ -193,15 +199,15 @@ impl Widget {
         let value = value.max(0) as usize;
 
         let new_scroll = if value >= max_line {
-            super::scroll::ScrollPosition::StickyBottom
+            ScrollPosition::StickyBottom
         } else {
-            super::scroll::ScrollPosition::Line(value)
+            ScrollPosition::Line(value)
         };
 
-        if self.scroll == new_scroll {
+        if self.scroll.position == new_scroll {
             false
         } else {
-            self.scroll = new_scroll;
+            self.scroll.position = new_scroll;
             true
         }
     }

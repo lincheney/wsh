@@ -67,9 +67,19 @@ impl<T> HighlightedRange<T> {
 }
 
 
+#[derive(Debug, Clone, Copy)]
 pub struct Scroll {
     pub show_scrollbar: bool,
     pub position: super::scroll::ScrollPosition,
+}
+
+impl Default for Scroll {
+    fn default() -> Self {
+        Self {
+            show_scrollbar: true,
+            position: Default::default(),
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone)]
