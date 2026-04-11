@@ -661,8 +661,11 @@ async fn enable_mouse_mode(ui: Ui, _lua: Lua, enable: Option<bool>) -> Result<()
 
     let ui = ui.get();
     let mut ui = ui.borrow_mut();
-    ui.mouse_mode = enable.unwrap_or(true);
-    ui.apply_mouse_mode()?;
+    let mouse_mode = enable.unwrap_or(true);
+    if mouse_mode != mouse_mode {
+        ui.mouse_mode = mouse_mode;
+        ui.apply_mouse_mode()?;
+    }
 
     drop(locks);
     Ok(())
