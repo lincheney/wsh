@@ -1,4 +1,4 @@
-local utf8 = require('wish/utf8')
+local utf8 = require('wish.utf8')
 
 local CUT_CONTENTS = nil
 
@@ -10,7 +10,7 @@ wish.set_keymap('<bs>', function()
     local buffer, cursor = wish.get_buffer()
     if cursor > 1 then
         buffer = utf8.sub(buffer, 1, cursor-2) .. utf8.sub(buffer, cursor)
-        wish.set_buffer(buffer, cursor-2)
+        wish.set_buffer(buffer, cursor-1)
     end
 end)
 
@@ -21,8 +21,8 @@ end)
 wish.set_keymap('<c-u>', function()
     local buffer, cursor = wish.get_buffer()
     if cursor > 0 then
-        CUT_CONTENTS = utf8.sub(buffer, 1, cursor)
-        wish.set_buffer(utf8.sub(buffer, cursor+1), 0)
+        CUT_CONTENTS = utf8.sub(buffer, 1, cursor - 1)
+        wish.set_buffer(utf8.sub(buffer, cursor), 0)
     end
 end)
 

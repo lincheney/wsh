@@ -74,7 +74,7 @@ fn set_cursor(ui: &Ui, _lua: &Lua, val: usize) -> Result<()> {
 }
 
 async fn set_buffer(ui: Ui, _lua: Lua, (val, cursor): (mlua::String, Option<usize>)) -> Result<()> {
-    ui.insert_or_set_buffer(false, &val.as_bytes(), cursor).await;
+    ui.insert_or_set_buffer(false, &val.as_bytes(), cursor.map(|c| c.saturating_sub(1))).await;
     ui.trigger_buffer_change_callbacks().await;
     Ok(())
 }
