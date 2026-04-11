@@ -26,7 +26,7 @@ pub struct Parser {
     style: Style,
     state: State,
     pub cursor_x: usize,
-    need_newline: bool,
+    pub need_newline: bool,
     pub ocrnl: bool,
     pub captured_sequences: std::cell::RefCell<BString>,
 }
@@ -144,7 +144,7 @@ pub fn parse_ansi_col(mut style: Style, string: &BStr) -> Style {
 
 impl Parser {
 
-    fn add_line<T>(&mut self, text: &mut Text<T>) {
+    pub fn add_line<T>(&mut self, text: &mut Text<T>) {
         text.push_line(b"".into(), None);
         self.cursor_x = 0;
         self.need_newline = false;

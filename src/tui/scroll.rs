@@ -142,8 +142,8 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
 
         let start = tokens.partition_point(|t| t.lineno < lineno);
         let end = start + tokens[start..].partition_point(|t| t.lineno <= lineno);
-        let start = tokens[start].visual_lineno;
-        let end = tokens[end - 1].visual_lineno + 1;
+        let start = tokens.get(start).or(tokens.last()).unwrap().visual_lineno;
+        let end = tokens.get(end.saturating_sub(1)).or(tokens.last()).unwrap().visual_lineno + 1;
         let current_height = end - start;
 
         let space = max_height.saturating_sub(current_height);

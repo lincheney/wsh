@@ -117,6 +117,11 @@ impl Widget {
 
     pub(in crate::tui) fn make_cursor_space_hl(&mut self) {
         if self.ansi_show_cursor {
+
+            if self.ansi.need_newline {
+                self.ansi.add_line(&mut self.inner);
+            }
+
             let pos = ansi::Parser::to_byte_pos(&self.inner, self.ansi.cursor_x);
             let (lineno, need_space) = if let Some(line) = self.inner.get().last() {
                 (self.inner.len().saturating_sub(1), pos == line.len())
