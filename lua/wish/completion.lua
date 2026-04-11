@@ -11,8 +11,8 @@ function M.complete()
     local keymap_layer = wish.add_keymap_layer()
 
     wish.set_keymap('<esc>', function()
-        comp:cancel()
         cancelled = true
+        comp:cancel()
     end, keymap_layer)
 
     -- loading spinner thing
@@ -36,7 +36,7 @@ function M.complete()
                     while true do
                         local chunk = comp()
                         loaded = true
-                        if not chunk then
+                        if not chunk or cancelled then
                             return
                         end
                         wish.set_message{id = msg, hidden = true}
