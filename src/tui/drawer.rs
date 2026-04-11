@@ -155,7 +155,12 @@ impl<W, C: Canvas> Drawer<'_, '_, W, C> {
 impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
     pub fn move_to_pos(&mut self, pos: (u16, u16)) -> Result<()> {
         if pos == (0, self.real_pos.1 + 1) {
-            queue!(self.writer, Print("\r\n"))?;
+            if self.real_pos.0 == self.term_width() {
+                // 1 past the end of line is technically the same?
+                // we need to do it this way to trigger terminal line wrapping
+            } else {
+                queue!(self.writer, Print("\r\n"))?;
+            }
         } else {
             if pos.0 != self.real_pos.0 {
                 queue!(self.writer, MoveToColumn(pos.0))?;
