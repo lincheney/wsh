@@ -1,5 +1,4 @@
-local QUERY = require('wish/syntax-query')
-local NAMESPACE = wish.add_buf_highlight_namespace()
+local QUERY = require('wish.syntax-query')
 
 local RULES = {
     { { hl='command', kind='command' } },
@@ -72,71 +71,81 @@ local RULES = {
     { {hl='keyword', kind='CASE|COPROC|DOLOOP|DONE|ELIF|ELSE|ZEND|ESAC|FI|FOR|FOREACH|FUNC|IF|NOCORRECT|REPEAT|SELECT|THEN|TIME|UNTIL|WHILE|TYPESET'} },
 }
 
-local function apply_highlight_matcher(matcher, token, str, highlights, priority)
-    if not matcher.hl then
-        return
-    end
+return wish.plugin(function(wish, opts, plugin)
 
-    if matcher.hlregex then
-        if type(matcher.hlregex) == 'string' then
-            matcher.hlregex = wish.regex(matcher.hlregex)
+    local NAMESPACE = wish.add_buf_highlight_namespace()
+
+    local function apply_highlight_matcher(matcher, token, str, highlights, priority)
+        if not matcher.hl then
+            return
         end
 
-        local tokstr = string.sub(str, token.start, token.finish)
-        local captures = matcher.hlregex:captures_all(tokstr)
-        for _, capture in ipairs(captures) do
-            local index = capture[2] or capture[1]
+        if matcher.hlregex then
+            if type(matcher.hlregex) == 'string' then
+                matcher.hlregex = wish.regex(matcher.hlregex)
+            end
+
+            local tokstr = string.sub(str, token.start, token.finish)
+            local captures = matcher.hlregex:captures_all(tokstr)
+            for _, capture in ipairs(captures) do
+                local index = capture[2] or capture[1]
+                local hl = wish.table.copy(wish.style[matcher.hl])
+                hl.start = token.start + index[1] - 1
+                hl.finish = token.start + index[2] - 1
+                hl.namespace = NAMESPACE
+                hl.priority = priority
+                table.insert(highlights, hl)
+            end
+
+        else
             local hl = wish.table.copy(wish.style[matcher.hl])
-            hl.start = token.start + index[1] - 1
-            hl.finish = token.start + index[2] - 1
+            hl.start = token.start
+            hl.finish = token.finish
             hl.namespace = NAMESPACE
             hl.priority = priority
             table.insert(highlights, hl)
         end
-
-    else
-        local hl = wish.table.copy(wish.style[matcher.hl])
-        hl.start = token.start
-        hl.finish = token.finish
-        hl.namespace = NAMESPACE
-        hl.priority = priority
-        table.insert(highlights, hl)
     end
-end
 
-local function apply_highlight_rules(rules, tokens, str, highlights, priority)
-    priority = priority or 0
-    highlights = highlights or {}
-    local rule_priority
-    local function callback(matches)
-        for i = 1, #matches do
-            apply_highlight_matcher(matches[i][1], matches[i][2], str, highlights, rule_priority)
+    local function apply_highlight_rules(rules, tokens, str, highlights, priority)
+        priority = priority or 0
+        highlights = highlights or {}
+        local rule_priority
+        local function callback(matches)
+            for i = 1, #matches do
+                apply_highlight_matcher(matches[i][1], matches[i][2], str, highlights, rule_priority)
+            end
         end
-    end
 
-    for i = 1, #rules do
-        rule_priority = (priority + (rules[i].priority or 0)) * #rules * 2 + i
-        QUERY.apply_seq(rules[i], tokens, str, callback)
-    end
-    for i = 1, #tokens do
-        if tokens[i].nested then
-            apply_highlight_rules(rules, tokens[i].nested, str, highlights, priority+1)
+        for i = 1, #rules do
+            rule_priority = (priority + (rules[i].priority or 0)) * #rules * 2 + i
+            QUERY.apply_seq(rules[i], tokens, str, callback)
         end
-    end
-    return highlights
-end
-
-QUERY.add_buffer_callback(function(tokens, str)
-    wish.clear_buf_highlights(NAMESPACE)
-
-    local highlights = apply_highlight_rules(RULES, tokens, str)
-    for i = 1, #highlights do
-        highlights[i].priority = highlights[i].priority + i / #highlights / 2
-    end
-    wish.table.sort_by(highlights, 'priority')
-    for i = 1, #highlights do
-        wish.add_buf_highlight(highlights[i])
+        for i = 1, #tokens do
+            if tokens[i].nested then
+                apply_highlight_rules(rules, tokens[i].nested, str, highlights, priority+1)
+            end
+        end
+        return highlights
     end
 
-    wish.redraw{buffer = true}
+    QUERY.add_buffer_callback(function(tokens, str)
+        if not plugin.is_enabled then
+            return true
+        end
+
+        wish.clear_buf_highlights(NAMESPACE)
+
+        local highlights = apply_highlight_rules(RULES, tokens, str)
+        for i = 1, #highlights do
+            highlights[i].priority = highlights[i].priority + i / #highlights / 2
+        end
+        wish.table.sort_by(highlights, 'priority')
+        for i = 1, #highlights do
+            wish.add_buf_highlight(highlights[i])
+        end
+
+        wish.redraw()
+    end)
+
 end)
