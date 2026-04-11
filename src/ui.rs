@@ -691,8 +691,6 @@ impl Ui {
                         ui.tui.add_zle_message(output.as_ref());
                     }
                     ui.buffer.set(None, cursor);
-                    // anything could have happened, so trigger a redraw
-                    ui.dirty = true;
                 }
 
                 if buffer.is_some() {

@@ -202,7 +202,7 @@ impl Tui {
 
         if clear {
             self.reset();
-            cmdline.reset();
+            cmdline.hard_reset();
             status_bar.reset();
             queue!(
                 writer,
