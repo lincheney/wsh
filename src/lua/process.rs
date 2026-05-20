@@ -7,7 +7,7 @@ use std::os::fd::{RawFd, AsRawFd, IntoRawFd, FromRawFd, OwnedFd};
 use std::fs::File;
 use std::io::{Read, Write};
 use anyhow::{Result, Context};
-use mlua::{prelude::*, UserData, UserDataMethods};
+use mlua::{prelude::*, UserData, UserDataMethods, UserDataFields};
 use tokio::io::{
     BufReader,
     BufWriter,
@@ -38,6 +38,7 @@ impl<'de> Deserialize<'de> for Signal {
     }
 }
 
+#[derive(Clone)]
 struct CommandResult {
     inner: watch::Receiver<Option<std::io::Result<i32>>>,
 }
@@ -56,8 +57,8 @@ impl CommandResult {
 
 impl UserData for CommandResult {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_async_method_mut("wait", |_lua, mut proc, ()| async move {
-            proc.wait().await
+        methods.add_async_method("wait", |_lua, proc, ()| async move {
+            proc.clone().wait().await
         });
     }
 }
@@ -68,6 +69,20 @@ struct Process {
 }
 
 impl UserData for Process {
+
+    // this is silly but otherwise wait() will lock Process and then we can't kill() it at the same time
+    fn add_fields<F: UserDataFields<Self>>(fields: &mut F) {
+        fields.add_field_method_get("wait", |lua, proc| {
+            let cmd = proc.result.clone();
+            lua.create_async_function(move |_lua, ()| {
+                let mut cmd = cmd.clone();
+                async move {
+                    Ok(cmd.wait().await)
+                }
+            })
+        });
+    }
+
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
 
         methods.add_method("pid", |_lua, proc, ()| {
@@ -76,10 +91,6 @@ impl UserData for Process {
 
         methods.add_method("is_finished", |_lua, proc, ()| {
             Ok(proc.result.inner.borrow().is_some())
-        });
-
-        methods.add_async_method_mut("wait", |_lua, mut proc, ()| async move {
-            proc.result.wait().await
         });
 
         methods.add_method("kill", |lua, proc, signal: LuaValue| {
