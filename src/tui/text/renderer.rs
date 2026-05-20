@@ -188,7 +188,7 @@ impl<'a> TextRenderer<'a> {
 
         // check if no space for the border
         if borders.bottom().is_some() && let Some(h) = max_height {
-            borders.inner.height = borders.inner.height.min((h - scrolled.range.len()) as u16 - borders.inner.y);
+            borders.inner.height = borders.inner.height.min(h.saturating_sub(scrolled.range.len()).saturating_sub(borders.inner.y as usize) as u16);
         }
 
         let scrollbar_range = if scroll.show_scrollbar && !(scrolled.range == (0 .. scrolled.total_line_count.max(1)))  {
