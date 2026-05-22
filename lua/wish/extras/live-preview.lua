@@ -1,34 +1,43 @@
 return wish.plugin(function(wish, opts, plugin)
 
-    local active = false
-    local msg = wish.set_message{
-        hidden = true,
-        persist = true,
-        dim = true,
-        height = 'min:3',
+    local enable_mouse_mode = opts.enable_mouse_mode
+    local timeout = opts.timeout
+    local height = opts.height or 'min:3'
+    local hide_on_stop = opts.hide_on_stop ~= false
+    local style = opts.style and opts.style.main or {
         border = {
             fg = 'magenta',
-            dim = false,
             type = 'Rounded',
-        },
+        }
     }
-    local saved_msg = wish.set_message{
+    local saved_style = opts.style and opts.style.saved or {
+        border = {
+            fg = 'cyan',
+            type = 'Rounded',
+        }
+    }
+
+    local visible = false
+    local active = false
+    local msg = wish.set_message(wish.table.deep_merge({
         hidden = true,
         persist = true,
         dim = true,
-        height = 'min:3',
-        border = {
-            fg = 'cyan',
-            dim = false,
-            type = 'Rounded',
-        },
-    }
+        height = height,
+    }, style))
+    local saved_msg = wish.set_message(wish.table.deep_merge({
+        hidden = true,
+        persist = true,
+        dim = true,
+        height = height,
+    }, saved_style))
     local layout_msg = wish.set_message{
         hidden = true,
         persist = true,
         direction = 'horizontal',
         children = {msg, saved_msg},
     }
+
     local buffer_change_callback = nil
     local accept_line_callback = nil
     local current_preview = nil
@@ -54,17 +63,19 @@ return wish.plugin(function(wish, opts, plugin)
     end
 
     local function preview(command)
+        visible = true
 
         if not command:find('%S') then
             current_preview = nil
-            wish.set_message{id = layout_msg, hidden = true}
+            -- hide only main msg in case saved msg is visible
+            wish.set_message{id = msg, hidden = false, text = '', border = {enabled = false}}
             wish.redraw()
             return
         end
 
         local proc = wish.async.zpty(command)
         -- kill any old proc
-        if current_preview then
+        if current_preview and not current_preview.proc:is_finished() then
             current_preview.proc:term()
         end
 
@@ -116,6 +127,18 @@ return wish.plugin(function(wish, opts, plugin)
                 wish.redraw()
             end),
         }
+
+        -- kill this one after timeout
+        if timeout then
+            wish.schedule(function()
+                wish.sleep(timeout)
+                if not proc:is_finished() then
+                    proc:term()
+                    wish.pprint('killed')
+                end
+            end)
+        end
+
         return current_preview
     end
 
@@ -126,39 +149,50 @@ return wish.plugin(function(wish, opts, plugin)
         end
     end)
 
-    local function stop()
-        wish.enable_mouse_mode(false)
-        wish.remove_event_callback(buffer_change_callback)
-        wish.remove_event_callback(accept_line_callback)
-        wish.set_message{id = layout_msg, hidden = true}
-        wish.set_message{id = saved_msg, hidden = true}
-        active = false
-        wish.redraw()
+    wish.add_event_callback('accept_line', function(arg)
+        plugin.hide()
+    end)
+
+    function plugin.hide()
+        if visible then
+            wish.set_message{id = layout_msg, hidden = true}
+            wish.redraw()
+            visible = false
+        end
     end
 
-    local function start()
+    function plugin.stop()
+        if enable_mouse_mode then
+            wish.enable_mouse_mode(false)
+        end
+        wish.remove_event_callback(buffer_change_callback)
+        if hide_on_stop then
+            plugin.hide()
+        end
+        active = false
+    end
+
+    function plugin.start()
         buffer_change_callback = wish.add_event_callback('buffer_change', function(arg)
             live_preview()
         end)
 
-        accept_line_callback = wish.add_event_callback('accept_line', function(arg)
-            stop()
-        end)
-
+        if enable_mouse_mode then
+            wish.enable_mouse_mode(true)
+        end
         live_preview()
-        wish.enable_mouse_mode(true)
         active = true
     end
 
     function plugin.toggle()
         if active then
-            stop()
+            plugin.stop()
         else
-            start()
+            plugin.start()
         end
     end
 
-    wish.set_keymap('<a-s>', function()
+    function plugin.save()
         if not active or not current_preview then
             return
         end
@@ -175,7 +209,7 @@ return wish.plugin(function(wish, opts, plugin)
             },
         }
         wish.redraw()
-    end)
+    end
 
     local function check_is_in_msg(msg, x, y)
         local geom = wish.get_message_geometry(msg)
