@@ -6,18 +6,17 @@ use crossterm::{
     cursor,
     queue,
     execute,
-    style,
     terminal::{Clear, ClearType},
+    style::Color,
 };
-use ratatui::{
-    *,
-    layout::*,
-    style::*,
-    buffer::Buffer,
-};
+pub mod style;
+pub mod cell;
+pub mod buffer;
+pub mod border;
 mod drawer;
 mod wrap;
 mod scroll;
+mod rect;
 pub mod widget;
 pub use widget::Widget;
 pub mod command_line;
@@ -27,6 +26,9 @@ pub mod layout;
 pub mod error_message;
 pub use drawer::{Drawer, Canvas, DummyCanvas};
 pub use error_message::ErrorMessage;
+pub use style::{Style, Modifier};
+pub use cell::Cell;
+pub use buffer::Buffer;
 
 pub struct MoveUp(pub u16);
 impl crossterm::Command for MoveUp {
@@ -53,14 +55,15 @@ impl crossterm::Command for MoveDown {
 pub fn allocate_height<W: Write>(stdout: &mut W, height: u16) -> std::io::Result<()> {
     for _ in 0 .. height {
         // vertical tab, this doesn't change x
-        queue!(stdout, style::Print("\x0b"))?;
+        queue!(stdout, crossterm::style::Print("\x0b"))?;
     }
     queue!(stdout, MoveUp(height))?;
     Ok(())
 }
 
-fn cell_is_empty(cell: &ratatui::buffer::Cell) -> bool {
-    cell.symbol() == " " && cell.bg == Color::Reset && !cell.modifier.intersects(Modifier::UNDERLINED | Modifier::REVERSED | Modifier::CROSSED_OUT)
+fn cell_is_empty(cell: &Cell) -> bool {
+    let active = cell.style.modifier & cell.style.modifier_mask;
+    cell.text() == " " && matches!(cell.style.bg, None | Some(Color::Reset)) && !active.intersects(Modifier::UNDERLINED | Modifier::REVERSED | Modifier::CROSSED_OUT)
 }
 
 #[derive(Default)]
@@ -107,11 +110,11 @@ impl Tui {
         self.nodes.get_node_mut(id)
     }
 
-    pub fn get_node_geometry(&self, id: usize) -> Option<Rect> {
+    pub fn get_node_geometry(&self, id: usize) -> Option<rect::Rect> {
         let node = self.nodes.get_node(id)?;
         let pos = node.get_draw_pos(&self.nodes.map)?;
         let size = node.get_size(false);
-        Some(Rect{
+        Some(rect::Rect{
             x: pos.0,
             y: pos.1 + self.top_y as u16,
             width: size.0,
@@ -119,13 +122,13 @@ impl Tui {
         })
     }
 
-    pub fn get_status_bar_geometry(&self, status_bar: &status_bar::StatusBar) -> Option<Rect> {
+    pub fn get_status_bar_geometry(&self, status_bar: &status_bar::StatusBar) -> Option<rect::Rect> {
         let size = self.get_size();
         let height = status_bar.get_height();
         if height == 0 {
             None
         } else {
-            Some(Rect{
+            Some(rect::Rect{
                 x: 0,
                 y: size.1.saturating_sub(height) + self.top_y as u16,
                 width: size.0,
@@ -145,7 +148,7 @@ impl Tui {
         let width = std::num::NonZero::new(width).map_or(80, |w| w.get());
 
         // refresh tmp size
-        node.refresh(&self.nodes.map, width, None, Some(Constraint::Min(0)), true);
+        node.refresh(&self.nodes.map, width, None, true);
 
         let mut string = vec![];
         let mut writer = Cursor::new(&mut string);
@@ -212,7 +215,7 @@ impl Tui {
         }
 
         // resize buffers
-        let area = Rect{x: 0, y: 0, width: width as _, height: height as _};
+        let area = rect::Rect{x: 0, y: 0, width: width as _, height: height as _};
         self.buffer.resize(area);
 
         let mut drawer = drawer::Drawer::new(&mut self.buffer, writer, cmdline.cursor_coord);

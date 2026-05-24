@@ -2,53 +2,123 @@ use bstr::BString;
 use std::default::Default;
 use serde::{Deserialize, Deserializer, de, Serialize};
 use anyhow::Result;
-use ratatui::{
-    layout::*,
-    widgets::*,
-    style::*,
-};
+use crossterm::style::Color;
 use mlua::{prelude::*};
 use crate::ui::{Ui};
-use crate::tui::{self, layout::{Node, NodeKind, Layout}};
+use crate::tui::{self, layout::{self, Node, NodeKind, Layout}, Style, Modifier, text::Alignment, Cell};
+use crate::tui::border;
 use super::SerdeWrap;
 
-#[derive(Debug, Copy, Clone)]
-pub struct SerdeConstraint(Constraint);
-impl<'de> Deserialize<'de> for SerdeConstraint {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let data = String::deserialize(deserializer)?;
-        let constraint = if let Some(end) = data.strip_prefix("min:") {
-            Constraint::Min(end.parse::<u16>().map_err(de::Error::custom)?)
-        } else if let Some(end) = data.strip_prefix("max:") {
-            Constraint::Max(end.parse::<u16>().map_err(de::Error::custom)?)
-        } else if let Some(start) = data.strip_suffix("%") {
-            Constraint::Percentage(start.parse::<u16>().map_err(de::Error::custom)?)
-        } else {
-            Constraint::Length(data.parse::<u16>().map_err(de::Error::custom)?)
+#[derive(Debug, Clone, Copy)]
+struct LuaColor(Color);
+
+impl<'de> serde::Deserialize<'de> for LuaColor {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let string = String::deserialize(deserializer)?.to_lowercase();
+        let color = match string.as_str() {
+            "reset"             => Color::Reset,
+            "default"           => Color::Reset,
+            "black"             => Color::Black,
+            "red"               => Color::DarkRed,
+            "green"             => Color::DarkGreen,
+            "yellow"            => Color::DarkYellow,
+            "blue"              => Color::DarkBlue,
+            "magenta"           => Color::DarkMagenta,
+            "cyan"              => Color::DarkCyan,
+            "gray"              => Color::Grey,
+            "grey"              => Color::Grey,
+            "darkgrey"          => Color::DarkGrey,
+            "darkgray"          => Color::DarkGrey,
+            "lightred"          => Color::Red,
+            "lightgreen"        => Color::Green,
+            "lightyellow"       => Color::Yellow,
+            "lightblue"         => Color::Blue,
+            "lightmagenta"      => Color::Magenta,
+            "lightcyan"         => Color::Cyan,
+            "white"             => Color::White,
+            _ if string.starts_with('#') && string.len() == 7 => {
+                let rgb = u32::from_str_radix(&string[1..7], 16).map_err(|e| serde::de::Error::custom(e.to_string()))?;
+                let r = (rgb >> 16) as _;
+                let g = ((rgb >> 8) & 0xff) as _;
+                let b = (rgb & 0xff) as _;
+                Color::Rgb{r, g, b}
+            },
+            _ => {
+                // try numeric ANSI index
+                if let Ok(n) = string.parse::<u8>() {
+                    Color::AnsiValue(n)
+                } else {
+                    return Err(serde::de::Error::custom(format!("unknown color: {string}")))
+                }
+            },
         };
-        Ok(Self(constraint))
+        Ok(LuaColor(color))
     }
 }
 
+impl serde::Serialize for LuaColor {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let string = match self.0 {
+            Color::Reset              => "reset",
+            Color::Black              => "black",
+            Color::DarkRed            => "red",
+            Color::DarkGreen          => "green",
+            Color::DarkYellow         => "yellow",
+            Color::DarkBlue           => "blue",
+            Color::DarkMagenta        => "magenta",
+            Color::DarkCyan           => "cyan",
+            Color::Grey               => "gray",
+            Color::DarkGrey           => "darkgray",
+            Color::Red                => "lightred",
+            Color::Green              => "lightgreen",
+            Color::Yellow             => "lightyellow",
+            Color::Blue               => "lightblue",
+            Color::Magenta            => "lightmagenta",
+            Color::Cyan               => "lightcyan",
+            Color::White              => "white",
+            Color::AnsiValue(n)       => &n.to_string(),
+            Color::Rgb{r, g, b}       => &format!("#{r:02x}{g:02x}{b:02x}"),
+        };
+        serializer.serialize_str(&string)
+    }
+}
+
+// #[derive(Debug, Copy, Clone)]
+// struct SerdeConstraint(Constraint);
+// impl<'de> Deserialize<'de> for SerdeConstraint {
+    // fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // let data = String::deserialize(deserializer)?;
+        // let constraint = if let Some(end) = data.strip_prefix("min:") {
+            // Constraint::Min(end.parse::<u16>().map_err(de::Error::custom)?)
+        // } else if let Some(end) = data.strip_prefix("max:") {
+            // Constraint::Max(end.parse::<u16>().map_err(de::Error::custom)?)
+        // } else if let Some(start) = data.strip_suffix("%") {
+            // Constraint::Percentage(start.parse::<u16>().map_err(de::Error::custom)?)
+        // } else {
+            // Constraint::Length(data.parse::<u16>().map_err(de::Error::custom)?)
+        // };
+        // Ok(Self(constraint))
+    // }
+// }
+
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default)]
-pub struct TextStyleOptions {
-    pub align: Option<SerdeWrap<Alignment>>,
+struct TextStyleOptions {
     #[serde(flatten)]
-    pub style: StyleOptions,
+    style: StyleOptions,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default)]
-pub struct TextOptions {
-    pub text: Option<String>,
+struct TextOptions {
+    text: Option<String>,
     #[serde(flatten)]
-    pub style: TextStyleOptions,
+    style: TextStyleOptions,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
-pub enum TextParts {
+enum TextParts {
     Single(String),
     Detailed(TextOptions),
     Many(Vec<TextOptions>),
@@ -57,16 +127,17 @@ pub enum TextParts {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 struct MessageStyleOptions {
+    align: Option<SerdeWrap<Alignment>>,
     #[serde(flatten)]
-    pub style: TextStyleOptions,
-    pub border: Option<BorderOptions>,
+    style: TextStyleOptions,
+    border: Option<BorderOptions>,
     // ansi options
-    pub show_cursor: Option<bool>,
+    show_cursor: Option<bool>,
 }
 
 impl MessageStyleOptions {
     fn is_none(&self) -> bool {
-        self.style.align.is_none()
+        self.align.is_none()
             && self.style.style.is_none()
             && self.border.is_none()
             && self.show_cursor.is_none()
@@ -102,17 +173,17 @@ enum MessageInner {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct MessageOptions {
+struct MessageOptions {
     id: Option<usize>,
-    pub persist: Option<bool>,
-    pub hidden: Option<bool>,
-    pub height: Option<SerdeConstraint>,
+    persist: Option<bool>,
+    hidden: Option<bool>,
+    height: Option<String>, // TODO
     #[serde(flatten)]
     inner: MessageInner,
 }
 
 #[derive(Clone, Copy, Debug, Default, strum::EnumString)]
-pub enum BorderSide {
+enum BorderSide {
     Top,
     Right,
     Bottom,
@@ -121,61 +192,70 @@ pub enum BorderSide {
     All,
 }
 
-impl From<BorderSide> for Borders {
+impl From<BorderSide> for border::Sides {
     fn from(val: BorderSide) -> Self {
         match val {
-            BorderSide::Top => Borders::TOP,
-            BorderSide::Right => Borders::RIGHT,
-            BorderSide::Bottom => Borders::BOTTOM,
-            BorderSide::Left => Borders::LEFT,
-            BorderSide::All => Borders::ALL,
+            BorderSide::Top    => border::Sides::TOP,
+            BorderSide::Right  => border::Sides::RIGHT,
+            BorderSide::Bottom => border::Sides::BOTTOM,
+            BorderSide::Left   => border::Sides::LEFT,
+            BorderSide::All    => border::Sides::ALL,
         }
     }
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
-pub enum BorderSides {
+enum BorderSides {
     Single(SerdeWrap<BorderSide>),
     Multiple(Vec<SerdeWrap<BorderSide>>),
 }
 
+#[derive(Debug, Deserialize)]
+struct BorderTitleOptions {
+    align: Option<SerdeWrap<Alignment>>,
+    #[serde(flatten)]
+    text: TextParts,
+}
+
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-pub struct BorderOptions {
-    pub enabled: Option<bool>,
-    pub sides: Option<BorderSides>,
-    pub r#type: Option<SerdeWrap<BorderType>>,
-    pub title: Option<TextParts>,
-    pub show_empty: Option<bool>,
+struct BorderOptions {
+    enabled: Option<bool>,
+    sides: Option<BorderSides>,
+    r#type: Option<SerdeWrap<border::Kind>>,
+    title_top: Option<BorderTitleOptions>,
+    title_bottom: Option<BorderTitleOptions>,
+    show_empty: Option<bool>,
     #[serde(flatten)]
-    pub style: StyleOptions,
+    style: StyleOptions,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct UnderlineStyleOptions {
-    color: SerdeWrap<Color>,
+struct UnderlineStyleOptions {
+    color: LuaColor,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
-pub enum UnderlineOption {
+enum UnderlineOption {
     Bool(bool),
     Options(UnderlineStyleOptions),
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(default)]
-pub struct StyleOptions {
-    pub fg: Option<SerdeWrap<Color>>,
-    pub bg: Option<SerdeWrap<Color>>,
-    pub bold: Option<bool>,
-    pub dim: Option<bool>,
-    pub italic: Option<bool>,
-    pub underline: Option<UnderlineOption>,
-    pub strikethrough: Option<bool>,
-    pub reversed: Option<bool>,
-    pub blink: Option<bool>,
+struct StyleOptions {
+    fg: Option<LuaColor>,
+    bg: Option<LuaColor>,
+    bold: Option<bool>,
+    dim: Option<bool>,
+    italic: Option<bool>,
+    underline: Option<UnderlineOption>,
+    strikethrough: Option<bool>,
+    reversed: Option<bool>,
+    blink: Option<bool>,
 }
 
 impl FromLua for StyleOptions {
@@ -202,10 +282,8 @@ impl From<Style> for StyleOptions {
     fn from(style: Style) -> Self {
         macro_rules! get_modifier {
             ($value:expr) => {
-                if style.add_modifier.contains($value) {
-                    Some(true)
-                } else if style.sub_modifier.contains($value) {
-                    Some(false)
+                if style.modifier_mask.contains($value) {
+                    Some(style.modifier.contains($value))
                 } else {
                     None
                 }
@@ -213,19 +291,19 @@ impl From<Style> for StyleOptions {
         }
 
         Self {
-            fg: style.fg.map(SerdeWrap),
-            bg: style.bg.map(SerdeWrap),
-            bold: get_modifier!(Modifier::BOLD),
-            dim: get_modifier!(Modifier::DIM),
-            italic: get_modifier!(Modifier::ITALIC),
+            fg: style.fg.map(LuaColor),
+            bg: style.bg.map(LuaColor),
+            bold:          get_modifier!(Modifier::BOLD),
+            dim:           get_modifier!(Modifier::DIM),
+            italic:        get_modifier!(Modifier::ITALIC),
             underline: if let Some(color) = style.underline_color {
-                Some(UnderlineOption::Options(UnderlineStyleOptions { color: SerdeWrap(color) }))
+                Some(UnderlineOption::Options(UnderlineStyleOptions { color: LuaColor(color) }))
             } else {
                 get_modifier!(Modifier::UNDERLINED).map(UnderlineOption::Bool)
             },
             strikethrough: get_modifier!(Modifier::CROSSED_OUT),
-            reversed: get_modifier!(Modifier::REVERSED),
-            blink: get_modifier!(Modifier::SLOW_BLINK),
+            reversed:      get_modifier!(Modifier::REVERSED),
+            blink:         get_modifier!(Modifier::SLOW_BLINK),
         }
     }
 }
@@ -313,9 +391,9 @@ fn parse_text_parts<T: Default+Clone>(parts: TextParts, text: &mut tui::text::Te
 
 fn set_widget_options(
     widget: &mut tui::widget::Widget,
-    style: &MessageStyleOptions,
+    style: MessageStyleOptions,
 ) {
-    if let Some(align) = style.style.align {
+    if let Some(align) = style.align {
         widget.inner.alignment = align.0;
     }
 
@@ -323,45 +401,55 @@ fn set_widget_options(
         widget.ansi_show_cursor = show_cursor;
     }
 
-    match &style.border {
+    match style.border {
         // explicitly disabled
         Some(BorderOptions{enabled: Some(false), ..}) => {
-            widget.block = None;
+            widget.border.clear();
         },
         Some(options) => {
-            let style: tui::widget::StyleOptions = options.style.clone().into();
-            widget.border_style = widget.border_style.patch(style.as_style());
-            widget.border_type = options.r#type.unwrap_or(SerdeWrap(widget.border_type)).0;
+
+            let sides = match &options.sides {
+                Some(BorderSides::Single(b)) => Some(b.0.into()),
+                Some(BorderSides::Multiple(b)) => b.iter().map(|x| border::Sides::from(x.0)).reduce(|x, y| x.union(y)),
+                None => Some(border::Sides::ALL),
+            };
+
+            if let Some(sides) = sides {
+                let style: tui::widget::StyleOptions = options.style.clone().into();
+                widget.border.sides = sides;
+                widget.border.kind = options.r#type.unwrap_or(SerdeWrap(widget.border.kind)).0;
+                widget.border.style = widget.border.style.patch(style.as_style());
+
+                if let Some(text) = options.title_top {
+                    let title = widget.border.title_top.get_or_insert_default();
+                    title.text.style = widget.border.style;
+                    parse_text_parts(text.text, &mut title.text);
+                    if let Some(align) = text.align {
+                        title.alignment = align.0;
+                    }
+                }
+
+                if let Some(text) = options.title_bottom {
+                    let title = widget.border.title_bottom.get_or_insert_default();
+                    title.text.style = widget.border.style;
+                    parse_text_parts(text.text, &mut title.text);
+                    if let Some(align) = text.align {
+                        title.alignment = align.0;
+                    }
+                }
+
+            } else {
+                widget.border.clear();
+            }
+
             widget.border_show_empty = options.show_empty.unwrap_or(widget.border_show_empty);
 
-            let border_sides = match &options.sides {
-                Some(BorderSides::Single(b)) => b.0.into(),
-                Some(BorderSides::Multiple(b)) => b.iter().map(|x| x.0.into()).reduce(|x: Borders, y| x.union(y)).unwrap_or(Borders::ALL),
-                None => widget.border_sides.unwrap_or(Borders::ALL),
-            };
-            widget.border_sides = Some(border_sides);
-
-            let mut block = options.title.as_ref()
-                .map(|title| {
-                    let text = widget.border_title.get_or_insert_default();
-                    parse_text_parts(title.clone(), text);
-                    Block::new().title(text as &tui::text::Text)
-                })
-                .or_else(|| widget.block.clone())
-                .unwrap_or_else(Block::new);
-
-            block = block.borders(border_sides);
-            block = block.border_style(widget.border_style);
-            block = block.border_type(widget.border_type);
-
-            widget.block = Some(block);
         },
         None => {},
     }
 
     widget.style = widget.style.merge(&style.style.style.clone().into());
     widget.inner.style = widget.style.as_style();
-    widget.block = std::mem::take(&mut widget.block).map(|b| b.style(widget.style.as_style()));
 }
 
 fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut Node> {
@@ -371,8 +459,8 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
 
             let mut layout = Layout {
                 direction: match direction {
-                    Direction::vertical => ratatui::layout::Direction::Vertical,
-                    Direction::horizontal => ratatui::layout::Direction::Horizontal,
+                    Direction::vertical   => layout::Direction::Vertical,
+                    Direction::horizontal => layout::Direction::Horizontal,
                 },
                 children: vec![],
             };
@@ -439,7 +527,7 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
             if let Some(text) = text {
                 parse_text_parts(text, &mut widget.inner);
             }
-            set_widget_options(widget, &style);
+            set_widget_options(widget, style);
 
             node
         },
@@ -453,7 +541,7 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
         node.set_hidden(hidden);
     }
     if let Some(constraint) = options.height {
-        node.constraint = Some(constraint.0);
+        // node.constraint = Some(constraint.0);
     }
 
     Ok(node)
@@ -644,7 +732,7 @@ async fn set_status_bar(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
                     parse_text_parts(text, &mut widget.inner);
                 }
                 // StatusBar is standalone, node options (persist/hidden/constraint) are ignored
-                set_widget_options(widget, &style);
+                set_widget_options(widget, style);
             },
             MessageInner::Layout { .. } => anyhow::bail!("status bar only accepts widget options"),
         }
@@ -718,13 +806,12 @@ fn sgr_to_style(lua: &Lua, sgr: String) -> LuaResult<LuaValue> {
 fn style_to_sgr(_lua: &Lua, options: StyleOptions) -> LuaResult<BString> {
     let style: tui::widget::StyleOptions = options.into();
     let style = style.as_style();
-    let mut cell = ratatui::buffer::Cell::default();
-    cell.set_style(style);
+    let mut cell = Cell::default();
+    cell.style = style;
 
     let mut buf = vec![];
     let mut canvas = tui::DummyCanvas::default();
     let mut drawer = tui::Drawer::new(&mut canvas, &mut buf, (0, 0));
-    // print_style_of_cell will write the SGR codes needed to reach the cell's style.
     drawer.print_style_of_cell(&cell)?;
 
     Ok(buf.into())

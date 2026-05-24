@@ -1,9 +1,7 @@
 use std::ops::Range;
 use unicode_width::{UnicodeWidthStr};
 use bstr::{BStr, BString, ByteSlice};
-use ratatui::{
-    style::*,
-};
+use crate::tui::style::{Style, Color, Modifier};
 use crate::tui::text::Text;
 
 const TAB_SIZE: usize = 8;
@@ -89,21 +87,21 @@ pub fn parse_ansi_col(mut style: Style, string: &BStr) -> Style {
             27 => style.remove_modifier(Modifier::REVERSED),
             28 => style.remove_modifier(Modifier::HIDDEN),
             29 => style.remove_modifier(Modifier::CROSSED_OUT),
-            30..=37 => style.fg(Color::Indexed(part as u8 - 30)),
+            30..=37 => style.fg(Color::AnsiValue(part as u8 - 30)),
             39 => style.fg(Color::Reset),
-            40..=47 => style.bg(Color::Indexed(part as u8 - 30)),
+            40..=47 => style.bg(Color::AnsiValue(part as u8 - 30)),
             49 => style.bg(Color::Reset),
             59 => style.underline_color(Color::Reset),
-            90..=97 => style.fg(Color::Indexed(part as u8 - 90 + 8)),
-            100..=107 => style.bg(Color::Indexed(part as u8 - 90 + 8)),
+            90..=97 => style.fg(Color::AnsiValue(part as u8 - 90 + 8)),
+            100..=107 => style.bg(Color::AnsiValue(part as u8 - 90 + 8)),
             38 => match parts.next() {
                 Some((2, _)) => if let Some(((r, g), b)) = parts.next().zip(parts.next()).zip(parts.next()) {
-                    style.fg(Color::Rgb(r.0 as u8, g.0 as u8, b.0 as u8))
+                    style.fg(Color::Rgb { r: r.0 as u8, g: g.0 as u8, b: b.0 as u8 })
                 } else {
                     style
                 },
                 Some((5, _)) => if let Some(part) = parts.next() {
-                    style.fg(Color::Indexed(part.0 as u8))
+                    style.fg(Color::AnsiValue(part.0 as u8))
                 } else {
                     style
                 },
@@ -111,12 +109,12 @@ pub fn parse_ansi_col(mut style: Style, string: &BStr) -> Style {
             },
             48 => match parts.next() {
                 Some((2, _)) => if let Some(((r, g), b)) = parts.next().zip(parts.next()).zip(parts.next()) {
-                    style.bg(Color::Rgb(r.0 as u8, g.0 as u8, b.0 as u8))
+                    style.bg(Color::Rgb { r: r.0 as u8, g: g.0 as u8, b: b.0 as u8 })
                 } else {
                     style
                 },
                 Some((5, _)) => if let Some(part) = parts.next() {
-                    style.bg(Color::Indexed(part.0 as u8))
+                    style.bg(Color::AnsiValue(part.0 as u8))
                 } else {
                     style
                 },
@@ -124,12 +122,12 @@ pub fn parse_ansi_col(mut style: Style, string: &BStr) -> Style {
             },
             58 => match parts.next() {
                 Some((2, _)) => if let Some(((r, g), b)) = parts.next().zip(parts.next()).zip(parts.next()) {
-                    style.underline_color(Color::Rgb(r.0 as u8, g.0 as u8, b.0 as u8))
+                    style.underline_color(Color::Rgb { r: r.0 as u8, g: g.0 as u8, b: b.0 as u8 })
                 } else {
                     style
                 },
                 Some((5, _)) => if let Some(part) = parts.next() {
-                    style.underline_color(Color::Indexed(part.0 as u8))
+                    style.underline_color(Color::AnsiValue(part.0 as u8))
                 } else {
                     style
                 },

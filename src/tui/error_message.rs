@@ -1,20 +1,23 @@
 use super::layout::Nodes;
-use ratatui::style::{Style, Color, Modifier};
+use super::{Style, Modifier};
+use super::border;
+use super::text::Alignment;
+use crossterm::style::Color;
 
 #[derive(Debug)]
 pub struct ErrorMessage {
-    pub id: usize,    // Persistent widget node ID
-    pub count: usize,      // Total errors encountered since last clear
+    pub id: usize,
+    pub count: usize,
 }
 
 impl ErrorMessage {
     pub const BORDER_STYLE: Style = Style::new().fg(Color::Red).add_modifier(Modifier::BOLD);
-    pub const TEXT_STYLE: Style = Style::new().fg(Color::White);
+    pub const TEXT_STYLE: Style = Style::new().fg(Color::AnsiValue(15));
 
     pub fn new(nodes: &mut Nodes) -> Self {
         let node = nodes.add(super::layout::NodeKind::Widget(super::widget::Widget::default()));
         node.persist = true;
-        node.constraint = Some(ratatui::layout::Constraint::Max(7));
+        // node.constraint = Some(Constraint::Max(7));
         Self{ id: node.id, count: 0 }
     }
 
@@ -25,22 +28,28 @@ impl ErrorMessage {
             if let super::layout::NodeKind::Widget(widget) = &mut node.kind {
                 widget.inner.clear();
                 widget.inner.push_str(message.into(), Some(Self::TEXT_STYLE.into()));
-                widget.block = Some(self.make_border());
+                widget.border = self.make_border();
             }
         }
     }
 
-    fn make_border(&self) -> ratatui::widgets::Block<'static> {
-        let title = if self.count > 1 {
+    fn make_border(&self) -> border::Border {
+        let title_str = if self.count > 1 {
             format!(" Error (+{} more) ", self.count - 1)
         } else {
             " Error ".into()
         };
 
-        ratatui::widgets::Block::new()
-            .borders(ratatui::widgets::Borders::ALL)
-            .border_style(Self::BORDER_STYLE)
-            .title(title)
+        let mut title_text = crate::tui::text::Text::default();
+        title_text.push_str(title_str.as_str().into(), Some(Self::BORDER_STYLE.into()));
+
+        border::Border{
+            sides: border::Sides::ALL,
+            kind: border::Kind::Plain,
+            style: Self::BORDER_STYLE,
+            title_top: Some(border::Title::new(title_text, Alignment::Left)),
+            title_bottom: None,
+        }
     }
 
     pub fn clear(&mut self, nodes: &mut Nodes) {

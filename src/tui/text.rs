@@ -1,10 +1,7 @@
 use std::ops::Range;
-use bstr::{BStr, BString, ByteVec, ByteSlice};
+use bstr::{BStr, BString, ByteVec};
 use unicode_width::UnicodeWidthStr;
-use ratatui::style::{Style};
-use ratatui::text::{Line, Span};
-use ratatui::layout::{Alignment};
-use ratatui::buffer::{Cell};
+use crate::tui::{Style, Cell};
 use super::wrap::WrapToken;
 mod renderer;
 pub use renderer::{Renderer, TextRenderer};
@@ -80,6 +77,15 @@ impl Default for Scroll {
             position: Default::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, strum::EnumString, strum::Display)]
+#[strum(ascii_case_insensitive)]
+pub enum Alignment {
+    #[default]
+    Left,
+    Center,
+    Right,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -271,9 +277,7 @@ impl<T> Text<T> {
         if self.style == Style::default() {
             None
         } else {
-            let mut cell = Cell::new(" ");
-            cell.set_style(self.style);
-            Some(cell)
+            Some(Cell::new_with_style(" ", self.style))
         }
     }
 
@@ -292,42 +296,6 @@ impl<T: Clone> Text<T> {
                     inner: hl.clone(),
                 });
             }
-        }
-    }
-}
-
-impl<T> From<&Text<T>> for Line<'_> {
-    fn from(val: &Text<T>) -> Self {
-        // only gets the first line
-        let Some(line) = val.lines.first()
-            else { return Line::default() };
-
-        let line = line.lines().next().unwrap();
-        let mut spans = vec![];
-        let mut prev_style = Style::new();
-        let mut string = String::new();
-        let highlights = val.highlights.iter().filter(|hl| hl.lineno == 0);
-        super::wrap::wrap(line.into(), highlights, Some(val.style), usize::MAX, 0, |_, _, token, style| {
-            let WrapToken::String(str) = token
-                else { return };
-            let style = style.unwrap();
-            if style != prev_style {
-                if !string.is_empty() {
-                    let new_string = std::mem::take(&mut string);
-                    spans.push(Span::styled(new_string, prev_style));
-                }
-                prev_style = style;
-            }
-            string.push_str(&str);
-        });
-        if !string.is_empty() {
-            spans.push(Span::styled(string, prev_style));
-        }
-
-        Line {
-            style: Style::new(),
-            alignment: None,
-            spans,
         }
     }
 }

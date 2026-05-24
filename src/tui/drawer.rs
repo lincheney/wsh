@@ -10,15 +10,12 @@ use crossterm::{
         Attribute as CAttribute,
         SetColors,
         ResetColor,
-        Color as CColor,
         Colors,
         SetUnderlineColor,
+        Color,
     },
 };
-use ratatui::{
-    style::{Style, Color, Modifier},
-    buffer::{Cell, Buffer},
-};
+use super::{Cell, Style, Modifier};
 
 pub trait Canvas {
     fn get_cell(&self, pos: (u16, u16)) -> &Cell;
@@ -27,36 +24,6 @@ pub trait Canvas {
     fn get_cell_range(&self, start: (u16, u16), end: (u16, u16)) -> &[Cell];
     fn get_cell_range_mut(&mut self, start: (u16, u16), end: (u16, u16)) -> &mut [Cell];
     fn get_size(&self) -> (u16, u16);
-}
-
-impl Canvas for Buffer {
-    fn get_cell(&self, pos: (u16, u16)) -> &Cell {
-        &self[pos]
-    }
-
-    fn get_cell_mut(&mut self, pos: (u16, u16)) -> &mut Cell {
-        &mut self[pos]
-    }
-
-    fn set_cell(&mut self, pos: (u16, u16), cell: &Cell) {
-        self[pos] = cell.clone();
-    }
-
-    fn get_cell_range(&self, start: (u16, u16), end: (u16, u16)) -> &[Cell] {
-        let start = start.0 + start.1 * self.area.width;
-        let end = end.0 + end.1 * self.area.width;
-        &self.content[start as usize .. end as usize]
-    }
-
-    fn get_cell_range_mut(&mut self, start: (u16, u16), end: (u16, u16)) -> &mut [Cell] {
-        let start = start.0 + start.1 * self.area.width;
-        let end = end.0 + end.1 * self.area.width;
-        &mut self.content[start as usize .. end as usize]
-    }
-
-    fn get_size(&self) -> (u16, u16) {
-        (self.area.width, self.area.height)
-    }
 }
 
 #[derive(Default)]
@@ -107,9 +74,9 @@ impl<'a, 'b, W, C> Drawer<'a, 'b, W, C> {
             writer,
             real_pos: pos,
             pos,
-            fg: Color::default(),
-            bg: Color::default(),
-            underline_color: Color::default(),
+            fg: Color::Reset,
+            bg: Color::Reset,
+            underline_color: Color::Reset,
             modifier: Modifier::default(),
         }
     }
@@ -208,9 +175,9 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
     }
 
     pub fn reset_colours(&mut self) -> Result<()> {
-        self.fg = Color::default();
-        self.bg = Color::default();
-        self.underline_color = Color::default();
+        self.fg = Color::Reset;
+        self.bg = Color::Reset;
+        self.underline_color = Color::Reset;
         self.modifier = Modifier::default();
         queue!(self.writer, ResetColor)
     }
@@ -232,7 +199,7 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
 
     fn cells_are_cleared(cells: &[Cell], style: Option<Style>) -> bool {
         if let Some(style) = style {
-            cells.iter().all(|c| c.symbol() == " " && c.style() == style)
+            cells.iter().all(|c| c.text() == " " && c.style == style)
         } else {
             cells.iter().all(super::cell_is_empty)
         }
@@ -245,14 +212,14 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
 
             let cells = self.canvas.get_cell_range_mut(self.pos, (width, self.pos.1));
 
-            let style = cell.map(|c| c.style());
+            let style = cell.map(|c| c.style);
             if !Self::cells_are_cleared(cells, style) {
                 for c in cells.iter_mut() {
                     c.reset();
                 }
                 if let Some(style) = style {
                     for c in cells.iter_mut() {
-                        c.set_style(style);
+                        c.style = style;
                     }
                 }
                 self.move_to_cur_pos()?;
@@ -276,14 +243,14 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
             return Ok(())
         };
 
-        let style = cell.map(|c| c.style());
+        let style = cell.map(|c| c.style);
         if !Self::cells_are_cleared(cells, style) {
             for c in cells.iter_mut() {
                 c.reset();
             }
             if let Some(style) = style {
                 for c in cells.iter_mut() {
-                    c.set_style(style);
+                    c.style = style;
                 }
             }
             self.move_to_cur_pos()?;
@@ -314,15 +281,15 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
         Ok(())
     }
 
-    pub fn draw_cells(&mut self, cells: &[Cell], force: bool) -> Result<()> {
-        for cell in cells {
-            self.draw_cell(cell, force)?;
-        }
-        Ok(())
-    }
+    // pub fn draw_cells(&mut self, cells: &[Cell], force: bool) -> Result<()> {
+        // for cell in cells {
+            // self.draw_cell(cell, force)?;
+        // }
+        // Ok(())
+    // }
 
     pub fn draw_cell(&mut self, cell: &Cell, force: bool) -> Result<()> {
-        let cell_width = cell.symbol().width() as u16;
+        let cell_width = cell.text().width() as u16;
         let will_wrap = self.pos.0 + cell_width > self.term_width();
 
         let mut pos = self.pos;
@@ -354,30 +321,36 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
     }
 
     pub fn print_style_of_cell(&mut self, cell: &Cell) -> Result<()> {
-        if cell.modifier != self.modifier {
-            self.draw_modifier(cell.modifier)?;
+        let cell_modifier = cell.style.modifier;
+        let cell_fg = cell.style.fg.unwrap_or(Color::Reset);
+        let cell_bg = cell.style.bg.unwrap_or(Color::Reset);
+        let cell_uc = cell.style.underline_color.unwrap_or(Color::Reset);
+
+        if cell_modifier != self.modifier {
+            self.draw_modifier(cell_modifier)?;
         }
-        if cell.fg != self.fg || cell.bg != self.bg {
-            queue!(self.writer, SetColors(Colors::new(cell.fg.into(), cell.bg.into())))?;
-            self.fg = cell.fg;
-            self.bg = cell.bg;
+        if cell_fg != self.fg || cell_bg != self.bg {
+            queue!(self.writer, SetColors(Colors::new(
+                cell_fg,
+                cell_bg,
+            )))?;
+            self.fg = cell_fg;
+            self.bg = cell_bg;
         }
-        if cell.underline_color != self.underline_color {
-            let color = CColor::from(cell.underline_color);
-            queue!(self.writer, SetUnderlineColor(color))?;
-            self.underline_color = cell.underline_color;
+        if cell_uc != self.underline_color {
+            queue!(self.writer, SetUnderlineColor(cell_uc))?;
+            self.underline_color = cell_uc;
         }
         Ok(())
     }
 
     pub fn print_cell(&mut self, cell: &Cell) -> Result<()> {
         self.print_style_of_cell(cell)?;
-        queue!(self.writer, Print(cell.symbol()))?;
+        queue!(self.writer, Print(cell.text()))?;
         Ok(())
     }
 
     fn draw_modifier(&mut self, new: Modifier) -> Result<()> {
-        //use crossterm::Attribute;
         let removed = self.modifier - new;
         if removed.contains(Modifier::REVERSED) {
             queue!(self.writer, SetAttribute(CAttribute::NoReverse))?;

@@ -1,6 +1,6 @@
 use std::ops::Range;
 use super::text::{HighlightedRange};
-use ratatui::style::{Style};
+use super::style::Style;
 use bstr::{BString, BStr};
 use super::wrap::WrapToken;
 

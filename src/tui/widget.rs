@@ -1,10 +1,8 @@
 use bstr::BStr;
 use std::default::Default;
-use ratatui::{
-    layout::*,
-    widgets::*,
-    style::*,
-};
+use crate::tui::{Style, Modifier};
+use crate::tui::border::{Border};
+use crossterm::style::Color;
 mod ansi;
 pub use ansi::parse_ansi_col;
 use super::scroll::ScrollPosition;
@@ -33,48 +31,49 @@ pub struct StyleOptions {
 
 impl StyleOptions {
     pub fn as_style(&self) -> Style {
-        let mut add_modifier = Modifier::empty();
-        let mut sub_modifier = Modifier::empty();
+        let mut modifier = Modifier::empty();
+        let mut modifier_mask = Modifier::empty();
         let mut underline_color = None;
+
         match self.underline {
             None => (),
-            Some(UnderlineOption::None) => { sub_modifier |= Modifier::UNDERLINED; },
-            Some(UnderlineOption::Set) => { add_modifier |= Modifier::UNDERLINED; },
+            Some(UnderlineOption::None) => {
+                modifier_mask |= Modifier::UNDERLINED;
+            },
+            Some(UnderlineOption::Set) => {
+                modifier      |= Modifier::UNDERLINED;
+                modifier_mask |= Modifier::UNDERLINED;
+            },
             Some(UnderlineOption::Color(color)) => {
                 underline_color = Some(color);
-                add_modifier |= Modifier::UNDERLINED;
+                modifier      |= Modifier::UNDERLINED;
+                modifier_mask |= Modifier::UNDERLINED;
             },
         }
 
-        let mut style = Style {
+        macro_rules! set_modifier {
+            ($field:ident, $flag:ident) => {
+                if let Some(v) = self.$field {
+                    modifier_mask |= Modifier::$flag;
+                    if v { modifier |= Modifier::$flag; }
+                }
+            }
+        }
+
+        set_modifier!(bold,          BOLD);
+        set_modifier!(dim,           DIM);
+        set_modifier!(italic,        ITALIC);
+        set_modifier!(strikethrough, CROSSED_OUT);
+        set_modifier!(reversed,      REVERSED);
+        set_modifier!(blink,         SLOW_BLINK);
+
+        Style {
             fg: self.fg,
             bg: self.bg,
             underline_color,
-            add_modifier,
-            sub_modifier,
-        };
-
-        macro_rules! set_modifier {
-            ($field:ident, $enum:ident) => (
-                if let Some($field) = self.$field {
-                    let value = Modifier::$enum;
-                    if $field {
-                        style.add_modifier.insert(value);
-                    } else {
-                        style.sub_modifier.insert(value);
-                    }
-                }
-            )
+            modifier,
+            modifier_mask,
         }
-
-        set_modifier!(bold, BOLD);
-        set_modifier!(dim, DIM);
-        set_modifier!(italic, ITALIC);
-        set_modifier!(strikethrough, CROSSED_OUT);
-        set_modifier!(reversed, REVERSED);
-        set_modifier!(blink, SLOW_BLINK);
-
-        style
     }
 
     pub fn merge(&self, other: &Self) -> Self {
@@ -97,12 +96,8 @@ impl StyleOptions {
 pub struct Widget {
     pub inner: super::text::Text,
     pub style: StyleOptions,
-    pub border_sides: Option<Borders>,
-    pub border_style: Style,
-    pub border_type: BorderType,
     pub border_show_empty: bool,
-    pub border_title: Option<super::text::Text>,
-    pub block: Option<Block<'static>>,
+    pub border: Border,
     // line_count is used by StatusBar for standalone rendering
     pub(super) line_count: u16,
 
@@ -134,7 +129,7 @@ impl Widget {
                 start: pos,
                 end: pos + 1,
                 inner: super::text::Highlight {
-                    style: ratatui::style::Modifier::REVERSED.into(),
+                    style: Style::new().add_modifier(Modifier::REVERSED),
                     blend: true,
                     namespace: (),
                     virtual_text: need_space.then(|| b" ".into()),
@@ -149,16 +144,14 @@ impl Widget {
     pub(super) fn get_height_for_width(
         &self,
         mut max_width: u16,
-        height_constraint: Option<Constraint>,
+        // height_constraint: Option<Constraint>,
     ) -> u16 {
 
-        let mut border_height = 0;
-        if let Some(ref block) = self.block {
-            let area = Rect{x: 0, y: 0, height: 10, width: max_width};
-            let inner = block.inner(area);
-            border_height = area.height - inner.height;
-            max_width = area.width - area.width;
-        }
+        // border
+        let (top, bottom) = self.border.inner_height();
+        let (left, right) = self.border.inner_width(max_width);
+        let border_height = top + bottom;
+        max_width = max_width.saturating_sub(left + right);
 
         if self.scroll.show_scrollbar {
             max_width = max_width.saturating_sub(1);
@@ -169,15 +162,15 @@ impl Widget {
             height += border_height;
         }
 
-        match height_constraint {
-            Some(Constraint::Min(min)) => {
-                height = height.max(min);
-            },
-            Some(Constraint::Max(max)) => {
-                height = height.min(max);
-            },
-            _ => (),
-        }
+        // match height_constraint {
+            // Some(crate::tui::Constraint::Min(min)) => {
+                // height = height.max(min);
+            // },
+            // Some(crate::tui::Constraint::Max(max)) => {
+                // height = height.min(max);
+            // },
+            // _ => (),
+        // }
         height
     }
 
@@ -218,4 +211,3 @@ impl Widget {
     }
 
 }
-

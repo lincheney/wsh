@@ -68,7 +68,7 @@ return wish.plugin(function(wish, opts, plugin)
         if not command:find('%S') then
             current_preview = nil
             -- hide only main msg in case saved msg is visible
-            wish.set_message{id = msg, hidden = false, text = '', border = {enabled = false}}
+            wish.set_message{id = msg, hidden = false, text = ' ', border = {enabled = false}}
             wish.redraw()
             return
         end
@@ -119,7 +119,7 @@ return wish.plugin(function(wish, opts, plugin)
                     id = msg,
                     border = {
                         dim = self.proc:is_finished(),
-                        title = {text = self.command},
+                        title_top = {text = self.command},
                     },
                     hidden = false,
                 }
@@ -205,7 +205,7 @@ return wish.plugin(function(wish, opts, plugin)
             hidden = false,
             border = {
                 dim = true,
-                title = {text = current_preview.command .. ' (saved)'},
+                title_top = {text = current_preview.command .. ' (saved)'},
             },
         }
         wish.redraw()

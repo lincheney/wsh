@@ -1,10 +1,10 @@
 use std::borrow::Cow;
 use unicode_width::UnicodeWidthStr;
 use bstr::{BStr, ByteSlice};
-use ratatui::style::{Style, Color, Modifier, Stylize};
+use super::style::{Style, Color, Modifier};
 use super::text::{HighlightedRange, Highlight};
 
-const ESCAPE_STYLE: Style = Style::new().fg(Color::Gray);
+const ESCAPE_STYLE: Style = Style::new().fg(Color::AnsiValue(7));
 
 pub fn merge_highlights<'a, T: 'a, I: Iterator<Item=&'a Highlight<T>>>(init: Style, iter: I) -> Style {
     let mut style = init;
@@ -13,12 +13,12 @@ pub fn merge_highlights<'a, T: 'a, I: Iterator<Item=&'a Highlight<T>>>(init: Sty
             // start from scratch
             style = Style::new();
         }
-        let reverse = style.add_modifier.contains(Modifier::REVERSED);
+        let reverse = style.has_modifier(Modifier::REVERSED);
         style = style.patch(h.style);
-        if reverse == h.style.add_modifier.contains(Modifier::REVERSED) {
-            style = style.not_reversed();
+        if reverse == h.style.has_modifier(Modifier::REVERSED) {
+            style = style.remove_modifier(Modifier::REVERSED);
         } else {
-            style = style.reversed();
+            style = style.add_modifier(Modifier::REVERSED);
         }
     }
     style

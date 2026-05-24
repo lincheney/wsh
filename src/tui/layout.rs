@@ -1,12 +1,16 @@
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
-use ratatui::{
-    layout::*,
-};
 use super::widget::Widget;
 use super::drawer::{Drawer, Canvas};
 use super::text::{Renderer, TextRenderer};
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Direction {
+    #[default]
+    Vertical,
+    Horizontal,
+}
 
 #[derive(Default, Debug, Clone)]
 pub struct Layout {
@@ -29,7 +33,7 @@ impl Layout {
                         if max_height.is_some_and(|h| total >= h) {
                             child.set_size((0, 0), tmp);
                         } else {
-                            total += child.refresh(map, max_width, max_height.map(|h| h - total), None, tmp);
+                            total += child.refresh(map, max_width, max_height.map(|h| h - total), tmp);
                         }
                     }
                 }
@@ -44,18 +48,20 @@ impl Layout {
                     return 0
                 }
 
-                // just use the ratatui algorithm
-                let constraints: Vec<_> = visible.iter()
-                    .map(|n| n.constraint.unwrap_or(Constraint::Fill(1)))
-                    .collect();
+                // // just use the ratatui algorithm
+                // let constraints: Vec<_> = visible.iter()
+                    // .map(|n| n.constraint.unwrap_or(Constraint::Fill(1)))
+                    // .collect();
 
                 // height doesnt really matter
-                let area = Rect{x: 0, y: 0, height: 10, width: max_width};
-                let areas = ratatui::layout::Layout::horizontal(constraints).split(area);
+                // let area = Rect{x: 0, y: 0, height: 10, width: max_width};
+                // let areas = ratatui::layout::Layout::horizontal(constraints).split(area);
 
                 let mut height = 0;
-                for (child, child_area) in visible.iter().zip(areas.iter()) {
-                    height = height.max(child.refresh(map, child_area.width, Some(child_area.height), None, tmp));
+                // for (child, child_area) in visible.iter().zip(areas.iter()) {
+                let width = max_width / visible.len() as u16;
+                for child in visible.iter() {
+                    height = height.max(child.refresh(map, width, Some(10), tmp));
                 }
                 height.min(max_height.unwrap_or(u16::MAX))
             },
@@ -74,7 +80,7 @@ pub struct Node {
     pub id: usize,
     pub has_parent: bool,
     pub kind: NodeKind,
-    pub constraint: Option<Constraint>,
+    // pub constraint: Option<Constraint>,
     pub persist: bool,
     hidden: bool,
     // cached width,height after refresh
@@ -147,14 +153,15 @@ impl Node {
         map: &HashMap<usize, Node>,
         max_width: u16,
         max_height: Option<u16>,
-        constraint: Option<Constraint>,
+        // constraint: Option<Constraint>,
         tmp: bool,
     ) -> u16 {
 
         let mut dim = (0, 0);
         if !self.is_hidden() {
             let height = match &self.kind {
-                NodeKind::Widget(widget) => widget.get_height_for_width(max_width, constraint.or(self.constraint)),
+                // NodeKind::Widget(widget) => widget.get_height_for_width(max_width, constraint.or(self.constraint)),
+                NodeKind::Widget(widget) => widget.get_height_for_width(max_width),
                 NodeKind::Layout(layout) => layout.refresh(map, max_width, max_height, tmp),
             };
             dim = (max_width, height.min(max_height.unwrap_or(u16::MAX)));
@@ -186,7 +193,7 @@ impl Nodes {
             id,
             has_parent: false,
             kind,
-            constraint: None,
+            // constraint: None,
             persist: false,
             hidden: false,
             size: Cell::new((0, 0)),
@@ -355,13 +362,14 @@ impl<'a> NodeRenderer<'a, std::slice::Iter<'a, usize>> {
                 let renderer = TextRenderer::new(
                     &widget.inner,
                     0,
-                    widget.block.as_ref(),
+                    Some(&widget.border),
                     size.0 as _,
                     Some((size.1 as _, widget.scroll)),
-                    match node.constraint {
-                        Some(Constraint::Min(height)) => Some(height as _),
-                        _ => None,
-                    },
+                    // match node.constraint {
+                        // Some(Constraint::Min(height)) => Some(height as _),
+                        // _ => None,
+                    // },
+                    None,
                     widget.cursor_space_hl.iter(),
                 );
                 NodeRenderer::Widget {
@@ -448,7 +456,7 @@ impl<'a> Renderer for NodeRenderer<'a, std::slice::Iter<'a, usize>> {
                         if newline && first {
                             drawer.goto_newline(None)?;
                         }
-                        drawer.draw_cell_n_times(&ratatui::buffer::Cell::EMPTY, false, node.size.get().0)?;
+                        drawer.draw_cell_n_times(&crate::tui::Cell::EMPTY, false, node.size.get().0 as _)?;
                     }
                 }
                 Ok(!all_finished)
