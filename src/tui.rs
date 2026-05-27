@@ -315,7 +315,7 @@ impl Tui {
 
         // go back to the cursor
         if drawer.validate_pos(cmdline.cursor_coord) {
-            drawer.move_to_pos(cmdline.cursor_coord)?;
+            drawer.move_to_pos(cmdline.cursor_coord, false)?;
         }
 
         drawer.reset_colours()?;

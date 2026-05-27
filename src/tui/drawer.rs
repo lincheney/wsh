@@ -120,13 +120,13 @@ impl<W, C: Canvas> Drawer<'_, '_, W, C> {
 }
 
 impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
-    pub fn move_to_pos(&mut self, pos: (u16, u16)) -> Result<()> {
+    pub fn move_to_pos(&mut self, pos: (u16, u16), force_wrap: bool) -> Result<()> {
         if pos == (0, self.real_pos.1 + 1) {
-            if self.real_pos.0 == self.term_width() {
+            if force_wrap || self.real_pos.0 != self.term_width() {
+                queue!(self.writer, Print("\r\n"))?;
+            } else {
                 // 1 past the end of line is technically the same?
                 // we need to do it this way to trigger terminal line wrapping
-            } else {
-                queue!(self.writer, Print("\r\n"))?;
             }
         } else {
             if pos.0 != self.real_pos.0 {
@@ -144,17 +144,17 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
         Ok(())
     }
 
-    pub fn move_to_cur_pos(&mut self) -> Result<()> {
+    pub fn move_to_cur_pos(&mut self, force_wrap: bool) -> Result<()> {
         if self.pos != self.real_pos {
             if self.pos.0 < self.term_width() {
-                self.move_to_pos(self.pos)?;
+                self.move_to_pos(self.pos, force_wrap)?;
             } else {
                 // oh tricky
                 // in order to get back to the very very edge of the screen, we have to reprint the
                 // char just before
                 // TODO what about when it is a multi width char
                 let pos = (self.term_width() - 1, self.pos.1);
-                self.move_to_pos(pos)?;
+                self.move_to_pos(pos, force_wrap)?;
                 let cell = self.canvas.get_cell(pos).clone();
                 self.draw_cell(&cell, true)?;
             }
@@ -163,7 +163,7 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
     }
 
     pub fn allocate_height(&mut self, height: u16) -> Result<()> {
-        self.move_to_cur_pos()?;
+        self.move_to_cur_pos(true)?;
         super::allocate_height(self.writer, height)?;
         Ok(())
     }
@@ -222,7 +222,7 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
                         c.style = style;
                     }
                 }
-                self.move_to_cur_pos()?;
+                self.move_to_cur_pos(true)?;
                 self.do_clear(ClearType::UntilNewLine, cell)?;
             }
 
@@ -253,14 +253,14 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
                     c.style = style;
                 }
             }
-            self.move_to_cur_pos()?;
+            self.move_to_cur_pos(true)?;
             self.do_clear(ClearType::FromCursorDown, cell)?;
         }
         Ok(())
     }
 
     pub fn write_raw(&mut self, data: &[u8], pos: Option<(u16, u16)>) -> Result<()> {
-        self.move_to_cur_pos()?;
+        self.move_to_cur_pos(false)?;
         self.writer.write_all(data)?;
         if let Some(pos) = pos {
             self.set_pos(pos);
@@ -303,7 +303,7 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
         let draw = force || will_wrap || self.canvas.get_cell(pos) != cell;
         if draw {
             // move to the location
-            self.move_to_cur_pos()?;
+            self.move_to_cur_pos(false)?;
             self.print_cell(cell)?;
             self.canvas.set_cell(pos, cell);
         }
