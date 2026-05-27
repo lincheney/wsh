@@ -4,6 +4,7 @@ use std::io::Write;
 use super::widget::Widget;
 use super::drawer::{Drawer, Canvas};
 use super::text::{Renderer, TextRenderer};
+use super::sizing;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Direction {
@@ -25,43 +26,44 @@ impl Layout {
     }
 
     fn refresh(&self, map: &HashMap<usize, Node>, max_width: u16, max_height: Option<u16>, tmp: bool) -> u16 {
+
+        let visible: Vec<&Node> = self.children.iter()
+            .filter_map(|cid| map.get(cid))
+            .filter(|n| !n.is_hidden())
+            .collect();
+
+        if visible.is_empty() {
+            return 0;
+        }
+
         match self.direction {
             Direction::Vertical => {
-                let mut total = 0;
-                for child_id in &self.children {
-                    if let Some(child) = map.get(child_id) && !child.is_hidden() {
-                        if max_height.is_some_and(|h| total >= h) {
-                            child.set_size((0, 0), tmp);
-                        } else {
-                            total += child.refresh(map, max_width, max_height.map(|h| h - total), tmp);
-                        }
-                    }
+                let mut sizes: Vec<_> = visible.iter().map(|node| {
+                    // given unlimited height, how much do you want?
+                    let desired_height = node.refresh(map, max_width, None, true);
+                    node.height_spec.into_size(max_height, Some(desired_height))
+                }).collect();
+                let mut sizes = sizing::SizeArray(&mut sizes);
+                sizes.allocate(max_height);
+
+                let mut height = 0u16;
+                for (child, size) in visible.iter().zip(sizes.0.iter()) {
+                    height += child.refresh(map, max_width, Some(size.size), false);
                 }
-                total.min(max_height.unwrap_or(u16::MAX))
+                height.min(max_height.unwrap_or(height))
             },
             Direction::Horizontal => {
-                let visible: Vec<&Node> = self.children.iter()
-                    .filter_map(|cid| map.get(cid))
-                    .filter(|n| !n.is_hidden())
+                let mut sizes: Vec<_> = visible.iter()
+                    .map(|node| node.width_spec.into_size(Some(max_width), None))
                     .collect();
-                if visible.is_empty() {
-                    return 0
-                }
+                let mut sizes = sizing::SizeArray(&mut sizes);
+                sizes.allocate(Some(max_width));
 
-                // // just use the ratatui algorithm
-                // let constraints: Vec<_> = visible.iter()
-                    // .map(|n| n.constraint.unwrap_or(Constraint::Fill(1)))
-                    // .collect();
-
-                // height doesnt really matter
-                // let area = Rect{x: 0, y: 0, height: 10, width: max_width};
-                // let areas = ratatui::layout::Layout::horizontal(constraints).split(area);
-
-                let mut height = 0;
-                // for (child, child_area) in visible.iter().zip(areas.iter()) {
-                let width = max_width / visible.len() as u16;
-                for child in visible.iter() {
-                    height = height.max(child.refresh(map, width, Some(10), tmp));
+                let mut height = 0u16;
+                for (child, size) in visible.iter().zip(sizes.0.iter()) {
+                    let child_height = child.refresh(map, size.size, max_height, tmp);
+                    let child_height = child.height_spec.into_size(max_height, Some(child_height)).size;
+                    height = height.max(child_height);
                 }
                 height.min(max_height.unwrap_or(u16::MAX))
             },
@@ -80,7 +82,8 @@ pub struct Node {
     pub id: usize,
     pub has_parent: bool,
     pub kind: NodeKind,
-    // pub constraint: Option<Constraint>,
+    pub height_spec: sizing::Constraint,
+    pub width_spec: sizing::Constraint,
     pub persist: bool,
     hidden: bool,
     // cached width,height after refresh
@@ -153,18 +156,18 @@ impl Node {
         map: &HashMap<usize, Node>,
         max_width: u16,
         max_height: Option<u16>,
-        // constraint: Option<Constraint>,
         tmp: bool,
     ) -> u16 {
 
         let mut dim = (0, 0);
         if !self.is_hidden() {
             let height = match &self.kind {
-                // NodeKind::Widget(widget) => widget.get_height_for_width(max_width, constraint.or(self.constraint)),
                 NodeKind::Widget(widget) => widget.get_height_for_width(max_width),
                 NodeKind::Layout(layout) => layout.refresh(map, max_width, max_height, tmp),
             };
-            dim = (max_width, height.min(max_height.unwrap_or(u16::MAX)));
+            let height = height.min(max_height.unwrap_or(height));
+            let height = self.height_spec.into_size(max_height, Some(height)).size;
+            dim = (max_width, height);
         }
 
         self.set_size(dim, tmp);
@@ -193,7 +196,8 @@ impl Nodes {
             id,
             has_parent: false,
             kind,
-            // constraint: None,
+            height_spec: sizing::Constraint::default(),
+            width_spec: sizing::Constraint::default(),
             persist: false,
             hidden: false,
             size: Cell::new((0, 0)),
@@ -360,17 +364,13 @@ impl<'a> NodeRenderer<'a, std::slice::Iter<'a, usize>> {
             NodeKind::Widget(widget) => {
                 let size = node.get_size(tmp);
                 let renderer = TextRenderer::new(
-                    &widget.inner,
-                    0,
-                    Some(&widget.border),
-                    size.0 as _,
-                    Some((size.1 as _, widget.scroll)),
-                    // match node.constraint {
-                        // Some(Constraint::Min(height)) => Some(height as _),
-                        // _ => None,
-                    // },
-                    None,
-                    widget.cursor_space_hl.iter(),
+                    &widget.inner, // text
+                    0, // initial_indent
+                    Some(&widget.border), // border
+                    size.0 as _, // width
+                    Some(size.1 as _), // height
+                    Some(widget.scroll), // scroll
+                    widget.cursor_space_hl.iter(), // extra_highlights
                 );
                 NodeRenderer::Widget {
                     renderer,

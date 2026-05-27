@@ -88,7 +88,7 @@ function M.run_in_background(command)
 
         local msg = wish.set_message{
             persist = true,
-            height = 'max:7',
+            max_height = 7,
             border = {
                 type = 'Rounded',
                 show_empty = true,

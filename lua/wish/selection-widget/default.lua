@@ -175,7 +175,7 @@ function M.start(opts)
     end
     state.selected = opts.selected or state.selected
 
-    opts.height = 'max:'..(SIZE + 2)
+    opts.max_height = SIZE + 2
     opts.hidden = false
 
     if selection_widget and not wish.check_message(selection_widget) then

@@ -2,7 +2,7 @@ return wish.plugin(function(wish, opts, plugin)
 
     local enable_mouse_mode = opts.enable_mouse_mode
     local timeout = opts.timeout
-    local height = opts.height or 'min:3'
+    local min_height = opts.min_height or 3
     local hide_on_stop = opts.hide_on_stop ~= false
     local style = opts.style and opts.style.main or {
         border = {
@@ -23,13 +23,13 @@ return wish.plugin(function(wish, opts, plugin)
         hidden = true,
         persist = true,
         dim = true,
-        height = height,
+        min_height = min_height,
     }, style))
     local saved_msg = wish.set_message(wish.table.deep_merge({
         hidden = true,
         persist = true,
         dim = true,
-        height = height,
+        min_height = min_height,
     }, saved_style))
     local layout_msg = wish.set_message{
         hidden = true,

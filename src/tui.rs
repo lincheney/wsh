@@ -17,6 +17,7 @@ mod drawer;
 mod wrap;
 mod scroll;
 mod rect;
+pub mod sizing;
 pub mod widget;
 pub use widget::Widget;
 pub mod command_line;

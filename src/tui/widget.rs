@@ -144,7 +144,6 @@ impl Widget {
     pub(super) fn get_height_for_width(
         &self,
         mut max_width: u16,
-        // height_constraint: Option<Constraint>,
     ) -> u16 {
 
         // border
@@ -162,15 +161,6 @@ impl Widget {
             height += border_height;
         }
 
-        // match height_constraint {
-            // Some(crate::tui::Constraint::Min(min)) => {
-                // height = height.max(min);
-            // },
-            // Some(crate::tui::Constraint::Max(max)) => {
-                // height = height.min(max);
-            // },
-            // _ => (),
-        // }
         height
     }
 

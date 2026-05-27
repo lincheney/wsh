@@ -1,11 +1,19 @@
 use bstr::BString;
 use std::default::Default;
-use serde::{Deserialize, Deserializer, de, Serialize};
+use serde::{Deserialize, Serialize};
 use anyhow::Result;
 use crossterm::style::Color;
 use mlua::{prelude::*};
 use crate::ui::{Ui};
-use crate::tui::{self, layout::{self, Node, NodeKind, Layout}, Style, Modifier, text::Alignment, Cell};
+use crate::tui::{
+    self,
+    layout::{self, Node, NodeKind, Layout},
+    Style,
+    Modifier,
+    text::Alignment,
+    Cell,
+    sizing,
+};
 use crate::tui::border;
 use super::SerdeWrap;
 
@@ -83,23 +91,30 @@ impl serde::Serialize for LuaColor {
     }
 }
 
-// #[derive(Debug, Copy, Clone)]
-// struct SerdeConstraint(Constraint);
-// impl<'de> Deserialize<'de> for SerdeConstraint {
-    // fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        // let data = String::deserialize(deserializer)?;
-        // let constraint = if let Some(end) = data.strip_prefix("min:") {
-            // Constraint::Min(end.parse::<u16>().map_err(de::Error::custom)?)
-        // } else if let Some(end) = data.strip_prefix("max:") {
-            // Constraint::Max(end.parse::<u16>().map_err(de::Error::custom)?)
-        // } else if let Some(start) = data.strip_suffix("%") {
-            // Constraint::Percentage(start.parse::<u16>().map_err(de::Error::custom)?)
-        // } else {
-            // Constraint::Length(data.parse::<u16>().map_err(de::Error::custom)?)
-        // };
-        // Ok(Self(constraint))
-    // }
-// }
+#[derive(Debug, Clone)]
+struct LuaSizeMetric(sizing::Metric);
+
+impl<'de> serde::Deserialize<'de> for LuaSizeMetric {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Debug, Clone, Deserialize)]
+        #[serde(untagged)]
+        enum Metric {
+            Fixed(u16),
+            Percent(String),
+        }
+
+        match Metric::deserialize(deserializer)? {
+            Metric::Fixed(x) => Ok(LuaSizeMetric(sizing::Metric::Fixed(x))),
+            Metric::Percent(x) => {
+                if x.ends_with('%') && let Ok(x) = x.parse::<u16>() {
+                    Ok(Self(sizing::Metric::Percent(x)))
+                } else {
+                    Err(serde::de::Error::custom(format!("invalid metric: {x}")))
+                }
+            },
+        }
+    }
+}
 
 #[derive(Debug, Default, Clone, Deserialize)]
 #[serde(default)]
@@ -177,7 +192,12 @@ struct MessageOptions {
     id: Option<usize>,
     persist: Option<bool>,
     hidden: Option<bool>,
-    height: Option<String>, // TODO
+    min_width:  Option<LuaSizeMetric>,
+    max_width:  Option<LuaSizeMetric>,
+    flex_width: Option<sizing::Flex>,
+    min_height: Option<LuaSizeMetric>,
+    max_height: Option<LuaSizeMetric>,
+    flex_height: Option<sizing::Flex>,
     #[serde(flatten)]
     inner: MessageInner,
 }
@@ -533,16 +553,20 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
         },
     };
 
-    // Apply node options (persist/hidden/constraint)
+    // Apply node options (persist/hidden/constraints)
     if let Some(persist) = options.persist {
         node.persist = persist;
     }
     if let Some(hidden) = options.hidden {
         node.set_hidden(hidden);
     }
-    if let Some(constraint) = options.height {
-        // node.constraint = Some(constraint.0);
-    }
+
+    node.height_spec.min = options.min_height.map(|x| x.0).or(node.height_spec.min);
+    node.height_spec.max = options.max_height.map(|x| x.0).or(node.height_spec.max);
+    node.height_spec.flex = options.flex_height.or(node.height_spec.flex);
+    node.width_spec.min = options.min_width.map(|x| x.0).or(node.width_spec.min);
+    node.width_spec.max = options.max_width.map(|x| x.0).or(node.width_spec.max);
+    node.width_spec.flex = options.flex_width.or(node.width_spec.flex);
 
     Ok(node)
 }

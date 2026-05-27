@@ -46,8 +46,8 @@ pub trait Renderer {
 
 pub struct TextRenderer<'a> {
     content_width: usize,
-    max_width: usize,
-    min_height: Option<usize>,
+    width: usize,
+    remaining_height: Option<usize>,
     line_count: usize,
     lines: ScrolledLinesIter<'a>,
     alignment: Alignment,
@@ -68,9 +68,9 @@ impl<'a> TextRenderer<'a> {
         text: &'a Text<T>,
         initial_indent: usize,
         border: Option<&'a Border>,
-        max_width: usize,
-        max_height: Option<(usize, Scroll)>,
-        min_height: Option<usize>,
+        width: usize,
+        height: Option<usize>,
+        scroll: Option<Scroll>,
         extra_highlights: H,
     ) -> Self
     where
@@ -81,19 +81,18 @@ impl<'a> TextRenderer<'a> {
         // how many rows do top/bottom borders consume
         let (top_rows, bottom_rows) = border.map(|b| b.inner_height()).unwrap_or_default();
         // how many cols do left/right borders consume
-        let (left_cols, right_cols) = border.map(|b| b.inner_width(max_width as u16)).unwrap_or_default();
+        let (left_cols, right_cols) = border.map(|b| b.inner_width(width as u16)).unwrap_or_default();
         let border_h = (top_rows + bottom_rows) as usize;
         let border_w = (left_cols + right_cols) as usize;
 
-        let content_width = max_width.saturating_sub(border_w);
+        let content_width = width.saturating_sub(border_w);
 
-        let (max_height, scroll) = max_height.unzip();
         let scroll = scroll.unwrap_or(Scroll{ show_scrollbar: false, position: ScrollPosition::Line(0) });
 
         let mut indent_cell = Cell::EMPTY;
         indent_cell.style = text.style;
 
-        let text_height = max_height.map(|h| h.saturating_sub(border_h));
+        let text_height = height.map(|h| h.saturating_sub(border_h));
         let scrolled = crate::tui::scroll::wrap(
             &text.lines,
             text.highlights.iter().chain(extra_highlights),
@@ -104,7 +103,7 @@ impl<'a> TextRenderer<'a> {
             scroll.position,
         );
 
-        let scrollbar_range = if scroll.show_scrollbar && !(scrolled.range == (0 .. scrolled.total_line_count.max(1))) {
+        let scrollbar_range = if scroll.show_scrollbar && !(scrolled.range.start == 0 || scrolled.range.end >= scrolled.total_line_count.max(1)) {
             let num_lines = scrolled.total_line_count.max(1);
             let text_height = text_height.unwrap_or(num_lines);
             let height = (text_height as f64 * scrolled.range.len() as f64 / num_lines as f64).round().max(1.) as usize;
@@ -121,8 +120,8 @@ impl<'a> TextRenderer<'a> {
 
         Self {
             content_width,
-            max_width,
-            min_height,
+            width,
+            remaining_height: height,
             line_count: 0,
             lines: scrolled.into_lines(),
             alignment: text.alignment,
@@ -181,12 +180,14 @@ impl Renderer for TextRenderer<'_> {
         F: FnMut(&mut Drawer<W, C>, usize, usize, usize),
     {
 
-        let min_height = if let Some(min_height) = &mut self.min_height && *min_height > 0 {
-            let old = *min_height;
-            *min_height -= 1;
-            old
-        } else {
-            0
+        let remaining_height = match &mut self.remaining_height {
+            Some(0) => return Ok(false), // no height left, done
+            Some(height) => {
+                let old = *height;
+                *height -= 1;
+                old
+            },
+            None => 0, // unlimited height
         };
 
         // draw top border row
@@ -194,14 +195,14 @@ impl Renderer for TextRenderer<'_> {
             if newline {
                 drawer.goto_newline(self.newline.as_ref())?;
             }
-            border.render_top(drawer, self.max_width as u16)?;
+            border.render_top(drawer, self.width as u16)?;
             self.top_consumed = true;
             return Ok(true)
         }
 
         let line = if let Some(slice) = self.lines.next() {
             Some(self.lines.slice(slice))
-        } else if min_height >= 2 || (min_height >= 1 && self.bottom_pending().is_none()) {
+        } else if remaining_height >= 2 || (remaining_height >= 1 && self.bottom_pending().is_none()) {
             Some(&[] as _)
         } else {
             None
@@ -251,18 +252,19 @@ impl Renderer for TextRenderer<'_> {
 
             // draw the scrollbar
             if let Some((scrollbar_range, bar)) = &self.scrollbar_range && scrollbar_range.contains(&lineno) {
-                let x = (initial_x + self.left_width() as u16 + self.content_width as u16).saturating_sub(drawer.get_pos().0);
+                // +1 for scrollbar
+                let x = (initial_x + self.left_width() as u16 + self.content_width as u16).saturating_sub(drawer.get_pos().0 + 1);
                 drawer.draw_cell_n_times(&self.clear_cell, false, x as _)?;
                 drawer.draw_cell(bar, false)?;
             }
 
             // draw right border
             if let Some(border) = self.border && border.has_right() {
-                let x = (initial_x + self.max_width as u16).saturating_sub(self.right_width() as u16 + drawer.get_pos().0);
+                let x = (initial_x + self.width as u16).saturating_sub(self.right_width() as u16 + drawer.get_pos().0);
                 drawer.draw_cell_n_times(&self.clear_cell, false, x as _)?;
                 border.render_right(drawer)?;
             } else if pad {
-                let x = (initial_x + self.max_width as u16).saturating_sub(drawer.get_pos().0);
+                let x = (initial_x + self.width as u16).saturating_sub(drawer.get_pos().0);
                 drawer.draw_cell_n_times(&self.clear_cell, false, x as _)?;
             }
 
@@ -274,7 +276,7 @@ impl Renderer for TextRenderer<'_> {
             if newline {
                 drawer.goto_newline(self.newline.as_ref())?;
             }
-            border.render_bottom(drawer, self.max_width as u16)?;
+            border.render_bottom(drawer, self.width as u16)?;
             self.bottom_consumed = true;
             return Ok(true)
         }
