@@ -25,7 +25,13 @@ impl Layout {
         self.children.iter().any(|c| map.get(c).is_some_and(|node| node.is_visible(map, tmp)))
     }
 
-    fn refresh(&self, map: &HashMap<usize, Node>, max_width: u16, max_height: Option<u16>, tmp: bool) -> u16 {
+    fn refresh(
+        &self,
+        map: &HashMap<usize, Node>,
+        max_width: u16,
+        max_height: Option<u16>,
+        tmp: bool,
+    ) -> (u16, u16) {
 
         let visible: Vec<&Node> = self.children.iter()
             .filter_map(|cid| map.get(cid))
@@ -33,24 +39,27 @@ impl Layout {
             .collect();
 
         if visible.is_empty() {
-            return 0;
+            return (0, 0);
         }
 
         match self.direction {
             Direction::Vertical => {
                 let mut sizes: Vec<_> = visible.iter().map(|node| {
                     // given unlimited height, how much do you want?
-                    let desired_height = node.refresh(map, max_width, None, true);
+                    let desired_height = node.refresh(map, max_width, None, true).1;
                     node.height_spec.into_size(max_height, Some(desired_height))
                 }).collect();
                 let mut sizes = sizing::SizeArray(&mut sizes);
                 sizes.allocate(max_height);
 
+                let mut width = 0u16;
                 let mut height = 0u16;
                 for (child, size) in visible.iter().zip(sizes.0.iter()) {
-                    height += child.refresh(map, max_width, Some(size.size), false);
+                    let size = child.refresh(map, max_width, Some(size.size), false);
+                    width = width.max(size.0);
+                    height += size.1;
                 }
-                height.min(max_height.unwrap_or(height))
+                (width, height.min(max_height.unwrap_or(height)))
             },
             Direction::Horizontal => {
                 let mut sizes: Vec<_> = visible.iter()
@@ -59,13 +68,15 @@ impl Layout {
                 let mut sizes = sizing::SizeArray(&mut sizes);
                 sizes.allocate(Some(max_width));
 
+                let mut width = 0u16;
                 let mut height = 0u16;
                 for (child, size) in visible.iter().zip(sizes.0.iter()) {
-                    let child_height = child.refresh(map, size.size, max_height, tmp);
-                    let child_height = child.height_spec.into_size(max_height, Some(child_height)).size;
+                    let dim = child.refresh(map, size.size, max_height, tmp);
+                    let child_height = child.height_spec.into_size(max_height, Some(dim.1)).size;
+                    width += dim.0;
                     height = height.max(child_height);
                 }
-                height.min(max_height.unwrap_or(u16::MAX))
+                (width, height.min(max_height.unwrap_or(u16::MAX)))
             },
         }
     }
@@ -157,13 +168,13 @@ impl Node {
         max_width: u16,
         max_height: Option<u16>,
         tmp: bool,
-    ) -> u16 {
+    ) -> (u16, u16) {
 
         let mut dim = (0, 0);
         if !self.is_hidden() {
             let height = match &self.kind {
                 NodeKind::Widget(widget) => widget.get_height_for_width(max_width),
-                NodeKind::Layout(layout) => layout.refresh(map, max_width, max_height, tmp),
+                NodeKind::Layout(layout) => layout.refresh(map, max_width, max_height, tmp).1,
             };
             let height = height.min(max_height.unwrap_or(height));
             let height = self.height_spec.into_size(max_height, Some(height)).size;
@@ -171,7 +182,7 @@ impl Node {
         }
 
         self.set_size(dim, tmp);
-        dim.1
+        dim
     }
 }
 
@@ -180,7 +191,7 @@ pub struct Nodes {
     pub(super) map: HashMap<usize, Node>,
     root: Layout,
     counter: usize,
-    pub height: Cell<u16>,
+    pub size: Cell<(u16, u16)>,
 }
 
 impl Nodes {
@@ -268,7 +279,7 @@ impl Nodes {
     }
 
     pub fn get_height(&self) -> u16 {
-        self.height.get()
+        self.size.get().1
     }
 
     pub fn refresh(&mut self, max_width: u16, max_height: Option<u16>) {
@@ -280,7 +291,7 @@ impl Nodes {
             }
         }
 
-        self.height.set(self.root.refresh(&self.map, max_width, max_height, false));
+        self.size.set(self.root.refresh(&self.map, max_width, max_height, false));
     }
 
     pub fn render<W: Write, C: Canvas>(

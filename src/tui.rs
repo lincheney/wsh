@@ -178,7 +178,7 @@ impl Tui {
     pub fn reset(&mut self) {
         // self.top_y = 0;
         self.buffer.reset();
-        self.nodes.height.set(0);
+        self.nodes.size.set((0, 0));
         self.dirty = true;
     }
 
