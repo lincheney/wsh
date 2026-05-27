@@ -83,8 +83,13 @@ impl SizeArray<'_> {
         self.0.iter().filter_map(|s| s.flex).map(|f| f.get()).sum()
     }
 
-    fn flex_unit(&self, available: Unit) -> f64 {
-        (available - self.current_non_flex_size()) as f64 / self.flex_total() as f64
+    fn flex_unit(&self, available: Unit) -> Option<f64> {
+        let flex_total = self.flex_total();
+        if flex_total == 0 {
+            None
+        } else {
+            Some((available - self.current_non_flex_size()) as f64 / flex_total as f64)
+        }
     }
 
     // distribute `total` cells among slots according to per-slot flex weights,
@@ -100,8 +105,7 @@ impl SizeArray<'_> {
             }
 
             // allocate remaining space to flex
-            while let flex_total = self.flex_total() && flex_total > 0 {
-                let flex_unit = self.flex_unit(available);
+            while let Some(flex_unit) = self.flex_unit(available) {
 
                 let mut recalc = false;
                 for s in self.0.iter_mut() {
