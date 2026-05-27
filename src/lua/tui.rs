@@ -87,7 +87,7 @@ impl serde::Serialize for LuaColor {
             Color::AnsiValue(n)       => &n.to_string(),
             Color::Rgb{r, g, b}       => &format!("#{r:02x}{g:02x}{b:02x}"),
         };
-        serializer.serialize_str(&string)
+        serializer.serialize_str(string)
     }
 }
 
@@ -774,7 +774,7 @@ async fn enable_mouse_mode(ui: Ui, _lua: Lua, enable: Option<bool>) -> Result<()
     let ui = ui.get();
     let mut ui = ui.borrow_mut();
     let mouse_mode = enable.unwrap_or(true);
-    if mouse_mode != mouse_mode {
+    if mouse_mode != ui.mouse_mode {
         ui.mouse_mode = mouse_mode;
         ui.apply_mouse_mode()?;
     }
@@ -824,7 +824,7 @@ fn sgr_to_style(lua: &Lua, sgr: String) -> LuaResult<LuaValue> {
     };
     let style = tui::widget::parse_ansi_col(Style::default(), sgr.into());
     let options = StyleOptions::from(style);
-    Ok(lua.to_value(&options)?)
+    lua.to_value(&options)
 }
 
 fn style_to_sgr(_lua: &Lua, options: StyleOptions) -> LuaResult<BString> {

@@ -113,7 +113,7 @@ impl Parser {
             0  => Button::Left,
             1  => Button::Middle,
             2  => Button::Right,
-            n  => Button::Button(n & !64 & !128),
+            n  => Button::Numbered(n & !64 & !128),
         };
 
         let mouse = if is_move {

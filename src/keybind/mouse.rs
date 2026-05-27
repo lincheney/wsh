@@ -3,7 +3,7 @@ pub enum Button {
     Left,
     Right,
     Middle,
-    Button(usize),
+    Numbered(usize),
 }
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -40,11 +40,11 @@ impl Mouse {
 
             key if key.starts_with("button") => {
                 if key.ends_with("-release") && let Ok(n) = key["button".len() .. key.len() - "-release".len()].parse() {
-                    Self::Button{button: Button::Button(n), release: true}
+                    Self::Button{button: Button::Numbered(n), release: true}
                 } else if key.ends_with("-move") && let Ok(n) = key["button".len() .. key.len() - "-move".len()].parse() {
-                    Self::Move{button: Button::Button(n)}
+                    Self::Move{button: Button::Numbered(n)}
                 } else if let Ok(n) = key["button".len() .. ].parse() {
-                    Self::Button{button: Button::Button(n), release: false}
+                    Self::Button{button: Button::Numbered(n), release: false}
                 } else {
                     return None
                 }
@@ -64,12 +64,12 @@ impl std::fmt::Display for Mouse {
             Self::Button{button: Button::Right, ..} => write!(f, "rightmouse"),
             Self::Button{button: Button::Middle, release: true} => write!(f, "middlemouse-release"),
             Self::Button{button: Button::Middle, ..} => write!(f, "middlemouse"),
-            Self::Button{button: Button::Button(n), release: true} => write!(f, "button{n}-release"),
-            Self::Button{button: Button::Button(n), ..} => write!(f, "button{n}"),
+            Self::Button{button: Button::Numbered(n), release: true} => write!(f, "button{n}-release"),
+            Self::Button{button: Button::Numbered(n), ..} => write!(f, "button{n}"),
             Self::Move{button: Button::Left} => write!(f, "leftmouse-move"),
             Self::Move{button: Button::Right} => write!(f, "rightmouse-move"),
             Self::Move{button: Button::Middle} => write!(f, "middlemouse-move"),
-            Self::Move{button: Button::Button(n)} => write!(f, "button{n}-move"),
+            Self::Move{button: Button::Numbered(n)} => write!(f, "button{n}-move"),
             Self::Scroll{down: true} => write!(f, "scrolldown"),
             Self::Scroll{..} => write!(f, "scrollup"),
         }

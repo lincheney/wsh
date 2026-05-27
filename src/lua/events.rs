@@ -153,8 +153,8 @@ impl From<keybind::MouseEvent> for MouseEvent {
             control: ev.modifiers.contains(keybind::Modifiers::CONTROL),
             shift: ev.modifiers.contains(keybind::Modifiers::SHIFT),
             alt: ev.modifiers.contains(keybind::Modifiers::ALT),
-            x: ev.x as usize,
-            y: ev.y as usize,
+            x: ev.x,
+            y: ev.y,
         }
     }
 }

@@ -3,15 +3,10 @@ use super::cell::Cell;
 use super::rect::Rect;
 use super::drawer::Canvas;
 
+#[derive(Default)]
 pub struct Buffer {
     pub area:    Rect,
     pub content: Vec<Cell>,
-}
-
-impl Default for Buffer {
-    fn default() -> Self {
-        Self { area: Rect::default(), content: vec![] }
-    }
 }
 
 impl Buffer {

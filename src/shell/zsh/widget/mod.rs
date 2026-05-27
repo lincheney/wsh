@@ -10,12 +10,12 @@ use super::{MetaStr, MetaString, MetaArray};
 struct Widget(NonNull<bindings::widget>);
 
 thread_local! {
-    static SELF_INSERT: Cell<Option<Widget>> = Cell::new(None);
-    static IMMORTAL_SELF_INSERT: Cell<Option<Widget>> = Cell::new(None);
-    static UNDEFINED_KEY: Cell<Option<Widget>> = Cell::new(None);
-    static IMMORTAL_UNDEFINED_KEY: Cell<Option<Widget>> = Cell::new(None);
-    static ACCEPT_LINE: Cell<Option<Widget>> = Cell::new(None);
-    static IMMORTAL_ACCEPT_LINE: Cell<Option<Widget>> = Cell::new(None);
+    static SELF_INSERT: Cell<Option<Widget>> = const{ Cell::new(None) };
+    static IMMORTAL_SELF_INSERT: Cell<Option<Widget>> = const{ Cell::new(None) };
+    static UNDEFINED_KEY: Cell<Option<Widget>> = const{ Cell::new(None) };
+    static IMMORTAL_UNDEFINED_KEY: Cell<Option<Widget>> = const{ Cell::new(None) };
+    static ACCEPT_LINE: Cell<Option<Widget>> = const{ Cell::new(None) };
+    static IMMORTAL_ACCEPT_LINE: Cell<Option<Widget>> = const{ Cell::new(None) };
 }
 
 

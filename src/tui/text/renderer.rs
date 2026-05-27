@@ -152,10 +152,10 @@ impl<'a> TextRenderer<'a> {
     }
 
     fn left_width(&self)  -> usize {
-        self.border.map_or(false, |b| b.has_left()) as _
+        self.border.is_some_and(|b| b.has_left()).into()
     }
     fn right_width(&self) -> usize {
-        self.border.map_or(false, |b| b.has_right()) as _
+        self.border.is_some_and(|b| b.has_right()).into()
     }
 }
 

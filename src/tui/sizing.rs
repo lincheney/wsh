@@ -1,5 +1,4 @@
 use std::num::NonZero;
-use std::cmp::Ordering;
 
 type Unit = u16;
 pub type Flex = NonZero<Unit>;
@@ -52,17 +51,19 @@ pub struct Size {
 }
 
 impl Size {
-    fn apply_flex_unit(&mut self, flex_unit: f64) -> Option<Ordering> {
-        let flex = self.flex?;
+    fn apply_flex_unit(&mut self, flex_unit: f64) -> bool {
+        let Some(flex) = self.flex
+            else { return true };
+
         let new_value = flex_unit * flex.get() as f64;
         if new_value < self.size as f64 {
-            Some(Ordering::Less)
+            false
         } else if let Some(max) = self.max && max <= new_value as Unit {
             self.size = max;
-            Some(Ordering::Greater)
+            false
         } else {
             self.size = new_value as Unit;
-            None
+            true
         }
     }
 }
@@ -104,13 +105,10 @@ impl SizeArray<'_> {
 
                 let mut recalc = false;
                 for s in self.0.iter_mut() {
-                    match s.apply_flex_unit(flex_unit) {
-                        Some(Ordering::Less | Ordering::Greater) => {
-                            // flex outside of bounds, so exclude it from flex
-                            s.flex = None;
-                            recalc = true;
-                        },
-                        _ => (),
+                    if !s.apply_flex_unit(flex_unit) {
+                        // flex outside of bounds, so exclude it from flex
+                        s.flex = None;
+                        recalc = true;
                     }
                 }
 
