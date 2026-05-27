@@ -105,20 +105,13 @@ impl SizeArray<'_> {
             }
 
             // allocate remaining space to flex
-            while let Some(flex_unit) = self.flex_unit(available) {
-
-                let mut recalc = false;
-                for s in self.0.iter_mut() {
-                    if !s.apply_flex_unit(flex_unit) {
-                        // flex outside of bounds, so exclude it from flex
-                        s.flex = None;
-                        recalc = true;
-                    }
-                }
-
-                if !recalc {
-                    break
-                }
+            // keep repeating the calculation with the ones that fail to set
+            while let Some(flex_unit) = self.flex_unit(available)
+                && self.0.iter_mut()
+                    .filter_map(|s| (!s.apply_flex_unit(flex_unit)).then_some(s))
+                    .map(|s| { s.flex = None; })
+                    .count() > 0
+            {
             }
 
             let mut remaining = available.saturating_sub(self.current_size());
