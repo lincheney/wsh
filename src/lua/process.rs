@@ -135,7 +135,6 @@ pub struct FullShellRunOpts {
 
 pub enum ShellRunCmd {
     Simple(BString),
-    Subshell(BString),
     Function{
         func: Arc<crate::shell::Function>,
         args: Vec<BString>,
@@ -182,9 +181,7 @@ enum ShellRunArgs {
 
 async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let args = match lua.from_value(val)? {
-        SpawnArgs::Shell(args) => {
-            return shell_run_with_args(ui, lua, ShellRunCmd::Subshell(args), Default::default()).await;
-        },
+        SpawnArgs::Shell(args) => return subshell_run(ui, lua, args, Default::default()).await,
         SpawnArgs::Full(args) => args,
         SpawnArgs::Simple(args) => FullSpawnArgs{args, ..Default::default()},
     };
@@ -261,13 +258,16 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
             crate::log_if_err::<(), _>(Err(err));
         }
 
-        if let Err(err) = result {
-            if let Some(result_sender) = result_sender {
-                let _ = result_sender.send(Err(err));
-            } else {
-                let err: Result<()> = Err(err);
-                ui.report_error(err);
-            }
+        match result {
+            Err(err) | Ok(Err(err)) => {
+                if let Some(result_sender) = result_sender {
+                    let _ = result_sender.send(Err(err));
+                } else {
+                    let err: Result<()> = Err(err);
+                    ui.report_error(err);
+                }
+            },
+            _ => (),
         }
 
     });
@@ -331,18 +331,42 @@ impl OverriddenStream {
 async fn shell_run(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     match lua.from_value(val)? {
         ShellRunArgs::Full(args) if args.subshell => {
-            shell_run_with_args(ui, lua, ShellRunCmd::Subshell(args.args), args.opts).await
+            subshell_run(ui, lua, args.args, args.opts).await
         },
         ShellRunArgs::Full(args) => {
-            shell_run_with_args(ui, lua, ShellRunCmd::Simple(args.args), args.opts).await
+            shell_run_with_args(ui, lua, ShellRunCmd::Simple(args.args), args.opts)
         },
         ShellRunArgs::Simple(args) => {
-            shell_run_with_args(ui, lua, ShellRunCmd::Simple(args), Default::default()).await
+            shell_run_with_args(ui, lua, ShellRunCmd::Simple(args), Default::default())
         },
     }
 }
 
-pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: FullShellRunOpts) -> Result<LuaMultiValue> {
+macro_rules! stdio_pipe {
+    ($args:expr, $name:ident, true) => (
+        stdio_pipe!($args, $name, File::create("/dev/null"), {
+            let (send, recv) = tokio::net::unix::pipe::pipe()?;
+            let send = WriteableFile(Some(BufWriter::new(send)));
+            (Some(send), Some(OverriddenStream::new(&std::io::$name(), recv.into_nonblocking_fd()?)))
+        })
+    );
+    ($args:expr, $name:ident, false) => (
+        stdio_pipe!($args, $name, File::open("/dev/null"), {
+            let (send, recv) = tokio::net::unix::pipe::pipe()?;
+            let recv = ReadableFile(Some(BufReader::new(recv)), false);
+            (Some(recv), Some(OverriddenStream::new(&std::io::$name(), send.into_nonblocking_fd()?)))
+        })
+    );
+    ($args:expr, $name:ident, $null:expr, $piped:expr) => (
+        match $args.$name {
+            Stdio::inherit => (None, None),
+            Stdio::null => (None, Some(OverriddenStream::new(&std::io::$name(), $null?))),
+            Stdio::piped => $piped,
+        }
+    );
+}
+
+pub async fn subshell_run(mut ui: Ui, lua: Lua, cmd: BString, args: FullShellRunOpts) -> Result<LuaMultiValue> {
     let (result_sender, result_receiver) = oneshot::channel();
     let (sender, receiver) = watch::channel(None);
 
@@ -352,126 +376,39 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
         || matches!(args.stderr, Stdio::inherit)
     );
 
+    let stdin = stdio_pipe!(args, stdin, true);
+    let stdout = stdio_pipe!(args, stdout, false);
+    let stderr = stdio_pipe!(args, stderr, false);
+    let streams = [stdin.1, stdout.1, stderr.1];
 
-    let mut result_sender = Some(result_sender);
-    let mut errors = [Ok(()), Ok(()), Ok(())];
+    tokio::task::spawn_local(async move {
+        let mut result_sender = Some(result_sender);
+        let result: Result<Result<_>> = ui.freeze_if(foreground, true, async {
+            // fork it now to get the pid
+            let redirections = streams.iter().flatten().map(|s| (s.fd, s.replacement)).collect();
+            let pid = ui.shell.exec_subshell(cmd, false, redirections)? as _;
+            // send streams back to caller
+            let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
+            // get the status
+            let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, false);
+            let code = match ui.shell.check_pid_status(pid as _) {
+                None | Some(-1) => pid_waiter.await.unwrap_or(-1) as _,
+                Some(code) => code as _,
+            };
 
-    let result: Result<Result<_>> = ui.freeze_if(foreground, true, async {
+            let _ = sender.send(Some(Ok(code)));
+            Ok(())
+        }).await;
 
-        macro_rules! stdio_pipe {
-            ($name:ident, true) => (
-                stdio_pipe!($name, File::create("/dev/null"), {
-                    let (send, recv) = tokio::net::unix::pipe::pipe()?;
-                    let send = WriteableFile(Some(BufWriter::new(send)));
-                    (Some(send), Some(OverriddenStream::new(&std::io::$name(), recv.into_nonblocking_fd()?)))
-                })
-            );
-            ($name:ident, false) => (
-                stdio_pipe!($name, File::open("/dev/null"), {
-                    let (send, recv) = tokio::net::unix::pipe::pipe()?;
-                    let recv = ReadableFile(Some(BufReader::new(recv)), false);
-                    (Some(recv), Some(OverriddenStream::new(&std::io::$name(), send.into_nonblocking_fd()?)))
-                })
-            );
-            ($name:ident, $null:expr, $piped:expr) => (
-                match args.$name {
-                    Stdio::inherit => (None, None),
-                    Stdio::null => (None, Some(OverriddenStream::new(&std::io::$name(), $null?))),
-                    Stdio::piped => $piped,
-                }
-            );
+        if let Err(err) = result {
+            if let Some(result_sender) = result_sender {
+                let _ = result_sender.send(Err(err));
+            } else {
+                ui.report_error::<(), _>(Err(err));
+            }
         }
 
-        let stdin = stdio_pipe!(stdin, true);
-        let stdout = stdio_pipe!(stdout, false);
-        let stderr = stdio_pipe!(stderr, false);
-
-        let mut streams = [stdin.1, stdout.1, stderr.1];
-
-        let code = match cmd {
-            cmd @ (ShellRunCmd::Simple(_) | ShellRunCmd::Function{..}) => {
-
-                let pid = std::process::id();
-                // send streams back to caller
-                let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
-
-                // wrap the whole thing in a do_run to ensure fd restoration happens in the
-                // correct order
-                // no forking, override fds in place
-                let result = streams.iter_mut().flatten().try_for_each(|s| s.override_fd());
-                if let Err(result) = result {
-                    let mut result = Err(result);
-                    // didnt work, restore any backups
-                    if let Err(e) = streams.iter_mut().flatten().try_for_each(|s| s.restore()) {
-                        result = result.context(e);
-                    }
-                    return result
-                }
-
-                let code = match cmd {
-                    ShellRunCmd::Simple(cmd) => ui.shell.exec(cmd.into()),
-                    ShellRunCmd::Function{func, args, arg0} => {
-                        let arg0 = arg0.map(|x| x.into());
-                        let args = args.into_iter().map(|x| x.into()).collect();
-                        ui.shell.exec_function(func.clone(), arg0, args).into()
-                    },
-                    ShellRunCmd::Subshell(_) => unreachable!(),
-                };
-
-                // finished, restore any backups
-                let mut errs = [Ok(()), Ok(()), Ok(())];
-                for (s, e) in streams.iter_mut().zip(errs.iter_mut()) {
-                    if let Some(s) = s {
-                        *e = s.restore();
-                    }
-                }
-
-                for (dst, src) in errors.iter_mut().zip(errs) {
-                    *dst = src;
-                }
-
-                code
-
-            },
-            ShellRunCmd::Subshell(cmd) => {
-                // fork it now to get the pid
-                let redirections = streams.iter().flatten().map(|s| (s.fd, s.replacement)).collect();
-                let pid = ui.shell.exec_subshell(cmd, false, redirections)? as _;
-                // send streams back to caller
-                let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
-                // get the status
-                let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, false);
-                match ui.shell.check_pid_status(pid as _) {
-                    None | Some(-1) => pid_waiter.await.unwrap_or(-1) as _,
-                    Some(code) => code as _,
-                }
-            },
-        };
-
-        // send the code out
-        let _ = sender.send(Some(Ok(code as _)));
-
-        Ok(())
-    }).await;
-
-    let mut drawn = false;
-
-    for err in errors {
-        drawn = ui.report_error(err) || drawn;
-    }
-
-    if let Err(err) = result {
-        if let Some(result_sender) = result_sender {
-            let _ = result_sender.send(Err(err));
-        } else {
-            let err: Result<()> = Err(err);
-            drawn = ui.report_error(err) || drawn;
-        }
-    }
-
-    if foreground && ! drawn {
-        ui.queue_draw();
-    }
+    });
 
     let (pid, stdin, stdout, stderr) = result_receiver.await.unwrap()?;
 
@@ -483,6 +420,76 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
         stdin,
         stdout,
         stderr,
+    ))?)
+}
+
+pub fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: FullShellRunOpts) -> Result<LuaMultiValue> {
+    let foreground = args.foreground.unwrap_or(
+        matches!(args.stdin, Stdio::inherit)
+        || matches!(args.stdout, Stdio::inherit)
+        || matches!(args.stderr, Stdio::inherit)
+    );
+
+    let mut errors = [Ok(()), Ok(()), Ok(())];
+
+    // let result: Result<Result<_>> =
+    let result = tokio::runtime::Handle::current().block_on(ui.freeze_if(foreground, true, async {
+
+        let stdin = stdio_pipe!(args, stdin, true);
+        let stdout = stdio_pipe!(args, stdout, false);
+        let stderr = stdio_pipe!(args, stderr, false);
+
+        let mut streams = [stdin.1, stdout.1, stderr.1];
+
+        // wrap the whole thing in a do_run to ensure fd restoration happens in the
+        // correct order
+        // no forking, override fds in place
+        let result = streams.iter_mut().flatten().try_for_each(|s| s.override_fd());
+        if let Err(result) = result {
+            let mut result = Err(result);
+            // didnt work, restore any backups
+            if let Err(e) = streams.iter_mut().flatten().try_for_each(|s| s.restore()) {
+                result = result.context(e);
+            }
+            return result
+        }
+
+        let code = match cmd {
+            ShellRunCmd::Simple(cmd) => ui.shell.exec(cmd.into()),
+            ShellRunCmd::Function{func, args, arg0} => {
+                let arg0 = arg0.map(|x| x.into());
+                let args = args.into_iter().map(|x| x.into()).collect();
+                ui.shell.exec_function(func.clone(), arg0, args).into()
+            },
+        };
+
+        // finished, restore any backups
+        let mut errs = [Ok(()), Ok(()), Ok(())];
+        for (s, e) in streams.iter_mut().zip(errs.iter_mut()) {
+            if let Some(s) = s {
+                *e = s.restore();
+            }
+        }
+
+        for (dst, src) in errors.iter_mut().zip(errs) {
+            *dst = src;
+        }
+
+        // send the code out
+        Ok(code)
+    }));
+
+    let mut drawn = false;
+    for err in errors {
+        drawn = ui.report_error(err) || drawn;
+    }
+    if foreground && ! drawn {
+        ui.queue_draw();
+    }
+
+    let code = result??;
+    Ok(lua.pack_multi((
+        code,
     ))?)
 }
 
