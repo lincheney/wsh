@@ -134,13 +134,13 @@ async fn redraw(ui: Ui, lua: Lua, val: Option<LuaValue>) -> Result<()> {
 }
 
 async fn exit(mut ui: Ui, _lua: Lua, code: Option<i32>) -> Result<()> {
-    ui.shell.exit(code.unwrap_or(0)).await?;
+    ui.shell.exit(code.unwrap_or(0));
     ui.accept_line().await?;
     Ok(())
 }
 
-async fn get_cwd(ui: Ui, _lua: Lua, (): ()) -> Result<BString> {
-    ui.shell.get_cwd().await
+fn get_cwd(ui: &Ui, _lua: &Lua, (): ()) -> Result<BString> {
+    Ok(ui.shell.get_cwd())
 }
 
 fn get_size(ui: &Ui, _lua: &Lua, (): ()) -> Result<(u32, u32)> {
@@ -150,8 +150,8 @@ fn get_size(ui: &Ui, _lua: &Lua, (): ()) -> Result<(u32, u32)> {
 async fn call_hook_func(ui: Ui, _lua: Lua, mut args: Vec<BString>) -> Result<Option<i32>> {
     let arg0 = args.remove(0);
     ui.freeze_if(true, true, async {
-        ui.shell.call_hook_func(Cow::Owned(arg0.into()), args.into_iter().map(|x| x.into()).collect()).await
-    }).await?
+        ui.shell.call_hook_func(Cow::Owned(arg0.into()), args.into_iter().map(|x| x.into()).collect())
+    }).await
 }
 
 async fn print(ui: Ui, _lua: Lua, value: BString) -> Result<()> {
@@ -227,19 +227,15 @@ async fn lua_try(lua: Lua, args: LuaTable) -> LuaResult<LuaMultiValue> {
 }
 
 pub async fn __laggy(_ui: Ui, lua: Lua, (): ()) -> Result<()> {
-    let _ = tokio::task::spawn_blocking(move || {
-        let _: Result<(), mlua::Error> = unsafe{ lua.exec_raw((), |_| {
-            // let lock = ui.borrow_mut();
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(async {
-                    for i in 0..2 {
-                        eprintln!("DEBUG(likes) \t{}\t= {:?}", stringify!(i), i);
-                        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-                    }
-                });
-            });
-        }) };
-    }).await;
+    let _: Result<(), mlua::Error> = unsafe{ lua.exec_raw((), |_| {
+        // let lock = ui.borrow_mut();
+        tokio::runtime::Handle::current().block_on(async {
+            for i in 0..2 {
+                eprintln!("DEBUG(likes) \t{}\t= {:?}", stringify!(i), i);
+                tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+            }
+        });
+    }) };
     // drop(lock);
     Ok(())
 }
@@ -257,7 +253,7 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.set_lua_async_fn("accept_line", accept_line)?;
     ui.set_lua_async_fn("redraw",  redraw)?;
     ui.set_lua_async_fn("exit", exit)?;
-    ui.set_lua_async_fn("get_cwd", get_cwd)?;
+    ui.set_lua_fn("get_cwd", get_cwd)?;
     ui.set_lua_fn("get_size", get_size)?;
     ui.set_lua_async_fn("call_hook_func", call_hook_func)?;
     ui.set_lua_async_fn("print", print)?;

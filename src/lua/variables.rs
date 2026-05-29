@@ -18,12 +18,12 @@ fn value_to_lua(lua: &Lua, val: Option<variables::Value>) -> Result<LuaValue> {
 }
 
 async fn get_var(ui: Ui, lua: Lua, (name, zle): (BString, Option<bool>)) -> Result<LuaValue> {
-    value_to_lua(&lua, ui.shell.get_var(name.into(), zle.unwrap_or(false)).await??)
+    value_to_lua(&lua, ui.shell.get_var(name.into(), zle.unwrap_or(false))?)
 }
 
 async fn get_vars(ui: Ui, lua: Lua, (names, zle): (Vec<BString>, Option<bool>)) -> Result<LuaTable> {
     let varnames = names.iter().map(|n| n.clone().into()).collect();
-    let results = ui.shell.get_vars(varnames, zle.unwrap_or(false)).await??;
+    let results = ui.shell.get_vars(varnames, zle.unwrap_or(false))?;
 
     let table = lua.create_table()?;
     for (name, val) in names.into_iter().zip(results) {
@@ -55,31 +55,31 @@ async fn set_var(ui: Ui, lua: Lua, (name, val, global): (BString, LuaValue, Opti
             return Err(anyhow::anyhow!("invalid value: {:?}", val))
         },
     };
-    ui.shell.set_var(name.into(), val, !global.unwrap_or(false)).await??;
+    ui.shell.set_var(name.into(), val, !global.unwrap_or(false))?;
     Ok(())
 }
 
 async fn unset_var(ui: Ui, _lua: Lua, name: BString) -> Result<()> {
-    ui.shell.unset_var(name.into()).await?;
+    ui.shell.unset_var(name.into());
     Ok(())
 }
 
 async fn export_var(ui: Ui, _lua: Lua, name: BString) -> Result<()> {
-    ui.shell.export_var(name.into()).await?;
+    ui.shell.export_var(name.into());
     Ok(())
 }
 
 async fn in_param_scope(ui: Ui, _lua: Lua, func: LuaFunction) -> Result<LuaValue> {
-    ui.shell.startparamscope().await?;
+    ui.shell.startparamscope();
     let result = func.call_async(()).await;
-    ui.shell.endparamscope().await?;
+    ui.shell.endparamscope();
     Ok(result?)
 }
 
 async fn in_zle_param_scope(ui: Ui, _lua: Lua, func: LuaFunction) -> Result<LuaValue> {
-    ui.shell.start_zle_scope().await?;
+    ui.shell.start_zle_scope();
     let result = func.call_async(()).await;
-    ui.shell.end_zle_scope().await?;
+    ui.shell.end_zle_scope();
     Ok(result?)
 }
 
@@ -109,7 +109,7 @@ async fn create_dynamic_var(
                     if weak.try_upgrade().is_none() {
                         eprintln!("Lua instance is destroyed")
                     } else {
-                        match crate::shell::run_with_shell($result) {
+                        match crate::shell::block_on($result) {
                             Ok(Ok(val)) => return val,
                             Ok(Err(err)) => ::log::error!("{}", err),
                             Err(err) => ::log::error!("{}", err),
@@ -142,11 +142,11 @@ async fn create_dynamic_var(
 
     let typ: super::SerdeWrap<VarType> = lua.from_value(typ)?;
     match typ.0 {
-        VarType::string => make_dynamic_var!(create_dynamic_string_var).await?,
-        VarType::integer => make_dynamic_var!(create_dynamic_integer_var).await?,
-        VarType::float => make_dynamic_var!(create_dynamic_float_var).await?,
-        VarType::array => make_dynamic_var!(create_dynamic_array_var).await?,
-        VarType::hashmap => make_dynamic_var!(create_dynamic_hash_var).await?,
+        VarType::string => make_dynamic_var!(create_dynamic_string_var),
+        VarType::integer => make_dynamic_var!(create_dynamic_integer_var),
+        VarType::float => make_dynamic_var!(create_dynamic_float_var),
+        VarType::array => make_dynamic_var!(create_dynamic_array_var),
+        VarType::hashmap => make_dynamic_var!(create_dynamic_hash_var),
     }
 }
 

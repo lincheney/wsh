@@ -5,12 +5,12 @@ macro_rules! strong_weak_wrapper {
 
             #[derive(Clone)]
             $struct_vis struct $name {
-                $($vis $field: std::sync::Arc<$type>,)*
+                $($vis $field: std::rc::Rc<$type>,)*
             }
 
             #[derive(Clone)]
             $struct_vis struct [<Weak $name>] {
-                $($vis $field: std::sync::Weak<$type>,)*
+                $($vis $field: std::rc::Weak<$type>,)*
             }
 
             #[allow(dead_code)]
@@ -21,7 +21,7 @@ macro_rules! strong_weak_wrapper {
             impl [<Downgrade $name>] for $name {
                 fn downgrade(&self) -> [<Weak $name>] {
                     [<Weak $name>] {
-                        $($field: std::sync::Arc::downgrade(&self.$field),)*
+                        $($field: std::rc::Rc::downgrade(&self.$field),)*
                     }
                 }
             }
@@ -33,7 +33,7 @@ macro_rules! strong_weak_wrapper {
             impl [<Upgrade $name>] for [<Weak $name>] {
                 fn upgrade(&self) -> Option<$name> {
                     Some($name {
-                        $($field: std::sync::Weak::upgrade(&self.$field)?,)*
+                        $($field: std::rc::Weak::upgrade(&self.$field)?,)*
                     })
                 }
             }

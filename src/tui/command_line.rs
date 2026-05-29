@@ -4,7 +4,7 @@ use bstr::{BString, BStr};
 use std::io::{Write};
 use crate::tui::{Drawer, Canvas};
 use crate::ui::buffer::Buffer;
-use crate::shell::{ShellClient, MetaStr};
+use crate::shell::{Shell, MetaStr};
 use crate::meta_str;
 
 const FALLBACK_PROMPT: &MetaStr = crate::meta_str!(c">>> ");
@@ -52,27 +52,24 @@ impl CommandLineState {
         self.draw_end_pos.1 - self.cursor_coord.1
     }
 
-    pub async fn get_shell_vars(shell: &ShellClient, width: u32) -> anyhow::Result<ShellVars> {
-        shell.run(move |shell| {
+    pub fn get_shell_vars(shell: &Shell, width: u32) -> ShellVars {
+        shell.start_zle_scope();
+        let predisplay = crate::shell::Variable::get(meta_str!(c"PREDISPLAY")).map(|mut v| v.as_bytes());
+        let postdisplay = crate::shell::Variable::get(meta_str!(c"POSTDISPLAY")).map(|mut v| v.as_bytes());
+        let prompt = shell.get_prompt(None, true).map_or(Cow::Borrowed(FALLBACK_PROMPT), Cow::Owned);
+        let prompt_size = shell.get_prompt_size(prompt.clone(), Some(width as _));
+        let prompt = match crate::shell::remove_invisible_chars(prompt) {
+            Cow::Owned(prompt) => Cow::Owned(prompt.unmetafy()),
+            Cow::Borrowed(prompt) => prompt.unmetafy(),
+        };
+        shell.end_zle_scope();
 
-            shell.start_zle_scope();
-            let predisplay = crate::shell::get_var(shell, meta_str!(c"PREDISPLAY")).map(|mut v| v.as_bytes());
-            let postdisplay = crate::shell::get_var(shell, meta_str!(c"POSTDISPLAY")).map(|mut v| v.as_bytes());
-            let prompt = shell.get_prompt(None, true).map_or(Cow::Borrowed(FALLBACK_PROMPT), Cow::Owned);
-            let prompt_size = shell.get_prompt_size(prompt.clone(), Some(width as _));
-            let prompt = match crate::shell::remove_invisible_chars(prompt) {
-                Cow::Owned(prompt) => Cow::Owned(prompt.unmetafy()),
-                Cow::Borrowed(prompt) => prompt.unmetafy(),
-            };
-            shell.end_zle_scope();
-
-            ShellVars {
-                predisplay,
-                postdisplay,
-                prompt,
-                prompt_size,
-            }
-        }).await
+        ShellVars {
+            predisplay,
+            postdisplay,
+            prompt,
+            prompt_size,
+        }
     }
 
 }

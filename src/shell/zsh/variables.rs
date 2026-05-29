@@ -88,7 +88,7 @@ fn try_hashtable_to_hashmap(table: zsh_sys::HashTable) -> Result<HashMap<BString
 }
 
 impl Variable {
-    pub(in crate::shell) fn get(name: &MetaStr) -> Option<Self> {
+    pub fn get(name: &MetaStr) -> Option<Self> {
         let bracks = 1;
         let mut ptr = name.as_ptr().cast_mut();
         let mut value: zsh_sys::value = unsafe{ std::mem::MaybeUninit::zeroed().assume_init() };
@@ -248,9 +248,9 @@ impl Variable {
 
     pub(in crate::shell) fn create_dynamic<T: VariableGSU>(
         name: &MetaStr,
-        get: Box<dyn Send + Fn() -> T>,
-        set: Option<Box<dyn Send + Fn(T)>>,
-        unset: Option<Box<dyn Send + Fn(bool)>>,
+        get: Box<dyn Fn() -> T>,
+        set: Option<Box<dyn Fn(T)>>,
+        unset: Option<Box<dyn Fn(bool)>>,
     ) -> Result<()> {
         let flag = T::FLAG | zsh_sys::PM_SPECIAL | zsh_sys::PM_REMOVABLE | zsh_sys::PM_LOCAL;
         let gsu = CustomGSU { get, set, unset, data: None };
@@ -283,9 +283,9 @@ impl Variable {
 }
 
 pub struct CustomGSU<T: VariableGSU> {
-    get: Box<dyn Send + Fn() -> T>,
-    set: Option<Box<dyn Send + Fn(T)>>,
-    unset: Option<Box<dyn Send + Fn(bool)>>,
+    get: Box<dyn Fn() -> T>,
+    set: Option<Box<dyn Fn(T)>>,
+    unset: Option<Box<dyn Fn(bool)>>,
     // this field is for the gsu to use when returning temporary values to zsh
     data: Option<T::Type>,
 }

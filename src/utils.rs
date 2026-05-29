@@ -8,7 +8,7 @@ pub mod strong_weak_wrapper;
 #[macro_use]
 pub mod impl_deref_helper;
 
-pub fn set_nonblocking_fd<R: AsRawFd>(file: &R) -> Result<()> {
+pub fn set_fd_nonblocking<R: AsRawFd>(file: &R) -> Result<()> {
     let raw_fd = file.as_raw_fd();
     // 3. Set non-blocking mode
     let flags = nix::fcntl::fcntl(raw_fd, nix::fcntl::FcntlArg::F_GETFL)?;

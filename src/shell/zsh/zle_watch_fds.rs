@@ -10,7 +10,7 @@ pub async fn handle_fd_change(ui: &crate::ui::Ui, fd_change: FdChange) -> Result
                 Ok(reader) => {
                     // spawn a task to wait on the fd
                     let ui = ui.clone();
-                    tokio::task::spawn(async move {
+                    tokio::task::spawn_local(async move {
                         loop {
                             let Some(guard) = canceller.run(reader.readable()).await
                                 else { break };
@@ -38,7 +38,7 @@ pub fn init(ui: &crate::ui::Ui) {
     // spawn a task to take care of watched fd
     if let Some(mut fd_source) = super::bin_zle::take_fd_change_source() {
         let mut ui = ui.clone();
-        tokio::task::spawn(async move {
+        tokio::task::spawn_local(async move {
             while let Some(change) = fd_source.recv().await {
                 ui.report_error(handle_fd_change(&ui, change).await);
             }

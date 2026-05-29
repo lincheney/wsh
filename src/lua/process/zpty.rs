@@ -102,7 +102,7 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         width: args.width,
     };
     // TODO capture shout
-    let zpty = ui.shell.zpty(name.into(), cmd, opts).await??;
+    let zpty = ui.shell.zpty(name.into(), cmd, opts)?;
 
     // do not drop the pty fd as zsh will do it for us
     // so we dup the fd to one we own instead
@@ -113,12 +113,12 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let stdout = ReadableFile(Some(BufReader::new(AsyncZpty{ inner: pty })), true);
 
     let pid = zpty.pid;
-    tokio::task::spawn(async move {
+    tokio::task::spawn_local(async move {
         // get the status
         let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, false);
-        let code = match ui.shell.check_pid_status(pid as _).await {
-            Err(_) | Ok(None | Some(-1)) => pid_waiter.await.unwrap_or(-1),
-            Ok(Some(code)) => code,
+        let code = match ui.shell.check_pid_status(pid as _) {
+            None | Some(-1) => pid_waiter.await.unwrap_or(-1),
+            Some(code) => code,
         };
         // send the code out
         let _ = sender.send(Some(Ok(code as _)));
@@ -126,7 +126,7 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         // delete the zpty once it has finished
         // this will close the original zpty fds
         // which is ok for us since we have dup-ed them
-        ui.shell.zpty_delete(zpty.name).await
+        ui.shell.zpty_delete(zpty.name)
     });
 
     Ok(lua.pack_multi((

@@ -403,6 +403,12 @@ pub fn unqueue_signals() -> nix::Result<()> {
     Ok(())
 }
 
+pub fn with_queued_signals<T, F: FnOnce() -> T>(func: F) -> (T, nix::Result<()>) {
+    queue_signals();
+    let result = func();
+    (result, unqueue_signals())
+}
+
 pub fn exit(code: i32) {
     unsafe {
         zsh_sys::exit_pending = 1;

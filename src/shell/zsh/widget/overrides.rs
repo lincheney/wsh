@@ -51,9 +51,7 @@ static UNDO_OVERRIDE: Mutex<Option<bindings::ZleIntFunc>> = Mutex::new(None);
 unsafe extern "C" fn custom_undo(_args: *mut *mut c_char) -> c_int {
     let result = GlobalState::with(|state| {
         if state.ui.get().borrow_mut().buffer.move_in_history(false) {
-            tokio::task::block_in_place(|| {
-                state.runtime.block_on(state.ui.trigger_buffer_change_callbacks());
-            });
+            state.runtime.block_on(state.ui.trigger_buffer_change_callbacks());
         }
     });
     match result {
@@ -81,9 +79,7 @@ static REDO_OVERRIDE: Mutex<Option<bindings::ZleIntFunc>> = Mutex::new(None);
 unsafe extern "C" fn custom_redo(_args: *mut *mut c_char) -> c_int {
     let result = GlobalState::with(|state| {
         if state.ui.get().borrow_mut().buffer.move_in_history(true) {
-            tokio::task::block_in_place(|| {
-                state.runtime.block_on(state.ui.trigger_buffer_change_callbacks());
-            });
+            state.runtime.block_on(state.ui.trigger_buffer_change_callbacks());
         }
     });
     match result {
@@ -131,9 +127,7 @@ unsafe extern "C" fn custom_vi_undo_change(_args: *mut *mut c_char) -> c_int {
     // for wish buffer, just do a regular undo
     let result = GlobalState::with(|state| {
         if state.ui.get().borrow_mut().buffer.move_in_history(false) {
-            tokio::task::block_in_place(|| {
-                state.runtime.block_on(state.ui.trigger_buffer_change_callbacks());
-            });
+            state.runtime.block_on(state.ui.trigger_buffer_change_callbacks());
         }
     });
     match result {

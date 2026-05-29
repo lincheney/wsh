@@ -1,6 +1,6 @@
 use std::num::NonZeroU16;
 use std::os::fd::{AsRawFd};
-use mlua::{prelude::*, UserData, UserDataMethods};
+use mlua::{prelude::*, UserData, UserDataMethods, MaybeSend};
 use tokio::io::{
     BufReader,
     BufWriter,
@@ -30,7 +30,7 @@ impl<T: AsyncRead> Readable<BufReader<T>> for ReadableFile<T> {
     }
 }
 
-fn add_readable_methods<R: Send+AsyncRead+Unpin, T: 'static+Send+Readable<R>, M: UserDataMethods<T>>(methods: &mut M) {
+fn add_readable_methods<R: MaybeSend+AsyncRead+Unpin, T: 'static+MaybeSend+Readable<R>, M: UserDataMethods<T>>(methods: &mut M) {
 
     methods.add_async_method_mut("read", |lua, mut file, ()| async move {
         let is_tty_master = file.is_tty_master();
@@ -71,7 +71,7 @@ fn add_readable_methods<R: Send+AsyncRead+Unpin, T: 'static+Send+Readable<R>, M:
 
 }
 
-fn add_bufreadable_methods<R: Send+AsyncRead+AsyncBufReadExt+Unpin, T: 'static+Send+Readable<R>, M: UserDataMethods<T>>(methods: &mut M) {
+fn add_bufreadable_methods<R: MaybeSend+AsyncRead+AsyncBufReadExt+Unpin, T: 'static+MaybeSend+Readable<R>, M: UserDataMethods<T>>(methods: &mut M) {
 
     methods.add_async_method_mut("read_until", |lua, mut file, val: u8| async move {
         if let Some(file) = file.get_reader() {
@@ -98,7 +98,7 @@ fn add_bufreadable_methods<R: Send+AsyncRead+AsyncBufReadExt+Unpin, T: 'static+S
 
 }
 
-fn add_writeable_methods<R: Send+AsyncWrite+Unpin, T: 'static+Send+Writeable<R>, M: UserDataMethods<T>>(methods: &mut M) {
+fn add_writeable_methods<R: MaybeSend+AsyncWrite+Unpin, T: 'static+MaybeSend+Writeable<R>, M: UserDataMethods<T>>(methods: &mut M) {
     methods.add_async_method_mut("write", |_lua, mut file, val: LuaString| async move {
         if let Some(file) = file.get_writer() {
             file.write_all(&val.as_bytes()).await?;
@@ -108,7 +108,7 @@ fn add_writeable_methods<R: Send+AsyncWrite+Unpin, T: 'static+Send+Writeable<R>,
     });
 }
 
-impl<T: AsyncRead + AsRawFd + Unpin + mlua::MaybeSend + 'static> UserData for ReadableFile<T> {
+impl<T: AsyncRead + AsRawFd + Unpin + MaybeSend + 'static> UserData for ReadableFile<T> {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("as_fd", |_lua, file, ()| {
             Ok(file.0.as_ref().map(|x| x.get_ref().as_raw_fd()))
@@ -154,7 +154,7 @@ impl<T: AsyncWrite> Writeable<BufWriter<T>> for WriteableFile<T> {
     }
 }
 
-impl<T: AsyncWrite + AsRawFd + Unpin + mlua::MaybeSend + 'static> UserData for WriteableFile<T> {
+impl<T: AsyncWrite + AsRawFd + Unpin + MaybeSend + 'static> UserData for WriteableFile<T> {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("as_fd", |_lua, file, ()| {
             Ok(file.0.as_ref().map(|x| x.get_ref().as_raw_fd()))

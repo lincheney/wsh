@@ -1,11 +1,12 @@
+use std::cell::RefCell;
+use std::rc::Rc;
 use bstr::{BStr, BString};
 use std::future::Future;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::default::Default;
 use mlua::prelude::*;
 use anyhow::Result;
 use crate::keybind::{Event, KeyEvent, Key, Modifiers};
-use crate::fork_lock::{ForkLock, RawForkLock, ForkLockReadGuard};
 use crate::print_lock::{PrintLock, PrintLockGuard};
 use nix::sys::termios;
 
@@ -21,8 +22,7 @@ use crate::tui::{
     MoveDown,
 };
 
-use crate::timed_lock::{RwLock};
-use crate::shell::{ShellClient, KeybindValue, process::PidMap};
+use crate::shell::{Shell, KeybindValue, process::PidMap};
 use crate::lua::{EventCallbacks, HasEventCallbacks};
 pub mod buffer;
 
@@ -63,41 +63,40 @@ pub struct UiInner {
 }
 
 pub struct UnlockedUi {
-    pub inner: RwLock<UiInner>,
+    pub inner: RefCell<UiInner>,
     pub event_callbacks: std::sync::Mutex<EventCallbacks> ,
 }
 
 impl UnlockedUi {
-    pub fn borrow(&self) -> tokio::sync::RwLockReadGuard<'_, UiInner> {
-        self.inner.blocking_read()
+    pub fn borrow(&self) -> std::cell::Ref<'_, UiInner> {
+        self.inner.borrow()
     }
 
-    pub fn borrow_mut(&self) -> tokio::sync::RwLockWriteGuard<'_, UiInner> {
-        self.inner.blocking_write()
+    pub fn borrow_mut(&self) -> std::cell::RefMut<'_, UiInner> {
+        self.inner.borrow_mut()
     }
 }
 
 crate::strong_weak_wrapper! {
     pub struct Ui {
-        pub unlocked: ForkLock<'static, UnlockedUi>,
-        pub shell: ShellClient,
+        pub unlocked: UnlockedUi,
+        pub shell: Shell,
         pub lua: Lua,
-        pub events: ForkLock<'static, crate::event_stream::EventController>,
+        pub events: crate::event_stream::EventController,
         pub has_foreground_process: tokio::sync::Mutex<()>,
 
         pub print_lock: PrintLock,
         is_drawing: AtomicBool,
 
-        pub pid_map: ForkLock<'static, std::sync::Mutex<PidMap>>,
+        pub pid_map: std::sync::Mutex<PidMap>,
     }
 }
 
 impl Ui {
 
     pub fn new(
-        lock: &'static RawForkLock,
         events: crate::event_stream::EventController,
-        shell: ShellClient,
+        shell: Shell,
     ) -> Result<Self> {
 
         let lua = Lua::new();
@@ -129,26 +128,34 @@ impl Ui {
         ui.reset();
 
         let ui = UnlockedUi {
-            inner: RwLock::new(ui),
+            inner: RefCell::new(ui),
             event_callbacks: Default::default(),
         };
         let ui = Self {
-            unlocked: Arc::new(lock.wrap(ui)),
-            lua: Arc::new(lua),
-            events: Arc::new(lock.wrap(events)),
-            shell: Arc::new(shell),
+            unlocked: Rc::new(ui),
+            lua: Rc::new(lua),
+            events: Rc::new(events),
+            shell: Rc::new(shell),
             has_foreground_process: Default::default(),
             print_lock: Default::default(),
-            is_drawing: Arc::new(false.into()),
-            pid_map: Arc::new(lock.wrap(Default::default())),
+            is_drawing: Rc::new(false.into()),
+            pid_map: Rc::new(Default::default()),
         };
 
         Ok(ui)
     }
 
 
-    pub fn get(&self) -> ForkLockReadGuard<'_, UnlockedUi> {
-        self.unlocked.read()
+    pub fn get(&self) -> &UnlockedUi {
+        &self.unlocked
+    }
+
+    pub fn borrow(&self) -> std::cell::Ref<'_, UiInner> {
+        self.unlocked.inner.borrow()
+    }
+
+    pub fn borrow_mut(&self) -> std::cell::RefMut<'_, UiInner> {
+        self.unlocked.inner.borrow_mut()
     }
 
     pub fn get_lua_api(&self) -> LuaResult<LuaTable> {
@@ -162,7 +169,7 @@ impl Ui {
 
     pub fn queue_draw(&self) {
         if !crate::is_forked() && !self.is_drawing.swap(true, Ordering::AcqRel) {
-            self.events.read().queue_draw();
+            self.events.queue_draw();
         }
     }
 
@@ -186,8 +193,7 @@ impl Ui {
             let need_cursor_y;
 
             let size = {
-                let this = self.unlocked.read();
-                let ui = &mut *this.borrow_mut();
+                let ui = &mut *self.unlocked.borrow_mut();
 
                 if size == Some(ui.size) {
                     return ui.draw(shell_vars, cursor_y);
@@ -218,11 +224,11 @@ impl Ui {
 
             // get the shell vars and cursor y then reacquire the ui
             if need_shell_vars {
-                shell_vars = Some(crate::tui::command_line::CommandLineState::get_shell_vars(&self.shell, size.0).await?);
+                shell_vars = Some(crate::tui::command_line::CommandLineState::get_shell_vars(&self.shell, size.0));
             }
             if need_cursor_y {
-                let cursor = self.events.read().get_cursor_position();
-                cursor_y = Some(tokio::time::timeout(crate::timed_lock::DEFAULT_DURATION, cursor).await.unwrap()?.1 as _);
+                let cursor = self.events.get_cursor_position();
+                cursor_y = Some(tokio::time::timeout(crate::DEFAULT_DURATION, cursor).await.unwrap()?.1 as _);
             }
         }
     }
@@ -296,13 +302,11 @@ impl Ui {
         // cancel the current command line?
 
         self.insert_or_set_buffer(false, b"", None).await;
-        if self.shell.accept_line_trampoline(Some("".into())).await.is_err() {
+        if matches!(self.shell.trampoline_out(Some("".into())).await, None | Some(Err(_))) {
             return Ok(false)
         }
         {
-            let this = &*self.unlocked.read();
-            let mut ui = this.borrow_mut();
-            ui.reset();
+            self.unlocked.borrow_mut().reset();
         }
         self.trigger_buffer_change_callbacks().await;
         self.start_cmd(Some(&"".into())).await?;
@@ -311,14 +315,10 @@ impl Ui {
 
     fn pre_accept_line<'a>(&'a self, lock: &mut PrintLockGuard<'a>) -> Result<()> {
         {
-            let this = &*self.unlocked.read();
-            let mut ui = this.borrow_mut();
-
-            ui.tui.clear_non_persistent();
-
+            self.unlocked.borrow_mut().tui.clear_non_persistent();
             // TODO handle errors here properly
         }
-        self.events.read().pause();
+        self.events.pause();
         self.prepare_for_unhandled_output_blocking(Some(lock))?;
         Ok(())
     }
@@ -344,7 +344,7 @@ impl Ui {
                 print_lock = self.print_lock.blocking_lock();
                 &mut print_lock
             };
-            self.unlocked.read().borrow_mut().prepare_for_unhandled_output()?;
+            self.unlocked.borrow_mut().prepare_for_unhandled_output()?;
             print_lock.acquire();
             Ok(true)
         } else {
@@ -358,7 +358,7 @@ impl Ui {
         // how do we solve this?
         if !crate::is_forked() {
             let mut print_lock = self.print_lock.lock().await;
-            self.unlocked.read().borrow_mut().prepare_for_unhandled_output()?;
+            self.unlocked.borrow_mut().prepare_for_unhandled_output()?;
             print_lock.acquire();
             Ok(true)
         } else {
@@ -387,15 +387,14 @@ impl Ui {
         if print_lock.get_value() == 1 {
 
             {
-                self.unlocked.read().borrow().activate()?;
+                self.unlocked.borrow().activate()?;
             }
 
             // move down one line if not at start of line
-            let cursor = self.events.read().get_cursor_position();
-            let cursor = tokio::time::timeout(crate::timed_lock::DEFAULT_DURATION, cursor).await.unwrap().unwrap_or((0, 0));
+            let cursor = self.events.get_cursor_position();
+            let cursor = tokio::time::timeout(crate::DEFAULT_DURATION, cursor).await.unwrap().unwrap_or((0, 0));
 
-            let this = self.unlocked.read();
-            let ui = &mut *this.borrow_mut();
+            let ui = &mut *self.unlocked.borrow_mut();
             if cursor.0 != 0 {
                 queue!(ui.stdout, style::Print("\r\n"))?;
             }
@@ -410,11 +409,9 @@ impl Ui {
 
     async fn post_accept_line<'a>(&'a self, lock: &mut PrintLockGuard<'a>) -> Result<()> {
         {
-            let this = &*self.unlocked.read();
-            let mut ui = this.borrow_mut();
-            ui.reset();
+            self.unlocked.borrow_mut().reset();
         }
-        self.events.read().unpause();
+        self.events.unpause();
         self.recover_from_unhandled_output(Some(lock)).await?;
         Ok(())
     }
@@ -430,7 +427,7 @@ impl Ui {
                 let ui = this.borrow();
                 ui.buffer.get_contents().clone()
             };
-            let (complete, _tokens) = self.shell.parse(buffer.clone(), Default::default()).await?;
+            let (complete, _tokens) = self.shell.parse(buffer.clone(), Default::default());
             if complete {
                 Some(buffer)
             } else {
@@ -451,7 +448,7 @@ impl Ui {
                 self.pre_accept_line(&mut print_lock)?;
                 // acceptline doesn't actually accept the line right now
                 // only when we return control to zle using the trampoline
-                if self.shell.accept_line_trampoline(Some(buffer.clone())).await.is_err() {
+                if matches!(self.shell.trampoline_out(Some(buffer.clone())).await, None | Some(Err(_))) {
                     return Ok(false)
                 }
                 self.post_accept_line(&mut print_lock).await?;
@@ -499,7 +496,7 @@ impl Ui {
     pub fn set_lua_async_fn<F, A, R, T>(&self, name: &str, func: F) -> LuaResult<()>
     where
         F: Fn(Self, Lua, A) -> T + mlua::MaybeSend + 'static + Clone,
-        A: FromLuaMulti + Send + 'static,
+        A: FromLuaMulti + mlua::MaybeSend + 'static,
         R: IntoLuaMulti,
         T: Future<Output=Result<R>> + mlua::MaybeSend + 'static,
     {
@@ -510,7 +507,7 @@ impl Ui {
     pub fn make_lua_async_fn<F, A, R, T>(&self, func: F) -> LuaResult<LuaFunction>
     where
         F: Fn(Self, Lua, A) -> T + mlua::MaybeSend + 'static + Clone,
-        A: FromLuaMulti + Send + 'static,
+        A: FromLuaMulti + mlua::MaybeSend + 'static,
         R: IntoLuaMulti,
         T: Future<Output=Result<R>> + mlua::MaybeSend + 'static,
     {
@@ -608,11 +605,9 @@ impl Ui {
                 buf == &[ui.termios_input_flags.eof] && ui.buffer.get_contents().is_empty()
             };
             if is_eof {
-                if let Err(e) = self.shell.exit(0).await {
-                    return Some(KeybindOutput::Value(Err(e)));
-                }
+                self.shell.exit(0);
                 // this should error as we exit
-                let _ = self.shell.accept_line_trampoline(None).await;
+                let _ = self.shell.trampoline_out(None).await;
                 return None;
             }
         }
@@ -625,55 +620,53 @@ impl Ui {
         let ui = self.clone();
         let buf: crate::shell::MetaString = buf.to_owned().into();
 
-        let result = self.shell.run(move |shell| {
-            match KeybindValue::find(shell, buf.as_ref()) {
-                Some(KeybindValue::String(string)) => {
-                    // recurse
-                    Some(Value::String(string))
-                },
-                // skip not found or where we have our own impl
-                Some(KeybindValue::Widget(widget)) if widget.is_self_insert() || widget.is_undefined_key() => None,
-                Some(KeybindValue::Widget(widget)) if widget.is_accept_line() => {
-                    Some(Value::Widget{accept_line: true, buffer: None, cursor: None, output: None})
-                },
-                Some(KeybindValue::Widget(mut widget)) => {
-                    // execute the widget
-                    let lock = if widget.is_internal() {
-                        // are all internal widgets safe to run without locking ui?
-                        // they should all output only to shout which we are already capturing?
-                        None
-                    } else {
-                        // a widget may run subprocesses so lock the ui
-                        Some(ui.has_foreground_process.blocking_lock())
-                    };
-                    let (buffer, cursor) = {
-                        let this = ui.get();
-                        let ui = this.inner.blocking_write();
-                        (ui.buffer.get_contents().clone(), ui.buffer.get_cursor())
-                    };
+        let result = match KeybindValue::find(&self.shell, buf.as_ref())? {
+            KeybindValue::String(string) => {
+                // recurse
+                Value::String(string)
+            },
+            // skip not found or where we have our own impl
+            KeybindValue::Widget(widget) if widget.is_self_insert() || widget.is_undefined_key() => {
+                return None
+            },
+            KeybindValue::Widget(widget) if widget.is_accept_line() => {
+                Value::Widget{accept_line: true, buffer: None, cursor: None, output: None}
+            },
+            KeybindValue::Widget(mut widget) => {
+                // execute the widget
+                let lock = if widget.is_internal() {
+                    // are all internal widgets safe to run without locking ui?
+                    // they should all output only to shout which we are already capturing?
+                    None
+                } else {
+                    // a widget may run subprocesses so lock the ui
+                    Some(ui.has_foreground_process.blocking_lock())
+                };
+                let (buffer, cursor) = {
+                    let this = ui.get();
+                    let ui = this.inner.borrow();
+                    (ui.buffer.get_contents().clone(), ui.buffer.get_cursor())
+                };
 
-                    shell.set_zle_buffer(buffer.clone(), cursor as _);
-                    shell.set_lastchar(lastchar);
+                self.shell.set_zle_buffer(buffer.clone(), cursor as _);
+                self.shell.set_lastchar(lastchar);
 
-                    let (output, _) = widget.exec_and_get_output(None, [].into_iter());
-                    let (new_buffer, new_cursor) = shell.get_zle_buffer();
-                    let new_cursor = new_cursor.unwrap_or(new_buffer.len() as _) as _;
-                    let new_buffer = (new_buffer != buffer).then_some(new_buffer);
-                    let new_cursor = (new_cursor != cursor).then_some(new_cursor);
-                    let accept_line = shell.has_accepted_line();
-                    drop(lock);
+                let (output, _) = widget.exec_and_get_output(None, [].into_iter());
+                let (new_buffer, new_cursor) = self.shell.get_zle_buffer();
+                let new_cursor = new_cursor.unwrap_or(new_buffer.len() as _) as _;
+                let new_buffer = (new_buffer != buffer).then_some(new_buffer);
+                let new_cursor = (new_cursor != cursor).then_some(new_cursor);
+                let accept_line = self.shell.has_accepted_line();
+                drop(lock);
 
-                    Some(Value::Widget{
-                        buffer: new_buffer,
-                        cursor: new_cursor,
-                        output: if output.is_empty() { None } else { Some(output) },
-                        accept_line,
-                    })
-                },
-                None => None,
-            }
-        }).await;
-        let result = crate::log_if_err(result)??;
+                Value::Widget{
+                    buffer: new_buffer,
+                    cursor: new_cursor,
+                    output: if output.is_empty() { None } else { Some(output) },
+                    accept_line,
+                }
+            },
+        };
 
         match result {
             Value::String(string) => Some(KeybindOutput::String(string)),
@@ -787,18 +780,14 @@ impl Ui {
         // execute the func
         // a func may run subprocesses so lock the ui
         let lock = self.has_foreground_process.lock().await;
-        let zle = self.shell.run(move |shell| {
-            shell.set_zle_buffer(old_buffer, old_cursor as _);
-            shell.exec_function_by_name(func, vec![num_chars.to_string().into()]);
-            shell.get_zle_buffer()
-        }).await;
+        self.shell.set_zle_buffer(old_buffer, old_cursor as _);
+        self.shell.exec_function_by_name(func, vec![num_chars.to_string().into()]);
+        let zle = self.shell.get_zle_buffer();
         drop(lock);
 
         let ui = self.get();
         let buffer = &mut ui.borrow_mut().buffer;
-        if let Some(zle) = crate::log_if_err(zle) {
-            buffer.set(Some(&zle.0), Some(zle.1.unwrap_or(zle.0.len() as _) as usize));
-        }
+        buffer.set(Some(&zle.0), Some(zle.1.unwrap_or(zle.0.len() as _) as usize));
         // finally add the data we wanted originally
         buffer.set(Some(data), cursor);
     }
@@ -813,7 +802,7 @@ impl Ui {
         let mut lock = if condition && !crate::is_forked() {
             // this essentially locks ui
             if freeze_events {
-                self.events.read().pause();
+                self.events.pause();
             }
             self.prepare_for_unhandled_output().await?;
             Some(self.has_foreground_process.lock().await)
@@ -825,7 +814,7 @@ impl Ui {
 
         if let Some(lock) = lock.take() {
             if freeze_events {
-                self.events.read().unpause();
+                self.events.unpause();
             }
             let recovered = self.recover_from_unhandled_output(None).await;
             drop(lock);
@@ -842,7 +831,7 @@ impl Ui {
             self.has_foreground_process.lock().await,
             self.print_lock.lock_exclusive().await,
         );
-        let mut stdout = self.unlocked.read().borrow().stdout.lock();
+        let mut stdout = self.unlocked.borrow().stdout.lock();
         crate::tui::allocate_height(&mut stdout, height)?;
         drop(locks);
         Ok(())

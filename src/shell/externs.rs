@@ -1,24 +1,21 @@
+use std::cell::Cell;
 use crate::lua::{ HasEventCallbacks};
-mod fork;
-use bstr::BString;
+pub(in crate::shell) mod fork;
 use crate::ui::{Ui};
 use std::os::raw::{c_char, c_int};
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::ptr::null_mut;
 use std::sync::{LazyLock, OnceLock, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
 use anyhow::Result;
-use crate::shell::{Shell, ShellMsg, zsh, MetaString, MetaSlice};
-use crate::fork_lock::{RawForkLock};
+use crate::shell::{Shell, zsh, MetaString, MetaSlice};
 
-static FORK_LOCK: RawForkLock = RawForkLock::new();
 
 pub(in crate::shell) struct GlobalState {
     pub(in crate::shell) ui: Ui,
-    shell: Shell,
     pub runtime: tokio::runtime::Runtime,
-    first_drawn: AtomicBool,
+    localset: tokio::task::LocalSet,
+    first_drawn: Cell<bool>,
 }
 
 thread_local! {
@@ -35,13 +32,15 @@ fn teardown() {
 impl GlobalState {
     fn new() -> Result<Self> {
         crate::logging::init();
-        fork::ForkState::init();
+        fork::init();
 
         let runtime = crate::async_runtime::init()?;
-        let result: Result<_> = runtime.block_on(async {
+        let localset = tokio::task::LocalSet::new();
+
+        let result: Result<_> = localset.block_on(&runtime, async {
             let (events, event_ctrl) = crate::event_stream::EventStream::new();
-            let (shell, shell_client) = Shell::make();
-            let mut ui = Ui::new(&FORK_LOCK, event_ctrl, shell_client)?;
+            let shell = Shell::new();
+            let mut ui = Ui::new(event_ctrl, shell)?;
 
             zsh::completion::override_compadd()?;
             zsh::widget::overrides::override_all()?;
@@ -60,15 +59,15 @@ impl GlobalState {
                 }
             }
 
-            Ok((ui, shell))
+            Ok(ui)
         });
-        let (ui, shell) = result?;
+        let ui = result?;
 
         Ok(Self {
             ui,
-            shell,
             runtime,
-            first_drawn: false.into(),
+            localset,
+            first_drawn: Cell::new(false),
         })
     }
 
@@ -86,52 +85,8 @@ impl GlobalState {
         Self::with(|state| state.clone())
     }
 
-    fn shell_loop(&self) -> Result<Option<BString>> {
-        self.shell_loop_internal(true)
-    }
-
-    fn shell_loop_oneshot<F: 'static + Send + Future<Output: Send>>(&self, future: F) -> Result<F::Output> {
-        let ui = self.ui.clone();
-        let handle = self.runtime.spawn(async move {
-            let result = future.await;
-            ui.shell.accept_line_trampoline(None).await?;
-            Ok(result)
-        });
-        self.shell_loop_internal(false)?;
-        self.runtime.block_on(handle)?
-    }
-
-    fn shell_loop_internal(&self, zle: bool) -> Result<Option<BString>> {
-        loop {
-            if zle && let Some(trampoline) = self.shell.trampoline.lock().unwrap().take() {
-                let _ = trampoline.send(());
-            }
-
-            // allow sigwinch while we are waiting
-            zsh::winch_unblock();
-            let msg = self.shell.recv_from_queue()?;
-            zsh::winch_block();
-
-            match msg {
-                Ok(ShellMsg::accept_line_trampoline{line, returnvalue}) => {
-                    if zle {
-                        *self.shell.trampoline.lock().unwrap() = Some(returnvalue);
-                    } else {
-                        returnvalue.send(()).unwrap();
-                    }
-                    return Ok(line)
-                },
-                Ok(msg) => self.shell.handle_one_message(msg),
-                Err(_) => return Ok(None),
-            }
-
-            // sometimes zsh will trash zle without refreshing
-            // redraw the ui
-            if zle && self.runtime.block_on(self.ui.zle_cmd_refresh()).unwrap() {
-                // draw LATER
-                self.ui.queue_draw();
-            }
-        }
+    pub fn block_on<F: 'static + Future>(&self, future: F) -> F::Output {
+        self.localset.block_on(&self.runtime, future)
     }
 
 }
@@ -146,8 +101,8 @@ impl Drop for GlobalState {
 }
 
 
-pub fn run_with_shell<F: 'static + Send + Future<Output: Send>>(future: F) -> Result<F::Output> {
-    GlobalState::get()?.shell_loop_oneshot(future)
+pub fn block_on<F: 'static + Future>(future: F) -> Result<F::Output> {
+    GlobalState::get().map(|state| state.block_on(future))
 }
 
 unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _options: zsh_sys::Options, _func: c_int) -> c_int {
@@ -156,15 +111,11 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
     let mut iter = iter.map(|s| s.to_bytes());
     match iter.next() {
         Some(b"lua") => {
-            let result: Result<()> = tokio::task::block_in_place(|| {
-
+            let result: Result<_> = (|| {
                 let state = GlobalState::get()?;
-                state.runtime.block_on(
-                    state.ui.lua.load(iter.next().unwrap_or(b"" as _)).exec_async()
-                )?;
-
+                state.block_on(state.ui.lua.load(iter.next().unwrap_or(b"" as _)).exec_async())?;
                 Ok(())
-            });
+            })();
 
             if let Err(e) = result {
                 eprintln!("{e:?}");
@@ -227,36 +178,45 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                 zsh_sys::adjustwinsize(0);
                 zsh::signals::sigwinch::fetch_term_size_from_zsh();
 
-                let first_drawn = state.first_drawn.load(Ordering::Relaxed);
-                crate::log_if_err::<_, anyhow::Error>(state.runtime.block_on(async {
+                let result = state.clone().block_on(async move {
                     // sometimes zsh will trash zle without refreshing
                     // redraw the ui
-                    if state.ui.zle_cmd_refresh().await? && first_drawn {
+                    let result = crate::log_if_err(state.ui.zle_cmd_refresh().await);
+                    if result == Some(true) && state.first_drawn.get() {
                         // draw LATER
                         state.ui.queue_draw();
                     }
-                    Ok(())
-                }));
 
-                // this is the only thread we should ever run this func
-                if !first_drawn {
-                    crate::log_if_err::<_, anyhow::Error>(state.runtime.block_on(async {
-                        if let Some(size) = zsh::signals::sigwinch::get_term_size() {
-                            state.ui.handle_window_resize(size.0, size.1).await?;
-                        }
-                        state.ui.start_cmd(None).await?;
-                        Ok(())
-                    }));
+                    // this is the only thread we should ever run this func
+                    if !state.first_drawn.get() {
+                        crate::log_if_err::<_, anyhow::Error>(async {
+                            if let Some(size) = zsh::signals::sigwinch::get_term_size() {
+                                state.ui.handle_window_resize(size.0, size.1).await?;
+                            }
+                            state.ui.start_cmd(None).await?;
+                            Ok(())
+                        }.await);
+                        state.ui.trigger_init_callbacks().await;
 
-                    let ui = state.ui.clone();
-                    crate::log_if_err::<_, anyhow::Error>(state.shell_loop_oneshot(async move {
-                        ui.trigger_init_callbacks().await
-                    }));
+                        state.first_drawn.set(true);
+                    }
 
-                    state.first_drawn.store(true, Ordering::Relaxed);
-                }
+                    // allow sigwinch while we are waiting
+                    // zsh::winch_unblock();
 
-                let result = tokio::task::block_in_place(|| state.shell_loop());
+                    let result = state.ui.shell.trampoline_in().await;
+
+                    // sometimes zsh will trash zle without refreshing
+                    // redraw the ui
+                    if state.ui.zle_cmd_refresh().await.unwrap() {
+                        // draw LATER
+                        state.ui.queue_draw();
+                    }
+
+                    // zsh::winch_block();
+
+                    result
+                });
                 zsh_sys::errflag = 0;
 
                 // zsh will reset the tty settings to its saved values
@@ -294,9 +254,11 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
 
             } else if cmd == zsh_sys::ZLE_CMD_REFRESH as _ {
                 // redraw the ui
-                if state.runtime.block_on(state.ui.zle_cmd_refresh()).unwrap() {
-                    crate::log_if_err(state.runtime.block_on(state.ui.clone().draw()));
-                }
+                state.clone().block_on(async move {
+                    if state.ui.zle_cmd_refresh().await.unwrap() {
+                        crate::log_if_err(state.ui.draw().await);
+                    }
+                });
                 return null_mut()
 
             } else if cmd == zsh_sys::ZLE_CMD_RESET_PROMPT as _ {

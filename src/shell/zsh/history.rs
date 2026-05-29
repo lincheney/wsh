@@ -4,7 +4,6 @@ use std::os::raw::c_long;
 use std::ptr::NonNull;
 use std::marker::PhantomData;
 use bstr::{BString};
-use crate::shell::ShellInternal;
 use super::{MetaStr, Variable};
 
 #[derive(Debug)]
@@ -47,11 +46,10 @@ pub enum HistoryIndex {
 
 pub struct History<'a> {
     ring: Option<EntryPtr<'a>>,
-    _shell: &'a ShellInternal,
 }
 
 impl<'a> History<'a> {
-    pub fn goto(_shell: &ShellInternal, index: HistoryIndex, skipdups: bool) {
+    pub fn goto(index: HistoryIndex, skipdups: bool) {
         // no idea what the return value means
         match index {
             HistoryIndex::Absolute(index) => unsafe{ super::zle_goto_hist(index, 0, skipdups.into()) },
@@ -59,10 +57,9 @@ impl<'a> History<'a> {
         };
     }
 
-    pub fn get(shell: &'a ShellInternal) -> Self {
+    pub fn get() -> Self {
         Self{
             ring: EntryPtr::new(unsafe{ zsh_sys::hist_ring }),
-            _shell: shell,
         }
     }
 
@@ -125,12 +122,12 @@ impl<'a> History<'a> {
         Ok(())
     }
 
-    pub fn append_words(_shell: &ShellInternal, words: Vec<BString>) -> Result<()> {
+    pub fn append_words(words: Vec<BString>) -> Result<()> {
         // make an array of the words and pass to print -s
         Self::append_internal(words.into(), meta_str!(c"__hist"), meta_str!(c"print -r -s -- \"${__hist[@]}\""))
     }
 
-    pub fn append(_shell: &ShellInternal, text: BString) -> Result<()> {
+    pub fn append(text: BString) -> Result<()> {
         // make a string and pass to print -s
         Self::append_internal(text.into(), meta_str!(c"__hist"), meta_str!(c"print -r -s -- \"$__hist\""))
     }

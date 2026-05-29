@@ -48,20 +48,20 @@ impl FdChangeHook {
 
     pub async fn run_locked(
         hook: &SyncFdChangeHook,
-        shell: &crate::shell::ShellClient,
+        shell: &crate::shell::Shell,
         fd: RawFd,
         error: Option<std::io::Error>,
     ) -> anyhow::Result<bool> {
         let hook = hook.lock().unwrap().clone();
         if let Some(hook) = hook {
-            shell.run_watch_fd(hook, fd, error).await?;
+            shell.run_watch_fd(hook, fd, error);
             Ok(true)
         } else {
             Ok(false)
         }
     }
 
-    pub fn run(&self, _shell: &crate::shell::ShellInternal, fd: RawFd, error: Option<std::io::Error>) {
+    pub fn run(&self, fd: RawFd, error: Option<std::io::Error>) {
         // this is way in excess of what we need
         let mut cursor = Cursor::new([0; 128]);
         write!(cursor, "{fd}").unwrap();

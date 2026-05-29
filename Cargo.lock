@@ -1339,7 +1339,6 @@ dependencies = [
  "num",
  "num-derive",
  "num-traits",
- "parking_lot",
  "paste",
  "regex",
  "serde",

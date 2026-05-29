@@ -21,11 +21,8 @@ thread_local! {
 
 pub struct ZleWidget<'a> {
     ptr: NonNull<bindings::thingy>,
-    pub shell: &'a crate::shell::ShellInternal,
+    pub shell: &'a crate::shell::Shell,
 }
-
-unsafe impl Send for ZleWidget<'_> {}
-unsafe impl Sync for ZleWidget<'_> {}
 
 pub struct WidgetArgs {
     times: u16,
@@ -51,7 +48,7 @@ fn insert_widget_cache(widget: &ZleWidget, cache: &'static std::thread::LocalKey
 }
 
 impl<'a> ZleWidget<'a> {
-    pub fn new(ptr: NonNull<bindings::thingy>, shell: &'a crate::shell::ShellInternal) -> Self {
+    pub fn new(ptr: NonNull<bindings::thingy>, shell: &'a crate::shell::Shell) -> Self {
         let w = Self{ptr, shell};
 
         if w.is_internal() {
@@ -118,7 +115,7 @@ impl<'a> ZleWidget<'a> {
     }
 
     pub(crate) fn exec_and_get_output<I: Iterator<Item=MetaString> + ExactSizeIterator>(&mut self, opts: Option<WidgetArgs>, args: I) -> (BString, c_int) {
-        let sink = &mut *self.shell.sink.lock().unwrap();
+        let sink = &mut *self.shell.sink.borrow_mut();
         super::capture_shout(sink, || Self::exec_with_ptr(self.ptr, opts, args))
     }
 

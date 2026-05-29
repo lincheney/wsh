@@ -47,12 +47,13 @@ extern "C" fn sighandler(sig: c_int) {
         // we just run a builtin so should be ok
 
         let trap_queueing_enabled = zsh_sys::trap_queueing_enabled;
-        TRAP_QUEUING_ENABLED.store(trap_queueing_enabled, Ordering::Release);
         if trap_queueing_enabled > 0 {
+            TRAP_QUEUING_ENABLED.store(trap_queueing_enabled, Ordering::Release);
             zsh_sys::trap_queueing_enabled = 0;
         }
         // this should call our trap
         zsh_sys::zhandler(convert_to_custom_signal(sig));
+        TRAP_QUEUING_ENABLED.store(0, Ordering::Release);
         zsh_sys::trap_queueing_enabled = trap_queueing_enabled;
     }
 }
@@ -118,12 +119,12 @@ pub(super) fn hook_signal(signal: signal::Signal) -> Result<()> {
 
 pub(super) fn self_pipe<C, T, E>(callback: C) -> Result<std::io::PipeWriter>
 where
-    C: Fn() -> Result<T, E> + Send + 'static,
+    C: Fn() -> Result<T, E> + mlua::MaybeSend + 'static,
     E: std::error::Error + Send + Sync + 'static,
 {
     let (reader, writer) = std::io::pipe()?;
-    crate::utils::set_nonblocking_fd(&writer)?;
-    crate::utils::set_nonblocking_fd(&reader)?;
+    crate::utils::set_fd_nonblocking(&writer)?;
+    crate::utils::set_fd_nonblocking(&reader)?;
 
     // spawn a reader task
     let mut reader = tokio::net::unix::pipe::Receiver::from_owned_fd(reader.into())?;

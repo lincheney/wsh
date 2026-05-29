@@ -3,9 +3,8 @@ use std::sync::Arc;
 use std::str::FromStr;
 use std::collections::HashMap;
 use std::default::Default;
-use std::os::fd::{RawFd, AsRawFd, IntoRawFd, FromRawFd, OwnedFd};
+use std::os::fd::{RawFd, AsRawFd, IntoRawFd};
 use std::fs::File;
-use std::io::{Read, Write};
 use anyhow::{Result, Context};
 use mlua::{prelude::*, UserData, UserDataMethods, UserDataFields};
 use tokio::io::{
@@ -214,73 +213,53 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         || matches!(args.stdout, Stdio::inherit)
         || matches!(args.stderr, Stdio::inherit)
     );
-    // use a pipe to notify the child we are ready
-    // ie that we have gotten the pid and registered it with zsh
-    // we have to do this because zsh will drop waitpid results
-    // if it doesn't recognise the pid
-    let (mut pid_read, mut pid_write) = std::io::pipe()?;
-    let (mut sync_pid_read, mut sync_pid_write) = std::io::pipe()?;
-    let sync_pid_write_fd = sync_pid_write.as_raw_fd();
-    unsafe {
-        command.pre_exec(move || {
-            // need to drop this here
-            drop(OwnedFd::from_raw_fd(sync_pid_write_fd));
-            let pid = std::process::id();
-            let buf = pid.to_le_bytes();
-            // send the pid over
-            pid_write.write_all(&buf)?;
-            // wait for the ack before continuing
-            let _ = sync_pid_read.read(&mut [0]);
-            Ok(())
-        });
-    }
 
     let (result_sender, result_receiver) = oneshot::channel();
     let (sender, receiver) = watch::channel(None);
 
-    tokio::task::spawn(async move {
-
-        let (pid_sender, pid_receiver) = oneshot::channel();
-        {
-            let ui = ui.clone();
-            tokio::task::spawn_blocking(move || {
-                let mut buf = [0; _];
-                if crate::log_if_err(pid_read.read(&mut buf)).is_some() {
-                    // get the pid
-                    let pid = u32::from_le_bytes(buf);
-                    let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, true);
-                    let _ = pid_sender.send((pid, pid_waiter));
-                    // send the ack
-                    crate::log_if_err(sync_pid_write.write_all(b" "));
-                }
-                drop(sync_pid_write);
-            });
-        }
+    tokio::task::spawn_local(async move {
 
         let mut result_sender = Some(result_sender);
+        let mut proc = None;
         let result: Result<Result<_>> = ui.freeze_if(foreground, true, async {
 
-            let mut proc = command.spawn()?;
-            match pid_receiver.await {
-                Ok((pid, pid_waiter)) => {
-                    let stdin  = proc.stdin.take().map(|s| WriteableFile(Some(BufWriter::new(s))));
-                    let stdout = proc.stdout.take().map(|s| ReadableFile(Some(BufReader::new(s)), false));
-                    let stderr = proc.stderr.take().map(|s| ReadableFile(Some(BufReader::new(s)), false));
+            let (result, queue_result) = crate::shell::with_queued_signals(|| {
+                command.spawn().map(|child| {
+                    let pid = child.id().unwrap();
+                    let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, true);
+                    (child, pid, pid_waiter)
+                })
+            });
+            crate::log_if_err(queue_result);
+            let (child, pid, pid_waiter) = result?;
+            let child = proc.insert(child);
 
-                    let _ = result_sender.take().unwrap().send(Ok((pid, stdin, stdout, stderr)));
-                    let code = pid_waiter.await.unwrap_or(-1);
+            let stdin  = child.stdin.take().map(|s| WriteableFile(Some(BufWriter::new(s))));
+            let stdout = child.stdout.take().map(|s| ReadableFile(Some(BufReader::new(s)), false));
+            let stderr = child.stderr.take().map(|s| ReadableFile(Some(BufReader::new(s)), false));
 
-                    // ignore error
-                    let _ = sender.send(Some(Ok(code as _)));
-                },
-                Err(err) => {
-                    // uhhh the process is probably dead?
-                    let _ = result_sender.take().unwrap().send(Err(anyhow::anyhow!("Failed to start process: {err}")));
-                },
-            }
+            let _ = result_sender.take().unwrap().send(Ok((pid, stdin, stdout, stderr)));
+            let code = if let Ok(code) = pid_waiter.await {
+                code
+            } else {
+                let code = child.wait().await.ok().and_then(|x| x.code()).unwrap_or(-1);
+                proc = None;
+                code
+            };
+
+            // ignore error
+            let _ = sender.send(Some(Ok(code as _)));
 
             Ok(())
         }).await;
+
+        // ensure the proc is dead
+        if let Some(mut proc) = proc.take()
+            && let Err(err) = proc.kill().await
+            && err.raw_os_error() != Some(nix::errno::Errno::ESRCH as _)
+        {
+            crate::log_if_err::<(), _>(Err(err));
+        }
 
         if let Err(err) = result {
             if let Some(result_sender) = result_sender {
@@ -373,135 +352,126 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
         || matches!(args.stderr, Stdio::inherit)
     );
 
-    // run this in a thread
-    tokio::task::spawn(async move {
 
-        let mut result_sender = Some(result_sender);
-        let mut errors = [Ok(()), Ok(()), Ok(())];
+    let mut result_sender = Some(result_sender);
+    let mut errors = [Ok(()), Ok(()), Ok(())];
 
-        let result: Result<Result<_>> = ui.freeze_if(foreground, true, async {
+    let result: Result<Result<_>> = ui.freeze_if(foreground, true, async {
 
-            macro_rules! stdio_pipe {
-                ($name:ident, true) => (
-                    stdio_pipe!($name, File::create("/dev/null"), {
-                        let (send, recv) = tokio::net::unix::pipe::pipe()?;
-                        let send = WriteableFile(Some(BufWriter::new(send)));
-                        (Some(send), Some(OverriddenStream::new(&std::io::$name(), recv.into_nonblocking_fd()?)))
-                    })
-                );
-                ($name:ident, false) => (
-                    stdio_pipe!($name, File::open("/dev/null"), {
-                        let (send, recv) = tokio::net::unix::pipe::pipe()?;
-                        let recv = ReadableFile(Some(BufReader::new(recv)), false);
-                        (Some(recv), Some(OverriddenStream::new(&std::io::$name(), send.into_nonblocking_fd()?)))
-                    })
-                );
-                ($name:ident, $null:expr, $piped:expr) => (
-                    match args.$name {
-                        Stdio::inherit => (None, None),
-                        Stdio::null => (None, Some(OverriddenStream::new(&std::io::$name(), $null?))),
-                        Stdio::piped => $piped,
+        macro_rules! stdio_pipe {
+            ($name:ident, true) => (
+                stdio_pipe!($name, File::create("/dev/null"), {
+                    let (send, recv) = tokio::net::unix::pipe::pipe()?;
+                    let send = WriteableFile(Some(BufWriter::new(send)));
+                    (Some(send), Some(OverriddenStream::new(&std::io::$name(), recv.into_nonblocking_fd()?)))
+                })
+            );
+            ($name:ident, false) => (
+                stdio_pipe!($name, File::open("/dev/null"), {
+                    let (send, recv) = tokio::net::unix::pipe::pipe()?;
+                    let recv = ReadableFile(Some(BufReader::new(recv)), false);
+                    (Some(recv), Some(OverriddenStream::new(&std::io::$name(), send.into_nonblocking_fd()?)))
+                })
+            );
+            ($name:ident, $null:expr, $piped:expr) => (
+                match args.$name {
+                    Stdio::inherit => (None, None),
+                    Stdio::null => (None, Some(OverriddenStream::new(&std::io::$name(), $null?))),
+                    Stdio::piped => $piped,
+                }
+            );
+        }
+
+        let stdin = stdio_pipe!(stdin, true);
+        let stdout = stdio_pipe!(stdout, false);
+        let stderr = stdio_pipe!(stderr, false);
+
+        let mut streams = [stdin.1, stdout.1, stderr.1];
+
+        let code = match cmd {
+            cmd @ (ShellRunCmd::Simple(_) | ShellRunCmd::Function{..}) => {
+
+                let pid = std::process::id();
+                // send streams back to caller
+                let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
+
+                // wrap the whole thing in a do_run to ensure fd restoration happens in the
+                // correct order
+                // no forking, override fds in place
+                let result = streams.iter_mut().flatten().try_for_each(|s| s.override_fd());
+                if let Err(result) = result {
+                    let mut result = Err(result);
+                    // didnt work, restore any backups
+                    if let Err(e) = streams.iter_mut().flatten().try_for_each(|s| s.restore()) {
+                        result = result.context(e);
                     }
-                );
-            }
+                    return result
+                }
 
-            let stdin = stdio_pipe!(stdin, true);
-            let stdout = stdio_pipe!(stdout, false);
-            let stderr = stdio_pipe!(stderr, false);
+                let code = match cmd {
+                    ShellRunCmd::Simple(cmd) => ui.shell.exec(cmd.into()),
+                    ShellRunCmd::Function{func, args, arg0} => {
+                        let arg0 = arg0.map(|x| x.into());
+                        let args = args.into_iter().map(|x| x.into()).collect();
+                        ui.shell.exec_function(func.clone(), arg0, args).into()
+                    },
+                    ShellRunCmd::Subshell(_) => unreachable!(),
+                };
 
-            let mut streams = [stdin.1, stdout.1, stderr.1];
-
-            let code = match cmd {
-                cmd @ (ShellRunCmd::Simple(_) | ShellRunCmd::Function{..}) => {
-
-                    let pid = std::process::id();
-                    // send streams back to caller
-                    let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
-
-                    // wrap the whole thing in a do_run to ensure fd restoration happens in the
-                    // correct order
-                    let (code, errs) = ui.shell.run(move |shell| {
-                        // no forking, override fds in place
-                        let result = streams.iter_mut().flatten().try_for_each(|s| s.override_fd());
-                        if let Err(result) = result {
-                            let mut result = Err(result);
-                            // didnt work, restore any backups
-                            if let Err(e) = streams.iter_mut().flatten().try_for_each(|s| s.restore()) {
-                                result = result.context(e);
-                            }
-                            return result
-                        }
-
-                        let code = match cmd {
-                            ShellRunCmd::Simple(cmd) => shell.exec(cmd.into()),
-                            ShellRunCmd::Function{func, args, arg0} => {
-                                let arg0 = arg0.map(|x| x.into());
-                                let args = args.into_iter().map(|x| x.into()).collect();
-                                shell.exec_function(func.clone(), arg0, args).into()
-                            },
-                            ShellRunCmd::Subshell(_) => unreachable!(),
-                        };
-
-                        // finished, restore any backups
-                        let mut errors = [Ok(()), Ok(()), Ok(())];
-                        for (s, e) in streams.iter_mut().zip(errors.iter_mut()) {
-                            if let Some(s) = s {
-                                *e = s.restore();
-                            }
-                        }
-
-                        Ok((code, errors))
-
-                    }).await??;
-
-                    for (dst, src) in errors.iter_mut().zip(errs) {
-                        *dst = src;
+                // finished, restore any backups
+                let mut errs = [Ok(()), Ok(()), Ok(())];
+                for (s, e) in streams.iter_mut().zip(errs.iter_mut()) {
+                    if let Some(s) = s {
+                        *e = s.restore();
                     }
+                }
 
-                    code
+                for (dst, src) in errors.iter_mut().zip(errs) {
+                    *dst = src;
+                }
 
-                },
-                ShellRunCmd::Subshell(cmd) => {
-                    // fork it now to get the pid
-                    let redirections = streams.iter().flatten().map(|s| (s.fd, s.replacement)).collect();
-                    let pid = ui.shell.exec_subshell(cmd, false, redirections).await?? as _;
-                    // send streams back to caller
-                    let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
-                    // get the status
-                    let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, false);
-                    match ui.shell.check_pid_status(pid as _).await {
-                        Err(_) | Ok(None | Some(-1)) => pid_waiter.await.unwrap_or(-1) as _,
-                        Ok(Some(code)) => code as _,
-                    }
-                },
-            };
+                code
 
-            // send the code out
-            let _ = sender.send(Some(Ok(code as _)));
+            },
+            ShellRunCmd::Subshell(cmd) => {
+                // fork it now to get the pid
+                let redirections = streams.iter().flatten().map(|s| (s.fd, s.replacement)).collect();
+                let pid = ui.shell.exec_subshell(cmd, false, redirections)? as _;
+                // send streams back to caller
+                let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
+                // get the status
+                let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, false);
+                match ui.shell.check_pid_status(pid as _) {
+                    None | Some(-1) => pid_waiter.await.unwrap_or(-1) as _,
+                    Some(code) => code as _,
+                }
+            },
+        };
 
-            Ok(())
-        }).await;
+        // send the code out
+        let _ = sender.send(Some(Ok(code as _)));
 
-        let mut drawn = false;
+        Ok(())
+    }).await;
 
-        for err in errors {
+    let mut drawn = false;
+
+    for err in errors {
+        drawn = ui.report_error(err) || drawn;
+    }
+
+    if let Err(err) = result {
+        if let Some(result_sender) = result_sender {
+            let _ = result_sender.send(Err(err));
+        } else {
+            let err: Result<()> = Err(err);
             drawn = ui.report_error(err) || drawn;
         }
+    }
 
-        if let Err(err) = result {
-            if let Some(result_sender) = result_sender {
-                let _ = result_sender.send(Err(err));
-            } else {
-                let err: Result<()> = Err(err);
-                drawn = ui.report_error(err) || drawn;
-            }
-        }
-
-        if foreground && ! drawn {
-            ui.queue_draw();
-        }
-
-    });
+    if foreground && ! drawn {
+        ui.queue_draw();
+    }
 
     let (pid, stdin, stdout, stderr) = result_receiver.await.unwrap()?;
 
