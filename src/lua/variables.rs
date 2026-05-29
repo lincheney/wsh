@@ -109,7 +109,7 @@ async fn create_dynamic_var(
                     if weak.try_upgrade().is_none() {
                         eprintln!("Lua instance is destroyed")
                     } else {
-                        match crate::shell::block_on($result) {
+                        match crate::utils::block_on($result) {
                             Ok(Ok(val)) => return val,
                             Ok(Err(err)) => ::log::error!("{}", err),
                             Err(err) => ::log::error!("{}", err),

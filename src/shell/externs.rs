@@ -14,7 +14,7 @@ use crate::shell::{Shell, zsh, MetaString, MetaSlice};
 
 pub(in crate::shell) struct GlobalState {
     pub(in crate::shell) ui: Ui,
-    pub runtime: tokio::runtime::Runtime,
+    runtime: tokio::runtime::Runtime,
     localset: tokio::task::LocalSet,
     first_drawn: Cell<bool>,
 }
@@ -86,7 +86,7 @@ impl GlobalState {
         Self::with(|state| state.clone())
     }
 
-    pub fn block_on<F: 'static + Future>(&self, future: F) -> F::Output {
+    fn block_on<F: 'static + Future>(&self, future: F) -> F::Output {
         self.localset.block_on(&self.runtime, future)
     }
 

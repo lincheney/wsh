@@ -4,7 +4,6 @@ use anyhow::{Result};
 use super::super::bindings;
 use super::super::MetaStr;
 use crate::shell::externs::GlobalState;
-use crate::lua::HasEventCallbacks;
 
 /// Look up a thingy by name in thingytab and return its widget pointer.
 unsafe fn get_widget(name: &MetaStr) -> Result<*mut bindings::widget> {
@@ -50,9 +49,7 @@ static UNDO_OVERRIDE: Mutex<Option<bindings::ZleIntFunc>> = Mutex::new(None);
 
 unsafe extern "C" fn custom_undo(_args: *mut *mut c_char) -> c_int {
     let result = GlobalState::with(|state| {
-        if state.ui.get().borrow_mut().buffer.move_in_history(false) {
-            state.runtime.block_on(state.ui.trigger_buffer_change_callbacks());
-        }
+        state.ui.borrow_mut().buffer.move_in_history(false);
     });
     match result {
         Ok(()) => 0,
@@ -78,9 +75,7 @@ static REDO_OVERRIDE: Mutex<Option<bindings::ZleIntFunc>> = Mutex::new(None);
 
 unsafe extern "C" fn custom_redo(_args: *mut *mut c_char) -> c_int {
     let result = GlobalState::with(|state| {
-        if state.ui.get().borrow_mut().buffer.move_in_history(true) {
-            state.runtime.block_on(state.ui.trigger_buffer_change_callbacks());
-        }
+        state.ui.borrow_mut().buffer.move_in_history(true);
     });
     match result {
         Ok(()) => 0,
@@ -126,9 +121,7 @@ unsafe extern "C" fn custom_vi_undo_change(_args: *mut *mut c_char) -> c_int {
     // in zsh this toggles between end-of-undo-list and one step back;
     // for wish buffer, just do a regular undo
     let result = GlobalState::with(|state| {
-        if state.ui.get().borrow_mut().buffer.move_in_history(false) {
-            state.runtime.block_on(state.ui.trigger_buffer_change_callbacks());
-        }
+        state.ui.borrow_mut().buffer.move_in_history(false);
     });
     match result {
         Ok(()) => 0,
