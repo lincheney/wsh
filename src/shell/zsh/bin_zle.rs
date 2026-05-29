@@ -1,8 +1,8 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::io::{Write, Cursor};
 use std::os::fd::RawFd;
-use crate::unsafe_send::UnsafeSend;
 use tokio::sync::{mpsc};
 use std::sync::{Arc, Mutex};
 use std::os::raw::*;
@@ -14,13 +14,15 @@ static ZLE_FD_SOURCE: Mutex<Option<mpsc::UnboundedReceiver<FdChange>>> = Mutex::
 
 struct ZleState {
     // original zle function
-    original: UnsafeSend<Option<Builtin>>,
+    original: Option<Builtin>,
     // sink to send fds
     fd_sink: Option<mpsc::UnboundedSender<FdChange>>,
     fd_mapping: HashMap<RawFd, (SyncFdChangeHook, canceller::Canceller)>,
 }
 
-static ZLE_STATE: Mutex<Option<ZleState>> = Mutex::new(None);
+thread_local! {
+    static ZLE_STATE: RefCell<Option<ZleState>> = RefCell::new(None);
+}
 
 pub enum FdChange {
     Added(RawFd, SyncFdChangeHook, canceller::Cancellable),
@@ -86,8 +88,8 @@ impl FdChangeHook {
 }
 
 unsafe extern "C" fn zle_handlerfunc(nam: *mut c_char, argv: *mut *mut c_char, options: zsh_sys::Options, func: c_int) -> c_int {
-    unsafe {
-        let mut zle = ZLE_STATE.lock().unwrap();
+    ZLE_STATE.with(|zle| unsafe {
+        let mut zle = zle.borrow_mut();
         let zle = zle.as_mut().unwrap();
 
         let fd_changed = if
@@ -149,7 +151,7 @@ unsafe extern "C" fn zle_handlerfunc(nam: *mut c_char, argv: *mut *mut c_char, o
         }
 
         result
-    }
+    })
 }
 
 pub fn take_fd_change_source() -> Option<mpsc::UnboundedReceiver<FdChange>> {
@@ -161,11 +163,11 @@ pub fn override_zle() {
     let mut zle = original.clone();
     let (sender, receiver) = mpsc::unbounded_channel();
 
-    *ZLE_STATE.lock().unwrap() = Some(ZleState{
-        original: unsafe{ UnsafeSend::new(Some(original)) },
+    ZLE_STATE.set(Some(ZleState{
+        original: Some(original),
         fd_sink: Some(sender),
         fd_mapping: HashMap::default(),
-    });
+    }));
     *ZLE_FD_SOURCE.lock().unwrap() = Some(receiver);
 
     zle.handlerfunc = Some(zle_handlerfunc);
@@ -174,7 +176,9 @@ pub fn override_zle() {
 }
 
 pub fn restore_zle() {
-    if let Some(mut zle) = ZLE_STATE.lock().unwrap().take() && let Some(original) = zle.original.as_mut().take() {
+    if let Some(mut zle) = ZLE_STATE.replace(None).take()
+        && let Some(original) = zle.original.take()
+    {
         original.add();
     }
 }

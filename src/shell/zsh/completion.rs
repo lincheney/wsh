@@ -1,4 +1,3 @@
-use crate::unsafe_send::UnsafeSend;
 use std::collections::HashSet;
 use std::cell::RefCell;
 use std::ops::ControlFlow;
@@ -15,7 +14,7 @@ use crate::ui::buffer::suffix::{Suffix, RemovalTrigger};
 const CMF_REMOVE: i32 =   1<< 1;	/* remove the suffix */
 
 pub struct Match {
-    inner: UnsafeSend<bindings::cmatch>,
+    inner: bindings::cmatch,
     // length of word being completed
     completion_word_len: usize,
     nbrbeg: i32,
@@ -57,7 +56,7 @@ impl Match {
             };
 
             Self {
-                inner: UnsafeSend::new(inner),
+                inner,
                 completion_word_len: (zsh_sys::we - zsh_sys::wb).max(0) as usize,
                 nbrbeg: super::nbrbeg,
                 nbrend: super::nbrend,
@@ -66,28 +65,27 @@ impl Match {
     }
 
     pub fn get_orig(&self) -> Option<&MetaStr> {
-        self.inner.as_ref().get_orig()
+        self.inner.get_orig()
     }
 
     pub fn get_mode(&self) -> u32 {
-        self.inner.as_ref().mode
+        self.inner.mode
     }
 
     pub fn get_fmode(&self) -> u32 {
-        self.inner.as_ref().fmode
+        self.inner.fmode
     }
 
     pub fn as_suffix(&self) -> Option<Suffix> {
-        let m = self.inner.as_ref();
-        if (m.flags & CMF_REMOVE) == 0 {
+        if (self.inner.flags & CMF_REMOVE) == 0 {
             return None
         }
 
-        let suf = m.get_suf()?.unmetafy();
+        let suf = self.inner.get_suf()?.unmetafy();
         let byte_len = suf.len();
-        let removal_trigger = if let Some(name) = m.get_remf() {
+        let removal_trigger = if let Some(name) = self.inner.get_remf() {
             RemovalTrigger::Function{name: name.to_owned(), len: suf.graphemes().count()}
-        } else if let Some(chars) = m.get_rems() {
+        } else if let Some(chars) = self.inner.get_rems() {
             let mut regex = format!("^[{}]", chars.to_owned().unmetafy());
             let match_empty = regex.contains("\\-");
             if match_empty {
@@ -110,26 +108,25 @@ impl Match {
 impl Drop for Match {
     fn drop(&mut self) {
         unsafe {
-            let inner = self.inner.as_ref();
-            zsh_sys::zsfree(inner.str_);
-            zsh_sys::zsfree(inner.orig);
-            zsh_sys::zsfree(inner.ipre);
-            zsh_sys::zsfree(inner.ripre);
-            zsh_sys::zsfree(inner.isuf);
-            zsh_sys::zsfree(inner.ppre);
-            zsh_sys::zsfree(inner.psuf);
-            zsh_sys::zsfree(inner.prpre);
-            zsh_sys::zsfree(inner.pre);
-            zsh_sys::zsfree(inner.suf);
-            zsh_sys::zsfree(inner.disp);
-            zsh_sys::zsfree(inner.autoq);
-            zsh_sys::zsfree(inner.rems);
-            zsh_sys::zsfree(inner.remf);
-            if !inner.brpl.is_null() {
-                drop(Box::from_raw(inner.brpl));
+            zsh_sys::zsfree(self.inner.str_);
+            zsh_sys::zsfree(self.inner.orig);
+            zsh_sys::zsfree(self.inner.ipre);
+            zsh_sys::zsfree(self.inner.ripre);
+            zsh_sys::zsfree(self.inner.isuf);
+            zsh_sys::zsfree(self.inner.ppre);
+            zsh_sys::zsfree(self.inner.psuf);
+            zsh_sys::zsfree(self.inner.prpre);
+            zsh_sys::zsfree(self.inner.pre);
+            zsh_sys::zsfree(self.inner.suf);
+            zsh_sys::zsfree(self.inner.disp);
+            zsh_sys::zsfree(self.inner.autoq);
+            zsh_sys::zsfree(self.inner.rems);
+            zsh_sys::zsfree(self.inner.remf);
+            if !self.inner.brpl.is_null() {
+                drop(Box::from_raw(self.inner.brpl));
             }
-            if !inner.brsl.is_null() {
-                drop(Box::from_raw(inner.brsl));
+            if !self.inner.brsl.is_null() {
+                drop(Box::from_raw(self.inner.brsl));
             }
         }
     }
@@ -142,13 +139,13 @@ struct CompaddState {
     // callback to send matches
     callback: Option<Box<dyn FnMut(Vec<Match>) -> ControlFlow<()>>>,
     // matches we have already seen
-    seen: UnsafeSend<HashSet<*const bindings::cmatch>>,
+    seen: HashSet<*const bindings::cmatch>,
 }
 
 impl CompaddState {
     fn reset(&mut self) {
         self.callback.take();
-        self.seen.as_mut().clear();
+        self.seen.clear();
     }
 }
 
@@ -177,7 +174,7 @@ unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_cha
 
                 let matches: Vec<_> = super::linked_list::iter_linklist(bindings::matches)
                     .filter_map(|ptr| (ptr as *const bindings::cmatch).as_ref())
-                    .filter(|m| compadd.seen.as_mut().insert(*m as _))
+                    .filter(|m| compadd.seen.insert(*m as _))
                     .map(Match::new)
                     .collect();
 
@@ -269,7 +266,7 @@ pub fn insert_completion(line: BString, m: &Match) -> (BString, usize) {
         zsh_sys::wb = zsh_sys::we - m.completion_word_len as i32;
 
         bindings::metafy_line();
-        bindings::do_single(m.inner.as_ref() as *const _ as *mut _);
+        bindings::do_single(&m.inner as *const _ as *mut _);
         bindings::unmetafy_line();
 
         let (buffer, cursor) = super::get_zle_buffer();

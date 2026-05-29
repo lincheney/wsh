@@ -3,21 +3,19 @@ use std::os::raw::{c_int};
 use bstr::{BString};
 use std::ptr::null_mut;
 use anyhow::Result;
-use crate::unsafe_send::UnsafeSend;
-use std::sync::{LazyLock};
 use crate::meta_str;
 
-pub static FUNCTIONS: LazyLock<UnsafeSend<zsh_sys::HashTable>> = LazyLock::new(|| {
-    unsafe {
+thread_local! {
+    pub static FUNCTIONS: zsh_sys::HashTable = unsafe {
         let old_shfunctab = zsh_sys::shfunctab;
         zsh_sys::createshfunctable();
         let new_shfunctab = zsh_sys::shfunctab;
         zsh_sys::shfunctab = old_shfunctab;
-        UnsafeSend::new(new_shfunctab)
-    }
-});
+        new_shfunctab
+    };
+}
 
-pub struct Function(pub(super) UnsafeSend<zsh_sys::shfunc>);
+pub struct Function(pub(super) zsh_sys::shfunc);
 
 impl Function {
     pub fn new(code: &MetaStr) -> Result<Self> {
@@ -48,7 +46,7 @@ impl Function {
         };
         unsafe{ zsh_sys::shfunc_set_sticky(&raw mut func); }
 
-        Ok(Self(unsafe{ UnsafeSend::new(func) }))
+        Ok(Self(func))
     }
 
     fn doshfunc<'a, I: Iterator<Item=&'a MetaStr>>(func: zsh_sys::Shfunc, arg0: &'a MetaStr, args: I) -> c_int {
@@ -65,7 +63,7 @@ impl Function {
     }
 
     pub fn execute<'a, I: Iterator<Item=&'a MetaStr>>(&self, arg0: Option<&'a MetaStr>, args: I) -> c_int {
-        Self::doshfunc(self.0.as_ref() as *const _ as _, arg0.unwrap_or(meta_str!(c"")), args)
+        Self::doshfunc(&self.0 as *const _ as _, arg0.unwrap_or(meta_str!(c"")), args)
     }
 
     pub fn execute_by_name<'a, I: Iterator<Item=&'a MetaStr>>(name: &'a MetaStr, args: I) -> Option<c_int> {
@@ -78,7 +76,7 @@ impl Function {
 
     pub fn get_source(&self) -> BString {
         unsafe {
-            let ptr = zsh_sys::getpermtext(self.0.as_ref().funcdef, null_mut(), 1);
+            let ptr = zsh_sys::getpermtext(self.0.funcdef, null_mut(), 1);
             MetaString::from_raw(ptr).unmetafy()
         }
     }
@@ -87,7 +85,7 @@ impl Function {
 impl Drop for Function {
     fn drop(&mut self) {
         unsafe {
-            zsh_sys::freeeprog(self.0.into_inner().funcdef);
+            zsh_sys::freeeprog(self.0.funcdef);
         }
     }
 }
