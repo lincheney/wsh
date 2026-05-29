@@ -138,6 +138,7 @@ end
 --      keymaps: bool: set keymaps
 --      data: any
 function M.start(opts)
+    opts = opts or {}
 
     if not M.is_active() or opts.data ~= state.data then
         state = {

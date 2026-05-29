@@ -18,6 +18,7 @@ local function start_proc()
     wish.set_cursor(utf8.len(wish.get_buffer()) + 1)
     wish.redraw()
 
+    wish.pprint(123)
     state.proc = wish.async.spawn{
         args = {
             'fzf',
@@ -32,10 +33,12 @@ local function start_proc()
         stdin = 'piped',
         stdout = 'piped',
     }
+    wish.pprint(456)
     state.resume()
 end
 
 function M.start(opts)
+    opts = opts or {}
     if state and opts.data == state.data then
         state.accept_callback = opts.accept_callback or state.accept_callback
         return

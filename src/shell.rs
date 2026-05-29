@@ -1,7 +1,7 @@
+use std::ops::ControlFlow;
 use std::cell::{RefCell, Cell};
 use std::borrow::Cow;
 use std::collections::HashMap;
-use tokio::sync::{mpsc};
 use anyhow::Result;
 use std::io::{Write};
 use std::os::fd::{RawFd};
@@ -31,13 +31,14 @@ pub use zsh::{
     MetaStr,
     MetaString,
     MetaSlice,
-    with_queued_signals,
 };
 pub use externs::{block_on};
 pub use variables::Variable;
 
+type Trampoline = ControlFlow<Option<BString>, Box<dyn FnOnce(crate::ui::Ui)> >;
+
 pub struct Shell {
-    trampoline_out: Cell<Option<tokio::sync::oneshot::Sender<Option<BString>>>>,
+    trampoline_out: Cell<Option<tokio::sync::oneshot::Sender<Trampoline>>>,
     trampoline_in: Cell<Option<tokio::sync::oneshot::Sender<()>>>,
     sink: RefCell<file_stream::Sink>,
 }
@@ -101,7 +102,7 @@ impl Shell {
         }
     }
 
-    pub fn trampoline_in(&self) -> tokio::sync::oneshot::Receiver<Option<BString>> {
+    pub fn trampoline_in(&self) -> tokio::sync::oneshot::Receiver<Trampoline> {
         if let Some(trampoline_in) = self.trampoline_in.replace(None) {
             let _ = trampoline_in.send(());
         }
@@ -111,12 +112,18 @@ impl Shell {
         receiver
     }
 
-    pub async fn trampoline_out(&self, line: Option<BString>) -> Option<Result<(), tokio::sync::oneshot::error::RecvError>> {
+    pub async fn trampoline_out(&self, trampoline: Trampoline) -> Option<Result<(), tokio::sync::oneshot::error::RecvError>> {
         let trampoline_out = self.trampoline_out.replace(None)?;
-        trampoline_out.send(line).unwrap();
+        if trampoline_out.send(trampoline).is_err() {
+            panic!("failed to trampoline out");
+        }
         let (sender, receiver) = ::tokio::sync::oneshot::channel();
         self.trampoline_in.set(Some(sender));
         Some(receiver.await)
+    }
+
+    pub async fn accept_line(&self, line: BString) -> Option<Result<(), tokio::sync::oneshot::error::RecvError>> {
+        self.trampoline_out(ControlFlow::Break(Some(line))).await
     }
 
     pub fn init_interactive(&self) {
@@ -182,15 +189,15 @@ impl Shell {
         zsh::execstring(cmd.as_ref(), Default::default())
     }
 
-    pub fn get_completions(&self, line: BString, sender: mpsc::UnboundedSender<Vec<zsh::completion::Match>>) -> Result<BString> {
+    pub fn get_completions(&self, line: BString, callback: Box<dyn FnMut(Vec<zsh::completion::Match>) -> ControlFlow<()>>) -> Result<BString> {
         // this may block for a long time
         let sink = &mut *self.sink.borrow_mut();
-        let (msg, _) = zsh::capture_shout(sink, || zsh::completion::get_completions(line, sender));
+        let (msg, _) = zsh::capture_shout(sink, || zsh::completion::get_completions(line, callback));
         Ok(msg)
     }
 
-    pub fn insert_completion(&self, string: BString, m: Arc<completion::Match>) -> (BString, usize) {
-        zsh::completion::insert_completion(string, &m)
+    pub fn insert_completion(&self, string: BString, m: &completion::Match) -> (BString, usize) {
+        zsh::completion::insert_completion(string, m)
     }
 
     pub fn parse(&self, string: BString, options: zsh::parser::ParserOptions) -> (bool, Vec<zsh::parser::Token>) {
@@ -442,6 +449,14 @@ impl Shell {
 
     pub fn get_function_source(&self, function: Arc<zsh::functions::Function>) -> BString {
         function.get_source()
+    }
+
+    pub fn is_queuing_signals(&self) -> bool {
+        zsh::is_queuing_signals()
+    }
+
+    pub fn with_queued_signals<T, F: FnOnce() -> T>(&self, func: F) -> (T, nix::Result<()>) {
+        zsh::with_queued_signals(func)
     }
 
     pub fn queue_signals(&self) {

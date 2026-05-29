@@ -8,6 +8,17 @@ pub mod strong_weak_wrapper;
 #[macro_use]
 pub mod impl_deref_helper;
 
+pub fn block_on<F: 'static + Future>(future: F) -> Result<F::Output> {
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        let guard = handle.enter();
+        let result = futures::executor::block_on(future);
+        drop(guard);
+        Ok(result)
+    } else {
+        crate::shell::block_on(future)
+    }
+}
+
 pub fn set_fd_nonblocking<R: AsRawFd>(file: &R) -> Result<()> {
     let raw_fd = file.as_raw_fd();
     // 3. Set non-blocking mode

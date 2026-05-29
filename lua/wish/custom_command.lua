@@ -13,7 +13,7 @@ function M.register(wish, opts)
     wish.add_event_callback('init', function()
         if not init then
             init = true
-            wish.silent_cmd[[setopt interactivecomments]]:wait()
+            wish.silent_cmd[[setopt interactivecomments]]
         end
     end)
 
@@ -23,7 +23,7 @@ function M.register(wish, opts)
     local accept_line
     accept_line = wish.add_event_callback('accept_line', function()
         local alias_cmd = 'alias ' .. keyword .. '=" # "'
-        wish.silent_cmd(alias_cmd):wait()
+        wish.silent_cmd(alias_cmd)
         wish.remove_event_callback(accept_line)
     end)
 

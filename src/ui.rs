@@ -1,3 +1,4 @@
+use std::ops::ControlFlow;
 use std::cell::RefCell;
 use std::rc::Rc;
 use bstr::{BStr, BString};
@@ -302,7 +303,7 @@ impl Ui {
         // cancel the current command line?
 
         self.insert_or_set_buffer(false, b"", None).await;
-        if matches!(self.shell.trampoline_out(Some("".into())).await, None | Some(Err(_))) {
+        if matches!(self.shell.accept_line(b"".into()).await, None | Some(Err(_))) {
             return Ok(false)
         }
         {
@@ -448,7 +449,7 @@ impl Ui {
                 self.pre_accept_line(&mut print_lock)?;
                 // acceptline doesn't actually accept the line right now
                 // only when we return control to zle using the trampoline
-                if matches!(self.shell.trampoline_out(Some(buffer.clone())).await, None | Some(Err(_))) {
+                if matches!(self.shell.accept_line(buffer.clone()).await, None | Some(Err(_))) {
                     return Ok(false)
                 }
                 self.post_accept_line(&mut print_lock).await?;
@@ -607,7 +608,7 @@ impl Ui {
             if is_eof {
                 self.shell.exit(0);
                 // this should error as we exit
-                let _ = self.shell.trampoline_out(None).await;
+                let _ = self.shell.trampoline_out(ControlFlow::Break(None)).await;
                 return None;
             }
         }

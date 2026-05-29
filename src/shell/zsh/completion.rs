@@ -1,9 +1,9 @@
 use crate::unsafe_send::UnsafeSend;
 use std::collections::HashSet;
-use tokio::sync::{mpsc};
+use std::cell::RefCell;
+use std::ops::ControlFlow;
 use regex::bytes::Regex;
 use anyhow::Result;
-use std::sync::{Mutex};
 use std::os::raw::*;
 use std::ptr::{null_mut};
 use std::default::Default;
@@ -138,53 +138,57 @@ impl Drop for Match {
 #[derive(Default)]
 struct CompaddState {
     // original compadd function
-    original: UnsafeSend<Option<Builtin>>,
-    // sink to send matches
-    sink: Option<mpsc::UnboundedSender<Vec<Match>>>,
+    original: Option<Builtin>,
+    // callback to send matches
+    callback: Option<Box<dyn FnMut(Vec<Match>) -> ControlFlow<()>>>,
     // matches we have already seen
     seen: UnsafeSend<HashSet<*const bindings::cmatch>>,
 }
 
 impl CompaddState {
     fn reset(&mut self) {
-        self.sink.take();
+        self.callback.take();
         self.seen.as_mut().clear();
     }
 }
 
 static COMPFUNC: &MetaStr = meta_str!(c"_main_complete");
-static COMPADD_STATE: Mutex<Option<CompaddState>> = Mutex::new(None);
+thread_local! {
+    static COMPADD_STATE: RefCell<Option<CompaddState>> = RefCell::new(None);
+}
 
 unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_char, options: zsh_sys::Options, func: c_int) -> c_int {
     // eprintln!("DEBUG(bombay)\t{}\t= {:?}\r", stringify!(nam), nam);
 
-    unsafe {
-        let mut compadd = COMPADD_STATE.lock().unwrap();
-        let compadd = compadd.as_mut().unwrap();
-        let result = compadd.original.as_ref().as_ref().unwrap().handlerfunc.unwrap()(nam, argv, options, func);
+    COMPADD_STATE.with(|compadd| {
+        unsafe {
+            let mut compadd = compadd.borrow_mut();
+            let compadd = compadd.as_mut().unwrap();
+            let result = compadd.original.as_ref().unwrap().handlerfunc.unwrap()(nam, argv, options, func);
 
-        if !bindings::matches.is_null() && let Some(sink) = compadd.sink.as_ref() {
-            if !bindings::amatches.is_null() && !(*bindings::amatches).name.is_null() {
-                // let g = MetaStr::from_ptr((*bindings::amatches).name);
-                // eprintln!("DEBUG(dachas)\t{}\t= {:?}\r", stringify!(g), g);
+            if !bindings::matches.is_null() && let Some(callback) = compadd.callback.as_mut() {
+                if !bindings::amatches.is_null() && !(*bindings::amatches).name.is_null() {
+                    // let g = MetaStr::from_ptr((*bindings::amatches).name);
+                    // eprintln!("DEBUG(dachas)\t{}\t= {:?}\r", stringify!(g), g);
+                }
+
+                // compadd can change the list matches points to by changing the group
+                // so we use a hashset to store what matches we've seen before
+
+                let matches: Vec<_> = super::linked_list::iter_linklist(bindings::matches)
+                    .filter_map(|ptr| (ptr as *const bindings::cmatch).as_ref())
+                    .filter(|m| compadd.seen.as_mut().insert(*m as _))
+                    .map(Match::new)
+                    .collect();
+
+                if !matches.is_empty() && callback(matches).is_break() {
+                    compadd.callback.take();
+                }
             }
 
-            // compadd can change the list matches points to by changing the group
-            // so we use a hashset to store what matches we've seen before
-
-            let matches: Vec<_> = super::linked_list::iter_linklist(bindings::matches)
-                .filter_map(|ptr| (ptr as *const bindings::cmatch).as_ref())
-                .filter(|m| compadd.seen.as_mut().insert(*m as _))
-                .map(Match::new)
-                .collect();
-
-            if !matches.is_empty() && sink.send(matches).is_err() {
-                compadd.sink.take();
-            }
+            result
         }
-
-        result
-    }
+    })
 }
 
 pub fn override_compadd() -> Result<()> {
@@ -196,10 +200,10 @@ pub fn override_compadd() -> Result<()> {
     let original = Builtin::pop(meta_str!(c"compadd")).unwrap();
     let mut compadd = original.clone();
 
-    *COMPADD_STATE.lock().unwrap() = Some(CompaddState{
-        original: unsafe{ UnsafeSend::new(Some(original)) },
+    COMPADD_STATE.set(Some(CompaddState{
+        original: Some(original),
         ..CompaddState::default()
-    });
+    }));
 
     compadd.handlerfunc = Some(compadd_handlerfunc);
     compadd.node.flags = 0;
@@ -208,9 +212,11 @@ pub fn override_compadd() -> Result<()> {
 }
 
 pub fn restore_compadd() {
-    if let Some(mut compadd) = COMPADD_STATE.lock().unwrap().take() && let Some(original) = compadd.original.as_mut().take() {
-        original.add();
-    }
+    COMPADD_STATE.with(|compadd| {
+        if let Some(mut compadd) = compadd.borrow_mut().take() && let Some(original) = compadd.original.take() {
+            original.add();
+        }
+    });
 }
 
 // ookkkk
@@ -218,16 +224,16 @@ pub fn restore_compadd() {
 // so there's no "low-level" function to hook into
 // the best we can do is emulate completecall()
 
-pub fn get_completions(line: BString, sink: mpsc::UnboundedSender<Vec<Match>>) {
-    {
-        if let Some(compadd) = COMPADD_STATE.lock().unwrap().as_mut() {
-            compadd.sink = Some(sink);
+pub fn get_completions(line: BString, callback: Box<dyn FnMut(Vec<Match>) -> ControlFlow<()>>) {
+    COMPADD_STATE.with(|compadd| {
+        if let Some(compadd) = compadd.borrow_mut().as_mut() {
+            compadd.callback = Some(callback);
         } else {
             panic!("ui is not running");
         }
         let len = line.len();
         super::set_zle_buffer(line, len as i64 + 1);
-    }
+    });
 
     unsafe {
         // this is kinda what completecall() does
@@ -244,9 +250,11 @@ pub fn get_completions(line: BString, sink: mpsc::UnboundedSender<Vec<Match>>) {
         bindings::minfo.cur = null_mut();
         super::execstring(meta_str!(c"set -o monitor"), Default::default());
 
-        let mut compadd = COMPADD_STATE.lock().unwrap();
-        let compadd = compadd.as_mut().unwrap();
-        compadd.reset();
+        COMPADD_STATE.with(|compadd| {
+            if let Some(compadd) = compadd.borrow_mut().as_mut() {
+                compadd.reset();
+            }
+        });
     }
 }
 

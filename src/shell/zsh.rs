@@ -376,6 +376,12 @@ pub fn capture_shout<T, F: FnOnce() -> T>(
     }
 }
 
+pub fn is_queuing_signals() -> bool {
+    unsafe {
+        zsh_sys::queueing_enabled > 0
+    }
+}
+
 pub fn queue_signals() {
     unsafe {
         zsh_sys::queueing_enabled += 1;

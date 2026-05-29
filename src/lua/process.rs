@@ -220,15 +220,22 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         let mut proc = None;
         let result: Result<Result<_>> = ui.freeze_if(foreground, true, async {
 
-            let (result, queue_result) = crate::shell::with_queued_signals(|| {
-                command.spawn().map(|child| {
-                    let pid = child.id().unwrap();
-                    let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, true);
-                    (child, pid, pid_waiter)
-                })
-            });
-            crate::log_if_err(queue_result);
-            let (child, pid, pid_waiter) = result?;
+            let (child, pid, pid_waiter) = if ui.shell.is_queuing_signals() {
+                // spawn directly, don't use a pid waiter since it will just get queued
+                let child = command.spawn()?;
+                let pid = child.id().unwrap();
+                (child, pid, None)
+            } else {
+                let (result, queue_result) = ui.shell.with_queued_signals(|| {
+                    command.spawn().map(|child| {
+                        let pid = child.id().unwrap();
+                        let pid_waiter = Some(crate::shell::process::register_pid(&ui, pid as _, true));
+                        (child, pid, pid_waiter)
+                    })
+                });
+                crate::log_if_err(queue_result);
+                result?
+            };
             let child = proc.insert(child);
 
             let stdin  = child.stdin.take().map(|s| WriteableFile(Some(BufWriter::new(s))));
@@ -236,13 +243,17 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
             let stderr = child.stderr.take().map(|s| ReadableFile(Some(BufReader::new(s)), false));
 
             let _ = result_sender.take().unwrap().send(Ok((pid, stdin, stdout, stderr)));
-            let code = if let Ok(code) = pid_waiter.await {
-                code
+
+            let code = if let Some(pid_waiter) = pid_waiter {
+                // if queuing is enabled then the pid_waiter won't work
+                tokio::select!(
+                    code = pid_waiter => code.ok(),
+                    status = child.wait() => status.ok().and_then(|x| x.code()),
+                )
             } else {
-                let code = child.wait().await.ok().and_then(|x| x.code()).unwrap_or(-1);
-                proc = None;
-                code
+                child.wait().await.ok().and_then(|x| x.code())
             };
+            let code = code.unwrap_or(-1);
 
             // ignore error
             let _ = sender.send(Some(Ok(code as _)));
@@ -252,6 +263,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
 
         // ensure the proc is dead
         if let Some(mut proc) = proc.take()
+            && matches!(proc.try_wait(), Ok(None))
             && let Err(err) = proc.kill().await
             && err.raw_os_error() != Some(nix::errno::Errno::ESRCH as _)
         {
@@ -432,65 +444,67 @@ pub fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: FullShe
 
     let mut errors = [Ok(()), Ok(()), Ok(())];
 
-    // let result: Result<Result<_>> =
-    let result = tokio::runtime::Handle::current().block_on(ui.freeze_if(foreground, true, async {
+    let result: Result<Result<_>> = crate::utils::block_on(async move {
+        let result = ui.freeze_if(foreground, true, async {
 
-        let stdin = stdio_pipe!(args, stdin, true);
-        let stdout = stdio_pipe!(args, stdout, false);
-        let stderr = stdio_pipe!(args, stderr, false);
+            let stdin = stdio_pipe!(args, stdin, true);
+            let stdout = stdio_pipe!(args, stdout, false);
+            let stderr = stdio_pipe!(args, stderr, false);
 
-        let mut streams = [stdin.1, stdout.1, stderr.1];
+            let mut streams = [stdin.1, stdout.1, stderr.1];
 
-        // wrap the whole thing in a do_run to ensure fd restoration happens in the
-        // correct order
-        // no forking, override fds in place
-        let result = streams.iter_mut().flatten().try_for_each(|s| s.override_fd());
-        if let Err(result) = result {
-            let mut result = Err(result);
-            // didnt work, restore any backups
-            if let Err(e) = streams.iter_mut().flatten().try_for_each(|s| s.restore()) {
-                result = result.context(e);
+            // wrap the whole thing in a do_run to ensure fd restoration happens in the
+            // correct order
+            // no forking, override fds in place
+            let result = streams.iter_mut().flatten().try_for_each(|s| s.override_fd());
+            if let Err(result) = result {
+                let mut result = Err(result);
+                // didnt work, restore any backups
+                if let Err(e) = streams.iter_mut().flatten().try_for_each(|s| s.restore()) {
+                    result = result.context(e);
+                }
+                return result
             }
-            return result
-        }
 
-        let code = match cmd {
-            ShellRunCmd::Simple(cmd) => ui.shell.exec(cmd.into()),
-            ShellRunCmd::Function{func, args, arg0} => {
-                let arg0 = arg0.map(|x| x.into());
-                let args = args.into_iter().map(|x| x.into()).collect();
-                ui.shell.exec_function(func.clone(), arg0, args).into()
-            },
-        };
+            let code = match cmd {
+                ShellRunCmd::Simple(cmd) => ui.shell.exec(cmd.into()),
+                ShellRunCmd::Function{func, args, arg0} => {
+                    let arg0 = arg0.map(|x| x.into());
+                    let args = args.into_iter().map(|x| x.into()).collect();
+                    ui.shell.exec_function(func.clone(), arg0, args).into()
+                },
+            };
 
-        // finished, restore any backups
-        let mut errs = [Ok(()), Ok(()), Ok(())];
-        for (s, e) in streams.iter_mut().zip(errs.iter_mut()) {
-            if let Some(s) = s {
-                *e = s.restore();
+            // finished, restore any backups
+            let mut errs = [Ok(()), Ok(()), Ok(())];
+            for (s, e) in streams.iter_mut().zip(errs.iter_mut()) {
+                if let Some(s) = s {
+                    *e = s.restore();
+                }
             }
+
+            for (dst, src) in errors.iter_mut().zip(errs) {
+                *dst = src;
+            }
+
+            // send the code out
+            Ok(code)
+        }).await;
+
+        let mut drawn = false;
+        for err in errors {
+            drawn = ui.report_error(err) || drawn;
+        }
+        if foreground && ! drawn {
+            ui.queue_draw();
         }
 
-        for (dst, src) in errors.iter_mut().zip(errs) {
-            *dst = src;
-        }
-
-        // send the code out
-        Ok(code)
-    }));
-
-    let mut drawn = false;
-    for err in errors {
-        drawn = ui.report_error(err) || drawn;
-    }
-    if foreground && ! drawn {
-        ui.queue_draw();
-    }
-
-    let code = result??;
-    Ok(lua.pack_multi((
-        code,
-    ))?)
+        let code = result??;
+        Ok(lua.pack_multi((
+            code,
+        ))?)
+    });
+    Ok(result??)
 }
 
 pub fn init_lua(ui: &Ui) -> Result<()> {

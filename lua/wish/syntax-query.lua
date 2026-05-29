@@ -184,7 +184,7 @@ local function parse_buffer()
     if not prev_complete or string.sub(buffer, 1, #prev_buffer) ~= prev_buffer or string.find(buffer, '%S', #prev_buffer+1) then
         -- is this going to be slow? do we need a debounce or something?
         prev_complete, prev_tokens = wish.parse(buffer)
-        wish.log.debug(wish.repr(M.debug_tokens(prev_tokens, buffer), true))
+        -- wish.log.debug(wish.repr(M.debug_tokens(prev_tokens, buffer), true))
         prev_buffer = buffer
         return true
     end

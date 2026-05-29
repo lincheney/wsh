@@ -1,38 +1,13 @@
-use tokio::sync::{mpsc, Mutex};
+use std::ops::ControlFlow;
 use crate::lua::{HasEventCallbacks};
 use crate::ui::{Ui};
 use anyhow::Result;
 use mlua::{prelude::*, UserData, UserDataMethods, MetaMethod};
-use std::sync::Arc;
-
-#[derive(FromLua, Clone)]
-struct Stream {
-    inner: Arc<Mutex<mpsc::UnboundedReceiver<Vec<crate::shell::completion::Match>>>>,
-}
+use std::rc::Rc;
 
 #[derive(FromLua, Clone)]
 struct Match {
-    inner: Arc<crate::shell::completion::Match>,
-}
-
-impl UserData for Stream {
-    fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_async_meta_method(MetaMethod::Call, |_lua, stream, ()| async move {
-            let mut stream = stream.inner.lock().await;
-            let Some(matches) = stream.recv().await
-                else { return Ok(None) };
-            let matches: Vec<_> = matches.into_iter().map(|x| Match{inner: Arc::new(x)}).collect();
-            Ok(Some(matches))
-        });
-
-        methods.add_async_method("cancel", |_lua, stream, ()| async move {
-            if stream.inner.lock().await.is_closed() {
-                Ok(())
-            } else {
-                crate::shell::control_c().map_err(|e| mlua::Error::RuntimeError(e.to_string()))
-            }
-        });
-    }
+    inner: Rc<crate::shell::completion::Match>,
 }
 
 impl UserData for Match {
@@ -51,37 +26,47 @@ impl UserData for Match {
     }
 }
 
-async fn get_completions(mut ui: Ui, _lua: Lua, val: Option<String>) -> Result<Stream> {
+async fn get_completions(ui: Ui, _lua: Lua, (val, callback): (Option<String>, LuaFunction)) -> Result<()> {
 
     let val = if let Some(val) = val {
         val.into()
     } else {
-        ui.get().borrow().buffer.get_contents().clone()
+        ui.borrow().buffer.get_contents().clone()
     };
 
-    let (sender, receiver) = mpsc::unbounded_channel();
+    ui.shell.trampoline_out(ControlFlow::Continue(Box::new(move |mut ui| {
+        let mut ui_clone = ui.clone();
+        let result = ui_clone.shell.get_completions(val, Box::new(move |matches| {
+            let matches: Vec<_> = matches.into_iter().map(|x| Match{inner: Rc::new(x)}).collect();
+            let result = crate::shell::block_on(callback.call_async(matches));
+            if let Some(result) = crate::log_if_err(result) {
+                ui.report_error::<(), _>(result);
+                ControlFlow::Continue(())
+            } else {
+                ControlFlow::Break(())
+            }
+        }));
 
-    // run this in another thread so it doesn't block us returning
-    tokio::task::spawn_local(async move {
-        match ui.shell.get_completions(val, sender) {
+        match result {
             Ok(msg) => {
                 if !msg.is_empty() {
-                    ui.unlocked.borrow_mut().tui.add_zle_message(msg.as_ref());
+                    ui_clone.borrow_mut().tui.add_zle_message(msg.as_ref());
                 }
             },
             err => {
-                ui.report_error(err);
+                ui_clone.report_error(err);
             },
         }
-    });
+    }))).await;
 
-    Ok(Stream{inner: Arc::new(Mutex::new(receiver))})
+
+    Ok(())
 }
 
 async fn insert_completion(ui: Ui, _lua: Lua, val: Match) -> Result<()> {
     let buffer = ui.get().borrow().buffer.get_contents().clone();
     let suffix = val.inner.as_suffix();
-    let (new_buffer, new_pos) = ui.shell.insert_completion(buffer, val.inner);
+    let (new_buffer, new_pos) = ui.shell.insert_completion(buffer, &val.inner);
     {
         // see if this can be done as an insert
         let this = ui.get();

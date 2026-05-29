@@ -1,3 +1,4 @@
+use std::ops::ControlFlow;
 use std::cell::Cell;
 use crate::lua::{ HasEventCallbacks};
 pub(in crate::shell) mod fork;
@@ -178,45 +179,58 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                 zsh_sys::adjustwinsize(0);
                 zsh::signals::sigwinch::fetch_term_size_from_zsh();
 
-                let result = state.clone().block_on(async move {
-                    // sometimes zsh will trash zle without refreshing
-                    // redraw the ui
-                    let result = crate::log_if_err(state.ui.zle_cmd_refresh().await);
-                    if result == Some(true) && state.first_drawn.get() {
-                        // draw LATER
-                        state.ui.queue_draw();
+                {
+                    let state = state.clone();
+                    state.clone().block_on(async move {
+                        // sometimes zsh will trash zle without refreshing
+                        // redraw the ui
+                        let result = crate::log_if_err(state.ui.zle_cmd_refresh().await);
+                        if result == Some(true) && state.first_drawn.get() {
+                            // draw LATER
+                            state.ui.queue_draw();
+                        }
+
+                        // this is the only thread we should ever run this func
+                        if !state.first_drawn.get() {
+                            crate::log_if_err::<_, anyhow::Error>(async {
+                                if let Some(size) = zsh::signals::sigwinch::get_term_size() {
+                                    state.ui.handle_window_resize(size.0, size.1).await?;
+                                }
+                                state.ui.start_cmd(None).await?;
+                                Ok(())
+                            }.await);
+                            state.ui.trigger_init_callbacks().await;
+
+                            state.first_drawn.set(true);
+                        }
+                    });
+                }
+
+                // allow sigwinch while we are waiting
+                // zsh::winch_unblock();
+
+                let result = loop {
+                    ::log::debug!("DEBUG(casual)\t{}\t= {:?}", stringify!("loop"), "loop");
+                    match state.block_on(state.ui.shell.trampoline_in()) {
+                        Err(err) => break Err(err),
+                        Ok(ControlFlow::Break(line)) => break Ok(line),
+                        Ok(ControlFlow::Continue(callback)) => {
+                            callback(state.ui.clone());
+                        },
                     }
+                };
 
-                    // this is the only thread we should ever run this func
-                    if !state.first_drawn.get() {
-                        crate::log_if_err::<_, anyhow::Error>(async {
-                            if let Some(size) = zsh::signals::sigwinch::get_term_size() {
-                                state.ui.handle_window_resize(size.0, size.1).await?;
-                            }
-                            state.ui.start_cmd(None).await?;
-                            Ok(())
-                        }.await);
-                        state.ui.trigger_init_callbacks().await;
-
-                        state.first_drawn.set(true);
-                    }
-
-                    // allow sigwinch while we are waiting
-                    // zsh::winch_unblock();
-
-                    let result = state.ui.shell.trampoline_in().await;
-
+                state.clone().block_on(async move {
                     // sometimes zsh will trash zle without refreshing
                     // redraw the ui
                     if state.ui.zle_cmd_refresh().await.unwrap() {
                         // draw LATER
                         state.ui.queue_draw();
                     }
-
-                    // zsh::winch_block();
-
-                    result
                 });
+
+                // zsh::winch_block();
+
                 zsh_sys::errflag = 0;
 
                 // zsh will reset the tty settings to its saved values

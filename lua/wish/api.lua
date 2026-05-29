@@ -53,16 +53,17 @@ function wish.async.spawn(...)
 end
 
 function wish.cmd(...)
-    local proc, stdin, stdout, stderr = wish.__shell_run(...)
-    return {
-        stdin = stdin,
-        stdout = stdout,
-        stderr = stderr,
-        is_finished = function(self) return proc:is_finished() end,
-        wait = function(self) return proc:wait() end,
-        kill = function(self, ...) return proc:kill(...) end,
-        term = function(self) return proc:kill('SIGTERM') end,
-    }
+    return wish.__shell_run(...)
+    -- local proc, stdin, stdout, stderr = wish.__shell_run(...)
+    -- return {
+        -- stdin = stdin,
+        -- stdout = stdout,
+        -- stderr = stderr,
+        -- is_finished = function(self) return proc:is_finished() end,
+        -- wait = function(self) return proc:wait() end,
+        -- kill = function(self, ...) return proc:kill(...) end,
+        -- term = function(self) return proc:kill('SIGTERM') end,
+    -- }
 end
 
 function wish.silent_cmd(...)
