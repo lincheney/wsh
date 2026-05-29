@@ -59,6 +59,14 @@ pub fn register_pid(ui: &crate::ui::Ui, pid: pidset::Pid, add_to_jobtab: bool) -
     receiver
 }
 
+pub fn deregister_pid(ui: &crate::ui::Ui, pid: pidset::Pid) {
+    let mut pid_map = ui.pid_map.lock().unwrap();
+    pid_map.remove(&pid);
+    if matches!(pidset::PID_TABLE.deregister_pid(pid), Some(true)) {
+        jobtab_retain_iter(|proc| proc.pid != pid).for_each(|_| ());
+    }
+}
+
 pub(in crate::shell) fn check_pid_status(pid: pidset::Pid) -> Option<i32> {
     jobtab_iter().find(|proc| proc.pid == pid).map(|proc| proc.status)
 }

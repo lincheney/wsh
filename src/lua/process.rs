@@ -248,7 +248,10 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
                 // if queuing is enabled then the pid_waiter won't work
                 tokio::select!(
                     code = pid_waiter => code.ok(),
-                    status = child.wait() => status.ok().and_then(|x| x.code()),
+                    status = child.wait() => {
+                        crate::shell::process::deregister_pid(&ui, pid as _);
+                        status.ok().and_then(|x| x.code())
+                    }
                 )
             } else {
                 child.wait().await.ok().and_then(|x| x.code())

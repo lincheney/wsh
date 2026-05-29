@@ -49,6 +49,10 @@ impl PidTable {
         self.get_mut().insert(pid, (Arc::new(AtomicI32::new(-1)), add_to_jobtab));
     }
 
+    pub fn deregister_pid(&self, pid: Pid) -> Option<bool> {
+        self.get_mut().remove(&pid).map(|(_, add_to_jobtab)| add_to_jobtab)
+    }
+
     pub fn extract_finished_pids<F: FnMut(Pid, i32)>(&self, mut callback: F) {
         self.get_mut().retain(|&pid, (status, _)| {
             let status = status.load(Ordering::Acquire);
