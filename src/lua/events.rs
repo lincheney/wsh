@@ -7,7 +7,7 @@ use crate::keybind;
 
 fn get_non_empty_owned_callbacks(ui: &Ui, typ: EventType) -> Option<Vec<(usize, Function)>> {
     let ui = ui.get();
-    let callbacks = ui.event_callbacks.lock().unwrap();
+    let callbacks = ui.event_callbacks.borrow();
     let callbacks = callbacks.get_callbacks(typ);
     if callbacks.is_empty() {
         None
@@ -173,11 +173,11 @@ event_types!(
 
 fn add_event_callback(ui: &Ui, lua: &Lua, (typ, callback): (LuaValue, Function)) -> Result<usize> {
     let typ: EventType = lua.from_value(typ)?;
-    Ok(ui.get().event_callbacks.lock().unwrap().add_event_callback(typ, callback))
+    Ok(ui.get().event_callbacks.borrow_mut().add_event_callback(typ, callback))
 }
 
 fn remove_event_callback(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
-    ui.get().event_callbacks.lock().unwrap().remove_event_callback(id);
+    ui.get().event_callbacks.borrow_mut().remove_event_callback(id);
     Ok(())
 }
 

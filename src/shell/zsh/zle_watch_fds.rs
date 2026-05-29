@@ -15,7 +15,7 @@ pub async fn handle_fd_change(ui: &crate::ui::Ui, fd_change: FdChange) -> Result
                             let Some(guard) = canceller.run(reader.readable()).await
                                 else { break };
 
-                            let result = ui.freeze_if(true, true, FdChangeHook::run_locked(&hook, &ui.shell, fd, guard.err())).await;
+                            let result = ui.freeze_if(true, true, async{ FdChangeHook::run_locked(&hook, &ui.shell, fd, guard.err()) }).await;
                             let result = crate::log_if_err(result);
                             let result = result.and_then(crate::log_if_err);
                             if result == Some(false) {
@@ -25,7 +25,7 @@ pub async fn handle_fd_change(ui: &crate::ui::Ui, fd_change: FdChange) -> Result
                     });
                 },
                 Err(err) => {
-                    ui.freeze_if(true, true, FdChangeHook::run_locked(&hook, &ui.shell, fd, Some(err))).await??;
+                    ui.freeze_if(true, true, async{ FdChangeHook::run_locked(&hook, &ui.shell, fd, Some(err)) }).await??;
                 },
             }
         },

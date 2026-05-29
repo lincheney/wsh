@@ -1,13 +1,15 @@
+use std::cell::RefCell;
 use std::os::raw::{c_int};
 use std::os::fd::{IntoRawFd, BorrowedFd};
 use nix::sys::signal;
 use anyhow::Result;
-use std::sync::{RwLock};
 use tokio::sync::{watch};
 use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 
 static SELF_PIPE: AtomicI32 = AtomicI32::new(-1);
-static RECEIVER: RwLock<Option<watch::Receiver<(u32, u32)>>> = RwLock::new(None);
+thread_local! {
+    static RECEIVER: RefCell<Option<watch::Receiver<(u32, u32)>>> = RefCell::new(None);
+}
 static SIZE: AtomicU64 = AtomicU64::new(0);
 
 pub(in crate::shell) fn fetch_term_size_from_zsh() {
@@ -33,7 +35,7 @@ pub fn get_term_size() -> Option<(u32, u32)> {
 }
 
 pub fn get_subscriber() -> Option<watch::Receiver<(u32, u32)>> {
-    RECEIVER.read().unwrap().clone()
+    RECEIVER.with(|r| r.borrow().clone())
 }
 
 pub(super) fn sighandler() -> c_int {
@@ -58,13 +60,17 @@ fn close_self_pipe() {
 
 pub(super) fn cleanup() {
     close_self_pipe();
-    *RECEIVER.write().unwrap() = None;
+    RECEIVER.with(|r| {
+        *r.borrow_mut() = None;
+    });
 }
 
 pub(super) fn init() -> Result<()> {
     fetch_term_size_from_zsh();
     let (sender, receiver) = watch::channel(get_term_size_from_zsh());
-    *RECEIVER.write().unwrap() = Some(receiver);
+    RECEIVER.with(|r| {
+        *r.borrow_mut() = Some(receiver);
+    });
 
     // spawn a reader task
     let writer = super::self_pipe::<_, _, std::convert::Infallible>(move || {

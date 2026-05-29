@@ -1,42 +1,53 @@
-use std::sync::{Arc, RwLock, RwLockReadGuard, Mutex, MutexGuard, atomic::{AtomicI32, Ordering}};
+use std::ptr::{NonNull};
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::{atomic::{AtomicI32, Ordering, AtomicPtr}};
 
 pub type Pid = i32;
 
-pub type PidSet = crate::utils::ConstHashMap<Pid, (Arc<AtomicI32>, bool)>;
+pub type PidSet = crate::utils::ConstHashMap<Pid, (Rc<AtomicI32>, bool)>;
 
 pub struct PidTable {
-    read: RwLock<PidSet>,
-    write: Mutex<PidSet>,
+    read: AtomicPtr<Rc<PidSet>>,
+    write: RefCell<PidSet>,
 }
 
 pub struct WriteGuard<'a> {
-    guard: MutexGuard<'a, PidSet>,
+    guard: std::cell::RefMut<'a, PidSet>,
     table: &'a PidTable,
 }
 impl Drop for WriteGuard<'_> {
     fn drop(&mut self) {
-        let mut pidset = self.table.read.write().unwrap();
-        pidset.clone_from(&*self.guard);
+        let mut pidset = PidSet::new();
+        pidset.clone_from(&self.guard);
+        let pidset = Rc::new(pidset);
+        let ptr = Box::into_raw(Box::new(pidset));
+        let old_ptr = self.table.read.swap(ptr, Ordering::AcqRel);
+        drop(unsafe { Box::from_raw(old_ptr) });
     }
 }
 crate::impl_deref_helper!(self: WriteGuard<'a>, &self.guard => PidSet);
 crate::impl_deref_helper!(mut self: WriteGuard<'a>, &mut self.guard => PidSet);
 
-pub static PID_TABLE: PidTable = PidTable {
-    // RwLock is re-entrant for read() so it is ok to use in signal handlers
-    read: RwLock::new(PidSet::new()),
-    write: Mutex::new(PidSet::new()),
-};
+thread_local! {
+    pub static PID_TABLE: PidTable = const{ PidTable {
+        read: AtomicPtr::new(std::ptr::null_mut()),
+        write: RefCell::new(PidSet::new()),
+    } };
+}
 
 impl PidTable {
-    pub fn get(&self) -> RwLockReadGuard<'_, PidSet> {
-        self.read.read().unwrap()
+    pub fn get(&self) -> Option<Rc<PidSet>> {
+        // loading and cloning can be separate
+        // because self.read is only written to by get_mut()
+        // which is never called in signal handlers
+        let pidset = NonNull::new(self.read.load(Ordering::Acquire))?;
+        Some(unsafe{ pidset.as_ref() }.clone())
     }
 
     pub fn get_mut(&self) -> WriteGuard<'_> {
-        // this should never be run from the "main/signal-handling" thread
         WriteGuard {
-            guard: self.write.lock().unwrap(),
+            guard: self.write.borrow_mut(),
             table: self,
         }
     }
@@ -46,7 +57,7 @@ impl PidTable {
     }
 
     pub fn register_pid(&self, pid: Pid, add_to_jobtab: bool) {
-        self.get_mut().insert(pid, (Arc::new(AtomicI32::new(-1)), add_to_jobtab));
+        self.get_mut().insert(pid, (Rc::new(AtomicI32::new(-1)), add_to_jobtab));
     }
 
     pub fn deregister_pid(&self, pid: Pid) -> Option<bool> {

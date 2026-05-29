@@ -114,9 +114,7 @@ impl Shell {
 
     pub async fn trampoline_out(&self, trampoline: Trampoline) -> Option<Result<(), tokio::sync::oneshot::error::RecvError>> {
         let trampoline_out = self.trampoline_out.replace(None)?;
-        if trampoline_out.send(trampoline).is_err() {
-            panic!("failed to trampoline out");
-        }
+        assert!(trampoline_out.send(trampoline).is_ok(), "failed to trampoline out");
         let (sender, receiver) = ::tokio::sync::oneshot::channel();
         self.trampoline_in.set(Some(sender));
         Some(receiver.await)

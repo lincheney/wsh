@@ -1,9 +1,8 @@
 use std::ops::ControlFlow;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use bstr::{BStr, BString};
 use std::future::Future;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::default::Default;
 use mlua::prelude::*;
 use anyhow::Result;
@@ -65,7 +64,7 @@ pub struct UiInner {
 
 pub struct UnlockedUi {
     pub inner: RefCell<UiInner>,
-    pub event_callbacks: std::sync::Mutex<EventCallbacks> ,
+    pub event_callbacks: RefCell<EventCallbacks> ,
 }
 
 impl UnlockedUi {
@@ -87,9 +86,9 @@ crate::strong_weak_wrapper! {
         pub has_foreground_process: tokio::sync::Mutex<()>,
 
         pub print_lock: PrintLock,
-        is_drawing: AtomicBool,
+        is_drawing: Cell<bool>,
 
-        pub pid_map: std::sync::Mutex<PidMap>,
+        pub pid_map: RefCell<PidMap>,
     }
 }
 
@@ -169,13 +168,17 @@ impl Ui {
     }
 
     pub fn queue_draw(&self) {
-        if !crate::is_forked() && !self.is_drawing.swap(true, Ordering::AcqRel) {
-            self.events.queue_draw();
+        if !crate::is_forked() {
+            let old = self.is_drawing.get();
+            self.is_drawing.set(true);
+            if old {
+                self.events.queue_draw();
+            }
         }
     }
 
     pub async fn draw(&self) -> Result<()> {
-        self.is_drawing.store(false, Ordering::Release);
+        self.is_drawing.set(false);
         if let Ok(mut lock) = self.print_lock.try_lock() && lock.get_value() == 0 {
             self.draw_with_lock(&mut lock).await
         } else {
@@ -336,20 +339,20 @@ impl Ui {
         // TODO if forked and trashed, zsh will NOT recover
         // we're going go to end up with janky output
         // how do we solve this?
-        if !crate::is_forked() {
+        if crate::is_forked() {
+            Ok(false)
+        } else {
 
             let mut print_lock;
             let print_lock = if let Some(lock) = lock {
                 lock
             } else {
-                print_lock = self.print_lock.blocking_lock();
+                print_lock = self.print_lock.try_lock().unwrap();
                 &mut print_lock
             };
             self.unlocked.borrow_mut().prepare_for_unhandled_output()?;
             print_lock.acquire();
             Ok(true)
-        } else {
-            Ok(false)
         }
     }
 
@@ -357,13 +360,13 @@ impl Ui {
         // TODO if forked and trashed, zsh will NOT recover
         // we're going go to end up with janky output
         // how do we solve this?
-        if !crate::is_forked() {
+        if crate::is_forked() {
+            Ok(false)
+        } else {
             let mut print_lock = self.print_lock.lock().await;
             self.unlocked.borrow_mut().prepare_for_unhandled_output()?;
             print_lock.acquire();
             Ok(true)
-        } else {
-            Ok(false)
         }
     }
 
@@ -527,14 +530,14 @@ impl Ui {
     pub fn init_lua(&self) -> Result<()> {
         crate::lua::init_lua(self)?;
 
-        self.lua.load(/*lua*/ r#"
+        self.lua.load(/*lua*/ r"
             local xdg_data = os.getenv('XDG_DATA_HOME')
             local home = os.getenv('HOME')
             local base = xdg_data or (home and home .. '/.local/share')
             local wish_path = base and (base .. '/wish/lua/?.lua;') or ''
             local p = (';' .. package.path .. ';'):gsub(';%./%?%.lua;', ''):gsub('^;', ''):gsub(';$', '')
             package.path = wish_path .. p
-        "#).exec()?;
+        ").exec()?;
         self.lua.load("require('wish')").exec()?;
         Ok(())
     }

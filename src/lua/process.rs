@@ -507,7 +507,7 @@ pub fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: FullShe
             code,
         ))?)
     });
-    Ok(result??)
+    result?
 }
 
 pub fn init_lua(ui: &Ui) -> Result<()> {

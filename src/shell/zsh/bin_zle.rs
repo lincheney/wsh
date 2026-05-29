@@ -46,7 +46,7 @@ pub struct FdChangeHook {
 
 impl FdChangeHook {
 
-    pub async fn run_locked(
+    pub fn run_locked(
         hook: &SyncFdChangeHook,
         shell: &crate::shell::Shell,
         fd: RawFd,

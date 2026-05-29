@@ -1,29 +1,25 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::cell::Cell;
 use tokio::sync::{Notify, Mutex, MutexGuard};
 
 #[derive(Default, Debug)]
 pub struct PrintLock {
     lock: Mutex<usize>,
     notify: Notify,
-    pub zle_trash: AtomicBool,
+    pub zle_trash: Cell<bool>,
 }
 
 impl PrintLock {
 
     pub fn zle_cmd_trash(&self) -> bool {
-        !self.zle_trash.swap(true, Ordering::Relaxed)
+        !self.zle_trash.replace(true)
     }
 
     pub fn zle_cmd_refresh(&self) -> bool {
-        self.zle_trash.swap(false, Ordering::Relaxed)
+        self.zle_trash.replace(false)
     }
 
     pub fn try_lock(&self) -> Result<PrintLockGuard<'_>, tokio::sync::TryLockError> {
         Ok(PrintLockGuard{ inner: self.lock.try_lock()?, notify: &self.notify })
-    }
-
-    pub fn blocking_lock(&self) -> PrintLockGuard<'_> {
-        PrintLockGuard{ inner: self.lock.blocking_lock(), notify: &self.notify }
     }
 
     pub async fn lock(&self) -> PrintLockGuard<'_> {

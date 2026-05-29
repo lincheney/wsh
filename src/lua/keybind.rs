@@ -54,7 +54,7 @@ pub async fn invoke_keybind_callback(ui: &Ui, event: &Event) -> bool {
                 break callback.clone();
             } else if k.no_fallthrough {
                 return true;
-            };
+            }
         }
     };
 

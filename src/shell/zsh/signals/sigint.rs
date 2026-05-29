@@ -1,16 +1,19 @@
+use std::rc::{Rc, Weak};
+use std::cell::RefCell;
 use std::os::raw::{c_int};
 use std::os::fd::{IntoRawFd, BorrowedFd};
 use nix::sys::signal;
 use anyhow::Result;
-use std::sync::{RwLock, Arc, Weak};
 use tokio::sync::{Notify};
 use std::sync::atomic::{AtomicI32, Ordering};
 
 static SELF_PIPE: AtomicI32 = AtomicI32::new(-1);
-static RECEIVER: RwLock<Option<Arc<Notify>>> = RwLock::new(None);
+thread_local! {
+    static RECEIVER: RefCell<Option<Rc<Notify>>> = const{ RefCell::new(None) };
+}
 
 pub fn get_subscriber() -> Option<Weak<Notify>> {
-    RECEIVER.read().unwrap().as_ref().map(Arc::downgrade)
+    RECEIVER.with(|r| r.borrow().as_ref().map(Rc::downgrade))
 }
 
 pub(super) fn sighandler() -> c_int {
@@ -34,7 +37,9 @@ fn close_self_pipe() {
 
 pub(super) fn cleanup() {
     close_self_pipe();
-    *RECEIVER.write().unwrap() = None;
+    RECEIVER.with(|r| {
+        *r.borrow_mut() = None;
+    });
 }
 
 pub(in crate::shell) fn install_signal_handler() -> Result<()> {
@@ -42,8 +47,10 @@ pub(in crate::shell) fn install_signal_handler() -> Result<()> {
 }
 
 pub(super) fn init() -> Result<()> {
-    let notify = Arc::new(Notify::new());
-    *RECEIVER.write().unwrap() = Some(notify.clone());
+    let notify = Rc::new(Notify::new());
+    RECEIVER.with(|r| {
+        *r.borrow_mut() = Some(notify.clone());
+    });
 
     // spawn a reader task
     let writer = super::self_pipe::<_, _, std::convert::Infallible>(move || {
