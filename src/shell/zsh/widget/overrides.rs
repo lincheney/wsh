@@ -1,9 +1,11 @@
+use crate::shell::ShellLoop;
 use std::os::raw::*;
 use std::sync::Mutex;
 use anyhow::{Result};
 use super::super::bindings;
 use super::super::MetaStr;
 use crate::shell::externs::GlobalState;
+use crate::lua::HasEventCallbacks;
 
 /// Look up a thingy by name in thingytab and return its widget pointer.
 unsafe fn get_widget(name: &MetaStr) -> Result<*mut bindings::widget> {
@@ -49,7 +51,12 @@ static UNDO_OVERRIDE: Mutex<Option<bindings::ZleIntFunc>> = Mutex::new(None);
 
 unsafe extern "C" fn custom_undo(_args: *mut *mut c_char) -> c_int {
     let result = GlobalState::with(|state| {
-        state.ui.borrow_mut().buffer.move_in_history(false);
+        if state.ui.get().borrow_mut().buffer.move_in_history(false) {
+            let ui = state.ui.clone();
+            state.shell_loop_with_future(async move {
+                ui.trigger_buffer_change_callbacks();
+            });
+        }
     });
     match result {
         Ok(()) => 0,

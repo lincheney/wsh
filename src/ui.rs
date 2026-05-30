@@ -169,9 +169,8 @@ impl Ui {
 
     pub fn queue_draw(&self) {
         if !crate::is_forked() {
-            let old = self.is_drawing.get();
-            self.is_drawing.set(true);
-            if old {
+            let old = self.is_drawing.replace(true);
+            if !old {
                 self.events.queue_draw();
             }
         }
@@ -624,7 +623,7 @@ impl Ui {
         let ui = self.clone();
         let buf: crate::shell::MetaString = buf.to_owned().into();
 
-        let result = match KeybindValue::find(&self.shell, buf.as_ref())? {
+        let result = match KeybindValue::find(buf.as_ref())? {
             KeybindValue::String(string) => {
                 // recurse
                 Value::String(string)
@@ -644,7 +643,7 @@ impl Ui {
                     None
                 } else {
                     // a widget may run subprocesses so lock the ui
-                    Some(ui.has_foreground_process.blocking_lock())
+                    Some(ui.has_foreground_process.lock().await)
                 };
                 let (buffer, cursor) = {
                     let this = ui.get();
@@ -655,7 +654,14 @@ impl Ui {
                 self.shell.set_zle_buffer(buffer.clone(), cursor as _);
                 self.shell.set_lastchar(lastchar);
 
-                let (output, _) = widget.exec_and_get_output(None, [].into_iter());
+                let (sender, receiver) = tokio::sync::oneshot::channel();
+                {
+                    let ui = self.clone();
+                    self.shell.trampoline_out_callback(Box::new(move |_| {
+                        let _ = sender.send(widget.exec_and_get_output(&ui.shell, None, [].into_iter()));
+                    })).await.unwrap();
+                }
+                let (output, _) = receiver.await.unwrap();
                 let (new_buffer, new_cursor) = self.shell.get_zle_buffer();
                 let new_cursor = new_cursor.unwrap_or(new_buffer.len() as _) as _;
                 let new_buffer = (new_buffer != buffer).then_some(new_buffer);

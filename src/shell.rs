@@ -49,19 +49,19 @@ pub struct Shell {
     sink: RefCell<file_stream::Sink>,
 }
 
-pub enum KeybindValue<'a> {
+pub enum KeybindValue {
     String(BString),
-    Widget(zsh::ZleWidget<'a>),
+    Widget(zsh::ZleWidget),
 }
 
-impl<'a> KeybindValue<'a> {
-    pub fn find(shell: &'a Shell, key: &MetaStr) -> Option<Self> {
+impl KeybindValue {
+    pub fn find(key: &MetaStr) -> Option<Self> {
         let mut strp: *mut c_char = std::ptr::null_mut();
 
         let keymap = unsafe{ NonNull::new(zsh::localkeymap).map_or(zsh::curkeymap, |x| x.as_ptr()) };
         let keybind = unsafe{ zsh::keybind(keymap, key.as_ptr().cast_mut(), &raw mut strp) };
         if let Some(keybind) = NonNull::new(keybind) {
-            return Some(KeybindValue::Widget(zsh::ZleWidget::new(keybind, shell)))
+            return Some(KeybindValue::Widget(zsh::ZleWidget::new(keybind)))
         }
         let strp = NonNull::new(strp)?;
         let strp = unsafe{ MetaStr::from_ptr(strp.as_ptr()) }.to_bytes();
