@@ -1,3 +1,4 @@
+use bstr::BString;
 use std::ops::ControlFlow;
 use std::cell::Cell;
 use crate::lua::{ HasEventCallbacks};
@@ -12,10 +13,9 @@ use anyhow::Result;
 use crate::shell::{Shell, zsh, MetaString, MetaSlice};
 
 
-pub(in crate::shell) struct GlobalState {
+pub struct GlobalState {
     pub(in crate::shell) ui: Ui,
-    runtime: tokio::runtime::Runtime,
-    localset: tokio::task::LocalSet,
+    runtime: crate::async_runtime::Runtime,
     first_drawn: Cell<bool>,
 }
 
@@ -30,15 +30,64 @@ fn teardown() {
     STATE.with(|state| state.take());
 }
 
+macro_rules! shell_loop {
+    ($state:expr) => {{
+        let state = $state;
+
+        let result = loop {
+            let trampoline = state.ui.shell.trampoline_in();
+            let result = state.runtime.block_on(trampoline);
+
+            match result {
+                Err(err) => break Err(err),
+                Ok(ControlFlow::Break(result)) => break Ok(result),
+                Ok(ControlFlow::Continue(callback)) => {
+                    state.ui.shell.trampoline_push();
+                    callback(state.clone());
+                    state.ui.shell.trampoline_pop();
+                },
+            }
+        };
+
+        Ok(result?)
+    }};
+    ($state:expr, $future:expr) => {{
+        let state = $state;
+        let mut future = $future;
+
+        let result = loop {
+            let trampoline = state.ui.shell.trampoline_in();
+            let result = state.runtime.block_on(async {
+                tokio::select!(
+                    result = &mut future => return ControlFlow::Break(result),
+                    result = trampoline => return ControlFlow::Continue(result),
+                )
+            });
+
+            match result {
+                ControlFlow::Break(x) => break Ok(x),
+                ControlFlow::Continue(Err(err)) => break Err(err),
+                ControlFlow::Continue(Ok(ControlFlow::Break(_))) => (),
+                ControlFlow::Continue(Ok(ControlFlow::Continue(callback))) => {
+                    state.ui.shell.trampoline_push();
+                    callback(state.clone());
+                    state.ui.shell.trampoline_pop();
+                },
+            }
+        };
+
+        Ok(result?)
+    }};
+}
+
 impl GlobalState {
     fn new() -> Result<Self> {
         crate::logging::init();
         fork::init();
 
-        let runtime = crate::async_runtime::init()?;
-        let localset = tokio::task::LocalSet::new();
+        let runtime = crate::async_runtime::Runtime::new()?;
 
-        let result: Result<_> = localset.block_on(&runtime, async {
+        let result: Result<_> = runtime.block_on(async {
             let (events, event_ctrl) = crate::event_stream::EventStream::new();
             let shell = Shell::new();
             let mut ui = Ui::new(event_ctrl, shell)?;
@@ -62,12 +111,10 @@ impl GlobalState {
 
             Ok(ui)
         });
-        let ui = result?;
 
         Ok(Self {
-            ui,
+            ui: result?,
             runtime,
-            localset,
             first_drawn: Cell::new(false),
         })
     }
@@ -86,10 +133,6 @@ impl GlobalState {
         Self::with(|state| state.clone())
     }
 
-    fn block_on<F: 'static + Future>(&self, future: F) -> F::Output {
-        self.localset.block_on(&self.runtime, future)
-    }
-
 }
 
 impl Drop for GlobalState {
@@ -101,10 +144,25 @@ impl Drop for GlobalState {
     }
 }
 
-
-pub fn block_on<F: 'static + Future>(future: F) -> Result<F::Output> {
-    GlobalState::get().map(|state| state.block_on(future))
+pub trait ShellLoop {
+    fn shell_loop_with_future<F: 'static + Future + Unpin>(&self, future: F) -> Result<F::Output>;
+    fn shell_loop(&self) -> Result<Option<BString>>;
 }
+
+impl ShellLoop for Rc<GlobalState> {
+    fn shell_loop_with_future<F: 'static + Future + Unpin>(&self, future: F) -> Result<F::Output> {
+        shell_loop!(self, future)
+    }
+
+    fn shell_loop(&self) -> Result<Option<BString>> {
+        shell_loop!(self)
+    }
+}
+
+pub fn shell_loop_with_future<F: 'static + Future + Unpin>(future: F) -> Result<F::Output> {
+    GlobalState::get().and_then(|state| state.shell_loop_with_future(future))
+}
+
 
 unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _options: zsh_sys::Options, _func: c_int) -> c_int {
 
@@ -114,7 +172,7 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
         Some(b"lua") => {
             let result: Result<_> = (|| {
                 let state = GlobalState::get()?;
-                state.block_on(state.ui.lua.load(iter.next().unwrap_or(b"" as _)).exec_async())?;
+                state.runtime.block_on(state.ui.lua.load(iter.next().unwrap_or(b"" as _)).exec_async())?;
                 Ok(())
             })();
 
@@ -181,7 +239,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
 
                 {
                     let state = state.clone();
-                    state.clone().block_on(async move {
+                    state.clone().runtime.block_on(async move {
                         // sometimes zsh will trash zle without refreshing
                         // redraw the ui
                         let result = crate::log_if_err(state.ui.zle_cmd_refresh().await);
@@ -209,18 +267,9 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                 // allow sigwinch while we are waiting
                 // zsh::winch_unblock();
 
-                let result = loop {
-                    ::log::debug!("DEBUG(casual)\t{}\t= {:?}", stringify!("loop"), "loop");
-                    match state.block_on(state.ui.shell.trampoline_in()) {
-                        Err(err) => break Err(err),
-                        Ok(ControlFlow::Break(line)) => break Ok(line),
-                        Ok(ControlFlow::Continue(callback)) => {
-                            callback(state.ui.clone());
-                        },
-                    }
-                };
+                let result = state.shell_loop();
 
-                state.clone().block_on(async move {
+                state.clone().runtime.block_on(async move {
                     // sometimes zsh will trash zle without refreshing
                     // redraw the ui
                     if state.ui.zle_cmd_refresh().await.unwrap() {
@@ -268,7 +317,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
 
             } else if cmd == zsh_sys::ZLE_CMD_REFRESH as _ {
                 // redraw the ui
-                state.clone().block_on(async move {
+                state.clone().runtime.block_on(async move {
                     if state.ui.zle_cmd_refresh().await.unwrap() {
                         crate::log_if_err(state.ui.draw().await);
                     }

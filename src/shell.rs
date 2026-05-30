@@ -1,5 +1,6 @@
+use std::rc::Rc;
 use std::ops::ControlFlow;
-use std::cell::{RefCell, Cell};
+use std::cell::{RefCell};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use anyhow::Result;
@@ -32,14 +33,17 @@ pub use zsh::{
     MetaString,
     MetaSlice,
 };
-pub use externs::{block_on};
+pub use externs::{ShellLoop, shell_loop_with_future};
 pub use variables::Variable;
 
-type Trampoline = ControlFlow<Option<BString>, Box<dyn FnOnce(crate::ui::Ui)> >;
+type TrampolinePayload = ControlFlow<Option<BString>, Box<dyn FnOnce(Rc<externs::GlobalState>)> >;
+enum Trampoline {
+    Resumed(tokio::sync::oneshot::Sender<TrampolinePayload>),
+    Paused(tokio::sync::oneshot::Sender<()>),
+}
 
 pub struct Shell {
-    trampoline_out: Cell<Option<tokio::sync::oneshot::Sender<Trampoline>>>,
-    trampoline_in: Cell<Option<tokio::sync::oneshot::Sender<()>>>,
+    trampoline: RefCell<Vec<Option<Trampoline>>>,
     sink: RefCell<file_stream::Sink>,
 }
 
@@ -97,26 +101,49 @@ impl Shell {
     pub fn new() -> Self {
         Shell {
             sink: RefCell::new(file_stream::Sink::new().unwrap()),
-            trampoline_in: Cell::new(None),
-            trampoline_out: Cell::new(None),
+            trampoline: RefCell::new(vec![None]),
         }
     }
 
-    pub fn trampoline_in(&self) -> tokio::sync::oneshot::Receiver<Trampoline> {
-        if let Some(trampoline_in) = self.trampoline_in.replace(None) {
-            let _ = trampoline_in.send(());
+    pub fn trampoline_push(&self) {
+        self.trampoline.borrow_mut().push(None);
+    }
+
+    pub fn trampoline_pop(&self) {
+        self.trampoline.borrow_mut().pop();
+    }
+
+    pub fn trampoline_in(&self) -> tokio::sync::oneshot::Receiver<TrampolinePayload> {
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+
+        let oneshot = {
+            let mut trampoline = self.trampoline.borrow_mut();
+            let trampoline = trampoline.last_mut().unwrap();
+            trampoline.replace(Trampoline::Resumed(sender))
+        };
+
+        ::log::debug!("DEBUG(jarred)\t{}\t= {:?}", stringify!(oneshot), oneshot.is_some());
+        if let Some(Trampoline::Paused(oneshot)) = oneshot {
+            ::log::debug!("DEBUG(kilted)\t{}\t= {:?}", stringify!(123), 123);
+            let _ = oneshot.send(());
         }
 
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        self.trampoline_out.set(Some(sender));
         receiver
     }
 
-    pub async fn trampoline_out(&self, trampoline: Trampoline) -> Option<Result<(), tokio::sync::oneshot::error::RecvError>> {
-        let trampoline_out = self.trampoline_out.replace(None)?;
-        assert!(trampoline_out.send(trampoline).is_ok(), "failed to trampoline out");
+    pub async fn trampoline_out(&self, payload: TrampolinePayload) -> Option<Result<(), tokio::sync::oneshot::error::RecvError>> {
         let (sender, receiver) = ::tokio::sync::oneshot::channel();
-        self.trampoline_in.set(Some(sender));
+
+        let oneshot = {
+            let mut trampoline = self.trampoline.borrow_mut();
+            let trampoline = trampoline.last_mut().unwrap();
+            trampoline.replace(Trampoline::Paused(sender))
+        };
+
+        let Some(Trampoline::Resumed(sender)) = oneshot
+            else { panic!("expected Some(Trampoline::Resumed(..))"); };
+        assert!(sender.send(payload).is_ok(), "failed to trampoline out");
+
         Some(receiver.await)
     }
 

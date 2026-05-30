@@ -349,10 +349,10 @@ async fn shell_run(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
             subshell_run(ui, lua, args.args, args.opts).await
         },
         ShellRunArgs::Full(args) => {
-            shell_run_with_args(ui, lua, ShellRunCmd::Simple(args.args), args.opts)
+            shell_run_with_args(ui, lua, ShellRunCmd::Simple(args.args), args.opts).await
         },
         ShellRunArgs::Simple(args) => {
-            shell_run_with_args(ui, lua, ShellRunCmd::Simple(args), Default::default())
+            shell_run_with_args(ui, lua, ShellRunCmd::Simple(args), Default::default()).await
         },
     }
 }
@@ -438,7 +438,7 @@ pub async fn subshell_run(mut ui: Ui, lua: Lua, cmd: BString, args: FullShellRun
     ))?)
 }
 
-pub fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: FullShellRunOpts) -> Result<LuaMultiValue> {
+pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: FullShellRunOpts) -> Result<LuaMultiValue> {
     let foreground = args.foreground.unwrap_or(
         matches!(args.stdin, Stdio::inherit)
         || matches!(args.stdout, Stdio::inherit)
@@ -447,67 +447,64 @@ pub fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: FullShe
 
     let mut errors = [Ok(()), Ok(()), Ok(())];
 
-    let result: Result<Result<_>> = crate::utils::block_on(async move {
-        let result = ui.freeze_if(foreground, true, async {
+    let result = ui.freeze_if(foreground, true, async {
 
-            let stdin = stdio_pipe!(args, stdin, true);
-            let stdout = stdio_pipe!(args, stdout, false);
-            let stderr = stdio_pipe!(args, stderr, false);
+        let stdin = stdio_pipe!(args, stdin, true);
+        let stdout = stdio_pipe!(args, stdout, false);
+        let stderr = stdio_pipe!(args, stderr, false);
 
-            let mut streams = [stdin.1, stdout.1, stderr.1];
+        let mut streams = [stdin.1, stdout.1, stderr.1];
 
-            // wrap the whole thing in a do_run to ensure fd restoration happens in the
-            // correct order
-            // no forking, override fds in place
-            let result = streams.iter_mut().flatten().try_for_each(|s| s.override_fd());
-            if let Err(result) = result {
-                let mut result = Err(result);
-                // didnt work, restore any backups
-                if let Err(e) = streams.iter_mut().flatten().try_for_each(|s| s.restore()) {
-                    result = result.context(e);
-                }
-                return result
+        // wrap the whole thing in a do_run to ensure fd restoration happens in the
+        // correct order
+        // no forking, override fds in place
+        let result = streams.iter_mut().flatten().try_for_each(|s| s.override_fd());
+        if let Err(result) = result {
+            let mut result = Err(result);
+            // didnt work, restore any backups
+            if let Err(e) = streams.iter_mut().flatten().try_for_each(|s| s.restore()) {
+                result = result.context(e);
             }
-
-            let code = match cmd {
-                ShellRunCmd::Simple(cmd) => ui.shell.exec(cmd.into()),
-                ShellRunCmd::Function{func, args, arg0} => {
-                    let arg0 = arg0.map(|x| x.into());
-                    let args = args.into_iter().map(|x| x.into()).collect();
-                    ui.shell.exec_function(func.clone(), arg0, args).into()
-                },
-            };
-
-            // finished, restore any backups
-            let mut errs = [Ok(()), Ok(()), Ok(())];
-            for (s, e) in streams.iter_mut().zip(errs.iter_mut()) {
-                if let Some(s) = s {
-                    *e = s.restore();
-                }
-            }
-
-            for (dst, src) in errors.iter_mut().zip(errs) {
-                *dst = src;
-            }
-
-            // send the code out
-            Ok(code)
-        }).await;
-
-        let mut drawn = false;
-        for err in errors {
-            drawn = ui.report_error(err) || drawn;
-        }
-        if foreground && ! drawn {
-            ui.queue_draw();
+            return result
         }
 
-        let code = result??;
-        Ok(lua.pack_multi((
-            code,
-        ))?)
-    });
-    result?
+        let code = match cmd {
+            ShellRunCmd::Simple(cmd) => ui.shell.exec(cmd.into()),
+            ShellRunCmd::Function{func, args, arg0} => {
+                let arg0 = arg0.map(|x| x.into());
+                let args = args.into_iter().map(|x| x.into()).collect();
+                ui.shell.exec_function(func.clone(), arg0, args).into()
+            },
+        };
+
+        // finished, restore any backups
+        let mut errs = [Ok(()), Ok(()), Ok(())];
+        for (s, e) in streams.iter_mut().zip(errs.iter_mut()) {
+            if let Some(s) = s {
+                *e = s.restore();
+            }
+        }
+
+        for (dst, src) in errors.iter_mut().zip(errs) {
+            *dst = src;
+        }
+
+        // send the code out
+        Ok(code)
+    }).await;
+
+    let mut drawn = false;
+    for err in errors {
+        drawn = ui.report_error(err) || drawn;
+    }
+    if foreground && ! drawn {
+        ui.queue_draw();
+    }
+
+    let code = result??;
+    Ok(lua.pack_multi((
+        code,
+    ))?)
 }
 
 pub fn init_lua(ui: &Ui) -> Result<()> {

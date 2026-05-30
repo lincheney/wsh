@@ -229,12 +229,12 @@ async fn lua_try(lua: Lua, args: LuaTable) -> LuaResult<LuaMultiValue> {
 pub async fn __laggy(_ui: Ui, lua: Lua, (): ()) -> Result<()> {
     let _: Result<(), mlua::Error> = unsafe{ lua.exec_raw((), |_| {
         // let lock = ui.borrow_mut();
-        crate::utils::block_on(async {
-            for i in 0..2 {
-                eprintln!("DEBUG(likes) \t{}\t= {:?}", stringify!(i), i);
-                tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-            }
-        });
+        // crate::utils::block_on(async {
+            // for i in 0..2 {
+                // eprintln!("DEBUG(likes) \t{}\t= {:?}", stringify!(i), i);
+                // tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+            // }
+        // });
     }) };
     // drop(lock);
     Ok(())
