@@ -17,11 +17,11 @@ fn value_to_lua(lua: &Lua, val: Option<variables::Value>) -> Result<LuaValue> {
     Ok(val)
 }
 
-async fn get_var(ui: Ui, lua: Lua, (name, zle): (BString, Option<bool>)) -> Result<LuaValue> {
+fn get_var(ui: &Ui, lua: &Lua, (name, zle): (BString, Option<bool>)) -> Result<LuaValue> {
     value_to_lua(&lua, ui.shell.get_var(name.into(), zle.unwrap_or(false))?)
 }
 
-async fn get_vars(ui: Ui, lua: Lua, (names, zle): (Vec<BString>, Option<bool>)) -> Result<LuaTable> {
+fn get_vars(ui: &Ui, lua: &Lua, (names, zle): (Vec<BString>, Option<bool>)) -> Result<LuaTable> {
     let varnames = names.iter().map(|n| n.clone().into()).collect();
     let results = ui.shell.get_vars(varnames, zle.unwrap_or(false))?;
 
@@ -34,7 +34,7 @@ async fn get_vars(ui: Ui, lua: Lua, (names, zle): (Vec<BString>, Option<bool>)) 
     Ok(table)
 }
 
-async fn set_var(ui: Ui, lua: Lua, (name, val, global): (BString, LuaValue, Option<bool>)) -> Result<()> {
+fn set_var(ui: &Ui, lua: &Lua, (name, val, global): (BString, LuaValue, Option<bool>)) -> Result<()> {
     let val: variables::Value = match val {
         LuaValue::Integer(val) => val.into(),
         LuaValue::Number(val) => val.into(),
@@ -59,17 +59,18 @@ async fn set_var(ui: Ui, lua: Lua, (name, val, global): (BString, LuaValue, Opti
     Ok(())
 }
 
-async fn unset_var(ui: Ui, _lua: Lua, name: BString) -> Result<()> {
+fn unset_var(ui: &Ui, _lua: &Lua, name: BString) -> Result<()> {
     ui.shell.unset_var(name.into());
     Ok(())
 }
 
-async fn export_var(ui: Ui, _lua: Lua, name: BString) -> Result<()> {
+fn export_var(ui: &Ui, _lua: &Lua, name: BString) -> Result<()> {
     ui.shell.export_var(name.into());
     Ok(())
 }
 
 async fn in_param_scope(ui: Ui, _lua: Lua, func: LuaFunction) -> Result<LuaValue> {
+    // TODO
     ui.shell.startparamscope();
     let result = func.call_async(()).await;
     ui.shell.endparamscope();
@@ -152,11 +153,11 @@ async fn create_dynamic_var(
 
 pub fn init_lua(ui: &Ui) -> Result<()> {
 
-    ui.set_lua_async_fn("get_var", get_var)?;
-    ui.set_lua_async_fn("get_vars", get_vars)?;
-    ui.set_lua_async_fn("set_var", set_var)?;
-    ui.set_lua_async_fn("unset_var", unset_var)?;
-    ui.set_lua_async_fn("export_var", export_var)?;
+    ui.set_lua_fn("get_var", get_var)?;
+    ui.set_lua_fn("get_vars", get_vars)?;
+    ui.set_lua_fn("set_var", set_var)?;
+    ui.set_lua_fn("unset_var", unset_var)?;
+    ui.set_lua_fn("export_var", export_var)?;
     ui.set_lua_async_fn("in_param_scope", in_param_scope)?;
     ui.set_lua_async_fn("in_zle_param_scope", in_zle_param_scope)?;
     ui.set_lua_async_fn("create_dynamic_var", create_dynamic_var)?;

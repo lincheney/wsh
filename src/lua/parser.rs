@@ -19,7 +19,7 @@ fn tokens_to_lua(tokens: &Vec<crate::shell::Token>, lua: &Lua) -> Result<LuaTabl
     Ok(tbl)
 }
 
-async fn parse(ui: Ui, lua: Lua, (val, options): (bstr::BString, Option<LuaValue>)) -> Result<(bool, LuaTable)> {
+fn parse(ui: &Ui, lua: &Lua, (val, options): (bstr::BString, Option<LuaValue>)) -> Result<(bool, LuaTable)> {
     let options = if let Some(options) = options {
         lua.from_value(options)?
     } else {
@@ -32,7 +32,7 @@ async fn parse(ui: Ui, lua: Lua, (val, options): (bstr::BString, Option<LuaValue
 
 pub fn init_lua(ui: &Ui) -> Result<()> {
 
-    ui.set_lua_async_fn("parse", parse)?;
+    ui.set_lua_fn("parse", parse)?;
 
     Ok(())
 }

@@ -16,7 +16,7 @@ fn entry_to_lua(entry: crate::shell::history::Entry, lua: &Lua) -> Result<LuaTab
     Ok(t)
 }
 
-async fn get_history(ui: Ui, lua: Lua, _val: ()) -> Result<(usize, LuaTable)> {
+fn get_history(ui: &Ui, lua: &Lua, _val: ()) -> Result<(usize, LuaTable)> {
     let current = ui.shell.get_histline();
 
     let tbl = lua.create_table()?;
@@ -28,7 +28,7 @@ async fn get_history(ui: Ui, lua: Lua, _val: ()) -> Result<(usize, LuaTable)> {
     Ok((current as _, tbl))
 }
 
-async fn get_history_index(ui: Ui, _lua: Lua, _val: ()) -> Result<usize> {
+fn get_history_index(ui: &Ui, _lua: &Lua, _val: ()) -> Result<usize> {
     Ok(ui.shell.get_histline() as _)
 }
 
@@ -72,13 +72,13 @@ async fn goto_history_relative(ui: Ui, _lua: Lua, val: i32) -> Result<()> {
     Ok(())
 }
 
-async fn append_history(ui: Ui, _lua: Lua, val: BString) -> Result<()> {
+fn append_history(ui: &Ui, _lua: &Lua, val: BString) -> Result<()> {
     ui.shell.append_history(val.clone())?;
     ui.shell.call_hook_func(Cow::Borrowed(meta_str!(c"zshaddhistory")), vec![val.into()]);
     Ok(())
 }
 
-async fn append_history_words(ui: Ui, _lua: Lua, val: Vec<BString>) -> Result<()> {
+fn append_history_words(ui: &Ui, _lua: &Lua, val: Vec<BString>) -> Result<()> {
     let chline = bstr::join(b" ", &val);
     ui.shell.append_history_words(val)?;
     ui.shell.call_hook_func(Cow::Borrowed(meta_str!(c"zshaddhistory")), vec![chline.into()]);
@@ -87,12 +87,12 @@ async fn append_history_words(ui: Ui, _lua: Lua, val: Vec<BString>) -> Result<()
 
 pub fn init_lua(ui: &Ui) -> Result<()> {
 
-    ui.set_lua_async_fn("get_history", get_history)?;
-    ui.set_lua_async_fn("get_history_index", get_history_index)?;
+    ui.set_lua_fn("get_history", get_history)?;
+    ui.set_lua_fn("get_history_index", get_history_index)?;
     ui.set_lua_async_fn("goto_history", goto_history)?;
     ui.set_lua_async_fn("goto_history_relative", goto_history_relative)?;
-    ui.set_lua_async_fn("append_history", append_history)?;
-    ui.set_lua_async_fn("append_history_words", append_history_words)?;
+    ui.set_lua_fn("append_history", append_history)?;
+    ui.set_lua_fn("append_history_words", append_history_words)?;
 
     Ok(())
 }

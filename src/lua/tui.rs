@@ -571,7 +571,7 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
     Ok(node)
 }
 
-async fn set_message(ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
+fn set_message(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<usize> {
     let options: MessageOptions = lua.from_value(val)?;
 
     let ui = ui.get();
@@ -588,7 +588,7 @@ async fn set_message(ui: Ui, lua: Lua, val: LuaValue) -> Result<usize> {
     Ok(id)
 }
 
-async fn clear_messages(ui: Ui, _lua: Lua, all: bool) -> Result<()> {
+fn clear_messages(ui: &Ui, _lua: &Lua, all: bool) -> Result<()> {
     let ui = ui.get();
     let tui = &mut ui.borrow_mut().tui;
     if all {
@@ -599,11 +599,11 @@ async fn clear_messages(ui: Ui, _lua: Lua, all: bool) -> Result<()> {
     Ok(())
 }
 
-async fn check_message(ui: Ui, _lua: Lua, id: usize) -> Result<bool> {
-    Ok(ui.get().borrow().tui.get_node(id).is_some())
+fn check_message(ui: &Ui, _lua: &Lua, id: usize) -> Result<bool> {
+    Ok(ui.borrow().tui.get_node(id).is_some())
 }
 
-async fn remove_message(ui: Ui, _lua: Lua, id: usize) -> Result<()> {
+fn remove_message(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
     let ui = ui.get();
     let tui = &mut ui.borrow_mut().tui;
     if tui.remove(id).is_some() {
@@ -626,7 +626,7 @@ struct BufferHighlight {
     namespace: Option<usize>,
 }
 
-async fn add_buf_highlight(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
+fn add_buf_highlight(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<()> {
     let ui = ui.get();
     let hl: BufferHighlight = lua.from_value(val)?;
     let blend = !hl.style.no_blend;
@@ -648,7 +648,7 @@ async fn add_buf_highlight(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
     Ok(())
 }
 
-async fn clear_buf_highlights(ui: Ui, _lua: Lua, namespace: Option<usize>) -> Result<()> {
+fn clear_buf_highlights(ui: &Ui, _lua: &Lua, namespace: Option<usize>) -> Result<()> {
     let ui = ui.get();
     let mut ui = ui.borrow_mut();
     if let Some(namespace) = namespace {
@@ -659,14 +659,14 @@ async fn clear_buf_highlights(ui: Ui, _lua: Lua, namespace: Option<usize>) -> Re
     Ok(())
 }
 
-async fn add_buf_highlight_namespace(ui: Ui, _lua: Lua, _val: ()) -> Result<usize> {
+fn add_buf_highlight_namespace(ui: &Ui, _lua: &Lua, _val: ()) -> Result<usize> {
     let ui = ui.get();
     let mut ui = ui.borrow_mut();
     ui.buffer.highlight_counter += 1;
     Ok(ui.buffer.highlight_counter)
 }
 
-async fn scroll_message(ui: Ui, _lua: Lua, (id, delta): (usize, isize)) -> Result<()> {
+fn scroll_message(ui: &Ui, _lua: &Lua, (id, delta): (usize, isize)) -> Result<()> {
     let ui = ui.get();
     let tui = &mut ui.borrow_mut().tui;
     match tui.get_node_mut(id) {
@@ -681,7 +681,7 @@ async fn scroll_message(ui: Ui, _lua: Lua, (id, delta): (usize, isize)) -> Resul
     }
 }
 
-async fn scroll_message_to(ui: Ui, _lua: Lua, (id, line): (usize, usize)) -> Result<()> {
+fn scroll_message_to(ui: &Ui, _lua: &Lua, (id, line): (usize, usize)) -> Result<()> {
     let ui = ui.get();
     let tui = &mut ui.borrow_mut().tui;
     match tui.get_node_mut(id) {
@@ -696,7 +696,7 @@ async fn scroll_message_to(ui: Ui, _lua: Lua, (id, line): (usize, usize)) -> Res
     }
 }
 
-async fn feed_ansi_message(ui: Ui, _lua: Lua, (id, value): (usize, LuaString)) -> Result<()> {
+fn feed_ansi_message(ui: &Ui, _lua: &Lua, (id, value): (usize, LuaString)) -> Result<()> {
     let ui = ui.get();
     let tui = &mut ui.borrow_mut().tui;
 
@@ -711,7 +711,7 @@ async fn feed_ansi_message(ui: Ui, _lua: Lua, (id, value): (usize, LuaString)) -
     }
 }
 
-async fn clear_message(ui: Ui, _lua: Lua, id: usize) -> Result<()> {
+fn clear_message(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
     let ui = ui.get();
     let tui = &mut ui.borrow_mut().tui;
 
@@ -722,7 +722,7 @@ async fn clear_message(ui: Ui, _lua: Lua, id: usize) -> Result<()> {
     Ok(())
 }
 
-async fn get_message_text(ui: Ui, _lua: Lua, id: usize) -> Result<Vec<BString>> {
+fn get_message_text(ui: &Ui, _lua: &Lua, id: usize) -> Result<Vec<BString>> {
     let ui = ui.get();
     let tui = &ui.borrow().tui;
 
@@ -733,7 +733,7 @@ async fn get_message_text(ui: Ui, _lua: Lua, id: usize) -> Result<Vec<BString>> 
     }
 }
 
-async fn message_to_ansi_string(ui: Ui, _lua: Lua, (id, width): (usize, Option<u16>)) -> Result<mlua::BString> {
+fn message_to_ansi_string(ui: &Ui, _lua: &Lua, (id, width): (usize, Option<u16>)) -> Result<mlua::BString> {
     let ui = ui.get();
     let tui = &mut ui.borrow_mut().tui;
 
@@ -743,7 +743,7 @@ async fn message_to_ansi_string(ui: Ui, _lua: Lua, (id, width): (usize, Option<u
     }
 }
 
-async fn set_status_bar(ui: Ui, lua: Lua, val: LuaValue) -> Result<()> {
+fn set_status_bar(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<()> {
     let ui = ui.get();
     let options: Option<MessageOptions> = lua.from_value(val)?;
     let mut ui = ui.borrow_mut();
@@ -852,20 +852,20 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     lua_api.set("sgr_to_style", ui.lua.create_function(sgr_to_style)?)?;
     lua_api.set("style_to_sgr", ui.lua.create_function(style_to_sgr)?)?;
     ui.set_lua_async_fn("allocate_height", allocate_height)?;
-    ui.set_lua_async_fn("set_message", set_message)?;
-    ui.set_lua_async_fn("check_message", check_message)?;
-    ui.set_lua_async_fn("remove_message", remove_message)?;
-    ui.set_lua_async_fn("clear_messages", clear_messages)?;
-    ui.set_lua_async_fn("scroll_message", scroll_message)?;
-    ui.set_lua_async_fn("scroll_message_to", scroll_message_to)?;
-    ui.set_lua_async_fn("add_buf_highlight_namespace", add_buf_highlight_namespace)?;
-    ui.set_lua_async_fn("add_buf_highlight", add_buf_highlight)?;
-    ui.set_lua_async_fn("clear_buf_highlights", clear_buf_highlights)?;
-    ui.set_lua_async_fn("feed_ansi_message", feed_ansi_message)?;
-    ui.set_lua_async_fn("clear_message", clear_message)?;
-    ui.set_lua_async_fn("get_message_text", get_message_text)?;
-    ui.set_lua_async_fn("message_to_ansi_string", message_to_ansi_string)?;
-    ui.set_lua_async_fn("set_status_bar", set_status_bar)?;
+    ui.set_lua_fn("set_message", set_message)?;
+    ui.set_lua_fn("check_message", check_message)?;
+    ui.set_lua_fn("remove_message", remove_message)?;
+    ui.set_lua_fn("clear_messages", clear_messages)?;
+    ui.set_lua_fn("scroll_message", scroll_message)?;
+    ui.set_lua_fn("scroll_message_to", scroll_message_to)?;
+    ui.set_lua_fn("add_buf_highlight_namespace", add_buf_highlight_namespace)?;
+    ui.set_lua_fn("add_buf_highlight", add_buf_highlight)?;
+    ui.set_lua_fn("clear_buf_highlights", clear_buf_highlights)?;
+    ui.set_lua_fn("feed_ansi_message", feed_ansi_message)?;
+    ui.set_lua_fn("clear_message", clear_message)?;
+    ui.set_lua_fn("get_message_text", get_message_text)?;
+    ui.set_lua_fn("message_to_ansi_string", message_to_ansi_string)?;
+    ui.set_lua_fn("set_status_bar", set_status_bar)?;
     ui.set_lua_async_fn("enable_mouse_mode", enable_mouse_mode)?;
     ui.set_lua_fn("get_message_geometry", get_message_geometry)?;
     ui.set_lua_fn("get_status_bar_geometry", get_status_bar_geometry)?;

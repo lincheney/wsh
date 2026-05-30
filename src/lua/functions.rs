@@ -55,7 +55,7 @@ impl UserData for Function {
     }
 }
 
-async fn make_zsh_function(ui: Ui, lua: Lua, code: BString) -> Result<LuaValue> {
+fn make_zsh_function(ui: &Ui, lua: &Lua, code: BString) -> Result<LuaValue> {
     let func = ui.shell.make_function(code.into())?;
     Ok(lua.pack(Function {
         inner: func,
@@ -65,7 +65,7 @@ async fn make_zsh_function(ui: Ui, lua: Lua, code: BString) -> Result<LuaValue> 
 
 pub fn init_lua(ui: &Ui) -> Result<()> {
 
-    ui.set_lua_async_fn("make_zsh_function", make_zsh_function)?;
+    ui.set_lua_fn("make_zsh_function", make_zsh_function)?;
 
     Ok(())
 }

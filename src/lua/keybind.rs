@@ -63,7 +63,7 @@ pub async fn invoke_keybind_callback(ui: &Ui, event: &Event) -> bool {
     true
 }
 
-async fn set_keymap(ui: Ui, _lua: Lua, (key, callback, layer): (String, Function, Option<usize>)) -> Result<()> {
+fn set_keymap(ui: &Ui, _lua: &Lua, (key, callback, layer): (String, Function, Option<usize>)) -> Result<()> {
     let key = EventIndex::parse_from_label(&key)?;
 
     let ui = ui.get();
@@ -82,7 +82,7 @@ async fn set_keymap(ui: Ui, _lua: Lua, (key, callback, layer): (String, Function
     Ok(())
 }
 
-async fn add_keymap_layer(ui: Ui, _lua: Lua, no_fallthrough: Option<bool>) -> Result<usize> {
+fn add_keymap_layer(ui: &Ui, _lua: &Lua, no_fallthrough: Option<bool>) -> Result<usize> {
     let no_fallthrough = no_fallthrough.unwrap_or(false);
     let ui = ui.get();
     let mut ui = ui.borrow_mut();
@@ -92,7 +92,7 @@ async fn add_keymap_layer(ui: Ui, _lua: Lua, no_fallthrough: Option<bool>) -> Re
     Ok(id)
 }
 
-async fn del_keymap_layer(ui: Ui, _lua: Lua, layer: usize) -> Result<()> {
+fn del_keymap_layer(ui: &Ui, _lua: &Lua, layer: usize) -> Result<()> {
     let ui = ui.get();
     let mut ui = ui.borrow_mut();
     ui.keybinds.retain(|k| k.id != layer);
@@ -101,9 +101,9 @@ async fn del_keymap_layer(ui: Ui, _lua: Lua, layer: usize) -> Result<()> {
 
 pub fn init_lua(ui: &Ui) -> Result<()> {
 
-    ui.set_lua_async_fn("set_keymap", set_keymap)?;
-    ui.set_lua_async_fn("add_keymap_layer", add_keymap_layer)?;
-    ui.set_lua_async_fn("del_keymap_layer", del_keymap_layer)?;
+    ui.set_lua_fn("set_keymap", set_keymap)?;
+    ui.set_lua_fn("add_keymap_layer", add_keymap_layer)?;
+    ui.set_lua_fn("del_keymap_layer", del_keymap_layer)?;
 
     Ok(())
 }
