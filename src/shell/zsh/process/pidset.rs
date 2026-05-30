@@ -23,7 +23,9 @@ impl Drop for WriteGuard<'_> {
         let pidset = Rc::new(pidset);
         let ptr = Box::into_raw(Box::new(pidset));
         let old_ptr = self.table.read.swap(ptr, Ordering::AcqRel);
-        drop(unsafe { Box::from_raw(old_ptr) });
+        if !old_ptr.is_null() {
+            drop(unsafe { Box::from_raw(old_ptr) });
+        }
     }
 }
 crate::impl_deref_helper!(self: WriteGuard<'a>, &self.guard => PidSet);
