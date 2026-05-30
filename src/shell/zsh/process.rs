@@ -150,7 +150,8 @@ pub(super) fn cleanup() {
         zsh_sys::deletehookfunc(c"before_trap".as_ptr().cast_mut(), Some(before_trap_hook));
     }
     close_self_pipe();
-    pidset::PID_TABLE.with(|p| p.clear());
+    // this can fail if we are exiting but i dont care
+    let _ = pidset::PID_TABLE.try_with(|p| p.clear());
 }
 
 pub(super) fn init(ui: &crate::ui::Ui) -> Result<()> {
