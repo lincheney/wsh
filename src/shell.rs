@@ -147,8 +147,16 @@ impl Shell {
         receiver.await
     }
 
-    pub async fn trampoline_out_callback(&self, callback: TrampolineCallback) -> Result<(), oneshot::error::RecvError> {
-        self.trampoline_out(ControlFlow::Continue(callback)).await
+    pub async fn trampoline_out_callback<F: 'static + FnOnce(Rc<externs::GlobalState>) -> T, T: 'static>(
+        &self,
+        callback: F,
+    ) -> Result<T, oneshot::error::RecvError> {
+        let (sender, receiver) = oneshot::channel();
+        let callback = Box::new(move |state| {
+            let _ = sender.send(callback(state));
+        });
+        self.trampoline_out(ControlFlow::Continue(callback)).await?;
+        receiver.await
     }
 
     pub async fn accept_line(&self, line: BString) -> Result<(), oneshot::error::RecvError> {

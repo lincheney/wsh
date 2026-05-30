@@ -446,12 +446,10 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
         || matches!(args.stderr, Stdio::inherit)
     );
 
-    let (result_sender, result_receiver) = oneshot::channel();
-
-    {
+    let result = {
         let ui = ui.clone();
-        ui.clone().shell.trampoline_out_callback(Box::new(move |state| {
-            let result = state.shell_loop_with_future(async move {
+        ui.clone().shell.trampoline_out_callback(move |state| {
+            state.shell_loop_with_future(async move {
                 ui.freeze_if(foreground, true, async {
 
                     let stdin = stdio_pipe!(args, stdin, true);
@@ -493,13 +491,11 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
                     Ok((code, errors))
                 }).await
 
-            });
-            // send the code out
-            let _ = result_sender.send(result);
-        })).await?;
-    }
+            })
+        }).await
+    };
 
-    let (code, errors) = result_receiver.await.unwrap()???;
+    let (code, errors) = result.unwrap()???;
 
     let mut drawn = false;
     for err in errors {
