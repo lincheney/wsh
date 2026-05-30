@@ -53,7 +53,8 @@ macro_rules! shell_loop {
     }};
     ($state:expr, $future:expr) => {{
         let state = $state;
-        let mut future = $future;
+        let future = $future;
+        tokio::pin!(future);
 
         let result = loop {
             let trampoline = state.ui.shell.trampoline_in();
@@ -145,12 +146,12 @@ impl Drop for GlobalState {
 }
 
 pub trait ShellLoop {
-    fn shell_loop_with_future<F: 'static + Future + Unpin>(&self, future: F) -> Result<F::Output>;
+    fn shell_loop_with_future<F: 'static + Future>(&self, future: F) -> Result<F::Output>;
     fn shell_loop(&self) -> Result<Option<BString>>;
 }
 
 impl ShellLoop for Rc<GlobalState> {
-    fn shell_loop_with_future<F: 'static + Future + Unpin>(&self, future: F) -> Result<F::Output> {
+    fn shell_loop_with_future<F: 'static + Future>(&self, future: F) -> Result<F::Output> {
         shell_loop!(self, future)
     }
 
@@ -159,7 +160,7 @@ impl ShellLoop for Rc<GlobalState> {
     }
 }
 
-pub fn shell_loop_with_future<F: 'static + Future + Unpin>(future: F) -> Result<F::Output> {
+pub fn shell_loop_with_future<F: 'static + Future>(future: F) -> Result<F::Output> {
     GlobalState::get().and_then(|state| state.shell_loop_with_future(future))
 }
 
@@ -239,7 +240,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
 
                 {
                     let state = state.clone();
-                    state.clone().runtime.block_on(async move {
+                    let result = state.clone().shell_loop_with_future(async move {
                         // sometimes zsh will trash zle without refreshing
                         // redraw the ui
                         let result = crate::log_if_err(state.ui.zle_cmd_refresh().await);
@@ -262,6 +263,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                             state.first_drawn.set(true);
                         }
                     });
+                    crate::log_if_err(result);
                 }
 
                 // allow sigwinch while we are waiting

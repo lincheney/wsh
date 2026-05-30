@@ -35,7 +35,7 @@ async fn get_completions(mut ui: Ui, _lua: Lua, (val, callback): (Option<String>
         ui.borrow().buffer.get_contents().clone()
     };
 
-    ui.clone().shell.trampoline_out(ControlFlow::Continue(Box::new(move |state| {
+    ui.clone().shell.trampoline_out_callback(Box::new(move |state| {
         let mut ui_clone = ui.clone();
         let result = ui_clone.shell.get_completions(val, Box::new(move |matches| {
             let matches: Vec<_> = matches.into_iter().map(|x| Match{inner: Rc::new(x)}).collect();
@@ -60,7 +60,7 @@ async fn get_completions(mut ui: Ui, _lua: Lua, (val, callback): (Option<String>
                 ui_clone.report_error(err);
             },
         }
-    }))).await;
+    })).await;
 
 
     Ok(())

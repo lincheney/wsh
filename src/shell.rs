@@ -12,6 +12,7 @@ use std::default::Default;
 use std::sync::{Arc};
 use std::ptr::null_mut;
 use bstr::{BString, ByteSlice, ByteVec};
+use tokio::sync::oneshot;
 
 mod externs;
 mod file_stream;
@@ -36,10 +37,11 @@ pub use zsh::{
 pub use externs::{ShellLoop, shell_loop_with_future};
 pub use variables::Variable;
 
-type TrampolinePayload = ControlFlow<Option<BString>, Box<dyn FnOnce(Rc<externs::GlobalState>)> >;
+type TrampolineCallback = Box<dyn FnOnce(Rc<externs::GlobalState>)>;
+type TrampolinePayload = ControlFlow<Option<BString>, TrampolineCallback>;
 enum Trampoline {
-    Resumed(tokio::sync::oneshot::Sender<TrampolinePayload>),
-    Paused(tokio::sync::oneshot::Sender<()>),
+    Resumed(oneshot::Sender<TrampolinePayload>),
+    Paused(oneshot::Sender<()>),
 }
 
 pub struct Shell {
@@ -113,41 +115,43 @@ impl Shell {
         self.trampoline.borrow_mut().pop();
     }
 
-    pub fn trampoline_in(&self) -> tokio::sync::oneshot::Receiver<TrampolinePayload> {
-        let (sender, receiver) = tokio::sync::oneshot::channel();
+    pub fn trampoline_in(&self) -> oneshot::Receiver<TrampolinePayload> {
+        let (sender, receiver) = oneshot::channel();
 
-        let oneshot = {
+        let previous = {
             let mut trampoline = self.trampoline.borrow_mut();
             let trampoline = trampoline.last_mut().unwrap();
             trampoline.replace(Trampoline::Resumed(sender))
         };
 
-        ::log::debug!("DEBUG(jarred)\t{}\t= {:?}", stringify!(oneshot), oneshot.is_some());
-        if let Some(Trampoline::Paused(oneshot)) = oneshot {
-            ::log::debug!("DEBUG(kilted)\t{}\t= {:?}", stringify!(123), 123);
-            let _ = oneshot.send(());
+        if let Some(Trampoline::Paused(previous)) = previous {
+            let _ = previous.send(());
         }
 
         receiver
     }
 
-    pub async fn trampoline_out(&self, payload: TrampolinePayload) -> Option<Result<(), tokio::sync::oneshot::error::RecvError>> {
-        let (sender, receiver) = ::tokio::sync::oneshot::channel();
+    pub async fn trampoline_out(&self, payload: TrampolinePayload) -> Result<(), oneshot::error::RecvError> {
+        let (sender, receiver) = oneshot::channel();
 
-        let oneshot = {
+        let previous = {
             let mut trampoline = self.trampoline.borrow_mut();
             let trampoline = trampoline.last_mut().unwrap();
             trampoline.replace(Trampoline::Paused(sender))
         };
 
-        let Some(Trampoline::Resumed(sender)) = oneshot
+        let Some(Trampoline::Resumed(previous)) = previous
             else { panic!("expected Some(Trampoline::Resumed(..))"); };
-        assert!(sender.send(payload).is_ok(), "failed to trampoline out");
+        assert!(previous.send(payload).is_ok(), "failed to trampoline out");
 
-        Some(receiver.await)
+        receiver.await
     }
 
-    pub async fn accept_line(&self, line: BString) -> Option<Result<(), tokio::sync::oneshot::error::RecvError>> {
+    pub async fn trampoline_out_callback(&self, callback: TrampolineCallback) -> Result<(), oneshot::error::RecvError> {
+        self.trampoline_out(ControlFlow::Continue(callback)).await
+    }
+
+    pub async fn accept_line(&self, line: BString) -> Result<(), oneshot::error::RecvError> {
         self.trampoline_out(ControlFlow::Break(Some(line))).await
     }
 
