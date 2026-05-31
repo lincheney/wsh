@@ -221,7 +221,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         let mut proc = None;
         let result: Result<Result<_>> = ui.freeze_if(foreground, true, async {
 
-            let (child, pid, pid_waiter) = {
+            let (child, pid, mut pid_waiter) = {
                 let (result, queue_result) = ui.shell.with_queued_signals(|| {
                     command.spawn().map(|child| {
                         let pid = child.id().unwrap();
@@ -242,10 +242,17 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
 
             // if queuing is enabled then the pid_waiter won't work
             let code = tokio::select!(
-                code = pid_waiter => code.ok(),
+                code = &mut pid_waiter => code.ok(),
                 status = child.wait() => {
+                    // if zsh got the code first then status may just be a failure
+                    // in that case still need to check pid_waiter
+                    let code = if let Ok(status) = status {
+                        status.code()
+                    } else {
+                        pid_waiter.await.ok()
+                    };
                     crate::shell::process::deregister_pid(&ui, pid as _);
-                    status.ok().and_then(|x| x.code())
+                    code
                 }
             );
             let code = code.unwrap_or(-1);
@@ -353,21 +360,23 @@ macro_rules! stdio_pipe {
     ($args:expr, $name:ident, true) => (
         stdio_pipe!($args, $name, File::create("/dev/null"), {
             let (send, recv) = tokio::net::unix::pipe::pipe()?;
+            let fd = send.as_raw_fd();
             let send = WriteableFile(Some(BufWriter::new(send)));
-            (Some(send), Some(OverriddenStream::new(&std::io::$name(), recv.into_nonblocking_fd()?)))
+            (Some(send), Some(OverriddenStream::new(&std::io::$name(), recv.into_nonblocking_fd()?)), Some(fd))
         })
     );
     ($args:expr, $name:ident, false) => (
         stdio_pipe!($args, $name, File::open("/dev/null"), {
             let (send, recv) = tokio::net::unix::pipe::pipe()?;
+            let fd = recv.as_raw_fd();
             let recv = ReadableFile(Some(BufReader::new(recv)), false);
-            (Some(recv), Some(OverriddenStream::new(&std::io::$name(), send.into_nonblocking_fd()?)))
+            (Some(recv), Some(OverriddenStream::new(&std::io::$name(), send.into_nonblocking_fd()?)), Some(fd))
         })
     );
     ($args:expr, $name:ident, $null:expr, $piped:expr) => (
         match $args.$name {
-            Stdio::inherit => (None, None),
-            Stdio::null => (None, Some(OverriddenStream::new(&std::io::$name(), $null?))),
+            Stdio::inherit => (None, None, None),
+            Stdio::null => (None, Some(OverriddenStream::new(&std::io::$name(), $null?)), None),
             Stdio::piped => $piped,
         }
     );
@@ -387,17 +396,24 @@ pub async fn subshell_run(mut ui: Ui, lua: Lua, cmd: BString, args: FullShellRun
     let stdout = stdio_pipe!(args, stdout, false);
     let stderr = stdio_pipe!(args, stderr, false);
     let streams = [stdin.1, stdout.1, stderr.1];
+    let fds = [stdin.2, stdout.2, stderr.2];
 
     tokio::task::spawn_local(async move {
         let mut result_sender = Some(result_sender);
         let result: Result<Result<_>> = ui.freeze_if(foreground, true, async {
             // fork it now to get the pid
-            let redirections = streams.iter().flatten().map(|s| (s.fd, s.replacement)).collect();
-            let pid = ui.shell.exec_subshell(cmd, false, redirections)? as _;
+            let redirections = streams.each_ref().map(|s| s.as_ref().map(|s| (s.fd, s.replacement, s.fd != 0)));
+            let pid = ui.shell.exec_subshell(cmd, false, &redirections, &fds)? as _;
+            // close them or we will block
+            for file in streams {
+                if let Some(mut file) = file {
+                    crate::log_if_err(file.close());
+                }
+            }
             // send streams back to caller
             let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
             // get the status
-            let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, false);
+            let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, true);
             let code = match ui.shell.check_pid_status(pid as _) {
                 None | Some(-1) => pid_waiter.await.unwrap_or(-1) as _,
                 Some(code) => code as _,
