@@ -1,3 +1,4 @@
+use std::sync::{atomic::Ordering};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use bstr::{BStr, BString};
@@ -138,7 +139,7 @@ impl Ui {
             has_foreground_process: Default::default(),
             print_lock: Default::default(),
             is_drawing: Rc::new(false.into()),
-            pid_map: Rc::new(Default::default()),
+            pid_map: Default::default(),
         };
 
         Ok(ui)
@@ -236,16 +237,22 @@ impl Ui {
     }
 
     pub async fn call_lua_fn<T: IntoLuaMulti + mlua::MaybeSend + 'static>(&self, draw: bool, callback: mlua::Function, arg: T) {
+
+        crate::shell::LUA_LEVEL.fetch_add(1, Ordering::Relaxed);
         let result = callback.call_async::<LuaValue>(arg).await;
-        let mut ui = self.clone();
-        if !ui.report_error(result) && draw {
-            ui.queue_draw();
+        crate::shell::LUA_LEVEL.fetch_sub(1, Ordering::Relaxed);
+
+        if result.is_err() {
+            let mut ui = self.clone();
+            if !ui.report_error(result) && draw {
+                ui.queue_draw();
+            }
         }
     }
 
     pub fn report_error<T, E: std::fmt::Display>(&mut self, result: std::result::Result<T, E>) -> bool {
         if let Err(err) = result {
-            log::error!("{}", err);
+            log::error!("{err}");
             self.show_error_message(&format!("ERROR: {err}"));
             true
         } else {

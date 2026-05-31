@@ -39,7 +39,6 @@ fn convert_from_custom_signal(sig: c_int) -> c_int {
 }
 
 extern "C" fn sighandler(sig: c_int) {
-    // this *should* run in the main thread
     #[allow(static_mut_refs)]
     unsafe {
         // allow our trap to run
@@ -76,7 +75,7 @@ pub fn invoke_signal_handler(arg: Option<&[u8]>) -> c_int {
     match signal.try_into() {
         Ok(signal::Signal::SIGCHLD) => super::process::sighandler(),
         Ok(signal::Signal::SIGWINCH) => sigwinch::sighandler(),
-        Ok(signal::Signal::SIGINT) => sigint::sighandler(),
+        // Ok(signal::Signal::SIGINT) => sigint::sighandler(),
         _ => 1, // unknown
     }
 }
@@ -89,10 +88,14 @@ fn resize_array<T: Copy + Default>(dst: &mut *mut T, old_len: usize, new_len: us
     *dst = Box::into_raw(new.into_boxed_slice()).cast();
 }
 
-pub(super) fn install_signal_handler(signal: signal::Signal, save_original: bool) -> Result<()> {
+pub(super) fn install_signal_handler(
+    signal: signal::Signal,
+    save_original: bool,
+    func: Option<extern "C" fn(c_int)>,
+) -> Result<()> {
     unsafe {
         // set the sighandler
-        let handler = signal::SigHandler::Handler(sighandler);
+        let handler = signal::SigHandler::Handler(func.unwrap_or(sighandler));
         let action = signal::SigAction::new(handler, signal::SaFlags::empty(), signal::SigSet::empty());
         let old_action = signal::sigaction(signal, &action)?;
         if save_original {
@@ -103,7 +106,7 @@ pub(super) fn install_signal_handler(signal: signal::Signal, save_original: bool
 }
 
 pub(super) fn hook_signal(signal: signal::Signal) -> Result<()> {
-    install_signal_handler(signal, true)?;
+    install_signal_handler(signal, true, None)?;
     unsafe {
         // now set the trap
         let signal = convert_to_custom_signal(signal as _);
@@ -157,7 +160,7 @@ pub fn init(ui: &crate::ui::Ui) -> Result<()> {
 
     super::process::init(ui)?;
     sigwinch::init()?;
-    sigint::init()?;
+    sigint::init(ui)?;
 
     Ok(())
 }

@@ -34,7 +34,7 @@ pub use zsh::{
     MetaString,
     MetaSlice,
 };
-pub use externs::{ShellLoop, shell_loop};
+pub use externs::{ShellLoop, shell_loop, LUA_LEVEL};
 pub use variables::Variable;
 
 type TrampolinePayload = Box<dyn FnOnce(Rc<externs::GlobalState>)>;
@@ -103,7 +103,7 @@ impl Shell {
     pub fn new() -> Self {
         Shell {
             sink: RefCell::new(file_stream::Sink::new().unwrap()),
-            trampoline: RefCell::new(vec![]),
+            trampoline: RefCell::new(vec![None]),
             accept_line_trampoline: Cell::new(None),
         }
     }

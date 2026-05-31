@@ -14,7 +14,6 @@ enum Message {
     Exit(i32),
     Draw,
     WindowResize(u32, u32),
-    Interrupt,
 }
 
 #[derive(Clone)]
@@ -141,23 +140,20 @@ impl EventStream {
         });
 
         // sigint
-        let queue_sender = self.queue_sender.clone();
-        let mut pausable = self.pausable.clone();
-        crate::spawn_and_log::<_, _, anyhow::Error>(async move {
-            let Some(errflag) = crate::shell::signals::sigint::get_subscriber()
-                else {
-                    anyhow::bail!("cannot subscribe to sigint events");
-                };
-            while let Some(errflag) = errflag.upgrade() {
-                match pausable.run(errflag.notified()).await {
-                    None => (),
-                    Some(()) => {
-                        let _ = queue_sender.send(Message::Interrupt);
-                    },
+        {
+            let ui = ui.clone();
+            crate::spawn_and_log::<_, _, anyhow::Error>(async move {
+                let Some(errflag) = crate::shell::signals::sigint::get_subscriber()
+                    else {
+                        anyhow::bail!("cannot subscribe to sigint events");
+                    };
+                while let Some(errflag) = errflag.upgrade() {
+                    errflag.notified().await;
+                    ui.handle_interrupt();
                 }
-            }
-            Ok(())
-        });
+                Ok(())
+            });
+        }
 
         // process events
         loop {
@@ -171,11 +167,6 @@ impl EventStream {
                 },
                 Some(Message::WindowResize(width, height)) => {
                     if !ui.handle_window_resize(width, height).await? {
-                        return Ok(0)
-                    }
-                },
-                Some(Message::Interrupt) => {
-                    if !ui.handle_interrupt().await? {
                         return Ok(0)
                     }
                 },

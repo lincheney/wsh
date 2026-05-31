@@ -7,7 +7,7 @@ use std::os::raw::{c_char, c_int};
 use std::rc::Rc;
 use std::cell::RefCell;
 use std::ptr::null_mut;
-use std::sync::{LazyLock, OnceLock, Mutex};
+use std::sync::{LazyLock, OnceLock, Mutex, atomic::{Ordering, AtomicUsize}};
 use anyhow::Result;
 use crate::shell::{Shell, zsh, MetaString, MetaSlice};
 
@@ -24,6 +24,7 @@ thread_local! {
 
 static ORIGINAL_ZLE_ENTRY_PTR: OnceLock<zsh_sys::ZleEntryPoint> = OnceLock::new();
 static IS_RUNNING: Mutex<()> = Mutex::new(());
+pub static LUA_LEVEL: AtomicUsize = AtomicUsize::new(0);
 
 fn teardown() {
     STATE.with(|state| state.take());
@@ -34,6 +35,7 @@ impl GlobalState {
         crate::logging::init();
         fork::init();
 
+        LUA_LEVEL.store(0, Ordering::Release);
         let runtime = crate::async_runtime::Runtime::new()?;
 
         let result: Result<_> = runtime.block_on(async {
