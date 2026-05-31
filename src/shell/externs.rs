@@ -103,7 +103,10 @@ impl ShellLoop for Rc<GlobalState> {
     fn shell_loop<F: 'static + Future>(&self, future: F) -> Result<F::Output> {
         tokio::pin!(future);
 
-        loop {
+        let mut queueing_enabled = self.ui.shell.queue_signal_level();
+        self.ui.shell.dont_queue_signals()?;
+
+        let result = loop {
             let trampoline = self.ui.shell.trampoline_in();
             let result = self.runtime.block_on(async {
                 tokio::select!(
@@ -113,15 +116,21 @@ impl ShellLoop for Rc<GlobalState> {
             });
 
             match result {
-                ControlFlow::Break(x) => return Ok(x),
-                ControlFlow::Continue(Err(err)) => return Err(err)?,
+                ControlFlow::Break(x) => break Ok(x),
+                ControlFlow::Continue(Err(err)) => break Err(err),
                 ControlFlow::Continue(Ok(callback)) => {
+                    self.ui.shell.restore_queue_signals(queueing_enabled);
                     self.ui.shell.trampoline_push();
                     callback(self.clone());
                     self.ui.shell.trampoline_pop();
+                    queueing_enabled = self.ui.shell.queue_signal_level();
+                    self.ui.shell.dont_queue_signals()?;
                 },
             }
-        }
+        };
+
+        self.ui.shell.restore_queue_signals(queueing_enabled);
+        Ok(result?)
     }
 }
 
@@ -288,7 +297,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
 
             } else if cmd == zsh_sys::ZLE_CMD_REFRESH as _ {
                 // redraw the ui
-                state.clone().runtime.block_on(async move {
+                state.clone().runtime.weak_block_on(async move {
                     if state.ui.zle_cmd_refresh().await.unwrap() {
                         crate::log_if_err(state.ui.draw().await);
                     }

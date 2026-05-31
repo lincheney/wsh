@@ -515,8 +515,8 @@ impl Shell {
         function.get_source()
     }
 
-    pub fn is_queuing_signals(&self) -> bool {
-        zsh::is_queuing_signals()
+    pub fn queue_signal_level(&self) -> i32 {
+        zsh::queue_signal_level()
     }
 
     pub fn with_queued_signals<T, F: FnOnce() -> T>(&self, func: F) -> (T, nix::Result<()>) {
@@ -529,6 +529,14 @@ impl Shell {
 
     pub fn unqueue_signals(&self) -> nix::Result<()> {
         zsh::unqueue_signals()
+    }
+
+    pub fn dont_queue_signals(&self) -> nix::Result<()> {
+        zsh::dont_queue_signals()
+    }
+
+    pub fn restore_queue_signals(&self, level: i32) {
+        zsh::restore_queue_signals(level)
     }
 
     pub fn call_hook_func(&self, name: Cow<'static, MetaStr>, args: Vec<MetaString>) -> Option<c_int> {
