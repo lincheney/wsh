@@ -60,8 +60,7 @@ async fn get_completions(mut ui: Ui, _lua: Lua, (val, callback): (Option<String>
                 ui_clone.report_error(err);
             },
         }
-    }).await;
-
+    }).await?;
 
     Ok(())
 }

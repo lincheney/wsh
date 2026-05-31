@@ -48,21 +48,21 @@ fn jobtab_iter<'a>() -> impl Iterator<Item=&'a zsh_sys::process> {
 }
 
 pub fn clear_pids() {
-    pidset::PID_TABLE.with(|p| p.clear());
+    let _ = pidset::PidTable::clear();
 }
 
 pub fn register_pid(ui: &crate::ui::Ui, pid: pidset::Pid, add_to_jobtab: bool) -> oneshot::Receiver<i32> {
     let (sender, receiver) = oneshot::channel();
     let mut pid_map = ui.pid_map.borrow_mut();
     pid_map.insert(pid, sender);
-    pidset::PID_TABLE.with(|p| p.register_pid(pid, add_to_jobtab));
+    let _ = pidset::PidTable::register_pid(pid, add_to_jobtab);
     receiver
 }
 
 pub fn deregister_pid(ui: &crate::ui::Ui, pid: pidset::Pid) {
     let mut pid_map = ui.pid_map.borrow_mut();
     pid_map.remove(&pid);
-    if matches!(pidset::PID_TABLE.with(|p| p.deregister_pid(pid)), Some(true)) {
+    if matches!(pidset::PidTable::deregister_pid(pid), Ok(Some(true))) {
         jobtab_retain_iter(|proc| proc.pid != pid).for_each(|_| ());
     }
 }
@@ -75,17 +75,12 @@ pub(super) fn sighandler() -> c_int {
     #[allow(static_mut_refs)]
     unsafe {
         // register any pids we are interested in
-        pidset::PID_TABLE.with(|pids| {
-            let pids = pids.get();
-            if let Some(pids) = pids && !pids.is_empty() {
-                super::queue_signals();
-                for (&pid, (status, add)) in pids.iter() {
-                    // register these pids
-                    if *add && status.load(Ordering::Relaxed) < 0 && !jobtab_iter().any(|proc| proc.pid == pid) {
-                        super::add_pid(pid);
-                    }
+        let _ = pidset::PidTable::try_with(|pids| {
+            for (&pid, (status, add)) in pids.iter() {
+                // register these pids
+                if *add && status.get() < 0 && !jobtab_iter().any(|proc| proc.pid == pid) {
+                    super::add_pid(pid);
                 }
-                super::unqueue_signals().unwrap();
             }
         });
 
@@ -96,32 +91,28 @@ pub(super) fn sighandler() -> c_int {
         zsh_sys::thisjob = thisjob;
 
         // check for our pids
-        pidset::PID_TABLE.with(|pids| {
-            if let Some(pids) = pids.get() && !pids.is_empty() {
-                super::queue_signals();
-                let mut found = false;
-                jobtab_retain_iter(|proc| {
-                    // found one
-                    if proc.status >= 0 && let Some((status, added)) = pids.get(&proc.pid) {
-                        found = true;
-                        status.store(proc.status, Ordering::Release);
-                        // pop it off
-                        if *added {
-                            return false
-                        }
-                    }
-                    true
-                }).for_each(drop);
-                super::unqueue_signals().unwrap();
-
-                // notify that we found something
-                if found {
-                    let pipe = SELF_PIPE.load(Ordering::Acquire);
-                    if pipe != -1 {
-                        nix::unistd::write(BorrowedFd::borrow_raw(pipe), b"0").unwrap();
+        let _ = pidset::PidTable::try_with(|pids| {
+            let mut found = false;
+            jobtab_retain_iter(|proc| {
+                // found one
+                if proc.status >= 0 && let Some((status, added)) = pids.get(&proc.pid) {
+                    found = true;
+                    status.set(proc.status);
+                    // pop it off
+                    if *added {
+                        return false
                     }
                 }
+                true
+            }).for_each(drop);
+            super::unqueue_signals().unwrap();
 
+            // notify that we found something
+            if found {
+                let pipe = SELF_PIPE.load(Ordering::Acquire);
+                if pipe != -1 {
+                    nix::unistd::write(BorrowedFd::borrow_raw(pipe), b"0").unwrap();
+                }
             }
         });
 
@@ -150,8 +141,7 @@ pub(super) fn cleanup() {
         zsh_sys::deletehookfunc(c"before_trap".as_ptr().cast_mut(), Some(before_trap_hook));
     }
     close_self_pipe();
-    // this can fail if we are exiting but i dont care
-    let _ = pidset::PID_TABLE.try_with(|p| p.clear());
+    let _ = pidset::PidTable::clear();
 }
 
 pub(super) fn init(ui: &crate::ui::Ui) -> Result<()> {
@@ -161,12 +151,10 @@ pub(super) fn init(ui: &crate::ui::Ui) -> Result<()> {
         let mut pid_map = ui.pid_map.borrow_mut();
         if !pid_map.is_empty() {
             // check for pids that are done
-            pidset::PID_TABLE.with(|p| {
-                p.extract_finished_pids(|pid, status| {
-                    if let Some(sender) = pid_map.remove(&pid) {
-                        let _ = sender.send(status);
-                    }
-                });
+            let _ = pidset::PidTable::extract_finished_pids(|pid, status| {
+                if let Some(sender) = pid_map.remove(&pid) {
+                    let _ = sender.send(status);
+                }
             });
         }
         Ok(())
