@@ -28,4 +28,15 @@ impl Runtime {
         self.localset.block_on(&self.runtime, future)
     }
 
+    pub fn weak_block_on<'a, F: 'a + Future>(&'a self, future: F) -> F::Output {
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let guard = handle.enter();
+            let result = futures::executor::block_on(future);
+            drop(guard);
+            result
+        } else {
+            self.block_on(future)
+        }
+    }
+
 }
