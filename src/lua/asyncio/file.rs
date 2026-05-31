@@ -52,19 +52,11 @@ fn add_readable_methods<R: MaybeSend+AsyncRead+Unpin, T: 'static+MaybeSend+Reada
         Ok(None)
     });
 
-    methods.add_async_method_mut("read_all", |lua, mut file, ()| async move {
+    methods.add_async_method_mut("read_to_end", |lua, mut file, ()| async move {
         if let Some(file) = file.get_reader() {
             let mut buf = vec![];
-            loop {
-                let start = buf.len();
-                buf.resize(buf.len() + 4096, 0);
-                let slice = &mut buf[start..];
-                let n = file.read(slice).await?;
-                buf.resize(start + n, 0);
-                if n == 0 {
-                    return Ok(Some(lua.create_string(&buf)?));
-                }
-            }
+            file.read_to_end(&mut buf).await?;
+            return Ok(Some(lua.create_string(&buf)?));
         }
         Ok(None)
     });

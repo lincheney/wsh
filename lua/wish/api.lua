@@ -90,7 +90,7 @@ end
 
 function wish.eval(args)
     local proc, stdin, stdout, stderr = wish.__shell_run{args = args, stdout = 'piped'}
-    local stdout = stdout:read_all()
+    local stdout = stdout:read_to_end()
     local code = proc:wait()
     wish.pprint({stdout=stdout})
     return code, stdout

@@ -18,7 +18,6 @@ local function start_proc()
     wish.set_cursor(utf8.len(wish.get_buffer()) + 1)
     wish.redraw()
 
-    wish.pprint(123)
     state.proc = wish.async.spawn{
         args = {
             'fzf',
@@ -33,7 +32,6 @@ local function start_proc()
         stdin = 'piped',
         stdout = 'piped',
     }
-    wish.pprint(456)
     state.resume()
 end
 
@@ -83,7 +81,7 @@ function M.start(opts)
         -- and wait for the proc to finish
         local code = state.proc:wait()
         if code == 0 then
-            result = tonumber(state.proc.stdout:read_all():match('^(%d+)\t'))
+            result = tonumber(state.proc.stdout:read_to_end():match('^(%d+)\t'))
         end
 
         -- go back up

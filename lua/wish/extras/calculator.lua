@@ -25,8 +25,8 @@ return wish.plugin(function(wish)
             stderr = 'piped',
         }
         local code = proc:wait()
-        local stdout = proc.stdout:read_all():gsub('\n$', '')
-        local stderr = proc.stderr:read_all():gsub('\n$', '')
+        local stdout = proc.stdout:read_to_end():gsub('\n$', '')
+        local stderr = proc.stderr:read_to_end():gsub('\n$', '')
         return code > 0 and stderr or stdout
     end
 
