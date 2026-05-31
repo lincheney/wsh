@@ -221,16 +221,11 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         let mut proc = None;
         let result: Result<Result<_>> = ui.freeze_if(foreground, true, async {
 
-            let (child, pid, pid_waiter) = if ui.shell.is_queuing_signals() {
-                // spawn directly, don't use a pid waiter since it will just get queued
-                let child = command.spawn()?;
-                let pid = child.id().unwrap();
-                (child, pid, None)
-            } else {
+            let (child, pid, pid_waiter) = {
                 let (result, queue_result) = ui.shell.with_queued_signals(|| {
                     command.spawn().map(|child| {
                         let pid = child.id().unwrap();
-                        let pid_waiter = Some(crate::shell::process::register_pid(&ui, pid as _, true));
+                        let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, true);
                         (child, pid, pid_waiter)
                     })
                 });
@@ -245,18 +240,14 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
 
             let _ = result_sender.take().unwrap().send(Ok((pid, stdin, stdout, stderr)));
 
-            let code = if let Some(pid_waiter) = pid_waiter {
-                // if queuing is enabled then the pid_waiter won't work
-                tokio::select!(
-                    code = pid_waiter => code.ok(),
-                    status = child.wait() => {
-                        crate::shell::process::deregister_pid(&ui, pid as _);
-                        status.ok().and_then(|x| x.code())
-                    }
-                )
-            } else {
-                child.wait().await.ok().and_then(|x| x.code())
-            };
+            // if queuing is enabled then the pid_waiter won't work
+            let code = tokio::select!(
+                code = pid_waiter => code.ok(),
+                status = child.wait() => {
+                    crate::shell::process::deregister_pid(&ui, pid as _);
+                    status.ok().and_then(|x| x.code())
+                }
+            );
             let code = code.unwrap_or(-1);
 
             // ignore error
