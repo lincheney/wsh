@@ -1,4 +1,3 @@
-use bstr::BString;
 use std::ops::ControlFlow;
 use std::cell::Cell;
 use crate::lua::{ HasEventCallbacks};
@@ -28,57 +27,6 @@ static IS_RUNNING: Mutex<()> = Mutex::new(());
 
 fn teardown() {
     STATE.with(|state| state.take());
-}
-
-macro_rules! shell_loop {
-    ($state:expr) => {{
-        let state = $state;
-
-        let result = loop {
-            let trampoline = state.ui.shell.trampoline_in();
-            let result = state.runtime.block_on(trampoline);
-
-            match result {
-                Err(err) => break Err(err),
-                Ok(ControlFlow::Break(result)) => break Ok(result),
-                Ok(ControlFlow::Continue(callback)) => {
-                    state.ui.shell.trampoline_push();
-                    callback(state.clone());
-                    state.ui.shell.trampoline_pop();
-                },
-            }
-        };
-
-        Ok(result?)
-    }};
-    ($state:expr, $future:expr) => {{
-        let state = $state;
-        let future = $future;
-        tokio::pin!(future);
-
-        let result = loop {
-            let trampoline = state.ui.shell.trampoline_in();
-            let result = state.runtime.block_on(async {
-                tokio::select!(
-                    result = &mut future => return ControlFlow::Break(result),
-                    result = trampoline => return ControlFlow::Continue(result),
-                )
-            });
-
-            match result {
-                ControlFlow::Break(x) => break Ok(x),
-                ControlFlow::Continue(Err(err)) => break Err(err),
-                ControlFlow::Continue(Ok(ControlFlow::Break(_))) => (),
-                ControlFlow::Continue(Ok(ControlFlow::Continue(callback))) => {
-                    state.ui.shell.trampoline_push();
-                    callback(state.clone());
-                    state.ui.shell.trampoline_pop();
-                },
-            }
-        };
-
-        Ok(result?)
-    }};
 }
 
 impl GlobalState {
@@ -146,22 +94,37 @@ impl Drop for GlobalState {
 }
 
 pub trait ShellLoop {
-    fn shell_loop_with_future<F: 'static + Future>(&self, future: F) -> Result<F::Output>;
-    fn shell_loop(&self) -> Result<Option<BString>>;
+    fn shell_loop<F: 'static + Future>(&self, future: F) -> Result<F::Output>;
 }
 
 impl ShellLoop for Rc<GlobalState> {
-    fn shell_loop_with_future<F: 'static + Future>(&self, future: F) -> Result<F::Output> {
-        shell_loop!(self, future)
-    }
+    fn shell_loop<F: 'static + Future>(&self, future: F) -> Result<F::Output> {
+        tokio::pin!(future);
 
-    fn shell_loop(&self) -> Result<Option<BString>> {
-        shell_loop!(self)
+        loop {
+            let trampoline = self.ui.shell.trampoline_in();
+            let result = self.runtime.block_on(async {
+                tokio::select!(
+                    result = &mut future => return ControlFlow::Break(result),
+                    result = trampoline => return ControlFlow::Continue(result),
+                )
+            });
+
+            match result {
+                ControlFlow::Break(x) => return Ok(x),
+                ControlFlow::Continue(Err(err)) => return Err(err)?,
+                ControlFlow::Continue(Ok(callback)) => {
+                    self.ui.shell.trampoline_push();
+                    callback(self.clone());
+                    self.ui.shell.trampoline_pop();
+                },
+            }
+        }
     }
 }
 
-pub fn shell_loop_with_future<F: 'static + Future>(future: F) -> Result<F::Output> {
-    GlobalState::get().and_then(|state| state.shell_loop_with_future(future))
+pub fn shell_loop<F: 'static + Future>(future: F) -> Result<F::Output> {
+    GlobalState::get().and_then(|state| state.shell_loop(future))
 }
 
 
@@ -240,7 +203,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
 
                 {
                     let state = state.clone();
-                    let result = state.clone().shell_loop_with_future(async move {
+                    let result = state.clone().shell_loop(async move {
                         // sometimes zsh will trash zle without refreshing
                         // redraw the ui
                         let result = crate::log_if_err(state.ui.zle_cmd_refresh().await);
@@ -269,7 +232,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                 // allow sigwinch while we are waiting
                 // zsh::winch_unblock();
 
-                let result = state.shell_loop();
+                let result = state.shell_loop(state.ui.shell.wait_for_accept_line());
 
                 state.clone().runtime.block_on(async move {
                     // sometimes zsh will trash zle without refreshing
@@ -295,17 +258,21 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                 zsh_sys::zleactive = 0;
 
                 return match result {
-                    Ok(Some(mut string)) => {
+                    Ok(Ok(Some(mut string))) => {
                         // MUST have a newline here
                         string.push(b'\n');
                         MetaString::from(string).into_raw()
                     },
-                    Ok(None) => {
+                    Ok(Ok(None)) => {
                         // TODO quit
                         null_mut()
                     },
+                    Ok(Err(err)) => {
+                        log::error!("{err:?}");
+                        null_mut()
+                    },
                     Err(err) => {
-                        log::error!("{:?}", err);
+                        log::error!("{err:?}");
                         null_mut()
                     },
                 }

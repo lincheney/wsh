@@ -209,7 +209,7 @@ impl EventStream {
                 // restore the shell settings
                 crate::log_if_err(ui.borrow_mut().deactivate());
                 // break out of shell loop if necessary
-                crate::log_if_err(ui.shell.accept_line("".into()).await);
+                crate::log_if_err(ui.shell.accept_line(Some("".into())).await);
                 // log the original error
                 crate::log_if_err::<(), _>(Err(e));
             }

@@ -1,6 +1,6 @@
 use std::rc::Rc;
 use std::ops::ControlFlow;
-use std::cell::{RefCell};
+use std::cell::{RefCell, Cell};
 use std::borrow::Cow;
 use std::collections::HashMap;
 use anyhow::Result;
@@ -34,18 +34,18 @@ pub use zsh::{
     MetaString,
     MetaSlice,
 };
-pub use externs::{ShellLoop, shell_loop_with_future};
+pub use externs::{ShellLoop, shell_loop};
 pub use variables::Variable;
 
-type TrampolineCallback = Box<dyn FnOnce(Rc<externs::GlobalState>)>;
-type TrampolinePayload = ControlFlow<Option<BString>, TrampolineCallback>;
-enum Trampoline {
-    Resumed(oneshot::Sender<TrampolinePayload>),
+type TrampolinePayload = Box<dyn FnOnce(Rc<externs::GlobalState>)>;
+enum Trampoline<T=TrampolinePayload> {
+    Resumed(oneshot::Sender<T>),
     Paused(oneshot::Sender<()>),
 }
 
 pub struct Shell {
     trampoline: RefCell<Vec<Option<Trampoline>>>,
+    accept_line_trampoline: Cell<Option<Trampoline<Option<BString>>>>,
     sink: RefCell<file_stream::Sink>,
 }
 
@@ -103,7 +103,8 @@ impl Shell {
     pub fn new() -> Self {
         Shell {
             sink: RefCell::new(file_stream::Sink::new().unwrap()),
-            trampoline: RefCell::new(vec![None]),
+            trampoline: RefCell::new(vec![]),
+            accept_line_trampoline: Cell::new(None),
         }
     }
 
@@ -155,12 +156,38 @@ impl Shell {
         let callback = Box::new(move |state| {
             let _ = sender.send(callback(state));
         });
-        self.trampoline_out(ControlFlow::Continue(callback)).await?;
+        self.trampoline_out(callback).await?;
         receiver.await
     }
 
-    pub async fn accept_line(&self, line: BString) -> Result<(), oneshot::error::RecvError> {
-        self.trampoline_out(ControlFlow::Break(Some(line))).await
+    pub fn wait_for_accept_line(&self) -> oneshot::Receiver<Option<BString>> {
+        let (sender, receiver) = oneshot::channel();
+
+        let previous = {
+            self.accept_line_trampoline.replace(Some(Trampoline::Resumed(sender)))
+        };
+
+        if let Some(Trampoline::Paused(previous)) = previous {
+            let _ = previous.send(());
+        }
+
+        receiver
+    }
+
+    pub async fn accept_line(&self, line: Option<BString>) -> Result<bool, oneshot::error::RecvError> {
+        let (sender, receiver) = oneshot::channel();
+
+        let previous = {
+            self.accept_line_trampoline.replace(Some(Trampoline::Paused(sender)))
+        };
+
+        if let Some(Trampoline::Resumed(previous)) = previous && previous.send(line).is_err() {
+            // unable to trampoline out, return early
+            self.accept_line_trampoline.take();
+            return Ok(false);
+        }
+
+        receiver.await.map(|_| true)
     }
 
     pub fn init_interactive(&self) {

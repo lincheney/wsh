@@ -40,7 +40,7 @@ async fn get_completions(mut ui: Ui, _lua: Lua, (val, callback): (Option<String>
         let result = ui_clone.shell.get_completions(val, Box::new(move |matches| {
             let matches: Vec<_> = matches.into_iter().map(|x| Match{inner: Rc::new(x)}).collect();
 
-            let result = state.shell_loop_with_future(callback.call_async(matches));
+            let result = state.shell_loop(callback.call_async(matches));
 
             if let Some(result) = crate::log_if_err(result) {
                 ui.report_error::<(), _>(result);

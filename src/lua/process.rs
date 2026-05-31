@@ -449,7 +449,7 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
     let result = {
         let ui = ui.clone();
         ui.clone().shell.trampoline_out_callback(move |state| {
-            state.shell_loop_with_future(async move {
+            state.shell_loop(async move {
                 ui.freeze_if(foreground, true, async {
 
                     let stdin = stdio_pipe!(args, stdin, true);
