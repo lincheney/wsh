@@ -26,7 +26,7 @@ impl UserData for Match {
     }
 }
 
-async fn get_completions(mut ui: Ui, _lua: Lua, (val, callback): (Option<String>, LuaFunction)) -> Result<()> {
+async fn get_completions(ui: Ui, _lua: Lua, (val, callback): (Option<String>, LuaFunction)) -> Result<()> {
 
     let val = if let Some(val) = val {
         val.into()
@@ -34,12 +34,12 @@ async fn get_completions(mut ui: Ui, _lua: Lua, (val, callback): (Option<String>
         ui.borrow().buffer.get_contents().clone()
     };
 
-    ui.clone().shell.trampoline_out_callback(move |state| {
+    ui.shell.trampoline_out_callback(move |mut ui| {
         let mut ui_clone = ui.clone();
         let result = ui_clone.shell.get_completions(val, Box::new(move |matches| {
             let matches: Vec<_> = matches.into_iter().map(|x| Match{inner: Rc::new(x)}).collect();
 
-            let result = state.shell_loop(callback.call_async(matches));
+            let result = ui.shell_loop(callback.call_async(matches));
 
             if let Some(result) = crate::log_if_err(result) {
                 ui.report_error::<(), _>(result);

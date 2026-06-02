@@ -788,7 +788,9 @@ impl Ui {
         // a func may run subprocesses so lock the ui
         let lock = self.has_foreground_process.lock().await;
         self.shell.set_zle_buffer(old_buffer, old_cursor as _);
-        self.shell.exec_function_by_name(func, vec![num_chars.to_string().into()]);
+        let _ = self.clone().shell.trampoline_out_callback(move |ui| {
+            ui.shell.exec_function_by_name(func, vec![num_chars.to_string().into()]);
+        }).await;
         let zle = self.shell.get_zle_buffer();
         drop(lock);
 

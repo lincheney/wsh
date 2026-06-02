@@ -455,54 +455,51 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
         || matches!(args.stderr, Stdio::inherit)
     );
 
-    let result = {
-        let ui = ui.clone();
-        ui.clone().shell.trampoline_out_callback(move |state| {
-            state.shell_loop(async move {
-                ui.freeze_if(foreground, true, async {
+    let result = ui.clone().shell.trampoline_out_callback(move |ui| {
+        ui.clone().shell_loop(async move {
+            ui.freeze_if(foreground, true, async {
 
-                    let stdin = stdio_pipe!(args, stdin, true);
-                    let stdout = stdio_pipe!(args, stdout, false);
-                    let stderr = stdio_pipe!(args, stderr, false);
+                let stdin = stdio_pipe!(args, stdin, true);
+                let stdout = stdio_pipe!(args, stdout, false);
+                let stderr = stdio_pipe!(args, stderr, false);
 
-                    let mut streams = [stdin.1, stdout.1, stderr.1];
+                let mut streams = [stdin.1, stdout.1, stderr.1];
 
-                    // wrap the whole thing in a do_run to ensure fd restoration happens in the
-                    // correct order
-                    // no forking, override fds in place
-                    let result = streams.iter_mut().flatten().try_for_each(|s| s.override_fd());
-                    if let Err(result) = result {
-                        let mut result = Err(result);
-                        // didnt work, restore any backups
-                        if let Err(e) = streams.iter_mut().flatten().try_for_each(|s| s.restore()) {
-                            result = result.context(e);
-                        }
-                        return result
+                // wrap the whole thing in a do_run to ensure fd restoration happens in the
+                // correct order
+                // no forking, override fds in place
+                let result = streams.iter_mut().flatten().try_for_each(|s| s.override_fd());
+                if let Err(result) = result {
+                    let mut result = Err(result);
+                    // didnt work, restore any backups
+                    if let Err(e) = streams.iter_mut().flatten().try_for_each(|s| s.restore()) {
+                        result = result.context(e);
                     }
+                    return result
+                }
 
-                    let code = match cmd {
-                        ShellRunCmd::Simple(cmd) => ui.shell.exec(cmd.into()),
-                        ShellRunCmd::Function{func, args, arg0} => {
-                            let arg0 = arg0.map(|x| x.into());
-                            let args = args.into_iter().map(|x| x.into()).collect();
-                            ui.shell.exec_function(func.clone(), arg0, args).into()
-                        },
-                    };
+                let code = match cmd {
+                    ShellRunCmd::Simple(cmd) => ui.shell.exec(cmd.into()),
+                    ShellRunCmd::Function{func, args, arg0} => {
+                        let arg0 = arg0.map(|x| x.into());
+                        let args = args.into_iter().map(|x| x.into()).collect();
+                        ui.shell.exec_function(func.clone(), arg0, args).into()
+                    },
+                };
 
-                    // finished, restore any backups
-                    let mut errors = [Ok(()), Ok(()), Ok(())];
-                    for (s, e) in streams.iter_mut().zip(errors.iter_mut()) {
-                        if let Some(s) = s {
-                            *e = s.restore();
-                        }
+                // finished, restore any backups
+                let mut errors = [Ok(()), Ok(()), Ok(())];
+                for (s, e) in streams.iter_mut().zip(errors.iter_mut()) {
+                    if let Some(s) = s {
+                        *e = s.restore();
                     }
+                }
 
-                    Ok((code, errors))
-                }).await
+                Ok((code, errors))
+            }).await
 
-            })
-        }).await
-    };
+        })
+    }).await;
 
     let (code, errors) = result.unwrap()???;
 
