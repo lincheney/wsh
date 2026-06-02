@@ -66,13 +66,12 @@ async fn get_completions(mut ui: Ui, _lua: Lua, (val, callback): (Option<String>
 }
 
 async fn insert_completion(ui: Ui, _lua: Lua, val: Match) -> Result<()> {
-    let buffer = ui.get().borrow().buffer.get_contents().clone();
+    let buffer = ui.borrow().buffer.get_contents().clone();
     let suffix = val.inner.as_suffix();
     let (new_buffer, new_pos) = ui.shell.insert_completion(buffer, &val.inner);
     {
         // see if this can be done as an insert
-        let this = ui.get();
-        let mut ui = this.borrow_mut();
+        let mut ui = ui.borrow_mut();
         ui.buffer.insert_or_set(Some(new_buffer.as_ref()), Some(new_pos));
         ui.buffer.replace_completion_suffix(suffix);
     }

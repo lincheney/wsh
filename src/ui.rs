@@ -43,6 +43,20 @@ pub struct TermiosInputFlags {
     pub eof: u8,
 }
 
+#[derive(Clone)]
+pub struct Ui(Rc<_Ui>);
+crate::impl_deref_helper!(self: Ui, &self.0 => Rc<_Ui>);
+
+pub struct _Ui {
+    pub inner: RefCell<UiInner>,
+    pub shell: Shell,
+    pub lua: Lua,
+    pub events: crate::event_stream::EventController,
+    pub has_foreground_process: tokio::sync::Mutex<()>,
+    pub print_lock: PrintLock,
+    is_drawing: Cell<bool>,
+}
+
 pub struct UiInner {
     pub tui: crate::tui::Tui,
     pub cmdline: crate::tui::command_line::CommandLineState,
@@ -60,37 +74,12 @@ pub struct UiInner {
 
     pub termios_input_flags: TermiosInputFlags,
     pub mouse_mode: bool,
+
+    pub pid_map: PidMap,
+    pub event_callbacks: EventCallbacks ,
 }
 
-pub struct UnlockedUi {
-    pub inner: RefCell<UiInner>,
-    pub event_callbacks: RefCell<EventCallbacks> ,
-}
-
-impl UnlockedUi {
-    pub fn borrow(&self) -> std::cell::Ref<'_, UiInner> {
-        self.inner.borrow()
-    }
-
-    pub fn borrow_mut(&self) -> std::cell::RefMut<'_, UiInner> {
-        self.inner.borrow_mut()
-    }
-}
-
-crate::strong_weak_wrapper! {
-    pub struct Ui {
-        pub unlocked: UnlockedUi,
-        pub shell: Shell,
-        pub lua: Lua,
-        pub events: crate::event_stream::EventController,
-        pub has_foreground_process: tokio::sync::Mutex<()>,
-
-        pub print_lock: PrintLock,
-        is_drawing: Cell<bool>,
-
-        pub pid_map: RefCell<PidMap>,
-    }
-}
+pub type WeakUi = std::rc::Weak<_Ui>;
 
 impl Ui {
 
@@ -106,7 +95,7 @@ impl Ui {
         let stdout = std::io::stdout();
         let termios = termios::tcgetattr(&stdout)?;
 
-        let mut ui = UiInner{
+        let mut ui = UiInner {
             dirty: true,
             tui: Default::default(),
             cmdline: Default::default(),
@@ -122,40 +111,33 @@ impl Ui {
                 eof: termios.control_chars[termios::SpecialCharacterIndices::VEOF as usize],
             },
             mouse_mode: false,
+            pid_map: Default::default(),
+            event_callbacks: Default::default(),
         };
         ui.keybinds.push(Default::default());
 
         ui.reset();
 
-        let ui = UnlockedUi {
+        let ui = _Ui {
             inner: RefCell::new(ui),
-            event_callbacks: Default::default(),
-        };
-        let ui = Self {
-            unlocked: Rc::new(ui),
-            lua: Rc::new(lua),
-            events: Rc::new(events),
-            shell: Rc::new(shell),
+            lua: lua,
+            events: events,
+            shell: shell,
             has_foreground_process: Default::default(),
             print_lock: Default::default(),
-            is_drawing: Rc::new(false.into()),
-            pid_map: Default::default(),
+            is_drawing: Cell::new(false),
         };
 
-        Ok(ui)
+        Ok(Self(Rc::new(ui)))
     }
 
-
-    pub fn get(&self) -> &UnlockedUi {
-        &self.unlocked
-    }
 
     pub fn borrow(&self) -> std::cell::Ref<'_, UiInner> {
-        self.unlocked.inner.borrow()
+        self.inner.borrow()
     }
 
     pub fn borrow_mut(&self) -> std::cell::RefMut<'_, UiInner> {
-        self.unlocked.inner.borrow_mut()
+        self.inner.borrow_mut()
     }
 
     pub fn get_lua_api(&self) -> LuaResult<LuaTable> {
@@ -196,7 +178,7 @@ impl Ui {
             let need_cursor_y;
 
             let size = {
-                let ui = &mut *self.unlocked.borrow_mut();
+                let ui = &mut *self.borrow_mut();
 
                 if size == Some(ui.size) {
                     return ui.draw(shell_vars, cursor_y);
@@ -261,8 +243,7 @@ impl Ui {
     }
 
     pub fn show_error_message(&mut self, msg: &str) {
-        let this = self.get();
-        let mut ui = this.borrow_mut();
+        let mut ui = self.borrow_mut();
         ui.tui.add_error_message(msg);
         self.queue_draw();
     }
@@ -289,7 +270,7 @@ impl Ui {
     }
 
     pub async fn handle_window_resize(&self, width: u32, height: u32) -> Result<bool> {
-        self.get().borrow_mut().size = (width, height);
+        self.borrow_mut().size = (width, height);
         self.queue_draw();
         self.trigger_window_resize_callbacks(width, height).await;
         Ok(true)
@@ -299,8 +280,7 @@ impl Ui {
         let _fg_lock = self.has_foreground_process.lock().await;
         let _print_lock = self.print_lock.lock_exclusive().await;
 
-        let this = self.get();
-        let mut ui = this.borrow_mut();
+        let mut ui = self.borrow_mut();
         ui.termios_input_flags.intr = intr;
         ui.apply_intr(intr)?;
         Ok(())
@@ -324,7 +304,7 @@ impl Ui {
 
     fn pre_accept_line<'a>(&'a self, lock: &mut PrintLockGuard<'a>) -> Result<()> {
         {
-            self.unlocked.borrow_mut().tui.clear_non_persistent();
+            self.borrow_mut().tui.clear_non_persistent();
             // TODO handle errors here properly
         }
         self.events.pause();
@@ -355,7 +335,7 @@ impl Ui {
                 print_lock = self.print_lock.try_lock().unwrap();
                 &mut print_lock
             };
-            self.unlocked.borrow_mut().prepare_for_unhandled_output()?;
+            self.borrow_mut().prepare_for_unhandled_output()?;
             print_lock.acquire();
             Ok(true)
         }
@@ -369,7 +349,7 @@ impl Ui {
             Ok(false)
         } else {
             let mut print_lock = self.print_lock.lock().await;
-            self.unlocked.borrow_mut().prepare_for_unhandled_output()?;
+            self.borrow_mut().prepare_for_unhandled_output()?;
             print_lock.acquire();
             Ok(true)
         }
@@ -396,14 +376,14 @@ impl Ui {
         if print_lock.get_value() == 1 {
 
             {
-                self.unlocked.borrow().activate()?;
+                self.borrow().activate()?;
             }
 
             // move down one line if not at start of line
             let cursor = self.events.get_cursor_position();
             let cursor = tokio::time::timeout(crate::DEFAULT_DURATION, cursor).await.unwrap().unwrap_or((0, 0));
 
-            let ui = &mut *self.unlocked.borrow_mut();
+            let ui = &mut *self.borrow_mut();
             if cursor.0 != 0 {
                 queue!(ui.stdout, style::Print("\r\n"))?;
             }
@@ -418,7 +398,7 @@ impl Ui {
 
     async fn post_accept_line<'a>(&'a self, lock: &mut PrintLockGuard<'a>) -> Result<()> {
         {
-            self.unlocked.borrow_mut().reset();
+            self.borrow_mut().reset();
         }
         self.events.unpause();
         self.recover_from_unhandled_output(Some(lock)).await?;
@@ -432,8 +412,7 @@ impl Ui {
 
         let buffer = {
             let buffer = {
-                let this = self.get();
-                let ui = this.borrow();
+                let ui = self.borrow();
                 ui.buffer.get_contents().clone()
             };
             let (complete, _tokens) = self.shell.parse(buffer.clone(), Default::default());
@@ -496,7 +475,7 @@ impl Ui {
     {
         let weak = self.downgrade();
         self.lua.create_function(move |lua, value| {
-            let ui = weak.try_upgrade()?;
+            let ui = Self::try_upgrade(&weak)?;
             func(&ui, lua, value)
                 .map_err(|e| mlua::Error::RuntimeError(e.to_string()))
         })
@@ -513,6 +492,18 @@ impl Ui {
         self.get_lua_api()?.set(name, func)
     }
 
+    pub fn downgrade(&self) -> WeakUi {
+        Rc::downgrade(&self.0)
+    }
+
+    pub fn try_upgrade(weak: &WeakUi) -> LuaResult<Self> {
+        if let Some(ui) = weak.upgrade() {
+            Ok(Self(ui))
+        } else {
+            lua_error("ui not running")
+        }
+    }
+
     pub fn make_lua_async_fn<F, A, R, T>(&self, func: F) -> LuaResult<LuaFunction>
     where
         F: Fn(Self, Lua, A) -> T + mlua::MaybeSend + 'static + Clone,
@@ -525,7 +516,7 @@ impl Ui {
             let weak = weak.clone();
             let func = func.clone();
             async move {
-                let ui = weak.try_upgrade()?;
+                let ui = Self::try_upgrade(&weak)?;
                 func(ui, lua, value).await
                     .map_err(|e| mlua::Error::RuntimeError(e.to_string()))
             }
@@ -609,8 +600,7 @@ impl Ui {
         if buf.len() == 1 {
             // zsh doesn't run widgets if eof
             let is_eof = {
-                let this = self.get();
-                let ui = this.borrow();
+                let ui = self.borrow();
                 buf == &[ui.termios_input_flags.eof] && ui.buffer.get_contents().is_empty()
             };
             if is_eof {
@@ -652,8 +642,7 @@ impl Ui {
                     Some(ui.has_foreground_process.lock().await)
                 };
                 let (buffer, cursor) = {
-                    let this = ui.get();
-                    let ui = this.inner.borrow();
+                    let ui = self.borrow();
                     (ui.buffer.get_contents().clone(), ui.buffer.get_cursor())
                 };
 
@@ -692,8 +681,7 @@ impl Ui {
                         self.insert_or_set_buffer(false, buffer, cursor.take()).await;
                     }
 
-                    let this = self.get();
-                    let mut ui = this.borrow_mut();
+                    let mut ui = self.borrow_mut();
 
                     // check for any output e.g. zle -M
                     if let Some(output) = &output {
@@ -743,14 +731,13 @@ impl Ui {
     }
 
     fn cancel_completion_suffix(&self) {
-        self.get().borrow_mut().buffer.replace_completion_suffix(None);
+        self.borrow_mut().buffer.replace_completion_suffix(None);
     }
 
     pub async fn insert_or_set_buffer(&self, insert: bool, data: &[u8], cursor: Option<usize>) {
         // if we need to invoke a shfunc, need to trampline out
         let (func, num_chars, old_buffer, old_cursor) = {
-            let ui = self.get();
-            let buffer = &mut ui.borrow_mut().buffer;
+            let buffer = &mut self.borrow_mut().buffer;
 
             let insert = if insert {
                 Some(data)
@@ -801,8 +788,7 @@ impl Ui {
         let zle = self.shell.get_zle_buffer();
         drop(lock);
 
-        let ui = self.get();
-        let buffer = &mut ui.borrow_mut().buffer;
+        let buffer = &mut self.borrow_mut().buffer;
         buffer.set(Some(&zle.0), Some(zle.1.unwrap_or(zle.0.len() as _) as usize));
         // finally add the data we wanted originally
         buffer.set(Some(data), cursor);
@@ -847,7 +833,7 @@ impl Ui {
             self.has_foreground_process.lock().await,
             self.print_lock.lock_exclusive().await,
         );
-        let mut stdout = self.unlocked.borrow().stdout.lock();
+        let mut stdout = self.borrow().stdout.lock();
         crate::tui::allocate_height(&mut stdout, height)?;
         drop(locks);
         Ok(())
@@ -986,16 +972,6 @@ impl Drop for UiInner {
     fn drop(&mut self) {
         if let Err(err) = self.deactivate() {
             log::error!("{:?}", err);
-        }
-    }
-}
-
-impl WeakUi {
-    pub fn try_upgrade(&self) -> LuaResult<Ui> {
-        if let Some(ui) = self.upgrade() {
-            Ok(ui)
-        } else {
-            lua_error("ui not running")
         }
     }
 }

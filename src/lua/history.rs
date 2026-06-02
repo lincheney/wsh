@@ -36,7 +36,7 @@ async fn goto_history_internal(ui: Ui, index: HistoryIndex) -> Result<()> {
     let changed = {
 
         let (buffer, cursor) = {
-            let ui = ui.unlocked.borrow();
+            let ui = ui.borrow();
             (ui.buffer.get_contents().clone(), ui.buffer.get_cursor())
         };
 

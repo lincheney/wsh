@@ -50,7 +50,7 @@ impl GlobalState {
             if !crate::is_forked() {
                 events.spawn(&ui, teardown);
                 ui.report_error(ui.init_lua());
-                ui.get().borrow().activate()?;
+                ui.borrow().activate()?;
                 zsh::bin_zle::override_zle();
                 zsh::zle_watch_fds::init(&ui);
 
@@ -306,7 +306,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
 
             } else if cmd == zsh_sys::ZLE_CMD_RESET_PROMPT as _ {
                 // redraw the prompt
-                state.ui.get().borrow_mut().cmdline.prompt_dirty = true;
+                state.ui.borrow_mut().cmdline.prompt_dirty = true;
                 state.ui.queue_draw();
                 return null_mut()
 

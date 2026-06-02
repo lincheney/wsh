@@ -574,7 +574,6 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
 fn set_message(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<usize> {
     let options: MessageOptions = lua.from_value(val)?;
 
-    let ui = ui.get();
     let tui = &mut ui.borrow_mut().tui;
     tui.dirty = true;
 
@@ -589,7 +588,6 @@ fn set_message(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<usize> {
 }
 
 fn clear_messages(ui: &Ui, _lua: &Lua, all: bool) -> Result<()> {
-    let ui = ui.get();
     let tui = &mut ui.borrow_mut().tui;
     if all {
         tui.clear_all();
@@ -604,7 +602,6 @@ fn check_message(ui: &Ui, _lua: &Lua, id: usize) -> Result<bool> {
 }
 
 fn remove_message(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
-    let ui = ui.get();
     let tui = &mut ui.borrow_mut().tui;
     if tui.remove(id).is_some() {
         tui.dirty = true;
@@ -627,7 +624,6 @@ struct BufferHighlight {
 }
 
 fn add_buf_highlight(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<()> {
-    let ui = ui.get();
     let hl: BufferHighlight = lua.from_value(val)?;
     let blend = !hl.style.no_blend;
     let style: tui::widget::StyleOptions = hl.style.inner.into();
@@ -649,7 +645,6 @@ fn add_buf_highlight(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<()> {
 }
 
 fn clear_buf_highlights(ui: &Ui, _lua: &Lua, namespace: Option<usize>) -> Result<()> {
-    let ui = ui.get();
     let mut ui = ui.borrow_mut();
     if let Some(namespace) = namespace {
         ui.buffer.clear_highlights_in_namespace(namespace);
@@ -660,14 +655,12 @@ fn clear_buf_highlights(ui: &Ui, _lua: &Lua, namespace: Option<usize>) -> Result
 }
 
 fn add_buf_highlight_namespace(ui: &Ui, _lua: &Lua, _val: ()) -> Result<usize> {
-    let ui = ui.get();
     let mut ui = ui.borrow_mut();
     ui.buffer.highlight_counter += 1;
     Ok(ui.buffer.highlight_counter)
 }
 
 fn scroll_message(ui: &Ui, _lua: &Lua, (id, delta): (usize, isize)) -> Result<()> {
-    let ui = ui.get();
     let tui = &mut ui.borrow_mut().tui;
     match tui.get_node_mut(id) {
         Some(Node{ kind: NodeKind::Widget(widget), .. }) => {
@@ -682,7 +675,6 @@ fn scroll_message(ui: &Ui, _lua: &Lua, (id, delta): (usize, isize)) -> Result<()
 }
 
 fn scroll_message_to(ui: &Ui, _lua: &Lua, (id, line): (usize, usize)) -> Result<()> {
-    let ui = ui.get();
     let tui = &mut ui.borrow_mut().tui;
     match tui.get_node_mut(id) {
         Some(Node{ kind: NodeKind::Widget(widget), .. }) => {
@@ -697,7 +689,6 @@ fn scroll_message_to(ui: &Ui, _lua: &Lua, (id, line): (usize, usize)) -> Result<
 }
 
 fn feed_ansi_message(ui: &Ui, _lua: &Lua, (id, value): (usize, LuaString)) -> Result<()> {
-    let ui = ui.get();
     let tui = &mut ui.borrow_mut().tui;
 
     match tui.get_node_mut(id) {
@@ -712,7 +703,6 @@ fn feed_ansi_message(ui: &Ui, _lua: &Lua, (id, value): (usize, LuaString)) -> Re
 }
 
 fn clear_message(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
-    let ui = ui.get();
     let tui = &mut ui.borrow_mut().tui;
 
     match tui.get_node_mut(id) {
@@ -723,7 +713,6 @@ fn clear_message(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
 }
 
 fn get_message_text(ui: &Ui, _lua: &Lua, id: usize) -> Result<Vec<BString>> {
-    let ui = ui.get();
     let tui = &ui.borrow().tui;
 
     match tui.get_node(id) {
@@ -734,7 +723,6 @@ fn get_message_text(ui: &Ui, _lua: &Lua, id: usize) -> Result<Vec<BString>> {
 }
 
 fn message_to_ansi_string(ui: &Ui, _lua: &Lua, (id, width): (usize, Option<u16>)) -> Result<mlua::BString> {
-    let ui = ui.get();
     let tui = &mut ui.borrow_mut().tui;
 
     match tui.render_to_string(id, width) {
@@ -744,7 +732,6 @@ fn message_to_ansi_string(ui: &Ui, _lua: &Lua, (id, width): (usize, Option<u16>)
 }
 
 fn set_status_bar(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<()> {
-    let ui = ui.get();
     let options: Option<MessageOptions> = lua.from_value(val)?;
     let mut ui = ui.borrow_mut();
     if let Some(options) = options {
@@ -771,7 +758,6 @@ async fn enable_mouse_mode(ui: Ui, _lua: Lua, enable: Option<bool>) -> Result<()
         ui.print_lock.lock_exclusive().await,
     );
 
-    let ui = ui.get();
     let mut ui = ui.borrow_mut();
     let mouse_mode = enable.unwrap_or(true);
     if mouse_mode != ui.mouse_mode {
@@ -784,7 +770,6 @@ async fn enable_mouse_mode(ui: Ui, _lua: Lua, enable: Option<bool>) -> Result<()
 }
 
 fn get_message_geometry(ui: &Ui, lua: &Lua, id: usize) -> Result<Option<LuaTable>> {
-    let ui = ui.get();
     let tui = &ui.borrow().tui;
 
     if let Some(geom) = tui.get_node_geometry(id) {
@@ -801,7 +786,6 @@ fn get_message_geometry(ui: &Ui, lua: &Lua, id: usize) -> Result<Option<LuaTable
 }
 
 fn get_status_bar_geometry(ui: &Ui, lua: &Lua, (): ()) -> Result<Option<LuaTable>> {
-    let ui = ui.get();
     let ui = ui.borrow();
     if let Some(geom) = ui.tui.get_status_bar_geometry(&ui.status_bar) {
         let table = lua.create_table_from([

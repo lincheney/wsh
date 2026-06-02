@@ -1,6 +1,6 @@
 use std::sync::Arc;
 use bstr::BString;
-use crate::ui::{Ui, DowngradeUi};
+use crate::ui::{Ui, WeakUi};
 use anyhow::Result;
 use mlua::{prelude::*, UserData, UserDataMethods};
 use serde::{Deserialize};
@@ -8,7 +8,7 @@ use super::process::{shell_run_with_args, FullShellRunOpts, ShellRunCmd};
 
 pub struct Function {
     inner: Arc<crate::shell::Function>,
-    ui: crate::ui::WeakUi,
+    ui: WeakUi,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -46,7 +46,7 @@ impl UserData for Function {
                 (args.split_off(0), None)
             };
 
-            let ui = func.ui.try_upgrade()?;
+            let ui = Ui::try_upgrade(&func.ui)?;
             let cmd = ShellRunCmd::Function{func: func.inner.clone(), args, arg0: None};
             let result = shell_run_with_args(ui, lua, cmd, opts.unwrap_or_default()).await;
             result.map_err(|e| mlua::Error::RuntimeError(e.to_string()))

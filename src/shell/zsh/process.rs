@@ -53,14 +53,14 @@ pub fn clear_pids() {
 
 pub fn register_pid(ui: &crate::ui::Ui, pid: pidset::Pid, add_to_jobtab: bool) -> oneshot::Receiver<i32> {
     let (sender, receiver) = oneshot::channel();
-    let mut pid_map = ui.pid_map.borrow_mut();
+    let pid_map = &mut ui.borrow_mut().pid_map;
     pid_map.insert(pid, sender);
     let _ = pidset::PidTable::register_pid(pid, add_to_jobtab);
     receiver
 }
 
 pub fn deregister_pid(ui: &crate::ui::Ui, pid: pidset::Pid) {
-    let mut pid_map = ui.pid_map.borrow_mut();
+    let pid_map = &mut ui.borrow_mut().pid_map;
     pid_map.remove(&pid);
     if matches!(pidset::PidTable::deregister_pid(pid), Ok(Some(true))) {
         jobtab_retain_iter(|proc| proc.pid != pid).for_each(|_| ());
@@ -148,7 +148,7 @@ pub(super) fn init(ui: &crate::ui::Ui) -> Result<()> {
     // spawn a reader task
     let ui = ui.clone();
     let writer = super::signals::self_pipe::<_, _, std::convert::Infallible>(move || {
-        let mut pid_map = ui.pid_map.borrow_mut();
+        let pid_map = &mut ui.borrow_mut().pid_map;
         if !pid_map.is_empty() {
             // check for pids that are done
             let _ = pidset::PidTable::extract_finished_pids(|pid, status| {

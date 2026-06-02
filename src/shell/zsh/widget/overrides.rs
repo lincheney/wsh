@@ -49,7 +49,7 @@ static UNDO_OVERRIDE: Mutex<Option<bindings::ZleIntFunc>> = Mutex::new(None);
 
 unsafe extern "C" fn custom_undo(_args: *mut *mut c_char) -> c_int {
     let result = GlobalState::with(|state| {
-        state.ui.get().borrow_mut().buffer.move_in_history(false);
+        state.ui.borrow_mut().buffer.move_in_history(false);
     });
     match result {
         Ok(()) => 0,
