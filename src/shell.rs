@@ -210,7 +210,8 @@ impl Shell {
         &self,
         string: BString,
         job_control: bool,
-        redirections: Vec<(RawFd, RawFd)>
+        redirections: &[Option<(RawFd, RawFd, bool)>],
+        closes: &[Option<RawFd>],
     ) -> Result<c_long> {
 
         // okkkkkkkk
@@ -221,11 +222,30 @@ impl Shell {
         // so i'm going to do this instead
 
         let mut cmd = BString::new(vec![]);
-        // apply all the redirections
-        for (left, right) in redirections {
-            write!(cmd, "{left}>{right} ").unwrap();
+        cmd.push_str("( ");
+        for c in closes {
+            if let Some(fd) = c {
+                write!(cmd, "__fd{fd}={fd}; ").unwrap();
+            }
         }
-        cmd.push_str(" ( eval '");
+        cmd.push_str("exec ");
+        // close fds
+        for c in closes {
+            if let Some(fd) = c {
+                write!(cmd, "{{__fd{fd}}}>&- ").unwrap();
+            }
+        }
+        // apply all the redirections
+        for r in redirections {
+            if let Some((left, right, output)) = r {
+                if *output {
+                    write!(cmd, "{left}>/dev/fd/{right} ").unwrap();
+                } else {
+                    write!(cmd, "{left}</dev/fd/{right} ").unwrap();
+                }
+            }
+        }
+        cmd.push_str("; eval '");
         // escape it
         string.replace_into(b"'", b"'\\''", &mut cmd);
         cmd.push_str("' ) &");
