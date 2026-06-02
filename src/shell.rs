@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use crate::ui::Ui;
 use std::ops::ControlFlow;
 use std::cell::{RefCell, Cell};
 use std::borrow::Cow;
@@ -34,10 +34,10 @@ pub use zsh::{
     MetaString,
     MetaSlice,
 };
-pub use externs::{ShellLoop, shell_loop, LUA_LEVEL};
+pub use externs::{LUA_LEVEL};
 pub use variables::Variable;
 
-type TrampolinePayload = Box<dyn FnOnce(Rc<externs::GlobalState>)>;
+type TrampolinePayload = Box<dyn FnOnce(Ui)>;
 enum Trampoline<T=TrampolinePayload> {
     Resumed(oneshot::Sender<T>),
     Paused(oneshot::Sender<()>),
@@ -148,7 +148,7 @@ impl Shell {
         receiver.await
     }
 
-    pub async fn trampoline_out_callback<F: 'static + FnOnce(Rc<externs::GlobalState>) -> T, T: 'static>(
+    pub async fn trampoline_out_callback<F: 'static + FnOnce(Ui) -> T, T: 'static>(
         &self,
         callback: F,
     ) -> Result<T, oneshot::error::RecvError> {

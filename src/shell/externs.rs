@@ -1,48 +1,43 @@
-use std::ops::ControlFlow;
-use std::cell::Cell;
 use crate::lua::{ HasEventCallbacks};
 pub(in crate::shell) mod fork;
 use crate::ui::{Ui};
 use std::os::raw::{c_char, c_int};
-use std::rc::Rc;
 use std::cell::RefCell;
 use std::ptr::null_mut;
-use std::sync::{LazyLock, OnceLock, Mutex, atomic::{Ordering, AtomicUsize}};
+use std::sync::{LazyLock, OnceLock, Mutex, atomic::{Ordering, AtomicUsize, AtomicBool}};
 use anyhow::Result;
 use crate::shell::{Shell, zsh, MetaString, MetaSlice};
 
 
-pub struct GlobalState {
-    pub(in crate::shell) ui: Ui,
-    runtime: crate::async_runtime::Runtime,
-    first_drawn: Cell<bool>,
-}
-
 thread_local! {
-    static STATE: RefCell<Option<Rc<GlobalState>>> = const{ RefCell::new(None) };
+    static STATE: RefCell<Option<Ui>> = const{ RefCell::new(None) };
 }
 
 static ORIGINAL_ZLE_ENTRY_PTR: OnceLock<zsh_sys::ZleEntryPoint> = OnceLock::new();
 static IS_RUNNING: Mutex<()> = Mutex::new(());
+static FIRST_DRAWN: AtomicBool = AtomicBool::new(false);
 pub static LUA_LEVEL: AtomicUsize = AtomicUsize::new(0);
 
 fn teardown() {
-    STATE.with(|state| state.take());
+    STATE.take();
 }
 
+pub struct GlobalState;
+
 impl GlobalState {
-    fn new() -> Result<Self> {
+    fn new() -> Result<Ui> {
         crate::logging::init();
         fork::init();
 
         LUA_LEVEL.store(0, Ordering::Release);
         let runtime = crate::async_runtime::Runtime::new()?;
 
-        let result: Result<_> = runtime.block_on(async {
-            let (events, event_ctrl) = crate::event_stream::EventStream::new();
-            let shell = Shell::new();
-            let mut ui = Ui::new(event_ctrl, shell)?;
+        // runtime.enter();
+        let (events, event_ctrl) = crate::event_stream::EventStream::new();
+        let shell = Shell::new();
+        let mut ui = Ui::new(event_ctrl, shell, runtime)?;
 
+        ui.clone().runtime.block_on(async move {
             zsh::completion::override_compadd()?;
             zsh::widget::overrides::override_all()?;
             zsh::signals::init(&ui)?;
@@ -59,28 +54,21 @@ impl GlobalState {
                     zsh_sys::zle_entry_ptr = Some(zle_entry_ptr_override);
                 }
             }
-
             Ok(ui)
-        });
-
-        Ok(Self {
-            ui: result?,
-            runtime,
-            first_drawn: Cell::new(false),
         })
     }
 
-    pub fn with<T, F: FnOnce(&Rc<Self>) -> T>(f: F) -> Result<T> {
-        STATE.with(|state| {
-            if let Some(state) = &*state.borrow() {
-                Ok(f(state))
+    pub fn with<T, F: FnOnce(&Ui) -> T>(f: F) -> Result<T> {
+        STATE.with(|ui| {
+            if let Some(ui) = &*ui.borrow() {
+                Ok(f(ui))
             } else {
                 anyhow::bail!("wish is not running")
             }
         })
     }
 
-    fn get() -> Result<Rc<Self>> {
+    fn get() -> Result<Ui> {
         Self::with(|state| state.clone())
     }
 
@@ -95,48 +83,9 @@ impl Drop for GlobalState {
     }
 }
 
-pub trait ShellLoop {
-    fn shell_loop<F: 'static + Future>(&self, future: F) -> Result<F::Output>;
-}
-
-impl ShellLoop for Rc<GlobalState> {
-    fn shell_loop<F: 'static + Future>(&self, future: F) -> Result<F::Output> {
-        tokio::pin!(future);
-
-        let mut queueing_enabled = self.ui.shell.queue_signal_level();
-        self.ui.shell.dont_queue_signals()?;
-
-        let result = loop {
-            let trampoline = self.ui.shell.trampoline_in();
-            let result = self.runtime.block_on(async {
-                tokio::select!(
-                    result = &mut future => return ControlFlow::Break(result),
-                    result = trampoline => return ControlFlow::Continue(result),
-                )
-            });
-
-            match result {
-                ControlFlow::Break(x) => break Ok(x),
-                ControlFlow::Continue(Err(err)) => break Err(err),
-                ControlFlow::Continue(Ok(callback)) => {
-                    self.ui.shell.restore_queue_signals(queueing_enabled);
-                    self.ui.shell.trampoline_push();
-                    callback(self.clone());
-                    self.ui.shell.trampoline_pop();
-                    queueing_enabled = self.ui.shell.queue_signal_level();
-                    self.ui.shell.dont_queue_signals()?;
-                },
-            }
-        };
-
-        self.ui.shell.restore_queue_signals(queueing_enabled);
-        Ok(result?)
-    }
-}
-
-pub fn shell_loop<F: 'static + Future>(future: F) -> Result<F::Output> {
-    GlobalState::get().and_then(|state| state.shell_loop(future))
-}
+// pub fn shell_loop<F: 'static + Future>(future: F) -> Result<F::Output> {
+    // GlobalState::get().and_then(|state| state.shell_loop(future))
+// }
 
 
 unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _options: zsh_sys::Options, _func: c_int) -> c_int {
@@ -146,8 +95,8 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
     match iter.next() {
         Some(b"lua") => {
             let result: Result<_> = (|| {
-                let state = GlobalState::get()?;
-                state.runtime.block_on(state.ui.lua.load(iter.next().unwrap_or(b"" as _)).exec_async())?;
+                let ui = GlobalState::get()?;
+                ui.runtime.block_on(ui.lua.load(iter.next().unwrap_or(b"" as _)).exec_async())?;
                 Ok(())
             })();
 
@@ -179,7 +128,7 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
 unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_list_tag) -> *mut c_char {
     // this is the real entrypoint
 
-    if let Ok(state) = GlobalState::get() {
+    if let Ok(ui) = GlobalState::get() {
         #[allow(static_mut_refs)]
         unsafe {
             if cmd == zsh_sys::ZLE_CMD_READ as _ && let Ok(_lock) = IS_RUNNING.try_lock() {
@@ -213,28 +162,26 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                 zsh::signals::sigwinch::fetch_term_size_from_zsh();
 
                 {
-                    let state = state.clone();
-                    let result = state.clone().shell_loop(async move {
+                    let ui = ui.clone();
+                    let result = ui.clone().shell_loop(async move {
                         // sometimes zsh will trash zle without refreshing
                         // redraw the ui
-                        let result = crate::log_if_err(state.ui.zle_cmd_refresh().await);
-                        if result == Some(true) && state.first_drawn.get() {
+                        let drawn = FIRST_DRAWN.swap(true, Ordering::Relaxed);
+                        let result = crate::log_if_err(ui.zle_cmd_refresh().await);
+                        if result == Some(true) && drawn {
                             // draw LATER
-                            state.ui.queue_draw();
+                            ui.queue_draw();
                         }
 
-                        // this is the only thread we should ever run this func
-                        if !state.first_drawn.get() {
+                        if !drawn {
                             crate::log_if_err::<_, anyhow::Error>(async {
                                 if let Some(size) = zsh::signals::sigwinch::get_term_size() {
-                                    state.ui.handle_window_resize(size.0, size.1).await?;
+                                    ui.handle_window_resize(size.0, size.1).await?;
                                 }
-                                state.ui.start_cmd(None).await?;
+                                ui.start_cmd(None).await?;
                                 Ok(())
                             }.await);
-                            state.ui.trigger_init_callbacks().await;
-
-                            state.first_drawn.set(true);
+                            ui.trigger_init_callbacks().await;
                         }
                     });
                     crate::log_if_err(result);
@@ -243,14 +190,14 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                 // allow sigwinch while we are waiting
                 // zsh::winch_unblock();
 
-                let result = state.shell_loop(state.ui.shell.wait_for_accept_line());
+                let result = ui.shell_loop(ui.shell.wait_for_accept_line());
 
-                state.clone().runtime.block_on(async move {
+                ui.clone().runtime.block_on(async move {
                     // sometimes zsh will trash zle without refreshing
                     // redraw the ui
-                    if state.ui.zle_cmd_refresh().await.unwrap() {
+                    if ui.zle_cmd_refresh().await.unwrap() {
                         // draw LATER
-                        state.ui.queue_draw();
+                        ui.queue_draw();
                     }
                 });
 
@@ -290,24 +237,24 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
 
             } else if cmd == zsh_sys::ZLE_CMD_TRASH as _ {
                 // something is probably going to print (error msgs etc) to the terminal
-                if let Ok(_lock) = state.ui.has_foreground_process.try_lock() {
-                    state.ui.zle_cmd_trash().unwrap();
+                if let Ok(_lock) = ui.has_foreground_process.try_lock() {
+                    ui.zle_cmd_trash().unwrap();
                 }
                 return null_mut()
 
             } else if cmd == zsh_sys::ZLE_CMD_REFRESH as _ {
                 // redraw the ui
-                state.clone().runtime.weak_block_on(async move {
-                    if state.ui.zle_cmd_refresh().await.unwrap() {
-                        crate::log_if_err(state.ui.draw().await);
+                ui.clone().runtime.weak_block_on(async move {
+                    if ui.zle_cmd_refresh().await.unwrap() {
+                        crate::log_if_err(ui.draw().await);
                     }
                 });
                 return null_mut()
 
             } else if cmd == zsh_sys::ZLE_CMD_RESET_PROMPT as _ {
                 // redraw the prompt
-                state.ui.borrow_mut().cmdline.prompt_dirty = true;
-                state.ui.queue_draw();
+                ui.borrow_mut().cmdline.prompt_dirty = true;
+                ui.queue_draw();
                 return null_mut()
 
             }
@@ -369,9 +316,9 @@ static mut MODULE_FEATURES: LazyLock<Features> = LazyLock::new(|| {
 #[unsafe(no_mangle)]
 pub extern "C" fn setup_() -> c_int {
     match GlobalState::new() {
-        Ok(value) => {
+        Ok(ui) => {
             STATE.with(|state| {
-                *state.borrow_mut() = Some(Rc::new(value));
+                *state.borrow_mut() = Some(ui);
             });
             0
         },

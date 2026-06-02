@@ -1,4 +1,3 @@
-use crate::shell::ShellLoop;
 use bstr::BString;
 use std::sync::Arc;
 use std::str::FromStr;
@@ -97,10 +96,13 @@ impl UserData for Process {
             if proc.result.inner.borrow().is_none() {
                 let signal: Signal = lua.from_value(signal)?;
                 let pid = nix::unistd::Pid::from_raw(proc.pid as _);
-                nix::sys::signal::kill(pid, signal.0).map_err(|e| LuaError::RuntimeError(e.to_string()))
-            } else {
-                Ok(())
+                if let Err(err) = nix::sys::signal::kill(pid, signal.0)
+                    && err != nix::errno::Errno::ESRCH
+                {
+                    return Err(LuaError::RuntimeError(err.to_string()))
+                }
             }
+            return Ok(())
         });
 
     }

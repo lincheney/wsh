@@ -1,3 +1,4 @@
+use std::ops::ControlFlow;
 use std::sync::{atomic::Ordering};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -54,7 +55,8 @@ pub struct _Ui {
     pub events: crate::event_stream::EventController,
     pub has_foreground_process: tokio::sync::Mutex<()>,
     pub print_lock: PrintLock,
-    is_drawing: Cell<bool>,
+    pub is_drawing: Cell<bool>,
+    pub runtime: crate::async_runtime::Runtime,
 }
 
 pub struct UiInner {
@@ -86,6 +88,7 @@ impl Ui {
     pub fn new(
         events: crate::event_stream::EventController,
         shell: Shell,
+        runtime: crate::async_runtime::Runtime,
     ) -> Result<Self> {
 
         let lua = Lua::new();
@@ -125,7 +128,8 @@ impl Ui {
             shell: shell,
             has_foreground_process: Default::default(),
             print_lock: Default::default(),
-            is_drawing: Cell::new(false),
+            is_drawing: Default::default(),
+            runtime,
         };
 
         Ok(Self(Rc::new(ui)))
@@ -837,6 +841,39 @@ impl Ui {
         crate::tui::allocate_height(&mut stdout, height)?;
         drop(locks);
         Ok(())
+    }
+
+    pub fn shell_loop<F: 'static + Future>(&self, future: F) -> Result<F::Output> {
+        tokio::pin!(future);
+
+        let mut queueing_enabled = self.shell.queue_signal_level();
+        self.shell.dont_queue_signals()?;
+
+        let result = loop {
+            let trampoline = self.shell.trampoline_in();
+            let result = self.runtime.block_on(async {
+                tokio::select!(
+                    result = &mut future => return ControlFlow::Break(result),
+                    result = trampoline => return ControlFlow::Continue(result),
+                )
+            });
+
+            match result {
+                ControlFlow::Break(x) => break Ok(x),
+                ControlFlow::Continue(Err(err)) => break Err(err),
+                ControlFlow::Continue(Ok(callback)) => {
+                    self.shell.restore_queue_signals(queueing_enabled);
+                    self.shell.trampoline_push();
+                    callback(self.clone());
+                    self.shell.trampoline_pop();
+                    queueing_enabled = self.shell.queue_signal_level();
+                    self.shell.dont_queue_signals()?;
+                },
+            }
+        };
+
+        self.shell.restore_queue_signals(queueing_enabled);
+        Ok(result?)
     }
 
 }

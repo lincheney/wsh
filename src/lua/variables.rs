@@ -100,21 +100,21 @@ async fn create_dynamic_var(
     (name, typ, get, set, unset): (BString, LuaValue, LuaFunction, Option<LuaFunction>, Option<LuaFunction>),
 ) -> Result<()> {
 
-    let weak = lua.weak();
+    let weak = ui.downgrade();
 
     macro_rules! make_dynamic_var_func {
         (|$($arg:ident),*| $result:expr) => (
             {
                 let weak = weak.clone();
                 Box::new(move |$($arg),*| {
-                    if weak.try_upgrade().is_none() {
-                        eprintln!("Lua instance is destroyed")
-                    } else {
-                        match crate::shell::shell_loop($result) {
+                    if let Ok(ui) = Ui::try_upgrade(&weak) {
+                        match ui.shell_loop($result) {
                             Ok(Ok(val)) => return val,
                             Ok(Err(err)) => ::log::error!("{}", err),
                             Err(err) => ::log::error!("{}", err),
                         }
+                    } else {
+                        eprintln!("Lua instance is destroyed")
                     }
                     Default::default()
                 })

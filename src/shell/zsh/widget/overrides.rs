@@ -48,8 +48,8 @@ static UNDO_NAME: &MetaStr = meta_str!(c".undo");
 static UNDO_OVERRIDE: Mutex<Option<bindings::ZleIntFunc>> = Mutex::new(None);
 
 unsafe extern "C" fn custom_undo(_args: *mut *mut c_char) -> c_int {
-    let result = GlobalState::with(|state| {
-        state.ui.borrow_mut().buffer.move_in_history(false);
+    let result = GlobalState::with(|ui| {
+        ui.borrow_mut().buffer.move_in_history(false);
     });
     match result {
         Ok(()) => 0,
@@ -74,8 +74,8 @@ static REDO_NAME: &MetaStr = meta_str!(c".redo");
 static REDO_OVERRIDE: Mutex<Option<bindings::ZleIntFunc>> = Mutex::new(None);
 
 unsafe extern "C" fn custom_redo(_args: *mut *mut c_char) -> c_int {
-    let result = GlobalState::with(|state| {
-        state.ui.borrow_mut().buffer.move_in_history(true);
+    let result = GlobalState::with(|ui| {
+        ui.borrow_mut().buffer.move_in_history(true);
     });
     match result {
         Ok(()) => 0,
@@ -120,8 +120,8 @@ static VI_UNDO_CHANGE_OVERRIDE: Mutex<Option<bindings::ZleIntFunc>> = Mutex::new
 unsafe extern "C" fn custom_vi_undo_change(_args: *mut *mut c_char) -> c_int {
     // in zsh this toggles between end-of-undo-list and one step back;
     // for wish buffer, just do a regular undo
-    let result = GlobalState::with(|state| {
-        state.ui.borrow_mut().buffer.move_in_history(false);
+    let result = GlobalState::with(|ui| {
+        ui.borrow_mut().buffer.move_in_history(false);
     });
     match result {
         Ok(()) => 0,

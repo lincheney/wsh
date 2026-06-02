@@ -1,7 +1,6 @@
 use std::ops::ControlFlow;
 use crate::lua::{HasEventCallbacks};
 use crate::ui::{Ui};
-use crate::shell::ShellLoop;
 use anyhow::Result;
 use mlua::{prelude::*, UserData, UserDataMethods, MetaMethod};
 use std::rc::Rc;
