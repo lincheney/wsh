@@ -1,3 +1,4 @@
+use crate::shell::{MetaString};
 use std::rc::Rc;
 use bstr::BString;
 use crate::ui::{Ui, WeakUi};
@@ -47,7 +48,8 @@ impl UserData for Function {
 }
 
 fn make_zsh_function(ui: &Ui, lua: &Lua, code: BString) -> Result<LuaValue> {
-    let func = ui.shell.make_function(code.into())?;
+    let code: MetaString = code.into();
+    let func = ui.shell.make_function(code.as_ref())?;
     Ok(lua.pack(Function {
         inner: func,
         ui: ui.downgrade(),

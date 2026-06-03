@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use crate::shell::{MetaString};
 use crate::{meta_str};
 use bstr::BString;
 use crate::lua::{HasEventCallbacks};
@@ -74,14 +74,16 @@ async fn goto_history_relative(ui: Ui, _lua: Lua, val: i32) -> Result<()> {
 
 fn append_history(ui: &Ui, _lua: &Lua, val: BString) -> Result<()> {
     ui.shell.append_history(val.clone())?;
-    ui.shell.call_hook_func(Cow::Borrowed(meta_str!(c"zshaddhistory")), vec![val.into()]);
+    let val: MetaString = val.into();
+    ui.shell.call_hook_func(meta_str!(c"zshaddhistory"), [val].iter());
     Ok(())
 }
 
 fn append_history_words(ui: &Ui, _lua: &Lua, val: Vec<BString>) -> Result<()> {
     let chline = bstr::join(b" ", &val);
     ui.shell.append_history_words(val)?;
-    ui.shell.call_hook_func(Cow::Borrowed(meta_str!(c"zshaddhistory")), vec![chline.into()]);
+    let chline: MetaString = chline.into();
+    ui.shell.call_hook_func(meta_str!(c"zshaddhistory"), [chline].iter());
     Ok(())
 }
 

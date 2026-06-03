@@ -460,7 +460,10 @@ pub fn zistype(x: c_char, y: c_short) -> bool {
     }
 }
 
-pub fn call_hook_func<'a, I: Iterator<Item=&'a MetaStr>>(name: &'a MetaStr, args: I) -> Option<c_int> {
+pub fn call_hook_func<'a, T: 'a + AsRef<MetaStr>, I: Iterator<Item=&'a T>>(
+    name: &'a MetaStr,
+    args: I,
+) -> Option<c_int> {
     unsafe {
         // needs metafy
         if zsh_sys::getshfunc(name.as_ptr().cast_mut()).is_null() {
@@ -472,7 +475,7 @@ pub fn call_hook_func<'a, I: Iterator<Item=&'a MetaStr>>(name: &'a MetaStr, args
     }
 
     let args = std::iter::once(name.as_ptr())
-        .chain(args.map(|x| x.as_ptr()));
+        .chain(args.map(|x| x.as_ref().as_ptr()));
 
     // convert args to a linked list
     let args = linked_list::LinkedList::new_from_ptrs(args);

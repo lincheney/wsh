@@ -1,3 +1,4 @@
+use crate::shell::{MetaString};
 use std::collections::HashMap;
 use bstr::BString;
 use crate::ui::Ui;
@@ -18,12 +19,13 @@ fn value_to_lua(lua: &Lua, val: Option<variables::Value>) -> Result<LuaValue> {
 }
 
 fn get_var(ui: &Ui, lua: &Lua, (name, zle): (BString, Option<bool>)) -> Result<LuaValue> {
-    value_to_lua(lua, ui.shell.get_var(name.into(), zle.unwrap_or(false))?)
+    let name: MetaString = name.into();
+    value_to_lua(lua, ui.shell.get_var(name.as_ref(), zle.unwrap_or(false))?)
 }
 
 fn get_vars(ui: &Ui, lua: &Lua, (names, zle): (Vec<BString>, Option<bool>)) -> Result<LuaTable> {
-    let varnames = names.iter().map(|n| n.clone().into()).collect();
-    let results = ui.shell.get_vars(varnames, zle.unwrap_or(false))?;
+    let varnames: Vec<MetaString> = names.iter().map(|n| n.clone().into()).collect();
+    let results = ui.shell.get_vars(varnames.iter(), zle.unwrap_or(false))?;
 
     let table = lua.create_table()?;
     for (name, val) in names.into_iter().zip(results) {
@@ -55,17 +57,20 @@ fn set_var(ui: &Ui, lua: &Lua, (name, val, global): (BString, LuaValue, Option<b
             return Err(anyhow::anyhow!("invalid value: {:?}", val))
         },
     };
-    ui.shell.set_var(name.into(), val, !global.unwrap_or(false))?;
+    let name: MetaString = name.into();
+    ui.shell.set_var(name.as_ref(), val, !global.unwrap_or(false))?;
     Ok(())
 }
 
 fn unset_var(ui: &Ui, _lua: &Lua, name: BString) -> Result<()> {
-    ui.shell.unset_var(name.into());
+    let name: MetaString = name.into();
+    ui.shell.unset_var(name.as_ref());
     Ok(())
 }
 
 fn export_var(ui: &Ui, _lua: &Lua, name: BString) -> Result<()> {
-    ui.shell.export_var(name.into());
+    let name: MetaString = name.into();
+    ui.shell.export_var(name.as_ref());
     Ok(())
 }
 
@@ -125,7 +130,7 @@ async fn create_dynamic_var(
     macro_rules! make_dynamic_var {
         ($func:ident) => (
             ui.shell.$func(
-                name.into(),
+                crate::shell::MetaString::from(name).as_ref(),
                 make_dynamic_var_func!(| | get.call_async(())),
                 if let Some(set) = set {
                     Some(make_dynamic_var_func!(|x| set.call_async(x)))

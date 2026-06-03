@@ -11,7 +11,7 @@ use std::ptr::NonNull;
 use std::os::raw::{c_long, c_char, c_int};
 use std::default::Default;
 use std::ptr::null_mut;
-use bstr::{BString, ByteSlice, ByteVec};
+use bstr::{BString, BStr, ByteSlice, ByteVec};
 use tokio::sync::oneshot;
 
 mod externs;
@@ -209,7 +209,7 @@ impl Shell {
     pub fn exec_subshell(
         &self,
         _token: TrampolineToken,
-        string: BString,
+        string: &BStr,
         job_control: bool,
         redirections: &[Option<(RawFd, RawFd, bool)>],
         closes: &[Option<RawFd>],
@@ -258,8 +258,8 @@ impl Shell {
         Ok(unsafe{ zsh_sys::lastpid })
     }
 
-    pub fn zpty(&self, name: MetaString, cmd: MetaString, opts: ZptyOpts) -> Result<Zpty> {
-        zsh::zpty(name, cmd.as_ref(), opts)
+    pub fn zpty(&self, name: MetaString, cmd: &MetaStr, opts: ZptyOpts) -> Result<Zpty> {
+        zsh::zpty(name, cmd, opts)
     }
 
     pub fn zpty_delete(&self, name: MetaString) -> c_long {
@@ -288,12 +288,12 @@ impl Shell {
         zsh::parser::parse(string, options)
     }
 
-    pub fn get_prompt(&self, prompt: Option<MetaString>, escaped: bool) -> Option<MetaString> {
-        zsh::get_prompt(prompt.as_ref().map(|p| p.as_ref()), escaped)
+    pub fn get_prompt(&self, prompt: Option<&MetaStr>, escaped: bool) -> Option<MetaString> {
+        zsh::get_prompt(prompt, escaped)
     }
 
-    pub fn get_prompt_size(&self, prompt: Cow<'static, MetaStr>, term_width: Option<c_long>) -> (usize, usize) {
-        let (width, height) = zsh::get_prompt_size(prompt.as_ref(), term_width);
+    pub fn get_prompt_size(&self, prompt: &MetaStr, term_width: Option<c_long>) -> (usize, usize) {
+        let (width, height) = zsh::get_prompt_size(prompt, term_width);
         (width as _, height as _)
     }
 
@@ -317,11 +317,11 @@ impl Shell {
         zsh::process::check_pid_status(pid)
     }
 
-    pub fn get_var(&self, name: MetaString, zle: bool) -> anyhow::Result<Option<variables::Value>> {
+    pub fn get_var(&self, name: &MetaStr, zle: bool) -> anyhow::Result<Option<variables::Value>> {
         if zle {
             self.start_zle_scope();
         }
-        let result = if let Some(mut v) = Variable::get(name.as_ref()) {
+        let result = if let Some(mut v) = Variable::get(name) {
             v.as_value().map(Some)
         } else {
             Ok(None)
@@ -332,11 +332,15 @@ impl Shell {
         result
     }
 
-    pub fn get_vars(&self, names: Vec<MetaString>, zle: bool) -> anyhow::Result<Vec<Option<variables::Value>>> {
+    pub fn get_vars<'a, T: 'a + AsRef<MetaStr>, I: Iterator<Item=&'a T>>(
+        &self,
+        names: I,
+        zle: bool,
+    ) -> anyhow::Result<Vec<Option<variables::Value>>> {
         if zle {
             self.start_zle_scope();
         }
-        let results = names.into_iter().map(|name| {
+        let results = names.map(|name| {
             if let Some(mut v) = Variable::get(name.as_ref()) {
                 v.as_value().map(Some)
             } else {
@@ -349,11 +353,11 @@ impl Shell {
         results
     }
 
-    pub fn get_var_as_string(&self, name: MetaString, zle: bool) -> anyhow::Result<Option<BString>> {
+    pub fn get_var_as_string(&self, name: &MetaStr, zle: bool) -> anyhow::Result<Option<BString>> {
         if zle {
             self.start_zle_scope();
         }
-        let result = Variable::get(name.as_ref()).map(|mut v| v.as_bytes());
+        let result = Variable::get(name).map(|mut v| v.as_bytes());
         if zle {
             self.end_zle_scope();
         }
@@ -376,16 +380,16 @@ impl Shell {
         zsh::end_zle_scope();
     }
 
-    pub fn set_var(&self, name: MetaString, value: variables::Value, local: bool) -> anyhow::Result<()> {
-        Variable::set(name.as_ref(), value, local)
+    pub fn set_var(&self, name: &MetaStr, value: variables::Value, local: bool) -> anyhow::Result<()> {
+        Variable::set(name, value, local)
     }
 
-    pub fn unset_var(&self, name: MetaString) {
-        Variable::unset(name.as_ref());
+    pub fn unset_var(&self, name: &MetaStr) {
+        Variable::unset(name);
     }
 
-    pub fn export_var(&self, name: MetaString) -> bool {
-        if let Some(var) = Variable::get(name.as_ref()) {
+    pub fn export_var(&self, name: &MetaStr) -> bool {
+        if let Some(var) = Variable::get(name) {
             var.export();
             true
         } else {
@@ -395,52 +399,52 @@ impl Shell {
 
     pub fn create_dynamic_string_var(
         &self,
-        name: MetaString,
+        name: &MetaStr,
         get: Box<dyn Fn() -> BString>,
         set: Option<Box<dyn Fn(BString)>>,
         unset: Option<Box<dyn Fn(bool)>>
     ) -> Result<()> {
-        Variable::create_dynamic(name.as_ref(), get, set, unset)
+        Variable::create_dynamic(name, get, set, unset)
     }
 
     pub fn create_dynamic_integer_var(
         &self,
-        name: MetaString,
+        name: &MetaStr,
         get: Box<dyn Fn() -> c_long>,
         set: Option<Box<dyn Fn(c_long)>>,
         unset: Option<Box<dyn Fn(bool)>>
     ) -> Result<()> {
-        Variable::create_dynamic(name.as_ref(), get, set, unset)
+        Variable::create_dynamic(name, get, set, unset)
     }
 
     pub fn create_dynamic_float_var(
         &self,
-        name: MetaString,
+        name: &MetaStr,
         get: Box<dyn Fn() -> f64>,
         set: Option<Box<dyn Fn(f64)>>,
         unset: Option<Box<dyn Fn(bool)>>
     ) -> Result<()> {
-        Variable::create_dynamic(name.as_ref(), get, set, unset)
+        Variable::create_dynamic(name, get, set, unset)
     }
 
     pub fn create_dynamic_array_var(
         &self,
-        name: MetaString,
+        name: &MetaStr,
         get: Box<dyn Fn() -> Vec<BString>>,
         set: Option<Box<dyn Fn(Vec<BString>)>>,
         unset: Option<Box<dyn Fn(bool)>>
     ) -> Result<()> {
-        Variable::create_dynamic(name.as_ref(), get, set, unset)
+        Variable::create_dynamic(name, get, set, unset)
     }
 
     pub fn create_dynamic_hash_var(
         &self,
-        name: MetaString,
+        name: &MetaStr,
         get: Box<dyn Fn() -> HashMap<BString, BString>>,
         set: Option<Box<dyn Fn(HashMap<BString, BString>)>>,
         unset: Option<Box<dyn Fn(bool)>>
     ) -> Result<()> {
-        Variable::create_dynamic(name.as_ref(), get, set, unset)
+        Variable::create_dynamic(name, get, set, unset)
     }
 
     pub fn goto_history(&self, index: history::HistoryIndex, skipdups: bool) {
@@ -509,28 +513,28 @@ impl Shell {
         unsafe{ zsh::done != 0 }
     }
 
-    pub fn make_function(&self, code: MetaString) -> Result<Rc<zsh::functions::Function>> {
-        let func = zsh::functions::Function::new(code.as_ref())?;
+    pub fn make_function(&self, code: &MetaStr) -> Result<Rc<zsh::functions::Function>> {
+        let func = zsh::functions::Function::new(code)?;
         Ok(Rc::new(func))
     }
 
-    pub fn exec_function(
+    pub fn exec_function<'a, T: 'a + AsRef<MetaStr>, I: Iterator<Item=&'a T>>(
         &self,
         _token: TrampolineToken,
         function: Rc<zsh::functions::Function>,
-        arg0: Option<MetaString>,
-        args: Vec<MetaString>
+        arg0: Option<&'a MetaStr>,
+        args: I,
     ) -> c_int {
-        function.execute(arg0.as_ref().map(|x| x.as_ref()), args.iter().map(|x| x.as_ref()))
+        function.execute(arg0, args)
     }
 
-    pub fn exec_function_by_name(
+    pub fn exec_function_by_name<'a, T: 'a + AsRef<MetaStr>, I: Iterator<Item=&'a T>>(
         &self,
         _token: TrampolineToken,
-        function: MetaString,
-        args: Vec<MetaString>
+        function: &'a MetaStr,
+        args: I,
     ) -> Option<c_int> {
-        zsh::functions::Function::execute_by_name(function.as_ref(), args.iter().map(|x| x.as_ref()))
+        zsh::functions::Function::execute_by_name(function, args)
     }
 
     pub fn get_function_source(&self, function: Rc<zsh::functions::Function>) -> BString {
@@ -561,9 +565,13 @@ impl Shell {
         zsh::restore_queue_signals(level)
     }
 
-    pub fn call_hook_func(&self, name: Cow<'static, MetaStr>, args: Vec<MetaString>) -> Option<c_int> {
+    pub fn call_hook_func<'a, T: 'a + AsRef<MetaStr>, I: Iterator<Item=&'a T>>(
+        &self,
+        name: &'a MetaStr,
+        args: I,
+    ) -> Option<c_int> {
         // needs metafy
-        zsh::call_hook_func(name.as_ref(), args.iter().map(|x| x.as_ref()))
+        zsh::call_hook_func(name, args)
     }
 
 }

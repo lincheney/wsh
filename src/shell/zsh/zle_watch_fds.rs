@@ -41,7 +41,7 @@ fn run_hook(hook: &SharedFdChangeHook, fd: RawFd, error: Option<std::io::Error>)
         }
     } else {
         let args = [Some(fdstr), error.map(|_| MetaStr::new(c"err"))];
-        super::call_hook_func(hook.func.as_ref(), args.into_iter().flatten());
+        super::call_hook_func(hook.func.as_ref(), args.iter().flatten());
     }
     unsafe {
         super::unrefthingy(super::lbindk);

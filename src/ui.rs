@@ -785,7 +785,8 @@ impl Ui {
         let lock = self.has_foreground_process.lock().await;
         self.shell.set_zle_buffer(old_buffer, old_cursor as _);
         let _ = self.clone().shell.trampoline_out_callback(move |ui, token| {
-            ui.shell.exec_function_by_name(token, func, vec![num_chars.to_string().into()]);
+            let num_chars: crate::shell::MetaString = num_chars.to_string().into();
+            ui.shell.exec_function_by_name(token, func.as_ref(), [num_chars].iter());
         }).await;
         let zle = self.shell.get_zle_buffer();
         drop(lock);

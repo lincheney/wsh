@@ -1,3 +1,4 @@
+use crate::shell::{MetaString};
 use std::rc::Rc;
 use crate::meta_str;
 use std::num::NonZeroU16;
@@ -94,7 +95,7 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     cmd.insert_str(0, meta_str!(c"eval "));
 
     let time = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_secs_f64();
-    let name = format!("zpty-{time}");
+    let name: MetaString = format!("zpty-{time}").into();
     let opts = crate::shell::ZptyOpts{
         echo_input: !args.no_echo_input,
         non_blocking: true,
@@ -102,7 +103,7 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         width: args.width,
     };
     // TODO capture shout
-    let zpty = ui.shell.zpty(name.into(), cmd, opts)?;
+    let zpty = ui.shell.zpty(name, cmd.as_ref(), opts)?;
 
     // do not drop the pty fd as zsh will do it for us
     // so we dup the fd to one we own instead

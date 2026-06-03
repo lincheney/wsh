@@ -134,7 +134,7 @@ pub async fn subshell_run_with_args(ui: Ui, lua: Lua, args: FullShellRunArgs) ->
                 let result = ui.freeze_if(foreground, true, async {
                     // fork it now to get the pid
                     let redirections = streams.each_ref().map(|s| s.as_ref().map(|s| (s.fd, s.replacement, s.fd != 0)));
-                    let pid = ui.shell.exec_subshell(token, args.command, false, &redirections, &fds)? as _;
+                    let pid = ui.shell.exec_subshell(token, args.command.as_ref(), false, &redirections, &fds)? as _;
                     // close them or we will block
                     for file in streams.iter_mut().flatten() {
                         crate::log_if_err(file.close());

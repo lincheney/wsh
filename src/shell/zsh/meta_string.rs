@@ -222,3 +222,9 @@ impl ToOwned for MetaStr {
         MetaString{ inner: self.inner.to_owned() }
     }
 }
+
+impl AsRef<MetaStr> for MetaStr {
+    fn as_ref(&self) -> &MetaStr {
+        self
+    }
+}

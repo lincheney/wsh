@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use crate::shell::{MetaString};
 use std::str::FromStr;
 use serde::{Deserialize, Deserializer, de};
 use bstr::BString;
@@ -147,8 +147,9 @@ fn get_size(ui: &Ui, _lua: &Lua, (): ()) -> Result<(u32, u32)> {
 
 async fn call_hook_func(ui: Ui, _lua: Lua, mut args: Vec<BString>) -> Result<Option<i32>> {
     let arg0 = args.remove(0);
+    let args: Vec<MetaString> = args.into_iter().map(|x| x.into()).collect();
     ui.freeze_if(true, true, async {
-        ui.shell.call_hook_func(Cow::Owned(arg0.into()), args.into_iter().map(|x| x.into()).collect())
+        ui.shell.call_hook_func(MetaString::from(arg0).as_ref(), args.iter())
     }).await
 }
 

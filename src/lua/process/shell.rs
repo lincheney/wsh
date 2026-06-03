@@ -1,3 +1,4 @@
+use crate::shell::{MetaString};
 use std::rc::Rc;
 use bstr::BString;
 use anyhow::{Result};
@@ -40,9 +41,10 @@ pub async fn shell_run_with_args(ui: Ui, _lua: Lua, cmd: ShellRunCmd, foreground
                 match cmd {
                     ShellRunCmd::Simple(command) => ui.shell.exec(token, command.into()),
                     ShellRunCmd::Function{func, args, arg0, ..} => {
-                        let arg0 = arg0.map(|x| x.into());
-                        let args = args.into_iter().map(|x| x.into()).collect();
-                        ui.shell.exec_function(token, func.clone(), arg0, args).into()
+                        let arg0: Option<MetaString> = arg0.map(|x| x.into());
+                        let arg0 = arg0.as_ref().map(|x| x.as_ref());
+                        let args: Vec<_> = args.into_iter().map(MetaString::from).collect();
+                        ui.shell.exec_function(token, func.clone(), arg0, args.iter()).into()
                     },
                 }
             }).await

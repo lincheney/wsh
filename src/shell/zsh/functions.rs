@@ -49,8 +49,12 @@ impl Function {
         Ok(Self(func))
     }
 
-    fn doshfunc<'a, I: Iterator<Item=&'a MetaStr>>(func: zsh_sys::Shfunc, arg0: &'a MetaStr, args: I) -> c_int {
-        let args = std::iter::once(arg0).chain(args);
+    fn doshfunc<'a, T: 'a + AsRef<MetaStr>, I: Iterator<Item=&'a T>>(
+        func: zsh_sys::Shfunc,
+        arg0: &'a MetaStr,
+        args: I,
+    ) -> c_int {
+        let args = std::iter::once(arg0).chain(args.map(|x| x.as_ref()));
         let args = args.map(|x| x.as_ptr());
         // convert args to a linked list
         let args = super::linked_list::LinkedList::new_from_ptrs(args);
@@ -62,11 +66,18 @@ impl Function {
         }
     }
 
-    pub fn execute<'a, I: Iterator<Item=&'a MetaStr>>(&self, arg0: Option<&'a MetaStr>, args: I) -> c_int {
+    pub fn execute<'a, T: 'a + AsRef<MetaStr>, I: Iterator<Item=&'a T>>(
+        &self,
+        arg0: Option<&'a MetaStr>,
+        args: I,
+    ) -> c_int {
         Self::doshfunc(&self.0 as *const _ as _, arg0.unwrap_or(meta_str!(c"")), args)
     }
 
-    pub fn execute_by_name<'a, I: Iterator<Item=&'a MetaStr>>(name: &'a MetaStr, args: I) -> Option<c_int> {
+    pub fn execute_by_name<'a, T: 'a + AsRef<MetaStr>, I: Iterator<Item=&'a T>>(
+        name: &'a MetaStr,
+        args: I,
+    ) -> Option<c_int> {
         let func = unsafe{ zsh_sys::getshfunc(name.as_ptr().cast_mut()) };
         if func.is_null() {
             return None

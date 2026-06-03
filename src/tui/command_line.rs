@@ -57,7 +57,7 @@ impl CommandLineState {
         let predisplay = crate::shell::Variable::get(meta_str!(c"PREDISPLAY")).map(|mut v| v.as_bytes());
         let postdisplay = crate::shell::Variable::get(meta_str!(c"POSTDISPLAY")).map(|mut v| v.as_bytes());
         let prompt = shell.get_prompt(None, true).map_or(Cow::Borrowed(FALLBACK_PROMPT), Cow::Owned);
-        let prompt_size = shell.get_prompt_size(prompt.clone(), Some(width as _));
+        let prompt_size = shell.get_prompt_size(&prompt, Some(width as _));
         let prompt = match crate::shell::remove_invisible_chars(prompt) {
             Cow::Owned(prompt) => Cow::Owned(prompt.unmetafy()),
             Cow::Borrowed(prompt) => prompt.unmetafy(),
