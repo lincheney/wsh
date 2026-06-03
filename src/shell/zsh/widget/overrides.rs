@@ -1,5 +1,5 @@
+use std::sync::{atomic::{AtomicPtr, Ordering}};
 use std::os::raw::*;
-use std::sync::Mutex;
 use anyhow::{Result};
 use super::super::bindings;
 use super::super::MetaStr;
@@ -22,21 +22,22 @@ unsafe fn get_widget(name: &MetaStr) -> Result<*mut bindings::widget> {
 }
 
 /// Look up a widget by name in thingytab and swap its fn pointer.
-fn override_widget(name: &MetaStr, new_fn: bindings::ZleIntFunc, state: &Mutex<Option<bindings::ZleIntFunc>>) -> Result<()> {
+fn override_widget(name: &MetaStr, new_fn: bindings::ZleIntFunc, state: &AtomicPtr<c_void>) -> Result<()> {
     unsafe {
         let widget = get_widget(name)?;
-        let original_fn = (*widget).u.fn_;
-        *state.lock().unwrap() = Some(original_fn);
+        let original_fn = (*widget).u.fn_.map_or(std::ptr::null_mut(), |f| f as _);
+        state.store(original_fn, Ordering::Release);
         (*widget).u.fn_ = new_fn;
         Ok(())
     }
 }
 
 /// Restore a widget's original fn pointer.
-fn restore_widget(name: &MetaStr, state: &Mutex<Option<bindings::ZleIntFunc>>) -> Result<()> {
-    if let Some(original_fn) = state.lock().unwrap().take() {
+fn restore_widget(name: &MetaStr, state: &AtomicPtr<c_void>) -> Result<()> {
+    let ptr = state.swap(std::ptr::null_mut(), Ordering::AcqRel);
+    if !ptr.is_null() {
         unsafe {
-            (*get_widget(name)?).u.fn_ = original_fn;
+            (*get_widget(name)?).u.fn_ = Some(std::mem::transmute(ptr));
         }
     }
     Ok(())
@@ -45,7 +46,7 @@ fn restore_widget(name: &MetaStr, state: &Mutex<Option<bindings::ZleIntFunc>>) -
 // --- undo widget override ---
 
 static UNDO_NAME: &MetaStr = meta_str!(c".undo");
-static UNDO_OVERRIDE: Mutex<Option<bindings::ZleIntFunc>> = Mutex::new(None);
+static UNDO_OVERRIDE: AtomicPtr<c_void> = const{ AtomicPtr::new(std::ptr::null_mut()) };
 
 unsafe extern "C" fn custom_undo(_args: *mut *mut c_char) -> c_int {
     let result = GlobalState::with(|ui| {
@@ -71,7 +72,7 @@ fn restore_undo() -> Result<()> {
 // --- redo widget override ---
 
 static REDO_NAME: &MetaStr = meta_str!(c".redo");
-static REDO_OVERRIDE: Mutex<Option<bindings::ZleIntFunc>> = Mutex::new(None);
+static REDO_OVERRIDE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
 unsafe extern "C" fn custom_redo(_args: *mut *mut c_char) -> c_int {
     let result = GlobalState::with(|ui| {
@@ -97,7 +98,7 @@ fn restore_redo() -> Result<()> {
 // --- split-undo widget override ---
 
 static SPLIT_UNDO_NAME: &MetaStr = meta_str!(c".split-undo");
-static SPLIT_UNDO_OVERRIDE: Mutex<Option<bindings::ZleIntFunc>> = Mutex::new(None);
+static SPLIT_UNDO_OVERRIDE: AtomicPtr<c_void> = const{ AtomicPtr::new(std::ptr::null_mut()) };
 
 unsafe extern "C" fn custom_split_undo(_args: *mut *mut c_char) -> c_int {
     // wish buffer doesn't have zsh's undo merging, so this is a no-op
@@ -115,7 +116,7 @@ fn restore_split_undo() -> Result<()> {
 // --- vi-undo-change widget override ---
 
 static VI_UNDO_CHANGE_NAME: &MetaStr = meta_str!(c".vi-undo-change");
-static VI_UNDO_CHANGE_OVERRIDE: Mutex<Option<bindings::ZleIntFunc>> = Mutex::new(None);
+static VI_UNDO_CHANGE_OVERRIDE: AtomicPtr<c_void> = const{ AtomicPtr::new(std::ptr::null_mut()) };
 
 unsafe extern "C" fn custom_vi_undo_change(_args: *mut *mut c_char) -> c_int {
     // in zsh this toggles between end-of-undo-list and one step back;
