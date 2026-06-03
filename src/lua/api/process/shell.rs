@@ -1,3 +1,4 @@
+use crate::lua::LuaWrapper;
 use crate::shell::{MetaString};
 use std::rc::Rc;
 use bstr::BString;
@@ -58,9 +59,9 @@ pub async fn shell_run_with_args(ui: Ui, _lua: Lua, cmd: ShellRunCmd, foreground
     Ok(code)
 }
 
-pub fn init_lua(ui: &Ui) -> Result<()> {
+pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
 
-    ui.set_lua_async_fn("__shell_run", shell_run)?;
+    lua.set_async_fn("__shell_run", shell_run)?;
 
     Ok(())
 }

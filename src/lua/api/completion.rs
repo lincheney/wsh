@@ -1,6 +1,7 @@
+use crate::lua::LuaWrapper;
 use std::ops::ControlFlow;
 use crate::lua::{HasEventCallbacks};
-use crate::ui::{Ui};
+use crate::lua::{Ui};
 use anyhow::Result;
 use mlua::{prelude::*, UserData, UserDataMethods, MetaMethod};
 use std::rc::Rc;
@@ -80,10 +81,10 @@ async fn insert_completion(ui: Ui, _lua: Lua, val: Match) -> Result<()> {
     Ok(())
 }
 
-pub fn init_lua(ui: &Ui) -> Result<()> {
+pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
 
-    ui.set_lua_async_fn("get_completions", get_completions)?;
-    ui.set_lua_async_fn("insert_completion", insert_completion)?;
+    lua.set_async_fn("get_completions", get_completions)?;
+    lua.set_async_fn("insert_completion", insert_completion)?;
 
     Ok(())
 }

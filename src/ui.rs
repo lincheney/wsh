@@ -1,5 +1,4 @@
 use std::ops::ControlFlow;
-use std::sync::{atomic::Ordering};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use bstr::{BStr, BString};
@@ -10,6 +9,9 @@ use anyhow::Result;
 use crate::keybind::{Event, KeyEvent, Key, Modifiers};
 use crate::print_lock::{PrintLock, PrintLockGuard};
 use nix::sys::termios;
+use crate::shell::{Shell, KeybindValue, process::PidMap};
+use crate::lua::{LuaWrapper, EventCallbacks, HasEventCallbacks};
+pub mod buffer;
 
 use crossterm::{
     terminal::{Clear, ClearType, BeginSynchronizedUpdate, EndSynchronizedUpdate},
@@ -23,16 +25,8 @@ use crate::tui::{
     MoveDown,
 };
 
-use crate::shell::{Shell, KeybindValue, process::PidMap};
-use crate::lua::{EventCallbacks, HasEventCallbacks};
-pub mod buffer;
-
 const ENABLE_SGR_MOUSE: style::Print<&str> = style::Print("\x1b[?1000;1006h");
 const DISABLE_SGR_MOUSE: style::Print<&str> = style::Print("\x1b[?1000;1006l");
-
-fn lua_error<T>(msg: &str) -> Result<T, mlua::Error> {
-    Err(mlua::Error::RuntimeError(msg.to_string()))
-}
 
 enum KeybindOutput {
     String(BString),
@@ -45,13 +39,13 @@ pub struct TermiosInputFlags {
 }
 
 #[derive(Clone)]
-pub struct Ui(Rc<_Ui>);
+pub struct Ui(pub Rc<_Ui>);
 crate::impl_deref_helper!(self: Ui, &self.0 => Rc<_Ui>);
 
 pub struct _Ui {
     pub inner: RefCell<UiInner>,
     pub shell: Shell,
-    pub lua: Lua,
+    pub lua: crate::lua::LuaWrapper,
     pub events: crate::event_stream::EventController,
     pub has_foreground_process: tokio::sync::Mutex<()>,
     pub print_lock: PrintLock,
@@ -91,10 +85,7 @@ impl Ui {
         runtime: crate::async_runtime::Runtime,
     ) -> Result<Self> {
 
-        let lua = Lua::new();
-        let lua_api = lua.create_table()?;
-        lua.globals().set("wish", &lua_api)?;
-
+        let lua = LuaWrapper::new()?;
         let stdout = std::io::stdout();
         let termios = termios::tcgetattr(&stdout)?;
 
@@ -131,8 +122,10 @@ impl Ui {
             is_drawing: Default::default(),
             runtime,
         };
+        let ui = Self(Rc::new(ui));
+        ui.lua.ui.replace(ui.downgrade());
 
-        Ok(Self(Rc::new(ui)))
+        Ok(ui)
     }
 
 
@@ -142,10 +135,6 @@ impl Ui {
 
     pub fn borrow_mut(&self) -> std::cell::RefMut<'_, UiInner> {
         self.inner.borrow_mut()
-    }
-
-    pub fn get_lua_api(&self) -> LuaResult<LuaTable> {
-        self.lua.globals().get("wish")
     }
 
     pub async fn start_cmd(&self, buffer: Option<&BString>) -> Result<()> {
@@ -222,12 +211,8 @@ impl Ui {
         }
     }
 
-    pub async fn call_lua_fn<T: IntoLuaMulti + mlua::MaybeSend + 'static>(&self, draw: bool, callback: mlua::Function, arg: T) {
-
-        crate::shell::LUA_LEVEL.fetch_add(1, Ordering::Relaxed);
-        let result = callback.call_async::<LuaValue>(arg).await;
-        crate::shell::LUA_LEVEL.fetch_sub(1, Ordering::Relaxed);
-
+    pub async fn call_lua_fn<T: IntoLuaMulti + 'static>(&self, draw: bool, callback: mlua::Function, arg: T) {
+        let result = self.lua.call_lua_fn(callback, arg).await;
         if result.is_err() {
             let mut ui = self.clone();
             if !ui.report_error(result) && draw {
@@ -457,86 +442,16 @@ impl Ui {
         Ok(true)
     }
 
-    pub fn set_lua_fn<F, A, R>(&self, name: &str, func: F) -> LuaResult<()>
-    where
-        F: Fn(&Self, &Lua, A) -> Result<R> + mlua::MaybeSend + 'static,
-        A: FromLuaMulti,
-        R: IntoLuaMulti,
-    {
-
-        let func = self.make_lua_fn(func)?;
-        self.get_lua_api()?.set(name, func)
-    }
-
-    pub fn make_lua_fn<F, A, R>(&self, func: F) -> LuaResult<LuaFunction>
-    where
-        F: Fn(&Self, &Lua, A) -> Result<R> + mlua::MaybeSend + 'static,
-        A: FromLuaMulti,
-        R: IntoLuaMulti,
-    {
-        let weak = self.downgrade();
-        self.lua.create_function(move |lua, value| {
-            let ui = Self::try_upgrade(&weak)?;
-            func(&ui, lua, value)
-                .map_err(|e| mlua::Error::RuntimeError(e.to_string()))
-        })
-    }
-
-    pub fn set_lua_async_fn<F, A, R, T>(&self, name: &str, func: F) -> LuaResult<()>
-    where
-        F: Fn(Self, Lua, A) -> T + mlua::MaybeSend + 'static + Clone,
-        A: FromLuaMulti + mlua::MaybeSend + 'static,
-        R: IntoLuaMulti,
-        T: Future<Output=Result<R>> + mlua::MaybeSend + 'static,
-    {
-        let func = self.make_lua_async_fn(func)?;
-        self.get_lua_api()?.set(name, func)
-    }
-
     pub fn downgrade(&self) -> WeakUi {
         Rc::downgrade(&self.0)
     }
 
-    pub fn try_upgrade(weak: &WeakUi) -> LuaResult<Self> {
+    pub fn try_upgrade(weak: &WeakUi) -> Result<Self> {
         if let Some(ui) = weak.upgrade() {
             Ok(Self(ui))
         } else {
-            lua_error("ui not running")
+            anyhow::bail!("ui not running")
         }
-    }
-
-    pub fn make_lua_async_fn<F, A, R, T>(&self, func: F) -> LuaResult<LuaFunction>
-    where
-        F: Fn(Self, Lua, A) -> T + mlua::MaybeSend + 'static + Clone,
-        A: FromLuaMulti + mlua::MaybeSend + 'static,
-        R: IntoLuaMulti,
-        T: Future<Output=Result<R>> + mlua::MaybeSend + 'static,
-    {
-        let weak = self.downgrade();
-        self.lua.create_async_function(move |lua, value| {
-            let weak = weak.clone();
-            let func = func.clone();
-            async move {
-                let ui = Self::try_upgrade(&weak)?;
-                func(ui, lua, value).await
-                    .map_err(|e| mlua::Error::RuntimeError(e.to_string()))
-            }
-        })
-    }
-
-    pub fn init_lua(&self) -> Result<()> {
-        crate::lua::init_lua(self)?;
-
-        self.lua.load(/*lua*/ r"
-            local xdg_data = os.getenv('XDG_DATA_HOME')
-            local home = os.getenv('HOME')
-            local base = xdg_data or (home and home .. '/.local/share')
-            local wish_path = base and (base .. '/wish/lua/?.lua;') or ''
-            local p = (';' .. package.path .. ';'):gsub(';%./%?%.lua;', ''):gsub('^;', ''):gsub(';$', '')
-            package.path = wish_path .. p
-        ").exec()?;
-        self.lua.load("require('wish')").exec()?;
-        Ok(())
     }
 
     async fn handle_key(&mut self, event: &Event, buf: &BStr) -> Option<Result<bool>> {

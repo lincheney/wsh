@@ -1,3 +1,4 @@
+use crate::lua::LuaWrapper;
 use bstr::BString;
 use std::default::Default;
 use serde::{Deserialize, Serialize};
@@ -829,30 +830,28 @@ async fn allocate_height(ui: Ui, _lua: Lua, height: u16) -> Result<()> {
     ui.allocate_height(height).await
 }
 
-pub fn init_lua(ui: &Ui) -> Result<()> {
+pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
 
-    let lua_api = ui.get_lua_api()?;
-
-    lua_api.set("sgr_to_style", ui.lua.create_function(sgr_to_style)?)?;
-    lua_api.set("style_to_sgr", ui.lua.create_function(style_to_sgr)?)?;
-    ui.set_lua_async_fn("allocate_height", allocate_height)?;
-    ui.set_lua_fn("set_message", set_message)?;
-    ui.set_lua_fn("check_message", check_message)?;
-    ui.set_lua_fn("remove_message", remove_message)?;
-    ui.set_lua_fn("clear_messages", clear_messages)?;
-    ui.set_lua_fn("scroll_message", scroll_message)?;
-    ui.set_lua_fn("scroll_message_to", scroll_message_to)?;
-    ui.set_lua_fn("add_buf_highlight_namespace", add_buf_highlight_namespace)?;
-    ui.set_lua_fn("add_buf_highlight", add_buf_highlight)?;
-    ui.set_lua_fn("clear_buf_highlights", clear_buf_highlights)?;
-    ui.set_lua_fn("feed_ansi_message", feed_ansi_message)?;
-    ui.set_lua_fn("clear_message", clear_message)?;
-    ui.set_lua_fn("get_message_text", get_message_text)?;
-    ui.set_lua_fn("message_to_ansi_string", message_to_ansi_string)?;
-    ui.set_lua_fn("set_status_bar", set_status_bar)?;
-    ui.set_lua_async_fn("enable_mouse_mode", enable_mouse_mode)?;
-    ui.set_lua_fn("get_message_geometry", get_message_geometry)?;
-    ui.set_lua_fn("get_status_bar_geometry", get_status_bar_geometry)?;
+    lua.api.set("sgr_to_style", lua.create_function(sgr_to_style)?)?;
+    lua.api.set("style_to_sgr", lua.create_function(style_to_sgr)?)?;
+    lua.set_async_fn("allocate_height", allocate_height)?;
+    lua.set_fn("set_message", set_message)?;
+    lua.set_fn("check_message", check_message)?;
+    lua.set_fn("remove_message", remove_message)?;
+    lua.set_fn("clear_messages", clear_messages)?;
+    lua.set_fn("scroll_message", scroll_message)?;
+    lua.set_fn("scroll_message_to", scroll_message_to)?;
+    lua.set_fn("add_buf_highlight_namespace", add_buf_highlight_namespace)?;
+    lua.set_fn("add_buf_highlight", add_buf_highlight)?;
+    lua.set_fn("clear_buf_highlights", clear_buf_highlights)?;
+    lua.set_fn("feed_ansi_message", feed_ansi_message)?;
+    lua.set_fn("clear_message", clear_message)?;
+    lua.set_fn("get_message_text", get_message_text)?;
+    lua.set_fn("message_to_ansi_string", message_to_ansi_string)?;
+    lua.set_fn("set_status_bar", set_status_bar)?;
+    lua.set_async_fn("enable_mouse_mode", enable_mouse_mode)?;
+    lua.set_fn("get_message_geometry", get_message_geometry)?;
+    lua.set_fn("get_status_bar_geometry", get_status_bar_geometry)?;
 
     Ok(())
 }

@@ -1,3 +1,4 @@
+use crate::lua::LuaWrapper;
 use bstr::BString;
 use anyhow::Result;
 use mlua::{prelude::*, Function};
@@ -180,11 +181,11 @@ fn remove_event_callback(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
     Ok(())
 }
 
-pub fn init_lua(ui: &Ui) -> Result<()> {
+pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
 
-    ui.set_lua_fn("add_event_callback", add_event_callback)?;
-    ui.set_lua_fn("remove_event_callback", remove_event_callback)?;
-    ui.set_lua_async_fn("trigger_event_callback", trigger_event_callback)?;
+    lua.set_fn("add_event_callback", add_event_callback)?;
+    lua.set_fn("remove_event_callback", remove_event_callback)?;
+    lua.set_async_fn("trigger_event_callback", trigger_event_callback)?;
 
     Ok(())
 }

@@ -1,3 +1,4 @@
+use crate::lua::LuaWrapper;
 use bstr::BString;
 use std::default::Default;
 use std::os::fd::{RawFd, AsRawFd, IntoRawFd};
@@ -184,9 +185,9 @@ pub async fn subshell_run_with_args(ui: Ui, lua: Lua, args: FullShellRunArgs) ->
     ))?)
 }
 
-pub fn init_lua(ui: &Ui) -> Result<()> {
+pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
 
-    ui.set_lua_async_fn("__subshell_run", subshell_run)?;
+    lua.set_async_fn("__subshell_run", subshell_run)?;
 
     Ok(())
 }

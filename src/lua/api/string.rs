@@ -1,6 +1,6 @@
+use crate::lua::LuaWrapper;
 use anyhow::Result;
 use mlua::{prelude::*};
-use crate::ui::Ui;
 use bstr::{ByteSlice};
 use unicode_width::{UnicodeWidthStr, UnicodeWidthChar};
 
@@ -43,17 +43,16 @@ fn from_byte_pos(_lua: &Lua, (string, index): (mlua::String, usize)) -> LuaResul
     Ok(None)
 }
 
-pub fn init_lua(ui: &Ui) -> Result<()> {
+pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
 
-    let lua_api = ui.get_lua_api()?;
-    let tbl = ui.lua.create_table()?;
-    lua_api.set("str", &tbl)?;
+    let tbl = lua.create_table()?;
+    lua.api.set("str", &tbl)?;
 
-    tbl.set("len", ui.lua.create_function(len)?)?;
-    tbl.set("width", ui.lua.create_function(width)?)?;
-    tbl.set("to_byte_pos", ui.lua.create_function(to_byte_pos)?)?;
-    tbl.set("from_byte_pos", ui.lua.create_function(from_byte_pos)?)?;
-    tbl.set("truncate", ui.lua.create_function(truncate)?)?;
+    tbl.set("len", lua.create_function(len)?)?;
+    tbl.set("width", lua.create_function(width)?)?;
+    tbl.set("to_byte_pos", lua.create_function(to_byte_pos)?)?;
+    tbl.set("from_byte_pos", lua.create_function(from_byte_pos)?)?;
+    tbl.set("truncate", lua.create_function(truncate)?)?;
 
     Ok(())
 }

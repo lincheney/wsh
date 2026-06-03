@@ -1,3 +1,4 @@
+use crate::lua::LuaWrapper;
 use crate::shell::{MetaString};
 use std::rc::Rc;
 use bstr::BString;
@@ -39,7 +40,7 @@ impl UserData for Function {
                 (args.split_off(0), true)
             };
 
-            let ui = Ui::try_upgrade(&func.ui)?;
+            let ui = Ui::try_upgrade(&func.ui).map_err(crate::lua::lua_error)?;
             let cmd = ShellRunCmd::Function{func: func.inner.clone(), args, arg0: None};
             let result = shell_run_with_args(ui, lua, cmd, foreground).await;
             result.map_err(|e| mlua::Error::RuntimeError(e.to_string()))
@@ -56,9 +57,9 @@ fn make_zsh_function(ui: &Ui, lua: &Lua, code: BString) -> Result<LuaValue> {
     })?)
 }
 
-pub fn init_lua(ui: &Ui) -> Result<()> {
+pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
 
-    ui.set_lua_fn("make_zsh_function", make_zsh_function)?;
+    lua.set_fn("make_zsh_function", make_zsh_function)?;
 
     Ok(())
 }

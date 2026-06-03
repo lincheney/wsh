@@ -1,3 +1,4 @@
+use crate::lua::LuaWrapper;
 use crate::shell::{MetaString};
 use std::collections::HashMap;
 use bstr::BString;
@@ -156,16 +157,16 @@ async fn create_dynamic_var(
     }
 }
 
-pub fn init_lua(ui: &Ui) -> Result<()> {
+pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
 
-    ui.set_lua_fn("get_var", get_var)?;
-    ui.set_lua_fn("get_vars", get_vars)?;
-    ui.set_lua_fn("set_var", set_var)?;
-    ui.set_lua_fn("unset_var", unset_var)?;
-    ui.set_lua_fn("export_var", export_var)?;
-    ui.set_lua_async_fn("in_param_scope", in_param_scope)?;
-    ui.set_lua_async_fn("in_zle_param_scope", in_zle_param_scope)?;
-    ui.set_lua_async_fn("create_dynamic_var", create_dynamic_var)?;
+    lua.set_fn("get_var", get_var)?;
+    lua.set_fn("get_vars", get_vars)?;
+    lua.set_fn("set_var", set_var)?;
+    lua.set_fn("unset_var", unset_var)?;
+    lua.set_fn("export_var", export_var)?;
+    lua.set_async_fn("in_param_scope", in_param_scope)?;
+    lua.set_async_fn("in_zle_param_scope", in_zle_param_scope)?;
+    lua.set_async_fn("create_dynamic_var", create_dynamic_var)?;
 
     Ok(())
 }

@@ -1,3 +1,4 @@
+use crate::lua::LuaWrapper;
 use bstr::BString;
 use std::str::FromStr;
 use std::collections::HashMap;
@@ -264,8 +265,8 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
 
 }
 
-pub fn init_lua(ui: &Ui) -> Result<()> {
-    ui.set_lua_async_fn("__spawn", spawn)?;
+pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
+    lua.set_async_fn("__spawn", spawn)?;
     Ok(())
 }
 

@@ -1,3 +1,4 @@
+use crate::lua::LuaWrapper;
 use crate::ui::Ui;
 use anyhow::Result;
 use mlua::prelude::*;
@@ -30,9 +31,9 @@ fn parse(ui: &Ui, lua: &Lua, (val, options): (bstr::BString, Option<LuaValue>)) 
     Ok((complete, tokens))
 }
 
-pub fn init_lua(ui: &Ui) -> Result<()> {
+pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
 
-    ui.set_lua_fn("parse", parse)?;
+    lua.set_fn("parse", parse)?;
 
     Ok(())
 }

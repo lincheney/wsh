@@ -1,6 +1,6 @@
+use crate::lua::LuaWrapper;
 use anyhow::Result;
 use mlua::{prelude::*, UserData, UserDataMethods, MetaMethod};
-use crate::ui::Ui;
 
 struct Regex {
     inner: regex::bytes::Regex,
@@ -67,9 +67,9 @@ fn regex(_lua: &Lua, string: String) -> LuaResult<Regex> {
     Ok(Regex{ inner: regex, full: None })
 }
 
-pub fn init_lua(ui: &Ui) -> Result<()> {
+pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
 
-    ui.get_lua_api()?.set("regex", ui.lua.create_function(regex)?)?;
+    lua.api.set("regex", lua.create_function(regex)?)?;
 
     Ok(())
 }

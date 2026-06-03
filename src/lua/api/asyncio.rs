@@ -1,3 +1,4 @@
+use crate::lua::LuaWrapper;
 use anyhow::Result;
 use mlua::{prelude::*, UserData, UserDataMethods};
 use crate::ui::Ui;
@@ -38,15 +39,15 @@ impl UserData for Receiver {
 }
 
 
-pub fn init_lua(ui: &Ui) -> Result<()> {
+pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
 
-    ui.set_lua_fn("schedule", schedule)?;
+    lua.set_fn("schedule", schedule)?;
 
-    let tbl = ui.lua.create_table()?;
-    ui.get_lua_api()?.set("async", &tbl)?;
+    let tbl = lua.create_table()?;
+    lua.api.set("async", &tbl)?;
 
     // this exists bc mlua calls coroutine.resume all the time so we can't use it
-    tbl.set("promise", ui.lua.create_function(|lua, ()| {
+    tbl.set("promise", lua.create_function(|lua, ()| {
         let (sender, receiver) = tokio::sync::oneshot::channel();
         lua.pack_multi((
             Sender(Some(sender)),

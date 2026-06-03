@@ -1,3 +1,4 @@
+use crate::lua::LuaWrapper;
 use crate::shell::{MetaString};
 use std::str::FromStr;
 use serde::{Deserialize, Deserializer, de};
@@ -5,7 +6,7 @@ use bstr::BString;
 use std::io::Write;
 use mlua::prelude::*;
 use anyhow::Result;
-use crate::ui::{Ui};
+use crate::lua::{Ui};
 use std::time::SystemTime;
 
 pub mod keybind;
@@ -226,42 +227,42 @@ async fn lua_try(lua: Lua, args: LuaTable) -> LuaResult<LuaMultiValue> {
     result
 }
 
-pub fn init_lua(ui: &Ui) -> Result<()> {
+pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
 
-    ui.set_lua_fn("get_cursor", get_cursor)?;
-    ui.set_lua_fn("get_buffer", get_buffer)?;
-    ui.set_lua_fn("set_cursor", set_cursor)?;
-    ui.set_lua_async_fn("set_buffer", set_buffer)?;
-    ui.set_lua_async_fn("insert_at_cursor", insert_at_cursor)?;
-    ui.set_lua_async_fn("delete_at_cursor", delete_at_cursor)?;
-    ui.set_lua_async_fn("undo_buffer", undo_buffer)?;
-    ui.set_lua_async_fn("redo_buffer", redo_buffer)?;
-    ui.set_lua_async_fn("accept_line", accept_line)?;
-    ui.set_lua_async_fn("redraw",  redraw)?;
-    ui.set_lua_async_fn("exit", exit)?;
-    ui.set_lua_fn("get_cwd", get_cwd)?;
-    ui.set_lua_fn("get_size", get_size)?;
-    ui.set_lua_async_fn("call_hook_func", call_hook_func)?;
-    ui.set_lua_async_fn("print", print)?;
-    ui.set_lua_async_fn("set_interrupt_key", set_interrupt_key)?;
-    ui.get_lua_api()?.set("sleep", ui.lua.create_async_function(sleep)?)?;
-    ui.get_lua_api()?.set("time", ui.lua.create_function(time)?)?;
-    ui.get_lua_api()?.set("shell_quote", ui.lua.create_function(shell_quote)?)?;
-    ui.get_lua_api()?.set("try", ui.lua.create_async_function(lua_try)?)?;
+    lua.set_fn("get_cursor", get_cursor)?;
+    lua.set_fn("get_buffer", get_buffer)?;
+    lua.set_fn("set_cursor", set_cursor)?;
+    lua.set_async_fn("set_buffer", set_buffer)?;
+    lua.set_async_fn("insert_at_cursor", insert_at_cursor)?;
+    lua.set_async_fn("delete_at_cursor", delete_at_cursor)?;
+    lua.set_async_fn("undo_buffer", undo_buffer)?;
+    lua.set_async_fn("redo_buffer", redo_buffer)?;
+    lua.set_async_fn("accept_line", accept_line)?;
+    lua.set_async_fn("redraw",  redraw)?;
+    lua.set_async_fn("exit", exit)?;
+    lua.set_fn("get_cwd", get_cwd)?;
+    lua.set_fn("get_size", get_size)?;
+    lua.set_async_fn("call_hook_func", call_hook_func)?;
+    lua.set_async_fn("print", print)?;
+    lua.set_async_fn("set_interrupt_key", set_interrupt_key)?;
+    lua.api.set("sleep", lua.create_async_function(sleep)?)?;
+    lua.api.set("time", lua.create_function(time)?)?;
+    lua.api.set("shell_quote", lua.create_function(shell_quote)?)?;
+    lua.api.set("try", lua.create_async_function(lua_try)?)?;
 
-    keybind::init_lua(ui)?;
-    string::init_lua(ui)?;
-    completion::init_lua(ui)?;
-    history::init_lua(ui)?;
-    events::init_lua(ui)?;
-    tui::init_lua(ui)?;
-    log::init_lua(ui)?;
-    asyncio::init_lua(ui)?;
-    process::init_lua(ui)?;
-    parser::init_lua(ui)?;
-    variables::init_lua(ui)?;
-    functions::init_lua(ui)?;
-    regex::init_lua(ui)?;
+    keybind::init_lua(lua)?;
+    string::init_lua(lua)?;
+    completion::init_lua(lua)?;
+    history::init_lua(lua)?;
+    events::init_lua(lua)?;
+    tui::init_lua(lua)?;
+    log::init_lua(lua)?;
+    asyncio::init_lua(lua)?;
+    process::init_lua(lua)?;
+    parser::init_lua(lua)?;
+    variables::init_lua(lua)?;
+    functions::init_lua(lua)?;
+    regex::init_lua(lua)?;
 
     Ok(())
 }

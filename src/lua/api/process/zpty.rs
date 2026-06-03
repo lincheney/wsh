@@ -1,3 +1,4 @@
+use crate::lua::LuaWrapper;
 use crate::shell::{MetaString};
 use std::rc::Rc;
 use crate::meta_str;
@@ -140,9 +141,9 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     ))?)
 }
 
-pub fn init_lua(ui: &Ui) -> Result<()> {
+pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
 
-    ui.set_lua_async_fn("__zpty", zpty)?;
+    lua.set_async_fn("__zpty", zpty)?;
 
     Ok(())
 }

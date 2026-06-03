@@ -1,3 +1,4 @@
+use crate::lua::LuaWrapper;
 use crate::shell::{MetaString};
 use crate::{meta_str};
 use bstr::BString;
@@ -87,14 +88,14 @@ fn append_history_words(ui: &Ui, _lua: &Lua, val: Vec<BString>) -> Result<()> {
     Ok(())
 }
 
-pub fn init_lua(ui: &Ui) -> Result<()> {
+pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
 
-    ui.set_lua_fn("get_history", get_history)?;
-    ui.set_lua_fn("get_history_index", get_history_index)?;
-    ui.set_lua_async_fn("goto_history", goto_history)?;
-    ui.set_lua_async_fn("goto_history_relative", goto_history_relative)?;
-    ui.set_lua_fn("append_history", append_history)?;
-    ui.set_lua_fn("append_history_words", append_history_words)?;
+    lua.set_fn("get_history", get_history)?;
+    lua.set_fn("get_history_index", get_history_index)?;
+    lua.set_async_fn("goto_history", goto_history)?;
+    lua.set_async_fn("goto_history_relative", goto_history_relative)?;
+    lua.set_fn("append_history", append_history)?;
+    lua.set_fn("append_history_words", append_history_words)?;
 
     Ok(())
 }

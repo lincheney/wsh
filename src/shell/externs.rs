@@ -44,7 +44,7 @@ impl GlobalState {
 
             if !crate::is_forked() {
                 events.spawn(&ui, teardown);
-                ui.report_error(ui.init_lua());
+                ui.report_error(ui.lua.init_lua());
                 ui.borrow().activate()?;
                 zsh::bin_zle::override_zle();
 

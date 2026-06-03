@@ -1,10 +1,11 @@
+use crate::lua::LuaWrapper;
 use serde::{Serialize};
 use std::collections::HashMap;
 use std::default::Default;
 use anyhow::Result;
 use mlua::{prelude::*, Function};
 use crate::keybind::event::{Event, EventIndex};
-use crate::ui::{Ui};
+use crate::lua::{Ui};
 
 #[derive(Default)]
 pub struct KeybindMapping {
@@ -95,11 +96,11 @@ fn del_keymap_layer(ui: &Ui, _lua: &Lua, layer: usize) -> Result<()> {
     Ok(())
 }
 
-pub fn init_lua(ui: &Ui) -> Result<()> {
+pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
 
-    ui.set_lua_fn("set_keymap", set_keymap)?;
-    ui.set_lua_fn("add_keymap_layer", add_keymap_layer)?;
-    ui.set_lua_fn("del_keymap_layer", del_keymap_layer)?;
+    lua.set_fn("set_keymap", set_keymap)?;
+    lua.set_fn("add_keymap_layer", add_keymap_layer)?;
+    lua.set_fn("del_keymap_layer", del_keymap_layer)?;
 
     Ok(())
 }

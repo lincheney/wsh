@@ -1,5 +1,5 @@
+use crate::lua::LuaWrapper;
 use anyhow::Result;
-use crate::ui::Ui;
 use mlua::prelude::*;
 
 struct LogValue(LuaValue);
@@ -14,10 +14,9 @@ impl std::fmt::Display for LogValue {
     }
 }
 
-pub fn init_lua(ui: &Ui) -> Result<()> {
-    let lua_api = ui.get_lua_api()?;
-    let tbl = ui.lua.create_table()?;
-    lua_api.set("log", &tbl)?;
+pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
+    let tbl = lua.create_table()?;
+    lua.api.set("log", &tbl)?;
 
     macro_rules! make_logger {
         ($name:ident) => (
@@ -27,7 +26,7 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
             make_logger!($name, $loglevel, 0)
         );
         ($name:ident, $loglevel:ident, $lualevel:expr) => (
-            tbl.set(stringify!($name), ui.lua.create_function(|lua, val: LuaValue| {
+            tbl.set(stringify!($name), lua.create_function(|lua, val: LuaValue| {
                 let traceback = lua.traceback(None, 1 + $lualevel)?.display().to_string();
                 let line = traceback.lines().nth(1).unwrap().trim();
                 log::$loglevel!("{} {}", line, LogValue(val)); Ok(())
