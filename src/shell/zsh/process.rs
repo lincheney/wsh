@@ -105,7 +105,6 @@ pub(super) fn sighandler() -> c_int {
                 }
                 true
             }).for_each(drop);
-            super::unqueue_signals().unwrap();
 
             // notify that we found something
             if found {
