@@ -33,7 +33,6 @@ pub use zsh::{
     MetaString,
     MetaSlice,
 };
-pub use externs::{LUA_LEVEL};
 pub use variables::Variable;
 
 pub struct TrampolineToken(());

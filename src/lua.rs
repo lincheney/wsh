@@ -1,4 +1,5 @@
-use std::sync::{atomic::Ordering};
+use std::os::raw::{c_int};
+use std::sync::atomic::{AtomicPtr, Ordering, AtomicUsize};
 use crate::ui::{Ui, WeakUi};
 use std::cell::RefCell;
 use anyhow::Result;
@@ -11,6 +12,10 @@ pub use api::{
     EventCallbacks,
     HasEventCallbacks,
 };
+
+static LUA_PTR: AtomicPtr<mlua::ffi::lua_State> = AtomicPtr::new(std::ptr::null_mut());
+const LUA_HOOK_MASK: c_int = mlua::ffi::LUA_MASKCALL | mlua::ffi::LUA_MASKRET | mlua::ffi::LUA_MASKLINE | mlua::ffi::LUA_MASKCOUNT;
+static LUA_LEVEL: AtomicUsize = AtomicUsize::new(0);
 
 pub fn lua_error<S: ToString>(msg: S) -> mlua::Error {
     mlua::Error::RuntimeError(msg.to_string())
@@ -29,6 +34,14 @@ impl LuaWrapper {
         let inner = Lua::new();
         let api = inner.create_table()?;
         inner.globals().set("wish", &api)?;
+
+        LUA_LEVEL.store(0, Ordering::Release);
+        unsafe {
+            inner.exec_raw::<()>((), |lua| {
+                LUA_PTR.store(lua, Ordering::Release);
+            })?;
+        }
+
         Ok(Self {
             inner,
             api,
@@ -113,12 +126,41 @@ impl LuaWrapper {
     }
 
     pub async fn call_lua_fn<T: IntoLuaMulti + 'static>(&self, callback: mlua::Function, arg: T) -> LuaResult<LuaValue> {
-        crate::shell::LUA_LEVEL.fetch_add(1, Ordering::Relaxed);
+        LUA_LEVEL.fetch_add(1, Ordering::Relaxed);
         let result = callback.call_async::<LuaValue>(arg).await;
-        crate::shell::LUA_LEVEL.fetch_sub(1, Ordering::Relaxed);
+        LUA_LEVEL.fetch_sub(1, Ordering::Relaxed);
         result
     }
 
+}
 
+impl Drop for LuaWrapper {
+    fn drop(&mut self) {
+        LUA_PTR.store(std::ptr::null_mut(), Ordering::Release);
+    }
+}
 
+#[inline(always)]
+pub fn set_sigint_hook() {
+    if LUA_LEVEL.load(Ordering::Acquire) > 0 {
+        let lua = LUA_PTR.load(Ordering::Acquire);
+        if !lua.is_null() {
+            unsafe {
+                // this is signal safe
+                // https://lua-l.lua.narkive.com/2F1sf9Vo/signal-safety-of-lua-sethook
+                mlua::ffi::lua_sethook(lua, Some(lua_sigint_hook), LUA_HOOK_MASK, 1);
+            }
+        }
+    }
+}
+
+extern "C-unwind" fn lua_sigint_hook(lua: *mut mlua::ffi::lua_State, _ar: *mut mlua::ffi::lua_Debug) {
+    unsafe {
+        // keep interrupting lua so long as there is more
+        if LUA_LEVEL.load(Ordering::Acquire) <= 1 {
+            mlua::ffi::lua_sethook(lua, None, LUA_HOOK_MASK, 1);
+        }
+        mlua::ffi::lua_pushliteral(lua, c"interrupted");
+        mlua::ffi::lua_error(lua);
+    }
 }
