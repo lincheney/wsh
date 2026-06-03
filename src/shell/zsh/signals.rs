@@ -41,6 +41,7 @@ fn convert_from_custom_signal(sig: c_int) -> c_int {
 extern "C" fn sighandler(sig: c_int) {
     #[allow(static_mut_refs)]
     unsafe {
+        zsh_sys::last_signal = sig;
 
         // bypass traps if possible
         if zsh_sys::queueing_enabled == 0 {
@@ -58,7 +59,11 @@ extern "C" fn sighandler(sig: c_int) {
             zsh_sys::trap_queueing_enabled = 0;
         }
         // this should call our trap
-        zsh_sys::zhandler(convert_to_custom_signal(sig));
+        let converted = convert_to_custom_signal(sig);
+        zsh_sys::zhandler(converted);
+        if zsh_sys::last_signal == converted {
+            zsh_sys::last_signal = sig;
+        }
         TRAP_QUEUING_ENABLED.store(0, Ordering::Release);
         zsh_sys::trap_queueing_enabled = trap_queueing_enabled;
     }
