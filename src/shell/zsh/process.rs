@@ -71,7 +71,7 @@ pub(in crate::shell) fn check_pid_status(pid: pidset::Pid) -> Option<i32> {
     jobtab_iter().find(|proc| proc.pid == pid).map(|proc| proc.status)
 }
 
-pub(super) fn sighandler() -> c_int {
+pub(super) fn sighandler(trapped: bool) -> c_int {
     #[allow(static_mut_refs)]
     unsafe {
         // register any pids we are interested in
@@ -85,10 +85,14 @@ pub(super) fn sighandler() -> c_int {
         });
 
         // reset thisjob so it doesn't go off reporting job statuses for foreground jobs
-        let thisjob = zsh_sys::thisjob;
-        zsh_sys::thisjob = THIS_JOB;
-        zsh_sys::zhandler(signal::Signal::SIGCHLD as _);
-        zsh_sys::thisjob = thisjob;
+        if trapped {
+            let thisjob = zsh_sys::thisjob;
+            zsh_sys::thisjob = THIS_JOB;
+            zsh_sys::zhandler(signal::Signal::SIGCHLD as _);
+            zsh_sys::thisjob = thisjob;
+        } else {
+            zsh_sys::zhandler(signal::Signal::SIGCHLD as _);
+        }
 
         // check for our pids
         let _ = pidset::PidTable::try_with(|pids| {

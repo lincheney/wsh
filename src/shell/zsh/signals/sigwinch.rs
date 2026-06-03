@@ -38,7 +38,7 @@ pub fn get_subscriber() -> Option<watch::Receiver<(u32, u32)>> {
     RECEIVER.with(|r| r.borrow().clone())
 }
 
-pub(super) fn sighandler() -> c_int {
+pub(super) fn sighandler(_trapped: bool) -> c_int {
     #[allow(static_mut_refs)]
     unsafe {
         zsh_sys::zhandler(signal::Signal::SIGWINCH as _);

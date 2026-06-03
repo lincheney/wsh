@@ -41,6 +41,13 @@ fn convert_from_custom_signal(sig: c_int) -> c_int {
 extern "C" fn sighandler(sig: c_int) {
     #[allow(static_mut_refs)]
     unsafe {
+
+        // bypass traps if possible
+        if zsh_sys::queueing_enabled == 0 {
+            invoke_signal_handler(sig, false);
+            return;
+        }
+
         // allow our trap to run
         // is this safe? trap queuing is only used for pid waiting
         // we just run a builtin so should be ok
@@ -71,13 +78,13 @@ pub fn invoke_signal_handler_entrypoint(arg: Option<&[u8]>) -> c_int {
         debug_assert_eq!(zsh_sys::queueing_enabled, 0);
         zsh_sys::trap_queueing_enabled = TRAP_QUEUING_ENABLED.load(Ordering::Acquire);
     }
-    invoke_signal_handler(signal)
+    invoke_signal_handler(signal, true)
 }
 
-fn invoke_signal_handler(sig: c_int) -> c_int {
+fn invoke_signal_handler(sig: c_int, trapped: bool) -> c_int {
     match sig.try_into() {
-        Ok(signal::Signal::SIGCHLD) => super::process::sighandler(),
-        Ok(signal::Signal::SIGWINCH) => sigwinch::sighandler(),
+        Ok(signal::Signal::SIGCHLD) => super::process::sighandler(trapped),
+        Ok(signal::Signal::SIGWINCH) => sigwinch::sighandler(trapped),
         // Ok(signal::Signal::SIGINT) => sigint::sighandler(),
         _ => 1, // unknown
     }

@@ -190,7 +190,7 @@ impl MetaStr {
     pub const fn try_from_bytes(bytes: &[u8]) -> Result<&Self, &'static str> {
         match CStr::from_bytes_until_nul(bytes) {
             Ok(x) => Self::try_new(x),
-            Err(err) => Err("bytes does not end with null"),
+            Err(_) => Err("bytes does not end with null"),
         }
     }
 
