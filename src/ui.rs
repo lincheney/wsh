@@ -594,7 +594,7 @@ impl Ui {
             Widget{buffer: Option<BString>, cursor: Option<usize>, output: Option<BString>, accept_line: bool},
         }
 
-        if crate::lua::keybind::invoke_keybind_callback(self, event).await {
+        if crate::lua::invoke_keybind_callback(self, event).await {
             return Some(KeybindOutput::Value(Ok(true)))
         }
 

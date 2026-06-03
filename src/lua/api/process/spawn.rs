@@ -12,7 +12,7 @@ use tokio::process::Command;
 use tokio::sync::{oneshot, watch};
 use serde::{Deserialize, Deserializer, de};
 use crate::ui::{Ui};
-use crate::lua::asyncio::{ReadableFile, WriteableFile};
+use crate::lua::api::asyncio::{ReadableFile, WriteableFile};
 use super::subshell;
 
 #[derive(Debug, Copy, Clone)]
