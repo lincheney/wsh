@@ -290,20 +290,17 @@ impl Ui {
         Ok(())
     }
 
-    pub async fn handle_interrupt(&self) -> Result<bool> {
+    pub async fn handle_interrupt(&self) -> Result<()> {
         // sigint
         // cancel the current command line?
 
         self.insert_or_set_buffer(false, b"", None).await;
-        if matches!(self.shell.accept_line(Some(b"".into())).await, Err(_)) {
-            return Ok(false)
+        if self.shell.accept_line(Some(b"".into())).await.is_err() {
+            return Ok(())
         }
-        {
-            self.unlocked.borrow_mut().reset();
-        }
-        self.trigger_buffer_change_callbacks().await;
+        self.borrow_mut().reset();
         self.start_cmd(Some(&"".into())).await?;
-        Ok(true)
+        Ok(())
     }
 
     fn pre_accept_line<'a>(&'a self, lock: &mut PrintLockGuard<'a>) -> Result<()> {
