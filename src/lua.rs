@@ -175,10 +175,8 @@ fn time(_lua: &Lua, (): ()) -> LuaResult<f64> {
 }
 
 async fn sleep(_lua: Lua, seconds: f64) -> LuaResult<()> {
-    crate::interrupter::new()
-        .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?
-        .run(tokio::time::sleep(std::time::Duration::from_secs_f64(seconds)))
-        .await;
+    crate::interrupter::run(tokio::time::sleep(std::time::Duration::from_secs_f64(seconds))).await
+        .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?;
     Ok(())
 }
 
@@ -228,20 +226,6 @@ async fn lua_try(lua: Lua, args: LuaTable) -> LuaResult<LuaMultiValue> {
     result
 }
 
-pub async fn __laggy(_ui: Ui, lua: Lua, (): ()) -> Result<()> {
-    let _: Result<(), mlua::Error> = unsafe{ lua.exec_raw((), |_| {
-        // let lock = ui.borrow_mut();
-        // crate::utils::block_on(async {
-            // for i in 0..2 {
-                // eprintln!("DEBUG(likes) \t{}\t= {:?}", stringify!(i), i);
-                // tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
-            // }
-        // });
-    }) };
-    // drop(lock);
-    Ok(())
-}
-
 pub fn init_lua(ui: &Ui) -> Result<()> {
 
     ui.set_lua_fn("get_cursor", get_cursor)?;
@@ -264,7 +248,6 @@ pub fn init_lua(ui: &Ui) -> Result<()> {
     ui.get_lua_api()?.set("time", ui.lua.create_function(time)?)?;
     ui.get_lua_api()?.set("shell_quote", ui.lua.create_function(shell_quote)?)?;
     ui.get_lua_api()?.set("try", ui.lua.create_async_function(lua_try)?)?;
-    ui.set_lua_async_fn("__laggy", __laggy)?;
 
     keybind::init_lua(ui)?;
     string::init_lua(ui)?;

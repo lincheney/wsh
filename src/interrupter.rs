@@ -20,3 +20,7 @@ pub fn new() -> Result<Interruptable> {
         };
     Ok(Interruptable(sigint))
 }
+
+pub async fn run<T, F: Future<Output=T>>(f: F) -> Result<Option<T>> {
+    Ok(new()?.run(f).await)
+}
