@@ -130,11 +130,18 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     });
 
     Ok(lua.pack_multi((
-        super::Process{
+        super::spawn::Process{
             pid,
-            result: super::CommandResult{ inner: receiver },
+            result: super::spawn::CommandResult{ inner: receiver },
         },
         stdin,
         stdout,
     ))?)
+}
+
+pub fn init_lua(ui: &Ui) -> Result<()> {
+
+    ui.set_lua_async_fn("__zpty", zpty)?;
+
+    Ok(())
 }

@@ -52,6 +52,20 @@ function wish.async.spawn(...)
     }
 end
 
+function wish.async.subshell(opts)
+    local proc, stdin, stdout, stderr = wish.__subshell_run(opts)
+    return {
+        stdin = stdin,
+        stdout = stdout,
+        stderr = stderr,
+        pid = function(self) return proc:pid() end,
+        is_finished = function(self) return proc:is_finished() end,
+        wait = function(self) return proc:wait() end,
+        kill = function(self, ...) return proc:kill(...) end,
+        term = function(self) return proc:kill('SIGTERM') end,
+    }
+end
+
 function wish.cmd(...)
     return wish.__shell_run(...)
     -- local proc, stdin, stdout, stderr = wish.__shell_run(...)
@@ -69,7 +83,7 @@ end
 function wish.silent_cmd(...)
     local args = {...}
     if #args == 1 then
-        args = {args = args[1]}
+        args = {command = args[1]}
     end
     args.foreground = false
     return wish.cmd(args)

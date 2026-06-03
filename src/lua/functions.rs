@@ -1,56 +1,47 @@
-use std::sync::Arc;
+use std::rc::Rc;
 use bstr::BString;
 use crate::ui::{Ui, WeakUi};
 use anyhow::Result;
 use mlua::{prelude::*, UserData, UserDataMethods};
 use serde::{Deserialize};
-use super::process::{shell_run_with_args, FullShellRunOpts, ShellRunCmd};
+use super::process::{shell_run_with_args, ShellRunCmd};
 
 pub struct Function {
-    inner: Arc<crate::shell::Function>,
+    inner: Rc<crate::shell::Function>,
     ui: WeakUi,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct FullFunctionArgs {
-    args: Vec<BString>,
-    #[serde(flatten)]
-    opts: FullShellRunOpts,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum FunctionArgs {
     Simple(Vec<BString>),
-    Full(FullFunctionArgs),
+    Full{
+        args: Vec<BString>,
+        foreground: Option<bool>,
+    },
 }
 
 impl UserData for Function {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_async_meta_method_mut(mlua::MetaMethod::Call, |lua, func, mut args: LuaMultiValue| async move {
 
-            let (args, opts) = if args.is_empty() {
-                (vec![], None)
+            let (args, foreground) = if args.is_empty() {
+                (vec![], true)
             } else if args.len() == 1 {
                 let args = args.pop_front().unwrap();
                 match lua.from_value(args)? {
-                    FunctionArgs::Simple(args) => {
-                        (args, None)
-                    },
-                    FunctionArgs::Full(args) => {
-                        (args.args, Some(args.opts))
-                    },
+                    FunctionArgs::Simple(args) => (args, true),
+                    FunctionArgs::Full{args, foreground} => (args, foreground.unwrap_or(true)),
                 }
             } else {
                 let mut args: mlua::Variadic<BString> = lua.unpack_multi(args)?;
-                (args.split_off(0), None)
+                (args.split_off(0), true)
             };
 
             let ui = Ui::try_upgrade(&func.ui)?;
             let cmd = ShellRunCmd::Function{func: func.inner.clone(), args, arg0: None};
-            let result = shell_run_with_args(ui, lua, cmd, opts.unwrap_or_default()).await;
+            let result = shell_run_with_args(ui, lua, cmd, foreground).await;
             result.map_err(|e| mlua::Error::RuntimeError(e.to_string()))
-
         });
     }
 }

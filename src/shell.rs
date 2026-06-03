@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use crate::ui::Ui;
 use std::ops::ControlFlow;
 use std::cell::{RefCell, Cell};
@@ -516,15 +517,15 @@ impl Shell {
         unsafe{ zsh::done != 0 }
     }
 
-    pub fn make_function(&self, code: MetaString) -> Result<Arc<zsh::functions::Function>> {
+    pub fn make_function(&self, code: MetaString) -> Result<Rc<zsh::functions::Function>> {
         let func = zsh::functions::Function::new(code.as_ref())?;
-        Ok(Arc::new(func))
+        Ok(Rc::new(func))
     }
 
     pub fn exec_function(
         &self,
         _token: TrampolineToken,
-        function: Arc<zsh::functions::Function>,
+        function: Rc<zsh::functions::Function>,
         arg0: Option<MetaString>,
         args: Vec<MetaString>
     ) -> c_int {
