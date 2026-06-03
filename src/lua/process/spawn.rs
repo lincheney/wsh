@@ -180,7 +180,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let (result_sender, result_receiver) = oneshot::channel();
     let (sender, receiver) = watch::channel(None);
 
-    tokio::task::spawn_local(async move {
+    ui.clone().runtime.spawn_local(async move {
 
         let mut result_sender = Some(result_sender);
         let mut proc = None;

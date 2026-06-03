@@ -1,8 +1,8 @@
-pub fn spawn_and_log<F, T, E>(future: F) -> tokio::task::JoinHandle<()> where
+pub fn spawn_and_log<F, T, E>(ui: &crate::ui::Ui, future: F) -> tokio::task::JoinHandle<()> where
     F: Future<Output = Result<T, E>> + 'static,
     E: std::fmt::Debug,
 {
-    tokio::task::spawn_local(async move {
+    ui.runtime.spawn_local(async move {
         crate::log_if_err(future.await);
     })
 }

@@ -78,7 +78,7 @@ pub(super) fn init(ui: &crate::ui::Ui) -> Result<()> {
     });
 
     // spawn a reader task
-    let writer = super::self_pipe::<_, _, std::convert::Infallible>(move || {
+    let writer = super::self_pipe::<_, _, std::convert::Infallible>(ui, move || {
         notify.notify_waiters();
         Ok(())
     })?;

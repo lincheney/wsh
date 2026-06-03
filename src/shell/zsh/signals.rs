@@ -120,7 +120,7 @@ pub(super) fn hook_signal(signal: signal::Signal) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn self_pipe<C, T, E>(callback: C) -> Result<std::io::PipeWriter>
+pub(super) fn self_pipe<C, T, E>(ui: &crate::ui::Ui, callback: C) -> Result<std::io::PipeWriter>
 where
     C: Fn() -> Result<T, E> + mlua::MaybeSend + 'static,
     E: std::error::Error + Send + Sync + 'static,
@@ -131,7 +131,7 @@ where
 
     // spawn a reader task
     let mut reader = tokio::net::unix::pipe::Receiver::from_owned_fd(reader.into())?;
-    crate::spawn_and_log::<_, (), anyhow::Error>(async move {
+    crate::spawn_and_log::<_, (), anyhow::Error>(ui, async move {
         let mut buf = [0];
         loop {
             match reader.read_exact(&mut buf).await {
@@ -159,7 +159,7 @@ pub fn init(ui: &crate::ui::Ui) -> Result<()> {
     }
 
     super::process::init(ui)?;
-    sigwinch::init()?;
+    sigwinch::init(ui)?;
     sigint::init(ui)?;
 
     Ok(())

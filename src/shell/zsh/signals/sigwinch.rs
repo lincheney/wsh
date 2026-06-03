@@ -65,7 +65,7 @@ pub(super) fn cleanup() {
     });
 }
 
-pub(super) fn init() -> Result<()> {
+pub(super) fn init(ui: &crate::ui::Ui) -> Result<()> {
     fetch_term_size_from_zsh();
     let (sender, receiver) = watch::channel(get_term_size_from_zsh());
     RECEIVER.with(|r| {
@@ -73,7 +73,7 @@ pub(super) fn init() -> Result<()> {
     });
 
     // spawn a reader task
-    let writer = super::self_pipe::<_, _, std::convert::Infallible>(move || {
+    let writer = super::self_pipe::<_, _, std::convert::Infallible>(ui, move || {
         let _ = sender.send(get_term_size_from_zsh());
         Ok(())
     })?;

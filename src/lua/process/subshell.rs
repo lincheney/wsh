@@ -125,7 +125,7 @@ pub async fn subshell_run_with_args(ui: Ui, lua: Lua, args: FullShellRunArgs) ->
     let streams = [stdin.1, stdout.1, stderr.1];
     let fds = [stdin.2, stdout.2, stderr.2];
 
-    tokio::task::spawn_local(async move {
+    ui.clone().runtime.spawn_local(async move {
         let result = ui.clone().shell.trampoline_out_callback(move |mut ui, token| {
 
             ui.clone().shell_loop(async move {

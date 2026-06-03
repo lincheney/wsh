@@ -146,9 +146,9 @@ pub(super) fn cleanup() {
 
 pub(super) fn init(ui: &crate::ui::Ui) -> Result<()> {
     // spawn a reader task
-    let ui = ui.clone();
-    let writer = super::signals::self_pipe::<_, _, std::convert::Infallible>(move || {
-        let pid_map = &mut ui.borrow_mut().pid_map;
+    let ui_clone = ui.clone();
+    let writer = super::signals::self_pipe::<_, _, std::convert::Infallible>(ui, move || {
+        let pid_map = &mut ui_clone.borrow_mut().pid_map;
         if !pid_map.is_empty() {
             // check for pids that are done
             let _ = pidset::PidTable::extract_finished_pids(|pid, status| {

@@ -60,7 +60,6 @@ pub fn register_fd(fd: RawFd, hook: &SharedFdChangeHook, mut cancellable: crate:
 
     crate::shell::externs::GlobalState::with(|ui| {
         // spawn a task to wait on the fd
-        // ui.clone().runtime.spawn_local(async move {
         let ui = ui.clone();
         let hook = hook.clone();
         ui.clone().runtime.spawn_local(async move {

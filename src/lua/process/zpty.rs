@@ -113,7 +113,7 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let stdout = ReadableFile(Some(BufReader::new(AsyncZpty{ inner: pty })), true);
 
     let pid = zpty.pid;
-    tokio::task::spawn_local(async move {
+    ui.clone().runtime.spawn_local(async move {
         // get the status
         let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, false);
         let code = match ui.shell.check_pid_status(pid as _) {

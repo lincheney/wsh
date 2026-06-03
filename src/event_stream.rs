@@ -91,7 +91,7 @@ impl EventStream {
 
         let queue_sender = self.queue_sender.clone();
         let mut pausable = self.pausable.clone();
-        crate::spawn_and_log::<_, _, anyhow::Error>(async move {
+        crate::spawn_and_log::<_, _, anyhow::Error>(&ui, async move {
             let mut buf = [0; 1024];
             loop {
                 let Some(guard) = pausable.run(reader.readable()).await
@@ -124,7 +124,7 @@ impl EventStream {
         // sigwinch
         let queue_sender = self.queue_sender.clone();
         let mut pausable = self.pausable.clone();
-        crate::spawn_and_log::<_, _, anyhow::Error>(async move {
+        crate::spawn_and_log::<_, _, anyhow::Error>(&ui, async move {
             let Some(mut window_size) = crate::shell::signals::sigwinch::get_subscriber()
                 else { anyhow::bail!("cannot subscribe to window resize events"); };
             loop {
@@ -141,15 +141,15 @@ impl EventStream {
 
         // sigint
         {
-            let ui = ui.clone();
-            crate::spawn_and_log::<_, _, anyhow::Error>(async move {
+            let ui_clone = ui.clone();
+            crate::spawn_and_log::<_, _, anyhow::Error>(&ui, async move {
                 let Some(errflag) = crate::shell::signals::sigint::get_subscriber()
                     else {
                         anyhow::bail!("cannot subscribe to sigint events");
                     };
                 while let Some(errflag) = errflag.upgrade() {
                     errflag.notified().await;
-                    ui.handle_interrupt();
+                    ui_clone.handle_interrupt();
                 }
                 Ok(())
             });
@@ -184,7 +184,7 @@ impl EventStream {
         // spawn a task to take care of keyboard input
 
         let ui = ui.clone();
-        tokio::task::spawn_local(async move {
+        ui.clone().runtime.spawn_local(async move {
             let result = async {
                 let tty = std::fs::File::open("/dev/tty")?;
                 // move to an fd >= 10
