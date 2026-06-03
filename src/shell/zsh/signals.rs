@@ -137,7 +137,7 @@ pub(super) fn hook_signal(signal: signal::Signal) -> Result<()> {
 
 pub(super) fn self_pipe<C, T, E>(ui: &crate::ui::Ui, callback: C) -> Result<std::io::PipeWriter>
 where
-    C: Fn() -> Result<T, E> + mlua::MaybeSend + 'static,
+    C: Fn() -> Result<T, E> + 'static,
     E: std::error::Error + Send + Sync + 'static,
 {
     let (reader, writer) = std::io::pipe()?;

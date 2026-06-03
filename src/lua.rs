@@ -74,7 +74,7 @@ impl LuaWrapper {
 
     pub fn set_fn<F, A, R>(&self, name: &str, func: F) -> LuaResult<()>
     where
-        F: Fn(&Ui, &Lua, A) -> Result<R> + mlua::MaybeSend + 'static,
+        F: Fn(&Ui, &Lua, A) -> Result<R> + 'static,
         A: FromLuaMulti,
         R: IntoLuaMulti,
     {
