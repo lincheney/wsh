@@ -50,15 +50,18 @@ fn run_hook(hook: &SharedFdChangeHook, fd: RawFd, error: Option<std::io::Error>)
 }
 
 pub fn register_fd(fd: RawFd, hook: &SharedFdChangeHook, mut cancellable: crate::canceller::Cancellable) -> Result<()> {
-    let reader = match AsyncFd::new(fd) {
-        Ok(reader) => reader,
-        Err(err) => {
-            run_hook(hook, fd, Some(err));
-            return Ok(())
-        },
-    };
 
     crate::shell::externs::GlobalState::with(|ui| {
+
+        let _guard = ui.runtime.enter();
+        let reader = match AsyncFd::new(fd) {
+            Ok(reader) => reader,
+            Err(err) => {
+                run_hook(hook, fd, Some(err));
+                return Ok(())
+            },
+        };
+
         // spawn a task to wait on the fd
         let ui = ui.clone();
         let hook = hook.clone();
@@ -84,5 +87,7 @@ pub fn register_fd(fd: RawFd, hook: &SharedFdChangeHook, mut cancellable: crate:
                 }
             }
         });
-    })
+
+        Ok(())
+    })?
 }

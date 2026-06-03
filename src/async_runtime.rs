@@ -43,4 +43,8 @@ impl Runtime {
         self.localset.spawn_local(future)
     }
 
+    pub fn enter(&self) -> tokio::runtime::EnterGuard<'_> {
+        self.runtime.enter()
+    }
+
 }

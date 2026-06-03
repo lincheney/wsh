@@ -57,7 +57,7 @@ extern "C" fn sighandler(sig: c_int) {
     }
 }
 
-pub fn invoke_signal_handler(arg: Option<&[u8]>) -> c_int {
+pub fn invoke_signal_handler_entrypoint(arg: Option<&[u8]>) -> c_int {
     let Some(arg) = arg
         else { return 1 };
     let Ok(arg) = std::str::from_utf8(arg)
@@ -71,8 +71,11 @@ pub fn invoke_signal_handler(arg: Option<&[u8]>) -> c_int {
         debug_assert_eq!(zsh_sys::queueing_enabled, 0);
         zsh_sys::trap_queueing_enabled = TRAP_QUEUING_ENABLED.load(Ordering::Acquire);
     }
+    invoke_signal_handler(signal)
+}
 
-    match signal.try_into() {
+fn invoke_signal_handler(sig: c_int) -> c_int {
+    match sig.try_into() {
         Ok(signal::Signal::SIGCHLD) => super::process::sighandler(),
         Ok(signal::Signal::SIGWINCH) => sigwinch::sighandler(),
         // Ok(signal::Signal::SIGINT) => sigint::sighandler(),

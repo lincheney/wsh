@@ -108,7 +108,7 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
         },
 
         Some(b".invoke-signal-handler") => {
-            zsh::signals::invoke_signal_handler(iter.next())
+            zsh::signals::invoke_signal_handler_entrypoint(iter.next())
         },
 
         Some(_) => {
