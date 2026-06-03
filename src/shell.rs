@@ -549,14 +549,6 @@ impl Shell {
         zsh::with_queued_signals(func)
     }
 
-    pub fn queue_signals(&self) {
-        zsh::queue_signals();
-    }
-
-    pub fn unqueue_signals(&self) -> nix::Result<()> {
-        zsh::unqueue_signals()
-    }
-
     pub fn dont_queue_signals(&self) -> nix::Result<()> {
         zsh::dont_queue_signals()
     }

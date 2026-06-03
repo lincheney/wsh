@@ -382,13 +382,13 @@ pub fn queue_signal_level() -> i32 {
     }
 }
 
-pub fn queue_signals() {
+fn queue_signals() {
     unsafe {
         zsh_sys::queueing_enabled += 1;
     }
 }
 
-pub fn unqueue_signals() -> nix::Result<()> {
+fn unqueue_signals() -> nix::Result<()> {
     unsafe {
         zsh_sys::queueing_enabled -= 1;
         if zsh_sys::queueing_enabled == 0 {
@@ -398,7 +398,7 @@ pub fn unqueue_signals() -> nix::Result<()> {
     Ok(())
 }
 
-pub fn run_queued_signals() -> nix::Result<()> {
+fn run_queued_signals() -> nix::Result<()> {
     const MAX_QUEUE_SIZE: i32 = 128;
 
     unsafe {

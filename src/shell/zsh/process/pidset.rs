@@ -17,9 +17,10 @@ thread_local! {
 
 impl PidTable {
     pub fn try_with<T, F: FnOnce(&mut PidSet) -> T>(f: F) -> Result<T> {
-        crate::shell::zsh::queue_signals();
-        let result = PID_TABLE.try_with(|p| f(&mut p.inner.borrow_mut()));
-        crate::shell::zsh::unqueue_signals().unwrap();
+        let (result, err) = crate::shell::zsh::with_queued_signals(|| {
+            PID_TABLE.try_with(|p| f(&mut p.inner.borrow_mut()))
+        });
+        err.unwrap();
         result
     }
 
