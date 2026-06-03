@@ -39,4 +39,8 @@ impl Runtime {
         }
     }
 
+    pub fn spawn_local<F: 'static + Future>(&self, future: F) -> tokio::task::JoinHandle<F::Output> {
+        self.localset.spawn_local(future)
+    }
+
 }

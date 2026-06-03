@@ -1,8 +1,8 @@
+use std::rc::Rc;
 use bstr::BString;
 use anyhow::Result;
 use std::os::fd::AsRawFd;
 use std::io::Read;
-use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tokio::io::unix::AsyncFd;
 use crate::keybind;
@@ -19,7 +19,7 @@ enum Message {
 #[derive(Clone)]
 pub struct EventController {
     queue: mpsc::UnboundedSender<Message>,
-    pauser: Arc<pauser::Pauser>,
+    pauser: Rc<pauser::Pauser>,
     position_queue: mpsc::UnboundedSender<oneshot::Sender<(usize, usize)>>,
 }
 
@@ -77,7 +77,7 @@ impl EventStream {
         };
         let controller = EventController {
             queue: sender,
-            pauser: Arc::new(pauser),
+            pauser: Rc::new(pauser),
             position_queue: position_sender,
         };
         (stream, controller)

@@ -47,7 +47,6 @@ impl GlobalState {
                 ui.report_error(ui.init_lua());
                 ui.borrow().activate()?;
                 zsh::bin_zle::override_zle();
-                zsh::zle_watch_fds::init(&ui);
 
                 unsafe {
                     let _ = ORIGINAL_ZLE_ENTRY_PTR.set(zsh_sys::zle_entry_ptr);

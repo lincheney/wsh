@@ -1,5 +1,5 @@
+use std::rc::Rc;
 use crate::meta_str;
-use std::sync::{Arc};
 use std::num::NonZeroU16;
 use bstr::BString;
 use std::time::SystemTime;
@@ -33,7 +33,7 @@ enum ZptyArgs {
 }
 
 struct AsyncZpty {
-    inner: Arc<AsyncFd<std::fs::File>>,
+    inner: Rc<AsyncFd<std::fs::File>>,
 }
 
 impl std::os::fd::AsRawFd for AsyncZpty {
@@ -108,7 +108,7 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     // so we dup the fd to one we own instead
     let pty = crate::utils::dup_fd(unsafe{ std::os::fd::BorrowedFd::borrow_raw(zpty.fd) })?;
     // crate::utils::set_nonblocking_fd(&pty)?;
-    let pty = Arc::new(AsyncFd::new(pty.into())?);
+    let pty = Rc::new(AsyncFd::new(pty.into())?);
     let stdin = WriteableFile(Some(BufWriter::new(AsyncZpty{ inner: pty.clone() })));
     let stdout = ReadableFile(Some(BufReader::new(AsyncZpty{ inner: pty })), true);
 

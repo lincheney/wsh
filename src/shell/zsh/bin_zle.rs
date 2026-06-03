@@ -1,132 +1,63 @@
+use std::rc::Rc;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::io::{Write, Cursor};
 use std::os::fd::RawFd;
-use tokio::sync::{mpsc};
-use std::sync::{Arc, Mutex};
 use std::os::raw::*;
 use crate::canceller;
 use super::builtin::Builtin;
-use super::meta_string::{MetaStr, MetaString};
-
-static ZLE_FD_SOURCE: Mutex<Option<mpsc::UnboundedReceiver<FdChange>>> = Mutex::new(None);
+use super::meta_string::{MetaStr};
+use super::zle_watch_fds::{FdChangeHook, SharedFdChangeHook};
 
 struct ZleState {
     // original zle function
     original: Option<Builtin>,
-    // sink to send fds
-    fd_sink: Option<mpsc::UnboundedSender<FdChange>>,
-    fd_mapping: HashMap<RawFd, (SyncFdChangeHook, canceller::Canceller)>,
+    fd_mapping: HashMap<RawFd, (SharedFdChangeHook, canceller::Canceller)>,
 }
 
 thread_local! {
     static ZLE_STATE: RefCell<Option<ZleState>> = RefCell::new(None);
 }
 
-pub enum FdChange {
-    Added(RawFd, SyncFdChangeHook, canceller::Cancellable),
-    Removed(RawFd),
-}
-
-// what on earth is this
-// zle -F registration events get sent over a queue so its async
-// however the hooks may modify itself (e.g. deregister itself)
-// so there is a gap between when the hook is updated in zsh
-// and the event is received over the queue where the hook
-// may be incorrectly run
-// instead we use this thing to have shared state
-// we could just have an Arc<Mutex<Option<_>>> (the Option for when the fd is deregistered)
-// but then when we call the hook and it modifies itself, we hit a deadlock on the mutex
-// so there is an inner Arc to allow it to be cloned *out* of the mutex just for that one call
-type SyncFdChangeHook = Arc<Mutex<Option<Arc<FdChangeHook>>>>;
-#[derive(Debug)]
-pub struct FdChangeHook {
-    func: MetaString,
-    widget: bool,
-}
-
-impl FdChangeHook {
-
-    pub fn run_locked(
-        hook: &SyncFdChangeHook,
-        shell: &crate::shell::Shell,
-        fd: RawFd,
-        error: Option<std::io::Error>,
-    ) -> anyhow::Result<bool> {
-        let hook = hook.lock().unwrap().clone();
-        if let Some(hook) = hook {
-            shell.run_watch_fd(hook, fd, error);
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    pub fn run(&self, fd: RawFd, error: Option<std::io::Error>) {
-        // this is way in excess of what we need
-        let mut cursor = Cursor::new([0; 128]);
-        write!(cursor, "{fd}").unwrap();
-        let fdbuf = cursor.into_inner();
-        let fdstr = MetaStr::from_bytes(&fdbuf);
-
-        // what does this do
-        let save_lbindk = unsafe{ super::refthingy(super::lbindk) };
-        if self.widget {
-            unsafe {
-                super::zlecallhook(self.func.as_ptr().cast_mut(), fdstr.as_ptr().cast_mut());
-            }
-        } else {
-            let args = [Some(fdstr), error.map(|_| MetaStr::new(c"err"))];
-            super::call_hook_func(self.func.as_ref(), args.into_iter().flatten());
-        }
-        unsafe {
-            super::unrefthingy(super::lbindk);
-            super::lbindk = save_lbindk;
-        }
-    }
-}
-
 unsafe extern "C" fn zle_handlerfunc(nam: *mut c_char, argv: *mut *mut c_char, options: zsh_sys::Options, func: c_int) -> c_int {
-    ZLE_STATE.with(|zle| unsafe {
-        let mut zle = zle.borrow_mut();
+    ZLE_STATE.with_borrow_mut(|zle| unsafe {
         let zle = zle.as_mut().unwrap();
 
         let fd_changed = if
-            let Some(fd_sink) = &zle.fd_sink
-            && super::opt_isset(&*options, b'F')
+            super::opt_isset(&*options, b'F')
             && (!super::opt_isset(&*options, b'L') || (*argv).is_null())
             && let Ok(fd) = std::str::from_utf8(&MetaStr::from_ptr(*argv).unmetafy())
             && let Ok(fd) = fd.parse()
         {
-            Some((fd_sink, fd, !(*argv.add(1)).is_null()))
+            Some((fd, !(*argv.add(1)).is_null()))
         } else {
             None
         };
 
         let result = zle.original.as_ref().as_ref().unwrap().handlerfunc.unwrap()(nam, argv, options, func);
 
-        if result == 0 && let Some((fd_sink, fd, exists)) = fd_changed {
+        if result == 0 && let Some((fd, exists)) = fd_changed {
 
             // find the watch
-            let payload = if exists && let Some(watch) = (0 .. super::nwatch)
+            if exists && let Some(watch) = (0 .. super::nwatch)
                 .map(|i| super::watch_fds.add(i as _))
                 .find(|w| (**w).fd == fd)
             {
 
-                let hook = Some(Arc::new(FdChangeHook {
+                let hook = Rc::new(FdChangeHook {
                     func: MetaStr::from_ptr((*watch).func).to_owned(),
                     widget: (*watch).widget != 0,
-                }));
+                });
                 match zle.fd_mapping.entry(fd) {
                     Entry::Occupied(prev) => {
-                        *prev.get().0.lock().unwrap() = hook;
-                        None
+                        *prev.get().0.borrow_mut() = hook;
                     },
                     Entry::Vacant(entry) => {
                         let (canceller, cancellable) = canceller::new();
-                        let hook = entry.insert((Arc::new(Mutex::new(hook)), canceller));
-                        Some(FdChange::Added(fd, hook.0.clone(), cancellable))
+                        let hook = entry.insert((Rc::new(RefCell::new(hook)), canceller));
+                        if let Err(err) = super::zle_watch_fds::register_fd(fd, &hook.0, cancellable) {
+                            eprintln!("{err:?}");
+                        }
                     },
                 }
 
@@ -135,40 +66,23 @@ unsafe extern "C" fn zle_handlerfunc(nam: *mut c_char, argv: *mut *mut c_char, o
                     log::error!("could not find watch for fd {fd}!");
                 }
 
-                if let Some((prev, _canceller)) = zle.fd_mapping.remove(&fd) {
-                    // dropping the canceller will cause it to trigger
-                    prev.lock().unwrap().take();
-                    Some(FdChange::Removed(fd))
-                } else {
-                    None
-                }
+                // dropping the canceller will cause it to trigger
+                drop(zle.fd_mapping.remove(&fd));
             };
-
-            if let Some(payload) = payload && fd_sink.send(payload).is_err() {
-                // the receiver got dropped, so drop the sender too
-                zle.fd_sink = None;
-            }
         }
 
         result
     })
 }
 
-pub fn take_fd_change_source() -> Option<mpsc::UnboundedReceiver<FdChange>> {
-    ZLE_FD_SOURCE.lock().unwrap().take()
-}
-
 pub fn override_zle() {
     let original = Builtin::pop(meta_str!(c"zle")).unwrap();
     let mut zle = original.clone();
-    let (sender, receiver) = mpsc::unbounded_channel();
 
     ZLE_STATE.set(Some(ZleState{
         original: Some(original),
-        fd_sink: Some(sender),
         fd_mapping: HashMap::default(),
     }));
-    *ZLE_FD_SOURCE.lock().unwrap() = Some(receiver);
 
     zle.handlerfunc = Some(zle_handlerfunc);
     zle.node.flags = 0;

@@ -10,7 +10,6 @@ use std::os::fd::{RawFd};
 use std::ptr::NonNull;
 use std::os::raw::{c_long, c_char, c_int};
 use std::default::Default;
-use std::sync::{Arc};
 use std::ptr::null_mut;
 use bstr::{BString, ByteSlice, ByteVec};
 use tokio::sync::oneshot;
@@ -21,7 +20,6 @@ mod zsh;
 use crate::meta_str;
 pub use zsh::{
     completion,
-    bin_zle,
     history,
     variables,
     process,
@@ -541,7 +539,7 @@ impl Shell {
         zsh::functions::Function::execute_by_name(function.as_ref(), args.iter().map(|x| x.as_ref()))
     }
 
-    pub fn get_function_source(&self, function: Arc<zsh::functions::Function>) -> BString {
+    pub fn get_function_source(&self, function: Rc<zsh::functions::Function>) -> BString {
         function.get_source()
     }
 
@@ -572,10 +570,6 @@ impl Shell {
     pub fn call_hook_func(&self, name: Cow<'static, MetaStr>, args: Vec<MetaString>) -> Option<c_int> {
         // needs metafy
         zsh::call_hook_func(name.as_ref(), args.iter().map(|x| x.as_ref()))
-    }
-
-    pub fn run_watch_fd(&self, hook: Arc<bin_zle::FdChangeHook>, fd: RawFd, error: Option<std::io::Error>) {
-        hook.run(fd, error);
     }
 
 }
