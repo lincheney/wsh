@@ -15,7 +15,7 @@ static LUA_PTR: AtomicPtr<mlua::ffi::lua_State> = AtomicPtr::new(std::ptr::null_
 const LUA_HOOK_MASK: c_int = mlua::ffi::LUA_MASKCALL | mlua::ffi::LUA_MASKRET | mlua::ffi::LUA_MASKLINE | mlua::ffi::LUA_MASKCOUNT;
 
 pub fn get_subscriber() -> Option<Weak<Notify>> {
-    RECEIVER.with(|r| r.borrow().as_ref().map(Rc::downgrade))
+    RECEIVER.with_borrow(|r| r.as_ref().map(Rc::downgrade))
 }
 
 extern "C-unwind" fn lua_sigint_hook(lua: *mut mlua::ffi::lua_State, _ar: *mut mlua::ffi::lua_Debug) {

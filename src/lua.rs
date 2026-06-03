@@ -175,7 +175,10 @@ fn time(_lua: &Lua, (): ()) -> LuaResult<f64> {
 }
 
 async fn sleep(_lua: Lua, seconds: f64) -> LuaResult<()> {
-    tokio::time::sleep(std::time::Duration::from_secs_f64(seconds)).await;
+    crate::interrupter::new()
+        .map_err(|e| mlua::Error::RuntimeError(e.to_string()))?
+        .run(tokio::time::sleep(std::time::Duration::from_secs_f64(seconds)))
+        .await;
     Ok(())
 }
 

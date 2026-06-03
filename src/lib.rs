@@ -8,6 +8,7 @@ mod logging;
 mod async_runtime;
 mod canceller;
 mod pauser;
+mod interrupter;
 mod print_lock;
 #[macro_use]
 mod utils;
