@@ -4,7 +4,6 @@ mod tui;
 mod event_stream;
 mod lua;
 mod keybind;
-mod signals;
 mod logging;
 mod async_runtime;
 mod canceller;
