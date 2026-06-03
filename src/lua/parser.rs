@@ -26,7 +26,7 @@ fn parse(ui: &Ui, lua: &Lua, (val, options): (bstr::BString, Option<LuaValue>)) 
         Default::default()
     };
     let (complete, tokens) = ui.shell.parse(val, options);
-    let tokens = tokens_to_lua(&tokens, &lua)?;
+    let tokens = tokens_to_lua(&tokens, lua)?;
     Ok((complete, tokens))
 }
 

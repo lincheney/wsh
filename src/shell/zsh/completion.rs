@@ -151,7 +151,7 @@ impl CompaddState {
 
 static COMPFUNC: &MetaStr = meta_str!(c"_main_complete");
 thread_local! {
-    static COMPADD_STATE: RefCell<Option<CompaddState>> = RefCell::new(None);
+    static COMPADD_STATE: RefCell<Option<CompaddState>> = const{ RefCell::new(None) };
 }
 
 unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_char, options: zsh_sys::Options, func: c_int) -> c_int {

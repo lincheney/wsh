@@ -29,7 +29,7 @@ pub struct Constraint {
 impl Constraint {
     pub fn into_size(self, available: Option<Unit>, min: Option<Unit>) -> Size {
         let max = self.max.map(|c| c.resolve(available));
-        let mut size = self.min.map(|c| c.resolve(available)).unwrap_or(0).max(min.unwrap_or(0));
+        let mut size = self.min.map_or(0, |c| c.resolve(available)).max(min.unwrap_or(0));
         // clamp to the max
         if let Some(max) = max && size > max {
             size = max;

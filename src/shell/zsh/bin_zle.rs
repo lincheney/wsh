@@ -16,7 +16,7 @@ struct ZleState {
 }
 
 thread_local! {
-    static ZLE_STATE: RefCell<Option<ZleState>> = RefCell::new(None);
+    static ZLE_STATE: RefCell<Option<ZleState>> = const{ RefCell::new(None) };
 }
 
 unsafe extern "C" fn zle_handlerfunc(nam: *mut c_char, argv: *mut *mut c_char, options: zsh_sys::Options, func: c_int) -> c_int {
@@ -90,7 +90,7 @@ pub fn override_zle() {
 }
 
 pub fn restore_zle() {
-    if let Some(mut zle) = ZLE_STATE.replace(None).take()
+    if let Some(mut zle) = ZLE_STATE.take()
         && let Some(original) = zle.original.take()
     {
         original.add();

@@ -123,9 +123,9 @@ impl Ui {
 
         let ui = _Ui {
             inner: RefCell::new(ui),
-            lua: lua,
-            events: events,
-            shell: shell,
+            lua,
+            events,
+            shell,
             has_foreground_process: Default::default(),
             print_lock: Default::default(),
             is_drawing: Default::default(),
@@ -440,7 +440,7 @@ impl Ui {
                 self.pre_accept_line(&mut print_lock)?;
                 // acceptline doesn't actually accept the line right now
                 // only when we return control to zle using the trampoline
-                if matches!(self.shell.accept_line(Some(buffer.clone())).await, Err(_)) {
+                if self.shell.accept_line(Some(buffer.clone())).await.is_err() {
                     return Ok(false)
                 }
                 self.post_accept_line(&mut print_lock).await?;
@@ -851,8 +851,8 @@ impl Ui {
             let trampoline = self.shell.trampoline_in();
             let result = self.runtime.block_on(async {
                 tokio::select!(
-                    result = &mut future => return ControlFlow::Break(result),
-                    result = trampoline => return ControlFlow::Continue(result),
+                    result = &mut future => ControlFlow::Break(result),
+                    result = trampoline => ControlFlow::Continue(result),
                 )
             });
 

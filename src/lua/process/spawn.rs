@@ -99,7 +99,7 @@ impl UserData for Process {
                     return Err(LuaError::RuntimeError(err.to_string()))
                 }
             }
-            return Ok(())
+            Ok(())
         });
 
     }

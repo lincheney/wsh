@@ -122,7 +122,7 @@ pub async fn subshell_run_with_args(ui: Ui, lua: Lua, args: FullShellRunArgs) ->
     let stdin = stdio_pipe!(args, stdin, true);
     let stdout = stdio_pipe!(args, stdout, false);
     let stderr = stdio_pipe!(args, stderr, false);
-    let streams = [stdin.1, stdout.1, stderr.1];
+    let mut streams = [stdin.1, stdout.1, stderr.1];
     let fds = [stdin.2, stdout.2, stderr.2];
 
     ui.clone().runtime.spawn_local(async move {
@@ -136,10 +136,8 @@ pub async fn subshell_run_with_args(ui: Ui, lua: Lua, args: FullShellRunArgs) ->
                     let redirections = streams.each_ref().map(|s| s.as_ref().map(|s| (s.fd, s.replacement, s.fd != 0)));
                     let pid = ui.shell.exec_subshell(token, args.command, false, &redirections, &fds)? as _;
                     // close them or we will block
-                    for file in streams {
-                        if let Some(mut file) = file {
-                            crate::log_if_err(file.close());
-                        }
+                    for file in streams.iter_mut().flatten() {
+                        crate::log_if_err(file.close());
                     }
                     // send streams back to caller
                     let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));

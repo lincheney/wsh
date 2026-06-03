@@ -147,9 +147,9 @@ impl Node {
             NodeKind::Layout(layout) => {
                 layout.children
                     .iter()
-                    .flat_map(|id| map.get(id))
+                    .filter_map(|id| map.get(id))
                     .filter(|child| child.is_visible(map, false))
-                    .flat_map(|child| child.get_draw_pos(map))
+                    .filter_map(|child| child.get_draw_pos(map))
                     .next()
             }
         }

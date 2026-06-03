@@ -25,7 +25,7 @@ fn teardown() {
 pub struct GlobalState;
 
 impl GlobalState {
-    fn new() -> Result<Ui> {
+    fn init() -> Result<Ui> {
         crate::logging::init();
         fork::init();
 
@@ -314,7 +314,7 @@ static mut MODULE_FEATURES: LazyLock<Features> = LazyLock::new(|| {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn setup_() -> c_int {
-    match GlobalState::new() {
+    match GlobalState::init() {
         Ok(ui) => {
             STATE.with(|state| {
                 *state.borrow_mut() = Some(ui);

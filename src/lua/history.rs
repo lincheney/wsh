@@ -23,7 +23,7 @@ fn get_history(ui: &Ui, lua: &Lua, _val: ()) -> Result<(usize, LuaTable)> {
     let history = crate::shell::history::History::get();
     for entry in history.iter() {
         let entry = entry.as_entry();
-        tbl.raw_push(entry_to_lua(entry, &lua)?)?;
+        tbl.raw_push(entry_to_lua(entry, lua)?)?;
     }
     Ok((current as _, tbl))
 }

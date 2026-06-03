@@ -18,7 +18,7 @@ fn value_to_lua(lua: &Lua, val: Option<variables::Value>) -> Result<LuaValue> {
 }
 
 fn get_var(ui: &Ui, lua: &Lua, (name, zle): (BString, Option<bool>)) -> Result<LuaValue> {
-    value_to_lua(&lua, ui.shell.get_var(name.into(), zle.unwrap_or(false))?)
+    value_to_lua(lua, ui.shell.get_var(name.into(), zle.unwrap_or(false))?)
 }
 
 fn get_vars(ui: &Ui, lua: &Lua, (names, zle): (Vec<BString>, Option<bool>)) -> Result<LuaTable> {
@@ -28,7 +28,7 @@ fn get_vars(ui: &Ui, lua: &Lua, (names, zle): (Vec<BString>, Option<bool>)) -> R
     let table = lua.create_table()?;
     for (name, val) in names.into_iter().zip(results) {
         if val.is_some() {
-            table.set(name.to_string(), value_to_lua(&lua, val)?)?;
+            table.set(name.to_string(), value_to_lua(lua, val)?)?;
         }
     }
     Ok(table)
@@ -44,10 +44,10 @@ fn set_var(ui: &Ui, lua: &Lua, (name, val, global): (BString, LuaValue, Option<b
             val.for_each(|_: LuaValue, _: LuaValue| { size += 1; Ok(()) })?;
 
             if val.raw_len() == size {
-                let val = Vec::<BString>::from_lua(LuaValue::Table(val), &lua)?;
+                let val = Vec::<BString>::from_lua(LuaValue::Table(val), lua)?;
                 val.into()
             } else {
-                let val = HashMap::<BString, BString>::from_lua(LuaValue::Table(val), &lua)?;
+                let val = HashMap::<BString, BString>::from_lua(LuaValue::Table(val), lua)?;
                 val.into()
             }
         },

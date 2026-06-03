@@ -224,26 +224,20 @@ impl Shell {
 
         let mut cmd = BString::new(vec![]);
         cmd.push_str("( ");
-        for c in closes {
-            if let Some(fd) = c {
-                write!(cmd, "__fd{fd}={fd}; ").unwrap();
-            }
+        for fd in closes.iter().flatten() {
+            write!(cmd, "__fd{fd}={fd}; ").unwrap();
         }
         cmd.push_str("exec ");
         // close fds
-        for c in closes {
-            if let Some(fd) = c {
-                write!(cmd, "{{__fd{fd}}}>&- ").unwrap();
-            }
+        for fd in closes.iter().flatten() {
+            write!(cmd, "{{__fd{fd}}}>&- ").unwrap();
         }
         // apply all the redirections
-        for r in redirections {
-            if let Some((left, right, output)) = r {
-                if *output {
-                    write!(cmd, "{left}>/dev/fd/{right} ").unwrap();
-                } else {
-                    write!(cmd, "{left}</dev/fd/{right} ").unwrap();
-                }
+        for (left, right, output) in redirections.iter().flatten() {
+            if *output {
+                write!(cmd, "{left}>/dev/fd/{right} ").unwrap();
+            } else {
+                write!(cmd, "{left}</dev/fd/{right} ").unwrap();
             }
         }
         cmd.push_str("; eval '");

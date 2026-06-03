@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 
 static SELF_PIPE: AtomicI32 = AtomicI32::new(-1);
 thread_local! {
-    static RECEIVER: RefCell<Option<watch::Receiver<(u32, u32)>>> = RefCell::new(None);
+    static RECEIVER: RefCell<Option<watch::Receiver<(u32, u32)>>> = const{ RefCell::new(None) };
 }
 static SIZE: AtomicU64 = AtomicU64::new(0);
 

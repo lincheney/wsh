@@ -72,7 +72,7 @@ pub fn register_fd(fd: RawFd, hook: &SharedFdChangeHook, mut cancellable: crate:
                 let result = ui.clone().freeze_if(true, true, async move {
                     let hook = hook.clone();
                     ui_clone.shell.trampoline_out_callback(move |_ui, _token| {
-                        run_hook(&hook, fd, None)
+                        run_hook(&hook, fd, None);
                     }).await
                 }).await;
 
