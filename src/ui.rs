@@ -653,14 +653,10 @@ impl Ui {
                 self.shell.set_zle_buffer(buffer.clone(), cursor as _);
                 self.shell.set_lastchar(lastchar);
 
-                let (sender, receiver) = tokio::sync::oneshot::channel();
-                {
-                    let ui = self.clone();
-                    self.shell.trampoline_out_callback(Box::new(move |_| {
-                        let _ = sender.send(widget.exec_and_get_output(&ui.shell, None, [].into_iter()));
-                    })).await.unwrap();
-                }
-                let (output, _) = receiver.await.unwrap();
+                let (output, _) = self.shell.trampoline_out_callback(Box::new(move |ui: Self, token| {
+                    widget.exec_and_get_output(token, &ui.shell, None, [].into_iter())
+                })).await.unwrap();
+
                 let (new_buffer, new_cursor) = self.shell.get_zle_buffer();
                 let new_cursor = new_cursor.unwrap_or(new_buffer.len() as _) as _;
                 let new_buffer = (new_buffer != buffer).then_some(new_buffer);
@@ -788,8 +784,8 @@ impl Ui {
         // a func may run subprocesses so lock the ui
         let lock = self.has_foreground_process.lock().await;
         self.shell.set_zle_buffer(old_buffer, old_cursor as _);
-        let _ = self.clone().shell.trampoline_out_callback(move |ui| {
-            ui.shell.exec_function_by_name(func, vec![num_chars.to_string().into()]);
+        let _ = self.clone().shell.trampoline_out_callback(move |ui, token| {
+            ui.shell.exec_function_by_name(token, func, vec![num_chars.to_string().into()]);
         }).await;
         let zle = self.shell.get_zle_buffer();
         drop(lock);
@@ -863,10 +859,10 @@ impl Ui {
             match result {
                 ControlFlow::Break(x) => break Ok(x),
                 ControlFlow::Continue(Err(err)) => break Err(err),
-                ControlFlow::Continue(Ok(callback)) => {
+                ControlFlow::Continue(Ok((callback, token))) => {
                     self.shell.restore_queue_signals(queueing_enabled);
                     self.shell.trampoline_push();
-                    callback(self.clone());
+                    callback(self.clone(), token);
                     self.shell.trampoline_pop();
                     queueing_enabled = self.shell.queue_signal_level();
                     self.shell.dont_queue_signals()?;

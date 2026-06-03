@@ -109,12 +109,18 @@ impl ZleWidget {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn exec<I: Iterator<Item=MetaString> + ExactSizeIterator>(&self, opts: Option<WidgetArgs>, args: I) -> c_int {
+    pub(crate) fn exec<I: Iterator<Item=MetaString> + ExactSizeIterator>(
+        &self,
+        _token: crate::shell::TrampolineToken,
+        opts: Option<WidgetArgs>,
+        args: I,
+    ) -> c_int {
         Self::exec_with_ptr(self.ptr, opts, args)
     }
 
     pub(crate) fn exec_and_get_output<I: Iterator<Item=MetaString> + ExactSizeIterator>(
         &mut self,
+        _token: crate::shell::TrampolineToken,
         shell: &crate::shell::Shell,
         opts: Option<WidgetArgs>,
         args: I,

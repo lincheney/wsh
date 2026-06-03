@@ -384,7 +384,7 @@ macro_rules! stdio_pipe {
     );
 }
 
-pub async fn subshell_run(mut ui: Ui, lua: Lua, cmd: BString, args: FullShellRunOpts) -> Result<LuaMultiValue> {
+pub async fn subshell_run(ui: Ui, lua: Lua, cmd: BString, args: FullShellRunOpts) -> Result<LuaMultiValue> {
     let (result_sender, result_receiver) = oneshot::channel();
     let (sender, receiver) = watch::channel(None);
 
@@ -401,37 +401,50 @@ pub async fn subshell_run(mut ui: Ui, lua: Lua, cmd: BString, args: FullShellRun
     let fds = [stdin.2, stdout.2, stderr.2];
 
     tokio::task::spawn_local(async move {
-        let mut result_sender = Some(result_sender);
-        let result: Result<Result<_>> = ui.freeze_if(foreground, true, async {
-            // fork it now to get the pid
-            let redirections = streams.each_ref().map(|s| s.as_ref().map(|s| (s.fd, s.replacement, s.fd != 0)));
-            let pid = ui.shell.exec_subshell(cmd, false, &redirections, &fds)? as _;
-            // close them or we will block
-            for file in streams {
-                if let Some(mut file) = file {
-                    crate::log_if_err(file.close());
+        let result = ui.clone().shell.trampoline_out_callback(move |mut ui, token| {
+
+            ui.clone().shell_loop(async move {
+                let mut result_sender = Some(result_sender);
+
+                let result = ui.freeze_if(foreground, true, async {
+                    // fork it now to get the pid
+                    let redirections = streams.each_ref().map(|s| s.as_ref().map(|s| (s.fd, s.replacement, s.fd != 0)));
+                    let pid = ui.shell.exec_subshell(token, cmd, false, &redirections, &fds)? as _;
+                    // close them or we will block
+                    for file in streams {
+                        if let Some(mut file) = file {
+                            crate::log_if_err(file.close());
+                        }
+                    }
+                    // send streams back to caller
+                    let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
+                    // get the status
+                    let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, true);
+                    let code = match ui.shell.check_pid_status(pid as _) {
+                        None | Some(-1) => pid_waiter.await.unwrap_or(-1) as _,
+                        Some(code) => code as _,
+                    };
+
+                    let _ = sender.send(Some(Ok(code)));
+                    Ok::<_, anyhow::Error>(())
+                }).await;
+
+                match result {
+                    Err(err) | Ok(Err(err)) => {
+                        if let Some(result_sender) = result_sender {
+                            let _ = result_sender.send(Err(err));
+                        } else {
+                            let err: Result<()> = Err(err);
+                            ui.report_error(err);
+                        }
+                    },
+                    _ => (),
                 }
-            }
-            // send streams back to caller
-            let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
-            // get the status
-            let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, true);
-            let code = match ui.shell.check_pid_status(pid as _) {
-                None | Some(-1) => pid_waiter.await.unwrap_or(-1) as _,
-                Some(code) => code as _,
-            };
 
-            let _ = sender.send(Some(Ok(code)));
-            Ok(())
+            })
+
         }).await;
-
-        if let Err(err) = result {
-            if let Some(result_sender) = result_sender {
-                let _ = result_sender.send(Err(err));
-            } else {
-                ui.report_error::<(), _>(Err(err));
-            }
-        }
+        crate::log_if_err(result);
 
     });
 
@@ -455,7 +468,7 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
         || matches!(args.stderr, Stdio::inherit)
     );
 
-    let result = ui.clone().shell.trampoline_out_callback(move |ui| {
+    let result = ui.clone().shell.trampoline_out_callback(move |ui, token| {
         ui.clone().shell_loop(async move {
             ui.freeze_if(foreground, true, async {
 
@@ -479,11 +492,11 @@ pub async fn shell_run_with_args(mut ui: Ui, lua: Lua, cmd: ShellRunCmd, args: F
                 }
 
                 let code = match cmd {
-                    ShellRunCmd::Simple(cmd) => ui.shell.exec(cmd.into()),
+                    ShellRunCmd::Simple(cmd) => ui.shell.exec(token, cmd.into()),
                     ShellRunCmd::Function{func, args, arg0} => {
                         let arg0 = arg0.map(|x| x.into());
                         let args = args.into_iter().map(|x| x.into()).collect();
-                        ui.shell.exec_function(func.clone(), arg0, args).into()
+                        ui.shell.exec_function(token, func.clone(), arg0, args).into()
                     },
                 };
 

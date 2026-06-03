@@ -37,7 +37,8 @@ pub use zsh::{
 pub use externs::{LUA_LEVEL};
 pub use variables::Variable;
 
-type TrampolinePayload = Box<dyn FnOnce(Ui)>;
+pub struct TrampolineToken(());
+type TrampolinePayload = (Box<dyn FnOnce(Ui, TrampolineToken)>, TrampolineToken);
 enum Trampoline<T=TrampolinePayload> {
     Resumed(oneshot::Sender<T>),
     Paused(oneshot::Sender<()>),
@@ -148,15 +149,15 @@ impl Shell {
         receiver.await
     }
 
-    pub async fn trampoline_out_callback<F: 'static + FnOnce(Ui) -> T, T: 'static>(
+    pub async fn trampoline_out_callback<F: 'static + FnOnce(Ui, TrampolineToken) -> T, T: 'static>(
         &self,
         callback: F,
     ) -> Result<T, oneshot::error::RecvError> {
         let (sender, receiver) = oneshot::channel();
-        let callback = Box::new(move |state| {
-            let _ = sender.send(callback(state));
+        let callback = Box::new(move |ui, token| {
+            let _ = sender.send(callback(ui, token));
         });
-        self.trampoline_out(callback).await?;
+        self.trampoline_out((callback, TrampolineToken(()))).await?;
         receiver.await
     }
 
@@ -202,12 +203,13 @@ impl Shell {
         }
     }
 
-    pub fn exec(&self, string: MetaString) -> c_long {
+    pub fn exec(&self, _token: TrampolineToken, string: MetaString) -> c_long {
         zsh::execstring(string.as_ref(), Default::default())
     }
 
     pub fn exec_subshell(
         &self,
+        _token: TrampolineToken,
         string: BString,
         job_control: bool,
         redirections: &[Option<(RawFd, RawFd, bool)>],
@@ -273,7 +275,12 @@ impl Shell {
         zsh::execstring(cmd.as_ref(), Default::default())
     }
 
-    pub fn get_completions(&self, line: BString, callback: Box<dyn FnMut(Vec<zsh::completion::Match>) -> ControlFlow<()>>) -> Result<BString> {
+    pub fn get_completions(
+        &self,
+        _token: TrampolineToken,
+        line: BString,
+        callback: Box<dyn FnMut(Vec<zsh::completion::Match>) -> ControlFlow<()>>,
+    ) -> Result<BString> {
         // this may block for a long time
         let sink = &mut *self.sink.borrow_mut();
         let (msg, _) = zsh::capture_shout(sink, || zsh::completion::get_completions(line, callback));
@@ -516,6 +523,7 @@ impl Shell {
 
     pub fn exec_function(
         &self,
+        _token: TrampolineToken,
         function: Arc<zsh::functions::Function>,
         arg0: Option<MetaString>,
         args: Vec<MetaString>
@@ -525,6 +533,7 @@ impl Shell {
 
     pub fn exec_function_by_name(
         &self,
+        _token: TrampolineToken,
         function: MetaString,
         args: Vec<MetaString>
     ) -> Option<c_int> {

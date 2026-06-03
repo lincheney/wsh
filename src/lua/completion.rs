@@ -34,9 +34,9 @@ async fn get_completions(ui: Ui, _lua: Lua, (val, callback): (Option<String>, Lu
         ui.borrow().buffer.get_contents().clone()
     };
 
-    ui.shell.trampoline_out_callback(move |mut ui| {
+    ui.shell.trampoline_out_callback(move |mut ui, token| {
         let mut ui_clone = ui.clone();
-        let result = ui_clone.shell.get_completions(val, Box::new(move |matches| {
+        let result = ui_clone.shell.get_completions(token, val, Box::new(move |matches| {
             let matches: Vec<_> = matches.into_iter().map(|x| Match{inner: Rc::new(x)}).collect();
 
             let result = ui.shell_loop(callback.call_async(matches));
