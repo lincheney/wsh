@@ -2,7 +2,6 @@ use std::os::fd::AsRawFd;
 use std::num::NonZeroU16;
 use nix::sys::signal;
 use nix::libc;
-use std::sync::{LazyLock};
 use std::os::fd::{RawFd};
 use std::os::raw::*;
 use std::default::Default;
@@ -29,7 +28,13 @@ pub(super) use bindings::*;
 use variables::{Variable};
 pub use meta_string::{MetaStr, MetaString, array::{MetaArray, MetaSlice}};
 
-pub static JOB: LazyLock<c_int> = LazyLock::new(|| unsafe{ zsh_sys::initjob() });
+thread_local! {
+    static JOB: c_int = unsafe{ zsh_sys::initjob() };
+}
+
+fn get_job_number() -> c_int {
+    JOB.with(|job| *job)
+}
 
 // pub type HandlerFunc = unsafe extern "C" fn(name: *mut c_char, argv: *mut *mut c_char, options: *mut zsh_sys::options, func: c_int) -> c_int;
 
@@ -224,7 +229,7 @@ pub fn add_pid(pid: i32) {
         let aux = 1;
         let bgtime = null_mut(); // this can be NULL if aux is 1
         let oldjob = zsh_sys::thisjob;
-        zsh_sys::thisjob = *JOB;
+        zsh_sys::thisjob = get_job_number();
         zsh_sys::addproc(pid, null_mut(), aux, bgtime, -1, -1);
         zsh_sys::thisjob = oldjob;
     }
@@ -232,7 +237,7 @@ pub fn add_pid(pid: i32) {
 
 pub fn find_process_status(pid: i32, pop_if_done: bool) -> Option<c_int> {
      unsafe{
-        let job = zsh_sys::jobtab.add(*JOB as usize);
+        let job = zsh_sys::jobtab.add(get_job_number() as usize);
         let mut prev: *mut zsh_sys::process = null_mut();
         let mut proc = (*job).auxprocs;
         while let Some(p) = proc.as_ref() {
