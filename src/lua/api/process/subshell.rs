@@ -36,7 +36,6 @@ enum SubshellRunArgs {
 struct OverriddenStream {
     fd: RawFd,
     replacement: RawFd,
-    backup: Option<RawFd>,
     closed: bool,
 }
 
@@ -45,7 +44,6 @@ impl OverriddenStream {
         Self {
             fd: fd.as_raw_fd(),
             replacement: replacement.into_raw_fd(),
-            backup: None,
             closed: false,
         }
     }
@@ -53,24 +51,6 @@ impl OverriddenStream {
     fn close(&mut self) -> Result<()> {
         nix::unistd::close(self.replacement)?;
         self.closed = true;
-        Ok(())
-    }
-
-    fn override_fd(&mut self) -> Result<()> {
-        let backup = nix::unistd::dup(self.fd)?;
-        nix::unistd::dup2(self.replacement, self.fd)?;
-        self.backup = Some(backup);
-        self.close()?;
-        Ok(())
-    }
-
-    fn restore(&mut self) -> Result<()> {
-        if let Some(backup) = self.backup {
-            nix::unistd::dup2(backup, self.fd)?;
-            nix::unistd::close(backup)?;
-        } else if !self.closed {
-            self.close()?;
-        }
         Ok(())
     }
 }
