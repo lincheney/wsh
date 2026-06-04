@@ -2,12 +2,14 @@ use anyhow::Result;
 use nix::sys::signal;
 use std::os::raw::{c_int};
 use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::Mutex;
+use std::cell::RefCell;
 use tokio::io::AsyncReadExt;
 pub mod sigwinch;
 pub mod sigint;
 
-static ORIGINAL_SIGACTIONS: Mutex<Vec<(signal::Signal, signal::SigAction)>> = Mutex::new(Vec::new());
+thread_local! {
+    static ORIGINAL_SIGACTIONS: RefCell<Vec<(signal::Signal, signal::SigAction)>> = RefCell::new(Vec::new());
+}
 
 // how the heck does this work
 //
@@ -114,7 +116,7 @@ pub(super) fn install_signal_handler(
         let action = signal::SigAction::new(handler, signal::SaFlags::empty(), signal::SigSet::empty());
         let old_action = signal::sigaction(signal, &action)?;
         if save_original {
-            ORIGINAL_SIGACTIONS.lock().unwrap().push((signal, old_action));
+            ORIGINAL_SIGACTIONS.with_borrow_mut(|x| x.push((signal, old_action)));
         }
     }
     Ok(())
@@ -182,9 +184,11 @@ pub fn init(ui: &crate::ui::Ui) -> Result<()> {
 
 pub fn cleanup() {
     // restore original signal handlers
-    for (sig, old_action) in ORIGINAL_SIGACTIONS.lock().unwrap().drain(..) {
-        crate::log_if_err(unsafe { signal::sigaction(sig, &old_action) });
-    }
+    ORIGINAL_SIGACTIONS.with_borrow_mut(|x| {
+        for (sig, old_action) in x.drain(..) {
+            crate::log_if_err(unsafe { signal::sigaction(sig, &old_action) });
+        }
+    });
 
     super::process::cleanup();
     sigwinch::cleanup();

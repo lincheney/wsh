@@ -1,4 +1,4 @@
-use std::sync::{atomic::{AtomicPtr, Ordering}};
+use std::cell::Cell;
 use std::os::raw::*;
 use anyhow::{Result};
 use super::super::bindings;
@@ -22,22 +22,21 @@ unsafe fn get_widget(name: &MetaStr) -> Result<*mut bindings::widget> {
 }
 
 /// Look up a widget by name in thingytab and swap its fn pointer.
-fn override_widget(name: &MetaStr, new_fn: bindings::ZleIntFunc, state: &AtomicPtr<c_void>) -> Result<()> {
+fn override_widget(name: &MetaStr, new_fn: bindings::ZleIntFunc, state: &Cell<bindings::ZleIntFunc>) -> Result<()> {
     unsafe {
         let widget = get_widget(name)?;
-        let original_fn = (*widget).u.fn_.map_or(std::ptr::null_mut(), |f| f as _);
-        state.store(original_fn, Ordering::Release);
+        let original_fn = (*widget).u.fn_;
+        state.set(original_fn);
         (*widget).u.fn_ = new_fn;
         Ok(())
     }
 }
 
 /// Restore a widget's original fn pointer.
-fn restore_widget(name: &MetaStr, state: &AtomicPtr<c_void>) -> Result<()> {
-    let ptr = state.swap(std::ptr::null_mut(), Ordering::AcqRel);
-    if !ptr.is_null() {
+fn restore_widget(name: &MetaStr, state: &Cell<bindings::ZleIntFunc>) -> Result<()> {
+    if let Some(state) = state.replace(None) {
         unsafe {
-            (*get_widget(name)?).u.fn_ = Some(std::mem::transmute(ptr));
+            (*get_widget(name)?).u.fn_ = Some(state);
         }
     }
     Ok(())
@@ -46,7 +45,9 @@ fn restore_widget(name: &MetaStr, state: &AtomicPtr<c_void>) -> Result<()> {
 // --- undo widget override ---
 
 static UNDO_NAME: &MetaStr = meta_str!(c".undo");
-static UNDO_OVERRIDE: AtomicPtr<c_void> = const{ AtomicPtr::new(std::ptr::null_mut()) };
+thread_local! {
+    static UNDO_OVERRIDE: Cell<bindings::ZleIntFunc> = const{ Cell::new(None) };
+}
 
 unsafe extern "C" fn custom_undo(_args: *mut *mut c_char) -> c_int {
     let result = GlobalState::with(|ui| {
@@ -62,17 +63,19 @@ unsafe extern "C" fn custom_undo(_args: *mut *mut c_char) -> c_int {
 }
 
 fn override_undo() -> Result<()> {
-    override_widget(UNDO_NAME, Some(custom_undo), &UNDO_OVERRIDE)
+    UNDO_OVERRIDE.with(|state| override_widget(UNDO_NAME, Some(custom_undo), state))
 }
 
 fn restore_undo() -> Result<()> {
-    restore_widget(UNDO_NAME, &UNDO_OVERRIDE)
+    UNDO_OVERRIDE.with(|state| restore_widget(UNDO_NAME, state))
 }
 
 // --- redo widget override ---
 
 static REDO_NAME: &MetaStr = meta_str!(c".redo");
-static REDO_OVERRIDE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+thread_local! {
+    static REDO_OVERRIDE: Cell<bindings::ZleIntFunc> = const{ Cell::new(None) };
+}
 
 unsafe extern "C" fn custom_redo(_args: *mut *mut c_char) -> c_int {
     let result = GlobalState::with(|ui| {
@@ -88,17 +91,19 @@ unsafe extern "C" fn custom_redo(_args: *mut *mut c_char) -> c_int {
 }
 
 fn override_redo() -> Result<()> {
-    override_widget(REDO_NAME, Some(custom_redo), &REDO_OVERRIDE)
+    REDO_OVERRIDE.with(|state| override_widget(REDO_NAME, Some(custom_redo), state))
 }
 
 fn restore_redo() -> Result<()> {
-    restore_widget(REDO_NAME, &REDO_OVERRIDE)
+    REDO_OVERRIDE.with(|state| restore_widget(REDO_NAME, state))
 }
 
 // --- split-undo widget override ---
 
 static SPLIT_UNDO_NAME: &MetaStr = meta_str!(c".split-undo");
-static SPLIT_UNDO_OVERRIDE: AtomicPtr<c_void> = const{ AtomicPtr::new(std::ptr::null_mut()) };
+thread_local! {
+    static SPLIT_UNDO_OVERRIDE: Cell<bindings::ZleIntFunc> = const{ Cell::new(None) };
+}
 
 unsafe extern "C" fn custom_split_undo(_args: *mut *mut c_char) -> c_int {
     // wish buffer doesn't have zsh's undo merging, so this is a no-op
@@ -106,17 +111,19 @@ unsafe extern "C" fn custom_split_undo(_args: *mut *mut c_char) -> c_int {
 }
 
 fn override_split_undo() -> Result<()> {
-    override_widget(SPLIT_UNDO_NAME, Some(custom_split_undo), &SPLIT_UNDO_OVERRIDE)
+    SPLIT_UNDO_OVERRIDE.with(|state| override_widget(SPLIT_UNDO_NAME, Some(custom_split_undo), state))
 }
 
 fn restore_split_undo() -> Result<()> {
-    restore_widget(SPLIT_UNDO_NAME, &SPLIT_UNDO_OVERRIDE)
+    SPLIT_UNDO_OVERRIDE.with(|state| restore_widget(SPLIT_UNDO_NAME, state))
 }
 
 // --- vi-undo-change widget override ---
 
 static VI_UNDO_CHANGE_NAME: &MetaStr = meta_str!(c".vi-undo-change");
-static VI_UNDO_CHANGE_OVERRIDE: AtomicPtr<c_void> = const{ AtomicPtr::new(std::ptr::null_mut()) };
+thread_local! {
+    static VI_UNDO_CHANGE_OVERRIDE: Cell<bindings::ZleIntFunc> = const{ Cell::new(None) };
+}
 
 unsafe extern "C" fn custom_vi_undo_change(_args: *mut *mut c_char) -> c_int {
     // in zsh this toggles between end-of-undo-list and one step back;
@@ -134,11 +141,11 @@ unsafe extern "C" fn custom_vi_undo_change(_args: *mut *mut c_char) -> c_int {
 }
 
 fn override_vi_undo_change() -> Result<()> {
-    override_widget(VI_UNDO_CHANGE_NAME, Some(custom_vi_undo_change), &VI_UNDO_CHANGE_OVERRIDE)
+    VI_UNDO_CHANGE_OVERRIDE.with(|state| override_widget(VI_UNDO_CHANGE_NAME, Some(custom_vi_undo_change), state))
 }
 
 fn restore_vi_undo_change() -> Result<()> {
-    restore_widget(VI_UNDO_CHANGE_NAME, &VI_UNDO_CHANGE_OVERRIDE)
+    VI_UNDO_CHANGE_OVERRIDE.with(|state| restore_widget(VI_UNDO_CHANGE_NAME, state))
 }
 
 // --- public API ---

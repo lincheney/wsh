@@ -35,7 +35,7 @@ pub fn get_term_size() -> Option<(u32, u32)> {
 }
 
 pub fn get_subscriber() -> Option<watch::Receiver<(u32, u32)>> {
-    RECEIVER.with(|r| r.borrow().clone())
+    RECEIVER.with_borrow(|r| r.clone())
 }
 
 pub(super) fn sighandler(_trapped: bool) -> c_int {

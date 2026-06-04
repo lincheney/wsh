@@ -2,20 +2,18 @@ use crate::lua::{HasEventCallbacks};
 pub(in crate::shell) mod fork;
 use crate::ui::{Ui};
 use std::os::raw::{c_char, c_int};
-use std::cell::RefCell;
+use std::cell::{RefCell, Cell};
 use std::ptr::null_mut;
-use std::sync::{LazyLock, OnceLock, Mutex, atomic::{Ordering, AtomicBool}};
 use anyhow::Result;
 use crate::shell::{Shell, zsh, MetaString, MetaSlice};
 
 
 thread_local! {
     static STATE: RefCell<Option<Ui>> = const{ RefCell::new(None) };
+    static ORIGINAL_ZLE_ENTRY_PTR: Cell<Option<zsh_sys::ZleEntryPoint>> = const{ Cell::new(None) };
+    static IS_RUNNING: Cell<bool> = const{ Cell::new(false) };
+    static FIRST_DRAWN: Cell<bool> = const{ Cell::new(false) };
 }
-
-static ORIGINAL_ZLE_ENTRY_PTR: OnceLock<zsh_sys::ZleEntryPoint> = OnceLock::new();
-static IS_RUNNING: Mutex<()> = Mutex::new(());
-static FIRST_DRAWN: AtomicBool = AtomicBool::new(false);
 
 fn teardown() {
     STATE.take();
@@ -47,7 +45,7 @@ impl GlobalState {
                 zsh::bin_zle::override_zle();
 
                 unsafe {
-                    let _ = ORIGINAL_ZLE_ENTRY_PTR.set(zsh_sys::zle_entry_ptr);
+                    ORIGINAL_ZLE_ENTRY_PTR.set(Some(zsh_sys::zle_entry_ptr));
                     zsh_sys::zle_entry_ptr = Some(zle_entry_ptr_override);
                 }
             }
@@ -128,7 +126,8 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
     if let Ok(ui) = GlobalState::get() {
         #[allow(static_mut_refs)]
         unsafe {
-            if cmd == zsh_sys::ZLE_CMD_READ as _ && let Ok(_lock) = IS_RUNNING.try_lock() {
+            if cmd == zsh_sys::ZLE_CMD_READ as _ && !IS_RUNNING.get() {
+                IS_RUNNING.set(true);
 
                 // lp = va_arg(ap, char **);
                 // rp = va_arg(ap, char **);
@@ -163,7 +162,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                     let result = ui.clone().shell_loop(async move {
                         // sometimes zsh will trash zle without refreshing
                         // redraw the ui
-                        let drawn = FIRST_DRAWN.swap(true, Ordering::Relaxed);
+                        let drawn = FIRST_DRAWN.replace(true);
                         let result = crate::log_if_err(ui.zle_cmd_refresh().await);
                         if result == Some(true) && drawn {
                             // draw LATER
@@ -212,6 +211,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                 zsh::zleline = null_mut();
                 zsh_sys::zleactive = 0;
 
+                IS_RUNNING.set(false);
                 return match result {
                     Ok(Ok(Some(mut string))) => {
                         // MUST have a newline here
@@ -282,33 +282,35 @@ const DEFAULT_BUILTIN: zsh_sys::builtin = zsh_sys::builtin{
     defopts: null_mut(),
 };
 
-static mut MODULE_FEATURES: LazyLock<Features> = LazyLock::new(|| {
-    let bn_list = Box::new([
-        zsh_sys::builtin{
-            node: zsh_sys::hashnode{
-                next: null_mut(),
-                nam: c"wsh".as_ptr().cast_mut(),
-                flags: 0,
+thread_local! {
+    static MODULE_FEATURES: Features = {
+        let bn_list = Box::new([
+            zsh_sys::builtin{
+                node: zsh_sys::hashnode{
+                    next: null_mut(),
+                    nam: c"wsh".as_ptr().cast_mut(),
+                    flags: 0,
+                },
+                handlerfunc: Some(handlerfunc),
+                ..DEFAULT_BUILTIN
             },
-            handlerfunc: Some(handlerfunc),
-            ..DEFAULT_BUILTIN
-        },
-    ]);
-    let bn_list = Box::leak(bn_list);
+        ]);
+        let bn_list = Box::leak(bn_list);
 
-    Features(zsh_sys::features{
-        // builtins
-        bn_list: bn_list.as_mut_ptr(), bn_size: bn_list.len() as _,
-        // conditions
-        cd_list: null_mut(), cd_size: 0,
-        // parameters
-        pd_list: null_mut(), pd_size: 0,
-        // math funcs
-        mf_list: null_mut(), mf_size: 0,
-        // abstract features
-        n_abstract: 0,
-    })
-});
+        Features(zsh_sys::features{
+            // builtins
+            bn_list: bn_list.as_mut_ptr(), bn_size: bn_list.len() as _,
+            // conditions
+            cd_list: null_mut(), cd_size: 0,
+            // parameters
+            pd_list: null_mut(), pd_size: 0,
+            // math funcs
+            mf_list: null_mut(), mf_size: 0,
+            // abstract features
+            n_abstract: 0,
+        })
+    };
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn setup_() -> c_int {
@@ -330,7 +332,7 @@ pub extern "C" fn setup_() -> c_int {
 #[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn features_(module: zsh_sys::Module, features: *mut *mut *mut c_char) -> c_int {
     unsafe {
-        let module_features = &raw mut MODULE_FEATURES.0;
+        let module_features = MODULE_FEATURES.with(|x| &raw const x.0).cast_mut();
         *features = zsh_sys::featuresarray(module, module_features);
     }
     0
@@ -340,7 +342,7 @@ pub unsafe extern "C" fn features_(module: zsh_sys::Module, features: *mut *mut 
 #[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn enables_(module: zsh_sys::Module, enables: *mut *mut c_int) -> c_int {
     unsafe {
-        let module_features = &raw mut MODULE_FEATURES.0;
+        let module_features = MODULE_FEATURES.with(|x| &raw const x.0).cast_mut();
         zsh_sys::handlefeatures(module, module_features, enables)
     }
 }
@@ -354,7 +356,7 @@ pub extern "C" fn boot_() -> c_int {
 #[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn cleanup_(module: zsh_sys::Module) -> c_int {
     unsafe {
-        let module_features = &raw mut MODULE_FEATURES.0;
+        let module_features = MODULE_FEATURES.with(|x| &raw const x.0).cast_mut();
         zsh_sys::setfeatureenables(module, module_features, null_mut())
     }
 }

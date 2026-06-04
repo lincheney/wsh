@@ -13,9 +13,10 @@ pub use api::{
     HasEventCallbacks,
 };
 
+// i must use atomics here as these are used in signal handlers
 static LUA_PTR: AtomicPtr<mlua::ffi::lua_State> = AtomicPtr::new(std::ptr::null_mut());
-const LUA_HOOK_MASK: c_int = mlua::ffi::LUA_MASKCALL | mlua::ffi::LUA_MASKRET | mlua::ffi::LUA_MASKLINE | mlua::ffi::LUA_MASKCOUNT;
 static LUA_LEVEL: AtomicUsize = AtomicUsize::new(0);
+const LUA_HOOK_MASK: c_int = mlua::ffi::LUA_MASKCALL | mlua::ffi::LUA_MASKRET | mlua::ffi::LUA_MASKLINE | mlua::ffi::LUA_MASKCOUNT;
 
 pub fn lua_error<S: ToString>(msg: S) -> mlua::Error {
     mlua::Error::RuntimeError(msg.to_string())
@@ -136,14 +137,14 @@ impl LuaWrapper {
 
 impl Drop for LuaWrapper {
     fn drop(&mut self) {
-        LUA_PTR.store(std::ptr::null_mut(), Ordering::Release);
+        LUA_PTR.store(std::ptr::null_mut(), Ordering::Relaxed);
     }
 }
 
 #[inline(always)]
 pub fn set_sigint_hook() {
-    if LUA_LEVEL.load(Ordering::Acquire) > 0 {
-        let lua = LUA_PTR.load(Ordering::Acquire);
+    if LUA_LEVEL.load(Ordering::Relaxed) > 0 {
+        let lua = LUA_PTR.load(Ordering::Relaxed);
         if !lua.is_null() {
             unsafe {
                 // this is signal safe
@@ -157,7 +158,7 @@ pub fn set_sigint_hook() {
 extern "C-unwind" fn lua_sigint_hook(lua: *mut mlua::ffi::lua_State, _ar: *mut mlua::ffi::lua_Debug) {
     unsafe {
         // keep interrupting lua so long as there is more
-        if LUA_LEVEL.load(Ordering::Acquire) <= 1 {
+        if LUA_LEVEL.load(Ordering::Relaxed) <= 1 {
             mlua::ffi::lua_sethook(lua, None, LUA_HOOK_MASK, 1);
         }
         mlua::ffi::lua_pushliteral(lua, c"interrupted");

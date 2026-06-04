@@ -2,15 +2,13 @@
 * prefork/postfork handlers
 */
 
-use std::sync::{atomic::Ordering};
-
 static ATFORK_INIT: std::sync::Once = std::sync::Once::new();
 
 // extern "C" fn prefork() {
 // }
 
 extern "C" fn postfork_child() {
-    crate::IS_FORKED.store(true, Ordering::Relaxed);
+    crate::IS_FORKED.set(true);
 
     super::STATE.with(|ui| {
         // if the state is None, it is probably not running
