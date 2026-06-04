@@ -8,7 +8,7 @@ pub mod sigwinch;
 pub mod sigint;
 
 thread_local! {
-    static ORIGINAL_SIGACTIONS: RefCell<Vec<(signal::Signal, signal::SigAction)>> = RefCell::new(Vec::new());
+    static ORIGINAL_SIGACTIONS: RefCell<Vec<(signal::Signal, signal::SigAction)>> = const{ RefCell::new(Vec::new()) };
 }
 
 // how the heck does this work

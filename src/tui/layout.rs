@@ -149,8 +149,7 @@ impl Node {
                     .iter()
                     .filter_map(|id| map.get(id))
                     .filter(|child| child.is_visible(map, false))
-                    .filter_map(|child| child.get_draw_pos(map))
-                    .next()
+                    .find_map(|child| child.get_draw_pos(map))
             }
         }
     }

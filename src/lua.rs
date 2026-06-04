@@ -59,7 +59,7 @@ impl LuaWrapper {
     }
 
     pub fn init_lua(&self) -> Result<()> {
-        init_lua(&self)?;
+        init_lua(self)?;
 
         self.inner.load(/*lua*/ r"
             local xdg_data = os.getenv('XDG_DATA_HOME')

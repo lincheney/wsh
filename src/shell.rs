@@ -553,7 +553,7 @@ impl Shell {
     }
 
     pub fn restore_queue_signals(&self, level: i32) {
-        zsh::restore_queue_signals(level)
+        zsh::restore_queue_signals(level);
     }
 
     pub fn call_hook_func<'a, T: 'a + AsRef<MetaStr>, I: Iterator<Item=&'a T>>(
