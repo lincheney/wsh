@@ -9,6 +9,7 @@ use std::ptr::null_mut;
 use bstr::{BString, ByteSlice};
 
 mod bindings;
+mod alloc;
 mod linked_list;
 mod builtin;
 pub mod variables;
