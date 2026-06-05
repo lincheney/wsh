@@ -88,6 +88,9 @@ return function(plugin_fn)
             spawn = function(...)
                 return track_process(wish.async.spawn(...))
             end,
+            subshell = function(...)
+                return track_process(wish.async.subshell(...))
+            end,
             zpty = function(...)
                 return track_process(wish.async.zpty(...))
             end,
@@ -145,11 +148,11 @@ return function(plugin_fn)
             end,
 
             cmd = function(...)
-                return track_process(wish.cmd(...))
+                return wish.cmd(...)
             end,
 
             silent_cmd = function(...)
-                return track_process(wish.silent_cmd(...))
+                return wish.silent_cmd(...)
             end,
 
             create_dynamic_var = function(name, ...)
