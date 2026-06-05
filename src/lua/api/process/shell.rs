@@ -38,7 +38,7 @@ pub async fn shell_run_with_args(ui: Ui, _lua: Lua, cmd: ShellRunCmd, foreground
 
     let code = ui.clone().shell.trampoline_out_callback(move |ui, token| {
         ui.clone().shell_loop(async move {
-            ui.freeze_if(foreground, true, async {
+            let result = ui.freeze_if(foreground, true, async {
                 match cmd {
                     ShellRunCmd::Simple(command) => ui.shell.exec(token, command.into()),
                     ShellRunCmd::Function{func, args, arg0, ..} => {
@@ -48,7 +48,12 @@ pub async fn shell_run_with_args(ui: Ui, _lua: Lua, cmd: ShellRunCmd, foreground
                         ui.shell.exec_function(token, func.clone(), arg0, args.iter()).into()
                     },
                 }
-            }).await
+            }).await;
+            if !crate::is_forked() {
+                // sometimes zsh will trash zle without refreshing
+                crate::log_if_err(ui.zle_cmd_refresh().await);
+            }
+            result
         })
     }).await???;
 
