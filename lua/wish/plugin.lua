@@ -147,14 +147,6 @@ return function(plugin_fn)
                 return ns
             end,
 
-            cmd = function(...)
-                return wish.cmd(...)
-            end,
-
-            silent_cmd = function(...)
-                return wish.silent_cmd(...)
-            end,
-
             create_dynamic_var = function(name, ...)
                 wish.create_dynamic_var(name, ...)
                 table.insert(vars, name)

@@ -14,20 +14,15 @@ return wish.plugin(function(wish)
     end
 
     local function make_script(expr)
-        return '() { set -o localoptions -o extendedglob -o forcefloat; local __expr='..wish.shell_quote(expr)..'; echo "$(( $__expr ))"; }'
+        return '() { set -o localoptions -o extendedglob -o forcefloat; local __expr='..wish.shell_quote(expr)..'; printf -v __value "$(( $__expr ))"; }'
     end
 
     local function do_maths(expr)
-        local proc = wish.cmd{
-            args = make_script(expr),
-            stdin = 'null',
-            stdout = 'piped',
-            stderr = 'piped',
-        }
-        local code = proc:wait()
-        local stdout = proc.stdout:read_to_end():gsub('\n$', '')
-        local stderr = proc.stderr:read_to_end():gsub('\n$', '')
-        return code > 0 and stderr or stdout
+        return wish.in_param_scope(function()
+            local code = wish.silent_cmd(make_script(expr))
+            local value = wish.get_var('__value')
+            return code > 0 and 'failed' or value
+        end)
     end
 
     wish.add_event_callback('buffer_change', function()
@@ -54,7 +49,7 @@ return wish.plugin(function(wish)
     CUSTOM_COMMAND.register(wish, {
         keyword = '//',
         callback = function(command)
-            wish.cmd(make_script(command)):wait()
+            wish.print(do_maths(command))
         end,
     })
 

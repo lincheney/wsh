@@ -10,21 +10,21 @@ end
 
 local init = false
 function M.register(wish, opts)
-    wish.add_event_callback('init', function()
-        if not init then
-            init = true
-            wish.silent_cmd[[setopt interactivecomments]]
-        end
-    end)
 
     local keyword = opts.keyword
     local callback = opts.callback
 
-    local accept_line
-    accept_line = wish.add_event_callback('accept_line', function()
-        local alias_cmd = 'alias ' .. keyword .. '=" # "'
-        wish.silent_cmd(alias_cmd)
-        wish.remove_event_callback(accept_line)
+    if not init then
+        wish.add_event_callback('init', function()
+            if not init then
+                init = true
+                wish.silent_cmd[[setopt interactivecomments]]
+            end
+        end)
+    end
+
+    wish.add_event_callback('init', function()
+        wish.silent_cmd('alias ' .. keyword .. '=" # "')
     end)
 
     wish.add_event_callback('precmd', function(buffer)
