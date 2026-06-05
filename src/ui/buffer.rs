@@ -1,3 +1,4 @@
+use byteyarn::ByteYarn;
 use std::io::Write;
 use bstr::{BStr, BString, ByteSlice};
 use crate::tui::{Drawer, Canvas};
@@ -6,19 +7,9 @@ pub mod suffix;
 
 #[derive(Debug)]
 pub struct Edit {
-    before: BString,
-    after: BString,
+    before: ByteYarn,
+    after: ByteYarn,
     position: usize,
-}
-
-impl Edit {
-    pub fn get_before(&self) -> &BStr {
-        self.before.as_ref()
-    }
-
-    pub fn get_after(&self) -> &BStr {
-        self.after.as_ref()
-    }
 }
 
 #[derive(Debug, Default)]
@@ -151,8 +142,8 @@ impl Buffer {
         }
 
         let edit = Edit {
-            before: old.into(),
-            after: new.into(),
+            before: ByteYarn::copy(old),
+            after: ByteYarn::copy(new),
             position: start,
         };
 
@@ -173,7 +164,7 @@ impl Buffer {
         };
 
         self.contents.delete_str(0, edit.position, old.len());
-        self.contents.insert_str(new.as_ref(), 0, edit.position, None);
+        self.contents.insert_str(new.as_bytes().into(), 0, edit.position, None);
         self.len = None;
 
         // calculate the new cursor
