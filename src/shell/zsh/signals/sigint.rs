@@ -41,8 +41,8 @@ fn close_self_pipe() {
 
 pub(super) fn cleanup() {
     close_self_pipe();
-    RECEIVER.with(|r| {
-        *r.borrow_mut() = None;
+    RECEIVER.with_borrow_mut(|r| {
+        *r = None;
     });
 }
 
@@ -52,8 +52,8 @@ pub(in crate::shell) fn install_signal_handler() -> Result<()> {
 
 pub(super) fn init(ui: &crate::ui::Ui) -> Result<()> {
     let notify = Rc::new(Notify::new());
-    RECEIVER.with(|r| {
-        *r.borrow_mut() = Some(notify.clone());
+    RECEIVER.with_borrow_mut(|r| {
+        *r = Some(notify.clone());
     });
 
     // spawn a reader task

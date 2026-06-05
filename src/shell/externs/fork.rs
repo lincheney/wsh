@@ -10,10 +10,10 @@ static ATFORK_INIT: std::sync::Once = std::sync::Once::new();
 extern "C" fn postfork_child() {
     crate::IS_FORKED.set(true);
 
-    super::STATE.with(|ui| {
+    super::STATE.with_borrow(|ui| {
         // if the state is None, it is probably not running
         // but there is no way to unregister this callback?
-        if let Some(ui) = &*ui.borrow() {
+        if let Some(ui) = ui {
             // clear pid table
             // since we are now the child, we won't be able to wait for any of them
             // we shouldn't have to rush this, since we don't have any child processes

@@ -54,8 +54,8 @@ impl GlobalState {
     }
 
     pub fn with<T, F: FnOnce(&Ui) -> T>(f: F) -> Result<T> {
-        STATE.with(|ui| {
-            if let Some(ui) = &*ui.borrow() {
+        STATE.with_borrow(|ui| {
+            if let Some(ui) = ui {
                 Ok(f(ui))
             } else {
                 anyhow::bail!("wish is not running")
@@ -316,8 +316,8 @@ thread_local! {
 pub extern "C" fn setup_() -> c_int {
     match GlobalState::init() {
         Ok(ui) => {
-            STATE.with(|state| {
-                *state.borrow_mut() = Some(ui);
+            STATE.with_borrow_mut(|state| {
+                *state = Some(ui);
             });
             0
         },

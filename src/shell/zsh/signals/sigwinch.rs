@@ -58,16 +58,16 @@ fn close_self_pipe() {
 
 pub(super) fn cleanup() {
     close_self_pipe();
-    RECEIVER.with(|r| {
-        *r.borrow_mut() = None;
+    RECEIVER.with_borrow_mut(|r| {
+        *r = None;
     });
 }
 
 pub(super) fn init(ui: &crate::ui::Ui) -> Result<()> {
     fetch_term_size_from_zsh();
     let (sender, receiver) = watch::channel(get_term_size_from_zsh());
-    RECEIVER.with(|r| {
-        *r.borrow_mut() = Some(receiver);
+    RECEIVER.with_borrow_mut(|r| {
+        *r = Some(receiver);
     });
 
     // spawn a reader task

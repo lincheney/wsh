@@ -157,9 +157,8 @@ thread_local! {
 unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_char, options: zsh_sys::Options, func: c_int) -> c_int {
     // eprintln!("DEBUG(bombay)\t{}\t= {:?}\r", stringify!(nam), nam);
 
-    COMPADD_STATE.with(|compadd| {
+    COMPADD_STATE.with_borrow_mut(|compadd| {
         unsafe {
-            let mut compadd = compadd.borrow_mut();
             let compadd = compadd.as_mut().unwrap();
             let result = compadd.original.as_ref().unwrap().handlerfunc.unwrap()(nam, argv, options, func);
 
@@ -209,8 +208,8 @@ pub fn override_compadd() -> Result<()> {
 }
 
 pub fn restore_compadd() {
-    COMPADD_STATE.with(|compadd| {
-        if let Some(mut compadd) = compadd.borrow_mut().take() && let Some(original) = compadd.original.take() {
+    COMPADD_STATE.with_borrow_mut(|compadd| {
+        if let Some(mut compadd) = compadd.take() && let Some(original) = compadd.original.take() {
             original.add();
         }
     });
@@ -222,8 +221,8 @@ pub fn restore_compadd() {
 // the best we can do is emulate completecall()
 
 pub fn get_completions(line: BString, callback: Box<dyn FnMut(Vec<Match>) -> ControlFlow<()>>) {
-    COMPADD_STATE.with(|compadd| {
-        if let Some(compadd) = compadd.borrow_mut().as_mut() {
+    COMPADD_STATE.with_borrow_mut(|compadd| {
+        if let Some(compadd) = compadd {
             compadd.callback = Some(callback);
         } else {
             panic!("ui is not running");
@@ -247,8 +246,8 @@ pub fn get_completions(line: BString, callback: Box<dyn FnMut(Vec<Match>) -> Con
         bindings::minfo.cur = null_mut();
         super::execstring(meta_str!(c"set -o monitor"), Default::default());
 
-        COMPADD_STATE.with(|compadd| {
-            if let Some(compadd) = compadd.borrow_mut().as_mut() {
+        COMPADD_STATE.with_borrow_mut(|compadd| {
+            if let Some(compadd) = compadd {
                 compadd.reset();
             }
         });
