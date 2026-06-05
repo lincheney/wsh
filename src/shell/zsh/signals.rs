@@ -164,22 +164,26 @@ where
 }
 
 pub fn init(ui: &crate::ui::Ui) -> Result<()> {
-    #[allow(static_mut_refs)]
-    unsafe {
-        let trapcount = (zsh_sys::SIGCOUNT + 3 + nix::libc::SIGRTMAX() as u32 - nix::libc::SIGRTMIN() as u32 + 1) as usize;
+    let (err1, err2) = super::with_queued_signals(|| {
 
-        // make extra space so we can stuff our own "custom" signals
-        debug_assert!(SIGTRAPPED_COUNT as usize > trapcount * 2);
-        resize_array(&mut super::sigtrapped, trapcount, SIGTRAPPED_COUNT as usize);
-        debug_assert!(SIGTRAPPED_COUNT as usize > trapcount * 2);
-        resize_array(&mut super::siglists, trapcount, SIGTRAPPED_COUNT as usize);
-    }
+        #[allow(static_mut_refs)]
+        unsafe {
+            let trapcount = (zsh_sys::SIGCOUNT + 3 + nix::libc::SIGRTMAX() as u32 - nix::libc::SIGRTMIN() as u32 + 1) as usize;
 
-    super::process::init(ui)?;
-    sigwinch::init(ui)?;
-    sigint::init(ui)?;
+            // make extra space so we can stuff our own "custom" signals
+            debug_assert!(SIGTRAPPED_COUNT as usize > trapcount * 2);
+            resize_array(&mut super::sigtrapped, trapcount, SIGTRAPPED_COUNT as usize);
+            debug_assert!(SIGTRAPPED_COUNT as usize > trapcount * 2);
+            resize_array(&mut super::siglists, trapcount, SIGTRAPPED_COUNT as usize);
+        }
 
-    Ok(())
+        super::process::init(ui)?;
+        sigwinch::init(ui)?;
+        sigint::init(ui)?;
+        Ok(())
+    });
+    err2?;
+    err1
 }
 
 pub fn cleanup() {
