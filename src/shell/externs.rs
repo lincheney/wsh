@@ -91,7 +91,7 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
         Some(b"lua") => {
             let result: Result<_> = (|| {
                 let ui = GlobalState::get()?;
-                ui.runtime.block_on(ui.lua.load(iter.next().unwrap_or(b"" as _)).exec_async())?;
+                ui.clone().shell_loop(ui.lua.load(iter.next().unwrap_or(b"" as _)).exec_async())??;
                 Ok(())
             })();
 
