@@ -466,6 +466,11 @@ pub fn zistype(x: c_char, y: c_short) -> bool {
     }
 }
 
+fn is_token(c: u8) -> bool {
+    c >= token::Pound as _ && c < token::Nularg as _
+}
+
+
 pub fn call_hook_func<'a, T: 'a + AsRef<MetaStr>, I: Iterator<Item=&'a T>>(
     name: &'a MetaStr,
     args: I,

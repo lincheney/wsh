@@ -189,3 +189,15 @@ pub enum token {
 pub enum WidgetFlag {
     WIDGET_INT = 1 << 0,
 }
+
+#[derive(num_derive::FromPrimitive, Debug, Copy, Clone, PartialEq)]
+pub enum CommandStack {
+    For,      While,     Repeat,    Select,
+    Until,    If,        Then,      Else,
+    Elif,     Math,      Cond,      Cmdor,
+    Cmdand,   Pipe,      Errpipe,   Foreach,
+    Case,     Function,  Subsh,     Cursh,
+    Array,    Quote,     Dquote,    Bquote,
+    Cmdsubst, Mathsubst, ElifThen,  Heredoc,
+    Heredocd, Brace,     Braceparam, Always,
+}

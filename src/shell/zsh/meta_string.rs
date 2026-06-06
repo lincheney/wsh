@@ -1,3 +1,4 @@
+use super::bindings::{Meta};
 use std::os::raw::c_char;
 use std::borrow::{Cow, Borrow};
 use std::ffi::{CStr, CString};
@@ -44,6 +45,14 @@ pub fn unmetafy(bytes: &BStr) -> Cow<'_, BStr> {
     }
 }
 
+pub fn unmetafy_in_place(bytes: &mut [u8]) -> i32 {
+    unsafe {
+        let mut len = 0i32;
+        zsh_sys::unmetafy(bytes.as_mut_ptr().cast(), &raw mut len);
+        len
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct MetaString {
     inner: CString,
@@ -79,12 +88,8 @@ impl MetaString {
     }
 
     pub fn unmetafy(self) -> BString {
-        let mut len = 0i32;
         let mut bytes: BString = self.inner.into_bytes_with_nul().into();
-        unsafe {
-            // threadsafe!
-            zsh_sys::unmetafy(bytes.as_mut_ptr().cast(), &raw mut len);
-        }
+        let len = unmetafy_in_place(bytes.as_mut());
         bytes.truncate(len as _);
         bytes
     }
@@ -206,6 +211,35 @@ impl MetaStr {
             Cow::Borrowed(self.inner.to_bytes().into())
         } else {
             Cow::Owned(self.to_owned().unmetafy())
+        }
+    }
+
+    pub fn len(&self, num_bytes: usize) -> usize {
+        let mut len = 0;
+        let mut meta = false;
+        for &c in self.inner.to_bytes().into_iter().take(num_bytes) {
+            if meta {
+                meta = false
+            } else if c == Meta {
+                meta = true;
+            } else {
+                len += 1;
+            }
+        }
+        len
+    }
+
+    pub fn last(&self) -> Option<u8> {
+        match &self.inner[self.inner.count_bytes().saturating_sub(2) .. ].to_bytes() {
+            [a, c] if *a == Meta => {
+                let mut buf = [Meta, *c];
+                unmetafy_in_place(&mut buf);
+                Some(buf[0])
+            },
+            [_, c] => Some(*c),
+            [a] if *a == Meta => None,
+            [c] => Some(*c),
+            _ => None,
         }
     }
 }
