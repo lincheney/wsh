@@ -263,28 +263,21 @@ impl Token {
 
 }
 
-fn find_str(needle: &BStr, haystack: &BStr, start: usize) -> Option<Range<usize>> {
-    let start = start + haystack[start..].find(needle)?;
-    Some(start .. start + needle.len())
-}
-
 pub fn parse(mut cmd: BString, options: ParserOptions) -> (bool, Vec<Token>) {
     if cmd.trim().is_empty() {
         return (true, vec![])
     }
 
-    // we add some at the end to detect if the command line is actually complete
-    let dummy = b" x".into();
-    // cmd.push_str(dummy);
-    // cmd.push_str(b"\n# comment\n");
+    // add newline at the end
+    cmd.push_str(b"\n");
 
-    let (mut complete, tokens) = parse_internal(cmd, options, 0, Some(dummy));
-    if tokens.is_empty() {
+    let (mut complete, token) = parse_internal(cmd, options);
+    if token.children.as_ref().is_none_or(|c| c.is_empty()) {
         // no tokens???
         complete = false;
     }
 
-    (complete, tokens)
+    (complete, token.children.unwrap())
 }
 
 struct ParseState {
@@ -552,33 +545,17 @@ unsafe extern "C" fn hungetc_override(c: c_int) {
 }
 
 fn parse_internal(
-    mut cmd: BString,
+    cmd: BString,
     options: ParserOptions,
-    range_offset: usize,
-    dummy: Option<&BStr>,
-) -> (bool, Vec<Token>) {
+) -> (bool, Token) {
 
     let metafied = MetaString::from(cmd.to_owned());
     let metalen = metafied.count_bytes();
     let mut complete = true;
-    // let mut heredocs = vec![];
-    let mut tokens: Vec<Token> = vec![];
-    let mut start = 0;
-    let mut metafied_start = 0;
 
-    // let mut push_token = |tokens: &mut Vec<Token>, tokstr: &[u8], kind: Option<TokenKind>| {
-        // let tokstr = super::meta_string::unmetafy(tokstr.into());
-        // let range = find_str(&tokstr, cmd, start).unwrap();
-        // start = range.end;
-        // tokens.push(Token{range: range.start + range_offset .. range.end + range_offset, kind, children: None});
-    // };
-
-    // do similar to bufferwords
     unsafe {
         zsh_sys::zcontext_save();
         zsh_sys::inpush(metafied.as_ptr().cast_mut(), 0, null_mut());
-        // zsh_sys::zlemetall = cmd.len() as _;
-        // zsh_sys::zlemetacs = zsh_sys::zlemetall;
         zsh_sys::strinbeg(0);
         let old_noerrs = super::set_error_verbosity(super::ErrorVerbosity::Ignore);
         let old_noaliases = zsh_sys::noaliases;
@@ -602,14 +579,10 @@ fn parse_internal(
         PARSE_STATE.with_borrow_mut(|state| {
             state.reset(metafied);
         });
-        let mut x = std::ptr::null_mut();
         while zsh_sys::lexstop == 0 && zsh_sys::inbufct > 0 {
-            x = zsh_sys::parse_event(zsh_sys::lextok_ENDINPUT as _);
-            ::log::debug!("DEBUG(ronda) \t{}\t= {:?}", stringify!(x), x);
-            ::log::debug!("DEBUG(melt)  \t{}\t= {:?}", stringify!("----"), "----");
-            ::log::debug!("DEBUG(frets) \t{}\t= {:?}", stringify!(0+zsh_sys::tok), 0+zsh_sys::tok);
+            complete = !zsh_sys::parse_event(zsh_sys::lextok_ENDINPUT as _).is_null() && complete;
         }
-        PARSE_STATE.with_borrow_mut(|state| {
+        let token = PARSE_STATE.with_borrow_mut(|state| {
             while state.stack.len() > 1 {
                 state.pop(None);
             }
@@ -619,103 +592,13 @@ fn parse_internal(
                 token.detect_comments(cmd.as_ref());
             }
             let end = token.children_end().unwrap_or(0);
-            if x.is_null() && end < metalen {
+            if !complete && end < metalen {
                 token.children.get_or_insert_default().push(Token::new_with_kind(end .. metalen, Some(TokenKind::SyntaxError)));
             }
             ::log::debug!("DEBUG(curved)\t{}\t=\n{}", stringify!(s.debug_dump(cmd.as_ref(), 0)), token.debug_dump(cmd.as_ref(), 0));
-            // state.stack.clear();
-        });
-        // PARSE_STATE.with_borrow_mut(|state| {
-            // state.getc();
-            // ::log::debug!("DEBUG(phooey)\t{}\t= {:?}", stringify!(state.stack), state.stack);
-        // });
 
-        // // ztokens has the wrong length, so use pointer arithmetic instead
-        // #[allow(static_mut_refs)]
-        // let ztokens = zsh_sys::ztokens.as_ptr();
-//
-        // loop {
-            // let incmdpos = zsh_sys::incmdpos > 0;
-            // zsh_sys::ctxtlex();
-//
-            // if zsh_sys::tok == zsh_sys::lextok_ENDINPUT {
-                // break
-            // }
-//
-            // let kind: Option<TokenKind> = num::FromPrimitive::from_u32(zsh_sys::tok).map(TokenKind::Lextok);
-            // // don't use wordbeg as it is unreliable and not always updatsed
-//
-            // if zsh_sys::tokstr.is_null() {
-//
-                // // get the start of the next word
-                // metafied_start += metafied.to_bytes()[metafied_start..].iter().position(|c| !super::zistype(*c as _, zsh_sys::IBLANK as _)).unwrap();
-                // let range = metafied_start .. metalen - zsh_sys::inbufct as usize;
-                // let bytes = &metafied.to_bytes()[range];
-                // push_token(&mut tokens, bytes, kind);
-//
-            // } else {
-                // // tokstr metafied and tokenized
-                // // let's go through the tokens
-//
-//
-                // let mut slice_start = 0;
-                // let mut meta = false;
-//
-                // let mut children = vec![];
-                // for (i, c) in tokstr.iter().enumerate() {
-                    // if meta {
-                        // meta = false;
-                    // } else if *c == Meta {
-                        // meta = true;
-                    // } else if *c >= token::Pound as _ && *c < token::Nularg as _ { // token
-//
-                        // if i > slice_start {
-                            // push_token(&mut children, &tokstr[slice_start..i], None);
-                        // }
-                        // slice_start = i + 1;
-//
-                        // let kind: Option<TokenKind> = num::FromPrimitive::from_u8(*c).map(TokenKind::Token);
-                        // let c = [*ztokens.add((*c - token::Pound as u8) as usize) as u8];
-                        // push_token(&mut children, &c[..], kind);
-                    // }
-                // }
-//
-                // let kind = match kind {
-                    // Some(TokenKind::Lextok(lextok::STRING)) if tokstr.starts_with(b"#") => Some(TokenKind::Comment),
-                    // Some(TokenKind::Lextok(lextok::STRING)) if incmdpos => Some(TokenKind::Command),
-                    // _ => kind,
-                // };
-//
-                // if slice_start == 0 {
-                    // // no inner tokens
-                    // push_token(&mut tokens, tokstr, kind);
-//
-                // } else {
-                    // if tokstr.len() > slice_start {
-                        // push_token(&mut children, &tokstr[slice_start..], None);
-                    // }
-                    // if options.custom {
-                        // let len = children.len();
-                        // apply_custom_token(cmd, options, &mut children, 0, len, range_offset);
-                    // }
-                    // let range = children[0].range.start .. children.last().unwrap().range.end;
-                    // tokens.push(Token{range, kind, children: Some(children)});
-                // }
-//
-                // // previous token was a <<
-                // if tokens.len() > 1 && matches!(tokens[tokens.len()-2].kind, Some(TokenKind::Lextok(lextok::DINANG | lextok::DINANGDASH))) {
-                    // heredocs.push((tokens.len()-1, zsh_sys::tokstr));
-                // }
-//
-            // }
-//
-            // if zsh_sys::tok == zsh_sys::lextok_LEXERR {
-                // complete = false;
-                // break
-            // }
-//
-            // metafied_start = metalen - zsh_sys::inbufct as usize;
-        // }
+            token
+        });
 
         // restore
         zsh_sys::hgetc = old_hgetc;
@@ -727,6 +610,8 @@ fn parse_internal(
         zsh_sys::noaliases = old_noaliases;
         super::set_error_verbosity(old_noerrs);
         zsh_sys::zcontext_restore();
+
+        (complete, token)
     }
 
     // if let Some(dummy) = dummy && let Some(last) = tokens.last_mut() {
@@ -757,7 +642,6 @@ fn parse_internal(
         // apply_custom_token(cmd, options, &mut tokens, 0, len, range_offset);
     // }
 
-    (complete, tokens)
 }
 
 fn find_heredocs(cmd: &BStr, tokens: &mut Vec<Token>, range_offset: usize, heredocs: &Vec<(usize, *mut c_char)>) -> bool {
@@ -923,7 +807,7 @@ fn apply_custom_token(cmd: &BStr, options: ParserOptions, tokens: &mut Vec<Token
                 TokenKind::Substitution => {
                     let tok = tok.unwrap();
                     let cmd = tok.as_str(cmd, range_offset);
-                    tok.children = Some(parse_internal(cmd.to_owned(), options, tok.range.start, None).1);
+                    // tok.children = Some(parse_internal(cmd.to_owned(), options, tok.range.start, None).1);
                 },
                 TokenKind::Function => {
                     // yuck
