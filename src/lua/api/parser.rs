@@ -12,8 +12,8 @@ fn tokens_to_lua(tokens: &Vec<crate::shell::Token>, lua: &Lua) -> Result<LuaTabl
         if let Some(kind) = &token.kind {
             t.raw_set("kind", kind.to_string())?;
         }
-        if let Some(nested) = &token.nested {
-            t.raw_set("nested", tokens_to_lua(nested, lua)?)?;
+        if let Some(children) = &token.children {
+            t.raw_set("children", tokens_to_lua(children, lua)?)?;
         }
         tbl.raw_push(t)?;
     }

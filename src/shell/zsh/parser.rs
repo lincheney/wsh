@@ -120,7 +120,7 @@ impl std::fmt::Display for TokenKind {
 pub struct Token {
     pub range: Range<usize>,
     pub kind: Option<TokenKind>,
-    pub nested: Option<Vec<Token>>,
+    pub children: Option<Vec<Token>>,
 }
 
 impl Token {
@@ -133,7 +133,7 @@ impl Token {
         Self {
             range,
             kind,
-            nested: None,
+            children: None,
         }
     }
 
@@ -141,15 +141,15 @@ impl Token {
         &cmd[self.range.start - range_offset .. self.range.end - range_offset]
     }
 
-    pub fn remove_dummy_from_nested(&mut self, len: usize) {
+    pub fn remove_dummy_from_children(&mut self, len: usize) {
         let mut tok = self;
-        while let Some(nested) = tok.nested.as_mut() && let Some(last) = nested.last_mut() {
+        while let Some(children) = tok.children.as_mut() && let Some(last) = children.last_mut() {
             last.range.end -= len;
             if last.range.is_empty() {
-                nested.pop();
+                children.pop();
                 break
             }
-            tok = nested.last_mut().unwrap();
+            tok = children.last_mut().unwrap();
         }
     }
 
@@ -165,7 +165,7 @@ impl Token {
                 Some(self.as_str(cmd, 0))
             },
         );
-        for token in self.nested.iter().flatten() {
+        for token in self.children.iter().flatten() {
             string.push_str("\n");
             string.push_str(&token.debug_dump(cmd, indent + 2));
         }
@@ -173,7 +173,7 @@ impl Token {
     }
 
     fn children_end(&self) -> Option<usize> {
-        self.nested.as_ref().and_then(|n| n.last()).map(|t| t.range.end)
+        self.children.as_ref().and_then(|n| n.last()).map(|t| t.range.end)
     }
 
     fn unmeta_range(&mut self, cmd: &MetaStr, cache: &mut [usize; 256]) {
@@ -207,14 +207,14 @@ impl Token {
         self.unmeta_range(meta, meta_cache);
 
         // remove empty children
-        if let Some(nested) = &mut self.nested {
-            nested.retain_mut(|token| {
+        if let Some(children) = &mut self.children {
+            children.retain_mut(|token| {
                 token.postprocess(meta, meta_cache);
                 !token.range.is_empty()
             });
 
-            if nested.is_empty() {
-                self.nested = None;
+            if children.is_empty() {
+                self.children = None;
             }
         }
 
@@ -223,25 +223,25 @@ impl Token {
             && matches!(self.kind, Some(TokenKind::CommandStack(CommandStack::Dquote | CommandStack::Quote)))
         {
             let mut end = self.range.end;
-            let nested = self.nested.get_or_insert_default();
-            for i in (0..nested.len()).rev() {
-                let start = nested[i].range.end;
+            let children = self.children.get_or_insert_default();
+            for i in (0..children.len()).rev() {
+                let start = children[i].range.end;
                 if start != end {
-                    nested.insert(i+1, Self::new_with_kind(start..end, None))
+                    children.insert(i+1, Self::new_with_kind(start..end, None))
                 }
-                end = nested[i].range.start;
+                end = children[i].range.start;
             }
             if self.range.start != end {
-                nested.insert(0, Self::new_with_kind(self.range.start..end, None))
+                children.insert(0, Self::new_with_kind(self.range.start..end, None))
             }
         }
 
         // empty command with only a command ending thing
         if matches!(self.kind, Some(TokenKind::Command))
-            && let Some(nested) = &mut self.nested
-            && nested.len() == 1 && nested[0].kind.is_some_and(|k| k.ends_command())
+            && let Some(children) = &mut self.children
+            && children.len() == 1 && children[0].kind.is_some_and(|k| k.ends_command())
         {
-            *self = nested.pop().unwrap();
+            *self = children.pop().unwrap();
         }
 
         if let Some(end) = self.children_end() {
@@ -250,8 +250,8 @@ impl Token {
     }
 
     fn detect_comments(&mut self, string: &BStr) {
-        if let Some(nested) = &mut self.nested {
-            for child in nested {
+        if let Some(children) = &mut self.children {
+            for child in children {
                 child.detect_comments(string);
             }
         } else if matches!(self.kind, Some(TokenKind::Lextok(lextok::STRING)))
@@ -340,7 +340,7 @@ impl ParseState {
             // wtf no parent tokens?
             (self.stack.push_mut(token), self.meta.as_ref())
         } else {
-            (self.stack.last_mut().unwrap().nested.get_or_insert_default().push_mut(token), self.meta.as_ref())
+            (self.stack.last_mut().unwrap().children.get_or_insert_default().push_mut(token), self.meta.as_ref())
         }
     }
 
@@ -457,20 +457,20 @@ impl ParseState {
                     ) {
                         // insert the quote here
                         let t = Token::new_with_kind(end-1 .. end, tokstr_kind.take().unwrap().1);
-                        token.nested.get_or_insert_default().push(t);
+                        token.children.get_or_insert_default().push(t);
                     }
 
                     if let Some(TokenKind::Heredoc(quoted)) = token.kind {
 
                         if !quoted && let Some((marker, mut heredoc)) = Self::parse_heredoc(meta, start..end) {
-                            token.nested.get_or_insert_default().append(&mut heredoc);
-                            let tokens = self.stack.last_mut().unwrap().nested.get_or_insert_default();
+                            token.children.get_or_insert_default().append(&mut heredoc);
+                            let tokens = self.stack.last_mut().unwrap().children.get_or_insert_default();
                             // marker
                             tokens.push(Token::new(marker .. end-1));
                             // newline
                             tokens.push(Token::new_with_kind(end-1 .. end, Some(TokenKind::Lextok(lextok::NEWLIN))));
                         } else {
-                            token.nested.get_or_insert_default().push(Token::new_with_kind(start .. end, None));
+                            token.children.get_or_insert_default().push(Token::new_with_kind(start .. end, None));
                         }
                     }
 
@@ -501,7 +501,7 @@ impl ParseState {
                     let token = Token {
                         range: start .. end,
                         kind: num::FromPrimitive::from_u32(zsh_sys::tok).map(TokenKind::Lextok),
-                        nested: None,
+                        children: None,
                     };
                     ::log::debug!("DEBUG(hanks) \t{}\t= {:?}", stringify!(token), token);
 
@@ -570,7 +570,7 @@ fn parse_internal(
         // let tokstr = super::meta_string::unmetafy(tokstr.into());
         // let range = find_str(&tokstr, cmd, start).unwrap();
         // start = range.end;
-        // tokens.push(Token{range: range.start + range_offset .. range.end + range_offset, kind, nested: None});
+        // tokens.push(Token{range: range.start + range_offset .. range.end + range_offset, kind, children: None});
     // };
 
     // do similar to bufferwords
@@ -620,7 +620,7 @@ fn parse_internal(
             }
             let end = token.children_end().unwrap_or(0);
             if x.is_null() && end < metalen {
-                token.nested.get_or_insert_default().push(Token::new_with_kind(end .. metalen, Some(TokenKind::SyntaxError)));
+                token.children.get_or_insert_default().push(Token::new_with_kind(end .. metalen, Some(TokenKind::SyntaxError)));
             }
             ::log::debug!("DEBUG(curved)\t{}\t=\n{}", stringify!(s.debug_dump(cmd.as_ref(), 0)), token.debug_dump(cmd.as_ref(), 0));
             // state.stack.clear();
@@ -661,7 +661,7 @@ fn parse_internal(
                 // let mut slice_start = 0;
                 // let mut meta = false;
 //
-                // let mut nested = vec![];
+                // let mut children = vec![];
                 // for (i, c) in tokstr.iter().enumerate() {
                     // if meta {
                         // meta = false;
@@ -670,13 +670,13 @@ fn parse_internal(
                     // } else if *c >= token::Pound as _ && *c < token::Nularg as _ { // token
 //
                         // if i > slice_start {
-                            // push_token(&mut nested, &tokstr[slice_start..i], None);
+                            // push_token(&mut children, &tokstr[slice_start..i], None);
                         // }
                         // slice_start = i + 1;
 //
                         // let kind: Option<TokenKind> = num::FromPrimitive::from_u8(*c).map(TokenKind::Token);
                         // let c = [*ztokens.add((*c - token::Pound as u8) as usize) as u8];
-                        // push_token(&mut nested, &c[..], kind);
+                        // push_token(&mut children, &c[..], kind);
                     // }
                 // }
 //
@@ -692,14 +692,14 @@ fn parse_internal(
 //
                 // } else {
                     // if tokstr.len() > slice_start {
-                        // push_token(&mut nested, &tokstr[slice_start..], None);
+                        // push_token(&mut children, &tokstr[slice_start..], None);
                     // }
                     // if options.custom {
-                        // let len = nested.len();
-                        // apply_custom_token(cmd, options, &mut nested, 0, len, range_offset);
+                        // let len = children.len();
+                        // apply_custom_token(cmd, options, &mut children, 0, len, range_offset);
                     // }
-                    // let range = nested[0].range.start .. nested.last().unwrap().range.end;
-                    // tokens.push(Token{range, kind, nested: Some(nested)});
+                    // let range = children[0].range.start .. children.last().unwrap().range.end;
+                    // tokens.push(Token{range, kind, children: Some(children)});
                 // }
 //
                 // // previous token was a <<
@@ -744,7 +744,7 @@ fn parse_internal(
             // if last.range.is_empty() {
                 // tokens.pop();
             // } else {
-                // last.remove_dummy_from_nested(dummy.len());
+                // last.remove_dummy_from_children(dummy.len());
             // }
         // }
         // heredocs.retain(|(i, _)| *i < tokens.len());
@@ -814,7 +814,7 @@ fn find_heredocs(cmd: &BStr, tokens: &mut Vec<Token>, range_offset: usize, hered
             let token = Token{
                 kind: Some(TokenKind::HeredocCloseTag),
                 range: tokens[range.start].range.start .. tokens[range.end-1].range.end,
-                nested: None,
+                children: None,
             };
             offset += range.end - range.start + 1;
             tokens.splice(range, [token]);
@@ -829,14 +829,14 @@ fn find_heredocs(cmd: &BStr, tokens: &mut Vec<Token>, range_offset: usize, hered
             if allow_subst {
                 let token = nest_tokens(tokens, range.start, range.end, kind);
                 token.range = new_start .. new_end;
-                for n in token.nested.iter_mut().flatten() {
+                for n in token.children.iter_mut().flatten() {
                     n.kind = None;
                 }
             } else {
                 let token = Token{
                     kind: Some(TokenKind::HeredocBody),
                     range: new_start .. new_end,
-                    nested: None,
+                    children: None,
                 };
                 tokens.splice(range.clone(), [token]);
             }
@@ -923,7 +923,7 @@ fn apply_custom_token(cmd: &BStr, options: ParserOptions, tokens: &mut Vec<Token
                 TokenKind::Substitution => {
                     let tok = tok.unwrap();
                     let cmd = tok.as_str(cmd, range_offset);
-                    tok.nested = Some(parse_internal(cmd.to_owned(), options, tok.range.start, None).1);
+                    tok.children = Some(parse_internal(cmd.to_owned(), options, tok.range.start, None).1);
                 },
                 TokenKind::Function => {
                     // yuck
@@ -946,7 +946,7 @@ fn apply_custom_token(cmd: &BStr, options: ParserOptions, tokens: &mut Vec<Token
                     if bracket_count > 0 {
                         func_len = end - i;
                     }
-                    let body = nest_tokens(tokens, i+len, i+func_len-1, None).nested.as_mut().unwrap();
+                    let body = nest_tokens(tokens, i+len, i+func_len-1, None).children.as_mut().unwrap();
                     end -= func_len - len - 1;
                     len += 2; // body and end bracket
                     // look for more functions
@@ -969,9 +969,9 @@ fn nest_tokens(tokens: &mut Vec<Token>, start: usize, end: usize, kind: Option<T
     let super_token = Token{
         kind,
         range: tokens[start].range.start .. tokens[end-1].range.end,
-        nested: None,
+        children: None,
     };
-    let nested = tokens.splice(start..end, [super_token]).collect();
-    tokens[start].nested = Some(nested);
+    let children = tokens.splice(start..end, [super_token]).collect();
+    tokens[start].children = Some(children);
     &mut tokens[start]
 }

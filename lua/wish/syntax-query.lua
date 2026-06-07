@@ -6,7 +6,7 @@ function M.debug_tokens(tokens, buffer)
         x[i] = {
             buffer:sub(tokens[i].start, tokens[i].finish),
             tokens[i].kind,
-            tokens[i].nested and M.debug_tokens(tokens[i].nested, buffer)
+            tokens[i].children and M.debug_tokens(tokens[i].children, buffer)
         }
     end
     return x
@@ -14,8 +14,8 @@ end
 
 local function apply_matcher(matcher, token, str)
 
-    if matcher.contains and not token.nested then
-        -- matcher asserts nested tokens but there aren't any
+    if matcher.contains and not token.children then
+        -- matcher asserts child tokens but there aren't any
         return
     end
 
@@ -56,7 +56,7 @@ local function apply_matcher(matcher, token, str)
 
     local values = {{matcher, token}}
     if matcher.contains then
-        local matched = M.apply_seq(matcher.contains, token.nested, str, function(matches)
+        local matched = M.apply_seq(matcher.contains, token.children, str, function(matches)
             wish.table.append(values, matches)
         end)
         if not matched then
@@ -161,8 +161,8 @@ function M.apply_rules(rules, tokens, str, callback)
         M.apply_seq(rules[i], tokens, str, callback)
     end
     for i = 1, #tokens do
-        if tokens[i].nested then
-            M.apply_rules(rules, tokens[i].nested, str, callback)
+        if tokens[i].children then
+            M.apply_rules(rules, tokens[i].children, str, callback)
         end
     end
 end
