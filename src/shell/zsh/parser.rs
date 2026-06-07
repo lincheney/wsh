@@ -4,7 +4,7 @@ use std::os::raw::{c_char, c_int};
 use serde::{Deserialize};
 use std::ops::Range;
 use std::ptr::null_mut;
-use super::bindings::{Meta, token, lextok, CommandStack};
+use super::bindings::{token, lextok, CommandStack};
 use super::{MetaStr, MetaString};
 
 #[derive(Clone, Copy, Deserialize)]
@@ -124,9 +124,12 @@ pub struct Token {
 }
 
 impl Token {
-    const DEFAULT: Self = Self::new(0..0, Some(TokenKind::Initial));
 
-    pub const fn new(range: Range<usize>, kind: Option<TokenKind>) -> Self {
+    const fn new(range: Range<usize>) -> Self {
+        Self::new_with_kind(range, Some(TokenKind::Initial))
+    }
+
+    const fn new_with_kind(range: Range<usize>, kind: Option<TokenKind>) -> Self {
         Self {
             range,
             kind,
@@ -224,12 +227,12 @@ impl Token {
             for i in (0..nested.len()).rev() {
                 let start = nested[i].range.end;
                 if start != end {
-                    nested.insert(i+1, Self::new(start..end, None))
+                    nested.insert(i+1, Self::new_with_kind(start..end, None))
                 }
                 end = nested[i].range.start;
             }
             if self.range.start != end {
-                nested.insert(0, Self::new(self.range.start..end, None))
+                nested.insert(0, Self::new_with_kind(self.range.start..end, None))
             }
         }
 
@@ -315,8 +318,8 @@ impl ParseState {
         self.metalen = self.meta.count_bytes();
         self.start = 0;
         self.stack.clear();
-        self.stack.push(Token{ range: 0..self.metalen, ..Token::DEFAULT });
-        self.stack.push(Token::DEFAULT);
+        self.stack.push(Token::new(0..self.metalen));
+        self.stack.push(Token::new(0..0));
 
         self.cmdsp = 0;
         self.tokstr_len = 0;
@@ -376,31 +379,15 @@ impl ParseState {
         let mut start = 0;
         for (i, &c) in tokstr.to_bytes().iter().enumerate() {
             if super::is_token(c) {
-                tokens.push(Token{
-                    range: range.start + start .. range.start + i,
-                    kind: None,
-                    ..Token::DEFAULT
-                });
+                tokens.push(Token::new_with_kind(range.start + start .. range.start + i, None));
 
                 let kind = num::FromPrimitive::from_u8(c).map(TokenKind::Token);
-                tokens.push(Token{
-                    range: range.start + i .. range.start + i + 1,
-                    kind,
-                    ..Token::DEFAULT
-                });
+                tokens.push(Token::new_with_kind(range.start + i .. range.start + i + 1, kind));
                 start = i + 1;
             }
         }
-        tokens.push(Token{
-            range: range.start + start .. range.start + end,
-            kind: None,
-            ..Token::DEFAULT
-        });
-        tokens.push(Token{
-            range: range.start + end .. range.start + end + 1,
-            kind: Some(TokenKind::Lextok(lextok::NEWLIN)),
-            ..Token::DEFAULT
-        });
+        tokens.push(Token::new_with_kind(range.start + start .. range.start + end, None));
+        tokens.push(Token::new_with_kind(range.start + end .. range.start + end + 1, Some(TokenKind::Lextok(lextok::NEWLIN))));
 
         Some((range.start + end + 1, tokens))
     }
@@ -439,15 +426,8 @@ impl ParseState {
                     }
                     ::log::debug!("DEBUG(sewer) \t{}\t= {:?}", stringify!(token.kind), kind);
 
-                    let mut command = Token {
-                        range: start .. self.metalen,
-                        kind,
-                        ..Token::DEFAULT
-                    };
-                    let mut initial = Token{
-                        range: start..start,
-                        ..Token::DEFAULT
-                    };
+                    let mut command = Token::new_with_kind(start .. self.metalen, kind);
+                    let mut initial = Token::new(start..start);
 
                     if matches!(kind, Some(TokenKind::CommandStack(CommandStack::Heredoc)))
                         && let Some(hdocs) = zsh_sys::hdocs.as_ref()
@@ -476,11 +456,7 @@ impl ParseState {
                         | (Some(TokenKind::CommandStack(CommandStack::Quote)), Some((_, Some(TokenKind::Token(token::Snull)))))
                     ) {
                         // insert the quote here
-                        let t = Token {
-                            range: end-1 .. end,
-                            kind: tokstr_kind.take().unwrap().1,
-                            ..Token::DEFAULT
-                        };
+                        let t = Token::new_with_kind(end-1 .. end, tokstr_kind.take().unwrap().1);
                         token.nested.get_or_insert_default().push(t);
                     }
 
@@ -490,22 +466,11 @@ impl ParseState {
                             token.nested.get_or_insert_default().append(&mut heredoc);
                             let tokens = self.stack.last_mut().unwrap().nested.get_or_insert_default();
                             // marker
-                            tokens.push(Token{
-                                range: marker .. end-1,
-                                ..Token::DEFAULT
-                            });
+                            tokens.push(Token::new(marker .. end-1));
                             // newline
-                            tokens.push(Token{
-                                range: end-1 .. end,
-                                kind: Some(TokenKind::Lextok(lextok::NEWLIN)),
-                                ..Token::DEFAULT
-                            });
+                            tokens.push(Token::new_with_kind(end-1 .. end, Some(TokenKind::Lextok(lextok::NEWLIN))));
                         } else {
-                            token.nested.get_or_insert_default().push(Token {
-                                range: start .. end,
-                                kind: None,
-                                ..Token::DEFAULT
-                            });
+                            token.nested.get_or_insert_default().push(Token::new_with_kind(start .. end, None));
                         }
                     }
 
@@ -528,12 +493,7 @@ impl ParseState {
                         .unwrap_or(end-1);
 
                     self.pop(Some(start));
-                    self.stack.push(Token {
-                        range: start .. end,
-                        kind,
-                        ..Token::DEFAULT
-                    });
-
+                    self.stack.push(Token::new_with_kind(start .. end, kind));
                     self.start = end;
                 }
 
@@ -548,11 +508,7 @@ impl ParseState {
                     // new token
                     let prev = self.pop(Some(start));
                     if let Some(t) = prev.kind && t.followed_by_command() && let Some(t) = token.kind && t.can_start_command() {
-                        self.stack.push(Token{
-                            range: start..self.metalen,
-                            kind: Some(TokenKind::Command),
-                            ..Token::DEFAULT
-                        })
+                        self.stack.push(Token::new_with_kind(start..self.metalen, Some(TokenKind::Command)));
                     }
                     if let Some(t) = self.stack.last().unwrap().kind && t.ends_command() {
                         self.pop(Some(start));
@@ -664,11 +620,7 @@ fn parse_internal(
             }
             let end = token.children_end().unwrap_or(0);
             if x.is_null() && end < metalen {
-                token.nested.get_or_insert_default().push(Token {
-                    range: end .. metalen,
-                    kind: Some(TokenKind::SyntaxError),
-                    ..Token::DEFAULT
-                });
+                token.nested.get_or_insert_default().push(Token::new_with_kind(end .. metalen, Some(TokenKind::SyntaxError)));
             }
             ::log::debug!("DEBUG(curved)\t{}\t=\n{}", stringify!(s.debug_dump(cmd.as_ref(), 0)), token.debug_dump(cmd.as_ref(), 0));
             // state.stack.clear();
