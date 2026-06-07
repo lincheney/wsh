@@ -226,19 +226,6 @@ impl Token {
             }
         }
 
-        // add a string for heredoc
-        if matches!(self.kind, Some(TokenKind::CommandStack(CommandStack::Heredoc)))
-            && self.nested_end().unwrap_or(0) < self.range.end
-        {
-            let nested = self.nested.get_or_insert_default();
-            let start = nested.last().map_or(self.range.start, |t| t.range.end);
-            nested.push(Token{
-                range: start..self.range.end,
-                kind: Some(TokenKind::Lextok(lextok::STRING)),
-                ..Token::DEFAULT
-            });
-        }
-
         if let Some(end) = self.nested_end() {
             self.range.end = end;
         }
@@ -310,6 +297,10 @@ impl ParseState {
     }
 
     fn pop(&mut self, end: Option<usize>,) -> &mut Token {
+        self.pop_with_meta(end).0
+    }
+
+    fn pop_with_meta(&mut self, end: Option<usize>,) -> (&mut Token, &MetaStr) {
         let mut token = self.stack.pop().unwrap();
         if let Some(end) = end {
             token.range.end = token.range.end.min(end);
@@ -317,9 +308,9 @@ impl ParseState {
 
         if self.stack.is_empty() {
             // wtf no parent tokens?
-            self.stack.push_mut(token)
+            (self.stack.push_mut(token), self.meta.as_ref())
         } else {
-            self.stack.last_mut().unwrap().nested.get_or_insert_default().push_mut(token)
+            (self.stack.last_mut().unwrap().nested.get_or_insert_default().push_mut(token), self.meta.as_ref())
         }
     }
 
@@ -327,6 +318,64 @@ impl ParseState {
         unsafe {
             self.metalen.saturating_sub(zsh_sys::inbufct as usize)
         }
+    }
+
+    fn parse_heredoc(meta: &MetaStr, range: Range<usize>) -> Option<(usize, Vec<Token>)> {
+        let heredoc = &meta.to_bytes()[range.clone()];
+
+        // get second last newline
+        let end = heredoc.iter()
+            .enumerate()
+            .rev()
+            .filter_map(|(i, &c)| (c == b'\n').then_some(i))
+            .skip(1)
+            .next()?;
+        let heredoc = &heredoc[..end];
+
+        let string = std::ffi::CString::new(heredoc).unwrap();
+        let mut string_ptr = string.as_ptr().cast_mut();
+
+        let tokstr = unsafe {
+            let err = zsh_sys::parsestrnoerr(&raw mut string_ptr);
+            if err != 0 {
+                return None;
+            }
+
+            // apparently it can be modified?
+            std::ffi::CStr::from_ptr(string_ptr)
+        };
+
+        let mut tokens = vec![];
+        let mut start = 0;
+        for (i, &c) in tokstr.to_bytes().iter().enumerate() {
+            if super::is_token(c) {
+                tokens.push(Token{
+                    range: range.start + start .. range.start + i,
+                    kind: None,
+                    ..Token::DEFAULT
+                });
+
+                let kind = num::FromPrimitive::from_u8(c).map(TokenKind::Token);
+                tokens.push(Token{
+                    range: range.start + i .. range.start + i + 1,
+                    kind,
+                    ..Token::DEFAULT
+                });
+                start = i + 1;
+            }
+        }
+        tokens.push(Token{
+            range: range.start + start .. range.start + end,
+            kind: None,
+            ..Token::DEFAULT
+        });
+        tokens.push(Token{
+            range: range.start + end .. range.start + end + 1,
+            kind: Some(TokenKind::Lextok(lextok::NEWLIN)),
+            ..Token::DEFAULT
+        });
+
+        Some((range.start + end + 1, tokens))
     }
 
     fn getc(&mut self) -> c_int {
@@ -374,7 +423,7 @@ impl ParseState {
                 } else if zsh_sys::cmdsp < self.cmdsp {
                     // pop stack
                     self.pop(Some(end));
-                    let token = self.pop(Some(end));
+                    let (token, meta) = self.pop_with_meta(Some(end));
                     ::log::debug!("DEBUG(flames)\t{}\t= {:?}", stringify!("pop"), ("pop", token.kind));
 
                     if matches!(
@@ -389,6 +438,30 @@ impl ParseState {
                             ..Token::DEFAULT
                         };
                         token.nested.get_or_insert_default().push(t);
+                    }
+
+                    if matches!(token.kind, Some(TokenKind::CommandStack(CommandStack::Heredoc))) {
+                        if let Some((marker, mut heredoc)) = Self::parse_heredoc(meta, start..end) {
+                            token.nested.get_or_insert_default().append(&mut heredoc);
+                            let tokens = self.stack.last_mut().unwrap().nested.get_or_insert_default();
+                            // marker
+                            tokens.push(Token{
+                                range: marker .. end-1,
+                                ..Token::DEFAULT
+                            });
+                            // newline
+                            tokens.push(Token{
+                                range: end-1 .. end,
+                                kind: Some(TokenKind::Lextok(lextok::NEWLIN)),
+                                ..Token::DEFAULT
+                            });
+                        } else {
+                            token.nested.get_or_insert_default().push(Token {
+                                range: start .. end,
+                                kind: None,
+                                ..Token::DEFAULT
+                            });
+                        }
                     }
 
                     self.start = end;
@@ -528,7 +601,7 @@ fn parse_internal(
             state.reset(metafied);
         });
         let mut x = std::ptr::null_mut();
-        while zsh_sys::lexstop == 0 {
+        while zsh_sys::lexstop == 0 && zsh_sys::inbufct > 0 {
             x = zsh_sys::parse_event(zsh_sys::lextok_ENDINPUT as _);
             ::log::debug!("DEBUG(ronda) \t{}\t= {:?}", stringify!(x), x);
             ::log::debug!("DEBUG(melt)  \t{}\t= {:?}", stringify!("----"), "----");
