@@ -9,8 +9,8 @@ fn tokens_to_lua(tokens: &Vec<crate::shell::Token>, lua: &Lua) -> Result<LuaTabl
         let t = lua.create_table()?;
         t.raw_set("start", token.range.start + 1)?;
         t.raw_set("finish", token.range.end)?;
-        if let Some(kind) = &token.kind {
-            t.raw_set("kind", kind.to_string())?;
+        if !token.kind.is_none() {
+            t.raw_set("kind", token.kind.to_string())?;
         }
         if let Some(children) = &token.children {
             t.raw_set("children", tokens_to_lua(children, lua)?)?;

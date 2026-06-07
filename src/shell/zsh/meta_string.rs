@@ -53,7 +53,7 @@ pub fn unmetafy_in_place(bytes: &mut [u8]) -> i32 {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct MetaString {
     inner: CString,
 }
