@@ -124,11 +124,15 @@ pub struct Token {
 }
 
 impl Token {
-    const DEFAULT: Self = Self {
-        range: 0..0,
-        kind: Some(TokenKind::Initial),
-        nested: None,
-    };
+    const DEFAULT: Self = Self::new(0..0, Some(TokenKind::Initial));
+
+    pub const fn new(range: Range<usize>, kind: Option<TokenKind>) -> Self {
+        Self {
+            range,
+            kind,
+            nested: None,
+        }
+    }
 
     pub fn as_str<'a>(&self, cmd: &'a BStr, range_offset: usize) -> &'a BStr {
         &cmd[self.range.start - range_offset .. self.range.end - range_offset]
@@ -165,7 +169,7 @@ impl Token {
         string
     }
 
-    fn nested_end(&self) -> Option<usize> {
+    fn children_end(&self) -> Option<usize> {
         self.nested.as_ref().and_then(|n| n.last()).map(|t| t.range.end)
     }
 
@@ -173,16 +177,16 @@ impl Token {
         for val in [&mut self.range.start, &mut self.range.end] {
             if *val > 0 {
                 match cache.get(*val) {
-                    Some(0) => {
-                        let x = cmd.len(*val);
+                    Some(0) => { // not yet cached
+                        let x = cmd.len_up_to(*val);
                         cache[*val] = x;
                         *val = x;
                     },
-                    Some(&x) => {
+                    Some(&x) => { // cached
                         *val = x;
                     },
-                    None => {
-                        *val = cmd.len(*val);
+                    None => { // out of cache range
+                        *val = cmd.len_up_to(*val);
                     },
                 }
             }
@@ -193,28 +197,11 @@ impl Token {
         // lstrip
         let nonblank = meta.to_bytes()[self.range.clone()]
             .iter()
-            .position(|c| !super::zistype(*c as _, zsh_sys::IBLANK as _));
+            .position(|c| !super::zistype(*c, zsh_sys::IBLANK));
         self.range.start = nonblank.map_or(self.range.end, |x| self.range.start + x);
 
         // convert ranges from meta
         self.unmeta_range(meta, meta_cache);
-
-        // add missing strings
-        if !self.range.is_empty() && matches!(self.kind, Some(TokenKind::CommandStack(CommandStack::Dquote | CommandStack::Quote))) {
-            let mut end = self.range.end;
-            let nested = self.nested.get_or_insert_default();
-            for i in (0..nested.len()).rev() {
-                let start = nested[i].range.end;
-                if start != end {
-                    nested.insert(i+1, Self {
-                        range: start..end,
-                        kind: None,
-                        ..Token::DEFAULT
-                    });
-                }
-                end = nested[i].range.start;
-            }
-        }
 
         // remove empty children
         if let Some(nested) = &mut self.nested {
@@ -228,8 +215,46 @@ impl Token {
             }
         }
 
-        if let Some(end) = self.nested_end() {
+        // add missing strings
+        if !self.range.is_empty()
+            && matches!(self.kind, Some(TokenKind::CommandStack(CommandStack::Dquote | CommandStack::Quote)))
+        {
+            let mut end = self.range.end;
+            let nested = self.nested.get_or_insert_default();
+            for i in (0..nested.len()).rev() {
+                let start = nested[i].range.end;
+                if start != end {
+                    nested.insert(i+1, Self::new(start..end, None))
+                }
+                end = nested[i].range.start;
+            }
+            if self.range.start != end {
+                nested.insert(0, Self::new(self.range.start..end, None))
+            }
+        }
+
+        // empty command with only a command ending thing
+        if matches!(self.kind, Some(TokenKind::Command))
+            && let Some(nested) = &mut self.nested
+            && nested.len() == 1 && nested[0].kind.is_some_and(|k| k.ends_command())
+        {
+            *self = nested.pop().unwrap();
+        }
+
+        if let Some(end) = self.children_end() {
             self.range.end = end;
+        }
+    }
+
+    fn detect_comments(&mut self, string: &BStr) {
+        if let Some(nested) = &mut self.nested {
+            for child in nested {
+                child.detect_comments(string);
+            }
+        } else if matches!(self.kind, Some(TokenKind::Lextok(lextok::STRING)))
+            && self.as_str(string, 0).starts_with(b"#")
+        {
+            self.kind = Some(TokenKind::Comment);
         }
     }
 
@@ -388,17 +413,20 @@ impl ParseState {
                 let end = self.get_current_index();
 
                 let mut tokstr_kind = None;
-                if !zsh_sys::tokstr.is_null() {
-                    let tokstr = MetaStr::from_ptr(zsh_sys::tokstr);
-                    // check if last char is a special token
-                    if tokstr.count_bytes() != self.tokstr_len
-                        && let Some(c) = tokstr.last()
-                        && super::is_token(c)
-                    {
-                        tokstr_kind = Some((c, num::FromPrimitive::from_u8(c).map(TokenKind::Token)));
-                    }
-                    self.tokstr_len = tokstr.count_bytes();
+
+                let tokstr = if zsh_sys::tokstr.is_null() {
+                    meta_str!(c"")
+                } else {
+                    MetaStr::from_ptr(zsh_sys::tokstr)
+                };
+                // check if last char is a special token
+                if tokstr.count_bytes() != self.tokstr_len
+                    && let Some(c) = tokstr.last()
+                    && super::is_token(c)
+                {
+                    tokstr_kind = Some((c, num::FromPrimitive::from_u8(c).map(TokenKind::Token)));
                 }
+                self.tokstr_len = tokstr.count_bytes();
 
                 if zsh_sys::cmdsp > self.cmdsp {
                     // push stack
@@ -426,7 +454,7 @@ impl ParseState {
                         && !hdocs.str_.is_null()
                     {
                         let word = MetaStr::from_ptr(hdocs.str_);
-                        let quoted = word.to_bytes().iter().any(|&c| super::zistype(c as _, zsh_sys::INULL as _));
+                        let quoted = word.to_bytes().iter().any(|&c| super::zistype(c, zsh_sys::INULL));
                         command.kind = Some(TokenKind::Heredoc(quoted));
                         initial.kind = None;
                     }
@@ -604,7 +632,8 @@ fn parse_internal(
 
         let old_lexflags = zsh_sys::lexflags;
         let mut new_lexflags = zsh_sys::LEXFLAGS_ACTIVE | zsh_sys::LEXFLAGS_ZLE;
-        if options.comments.unwrap_or(super::isset(zsh_sys::INTERACTIVECOMMENTS as _)) {
+        let allow_comments = options.comments.unwrap_or(super::isset(zsh_sys::INTERACTIVECOMMENTS as _));
+        if allow_comments {
             new_lexflags |= zsh_sys::LEXFLAGS_COMMENTS_KEEP;
         }
         zsh_sys::lexflags = new_lexflags as _;
@@ -630,7 +659,10 @@ fn parse_internal(
             }
             let mut token = state.stack.pop().unwrap();
             token.postprocess(state.meta.as_ref(), &mut [0; _]);
-            let end = token.nested_end().unwrap_or(0);
+            if allow_comments {
+                token.detect_comments(cmd.as_ref());
+            }
+            let end = token.children_end().unwrap_or(0);
             if x.is_null() && end < metalen {
                 token.nested.get_or_insert_default().push(Token {
                     range: end .. metalen,

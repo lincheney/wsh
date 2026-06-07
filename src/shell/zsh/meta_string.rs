@@ -13,7 +13,7 @@ macro_rules! meta_str {
 }
 
 fn imeta(c: u8) -> bool {
-    super::zistype(c as _, zsh_sys::IMETA as _)
+    super::zistype(c, zsh_sys::IMETA)
 }
 
 fn metafied_len(string: &[u8]) -> usize {
@@ -214,7 +214,7 @@ impl MetaStr {
         }
     }
 
-    pub fn len(&self, num_bytes: usize) -> usize {
+    pub fn len_up_to(&self, num_bytes: usize) -> usize {
         let mut len = 0;
         let mut meta = false;
         for &c in self.inner.to_bytes().into_iter().take(num_bytes) {
