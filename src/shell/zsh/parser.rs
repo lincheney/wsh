@@ -28,6 +28,7 @@ pub enum TokenKind {
     Lextok(lextok),
     Token(token),
     CommandStack(CommandStack),
+    Heredoc(bool),
     Initial,
     SyntaxError,
     Substitution,
@@ -109,6 +110,7 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Comment => write!(fmt, "comment"),
             TokenKind::Command => write!(fmt, "command"),
             TokenKind::Initial => write!(fmt, "initial"),
+            TokenKind::Heredoc(_quoted) => write!(fmt, "heredoc"),
             TokenKind::SyntaxError => write!(fmt, "stynax_error"),
         }
     }
@@ -408,15 +410,29 @@ impl ParseState {
                         self.pop(Some(start));
                     }
                     ::log::debug!("DEBUG(sewer) \t{}\t= {:?}", stringify!(token.kind), kind);
-                    // new command stack
-                    self.stack.push(Token { range: start .. self.metalen, kind, ..Token::DEFAULT });
+
+                    let mut command = Token {
+                        range: start .. self.metalen,
+                        kind,
+                        ..Token::DEFAULT
+                    };
                     let mut initial = Token{
                         range: start..start,
                         ..Token::DEFAULT
                     };
-                    if matches!(kind, Some(TokenKind::CommandStack(CommandStack::Heredoc))) {
+
+                    if matches!(kind, Some(TokenKind::CommandStack(CommandStack::Heredoc)))
+                        && let Some(hdocs) = zsh_sys::hdocs.as_ref()
+                        && !hdocs.str_.is_null()
+                    {
+                        let word = MetaStr::from_ptr(hdocs.str_);
+                        let quoted = word.to_bytes().iter().any(|&c| super::zistype(c as _, zsh_sys::INULL as _));
+                        command.kind = Some(TokenKind::Heredoc(quoted));
                         initial.kind = None;
                     }
+
+                    // new command stack
+                    self.stack.push(command);
                     // and its initial token
                     self.stack.push(initial);
 
@@ -440,8 +456,9 @@ impl ParseState {
                         token.nested.get_or_insert_default().push(t);
                     }
 
-                    if matches!(token.kind, Some(TokenKind::CommandStack(CommandStack::Heredoc))) {
-                        if let Some((marker, mut heredoc)) = Self::parse_heredoc(meta, start..end) {
+                    if let Some(TokenKind::Heredoc(quoted)) = token.kind {
+
+                        if !quoted && let Some((marker, mut heredoc)) = Self::parse_heredoc(meta, start..end) {
                             token.nested.get_or_insert_default().append(&mut heredoc);
                             let tokens = self.stack.last_mut().unwrap().nested.get_or_insert_default();
                             // marker
