@@ -8,6 +8,12 @@ use std::ptr::null_mut;
 use super::bindings::{token, lextok, CommandStack};
 use super::{MetaStr, MetaString};
 
+fn get_tokstr<'a>() -> Option<&'a MetaStr> {
+    unsafe {
+        (!zsh_sys::tokstr.is_null()).then(|| MetaStr::from_ptr(zsh_sys::tokstr))
+    }
+}
+
 #[derive(Clone, Copy, Deserialize)]
 #[serde(default)]
 pub struct ParserOptions {
@@ -136,11 +142,11 @@ pub struct Token {
 
 impl Token {
 
-    const fn new(range: Range<usize>) -> Self {
+    fn new(range: Range<usize>) -> Self {
         Self::new_with_kind(range, TokenKind::Initial)
     }
 
-    const fn new_with_kind(range: Range<usize>, kind: TokenKind) -> Self {
+    fn new_with_kind(range: Range<usize>, kind: TokenKind) -> Self {
         Self {
             range,
             kind,
@@ -288,6 +294,7 @@ impl Token {
         let children = self.get_children_mut();
 
         let mut tokstr = tokstr.iter()
+            .take(range.len())
             .enumerate()
             .filter(|(_, c)| super::is_token(**c))
             .map(|(i, &c)| (range.start + i, c))
@@ -308,15 +315,13 @@ impl Token {
                 start = range.end;
             } else if let Some((i, _)) = next_token && next_child.is_none_or(|c| *i < c.range.start) {
                 let (i, tok) = tokstr.next().unwrap();
-                if childi > 0 {
+                if i >= start {
                     // in case the child overlaps with a token
-                    start = children[childi-1].range.end.min(i);
-                    children[childi-1].range.end = start;
+                    children.insert(childi, Token::new_with_kind(start..i, TokenKind::None));
+                    children.insert(childi+1, Token::new_with_kind(i..i+1, TokenKind::from_token(tok)));
+                    childi += 2;
+                    start = i+1;
                 }
-                children.insert(childi, Token::new_with_kind(start..i, TokenKind::None));
-                children.insert(childi+1, Token::new_with_kind(i..i+1, TokenKind::from_token(tok)));
-                childi += 2;
-                start = i+1;
             } else {
                 // no more
                 children.push(Token::new_with_kind(start..range.end, TokenKind::None));
@@ -351,6 +356,7 @@ struct ParseState {
     metalen: usize,
     start: usize,
     stack: Vec<Token>,
+    tokstr_len_stack: Vec<usize>,
     cmdsp: i32,
     started: bool,
     tokstr: *const c_char,
@@ -408,6 +414,7 @@ impl ParseState {
             .filter_map(|(i, &c)| (c == b'\n').then_some(i))
             .nth(1)?;
         let heredoc = &heredoc[..end];
+        let marker_len = range.len() - end - 1;
 
         let string = std::ffi::CString::new(heredoc).unwrap();
         let mut string_ptr = string.as_ptr().cast_mut();
@@ -423,21 +430,103 @@ impl ParseState {
             std::ffi::CStr::from_ptr(string_ptr)
         };
 
-        // TODO can i use add_tokstr() here?
-        let mut tokens = vec![];
-        let mut start = 0;
-        for (i, &c) in tokstr.to_bytes().iter().enumerate() {
-            if super::is_token(c) {
-                tokens.push(Token::new_with_kind(range.start + start .. range.start + i, TokenKind::None));
-                let kind = TokenKind::from_token(c);
-                tokens.push(Token::new_with_kind(range.start + i .. range.start + i + 1, kind));
-                start = i + 1;
-            }
-        }
-        tokens.push(Token::new_with_kind(range.start + start .. range.start + end, TokenKind::None));
-        tokens.push(Token::new_with_kind(range.start + end .. range.start + end + 1, TokenKind::Lextok(lextok::NEWLIN)));
+        let mut token = Token::new(range.start .. range.start + string.count_bytes());
+        token.add_tokstr(tokstr.to_bytes());
+        token.push_token(Token::new_with_kind(range.end - 1 - marker_len .. range.end - marker_len, TokenKind::None));
 
-        Some((range.start + end + 1, tokens))
+        Some((range.start + end + 1, token.children.unwrap()))
+    }
+
+    fn push_command_stack(&mut self) {
+        let end = self.get_current_index();
+
+        unsafe {
+            // pop previous if end of command
+            let cs = *zsh_sys::cmdstack.add(self.cmdsp as usize);
+            let kind = TokenKind::from_command_stack(cs);
+            if kind.ends_command() {
+                self.pop(Some(end));
+            }
+
+            // add tokstr from before this command stack
+            let tokstr = NonNull::new(self.tokstr.cast_mut()).or(NonNull::new(zsh_sys::tokstr));
+            let tokstr_len = tokstr.map_or(0, |ptr| MetaStr::from_ptr(ptr.as_ptr()).count_bytes());
+            let offset = tokstr_len - self.tokstr_len_stack.last().copied().unwrap_or(0);
+            self.tokstr_len_stack.push(tokstr_len);
+            // token that contains everything incl stuff around the command stack
+            self.stack.push(Token::new_with_kind(end - offset .. self.metalen, TokenKind::None));
+
+            // token for the actual command stack
+            let mut command = Token::new_with_kind(end .. self.metalen, kind);
+            let mut initial = Token::new(end..end);
+
+            // check if heredoc is quoted
+            if matches!(kind, TokenKind::CommandStack(CommandStack::Heredoc))
+                && let Some(hdocs) = zsh_sys::hdocs.as_ref()
+                && !hdocs.str_.is_null()
+            {
+                let word = MetaStr::from_ptr(hdocs.str_);
+                let quoted = word.to_bytes().iter().any(|&c| super::zistype(c, zsh_sys::INULL));
+                command.kind = TokenKind::Heredoc(quoted);
+                initial.kind = TokenKind::None;
+            }
+
+            self.start = command.range.start;
+            command.push_token(initial);
+            self.stack.push(command);
+        }
+    }
+
+    fn pop_command_stack(&mut self) {
+        let start = self.start;
+        let end = self.get_current_index();
+
+        self.tokstr_len_stack.pop();
+        let tokstr_start = self.tokstr_len_stack.last().copied().unwrap_or(0);
+
+        let (token, meta) = loop {
+            let (token, meta) = self.pop_with_meta(Some(end));
+            // clamp to children - need to do this or add_tokstr() won't work
+            if let Some(end) = token.children_end() {
+                token.range.end = end;
+            }
+            if matches!(token.kind, TokenKind::Heredoc(_) | TokenKind::CommandStack(_)) {
+                break (token, meta);
+            }
+        };
+
+        if let TokenKind::Heredoc(quoted) = token.kind {
+            // heredocs dont parse well
+            // this is because zsh pushes a new context that overrides our getc
+            // so we try reparse it ourselves
+            if !quoted && let Some((marker, mut heredoc)) = Self::parse_heredoc(meta, start..end) {
+                token.get_children_mut().append(&mut heredoc);
+                let tokens = self.stack.last_mut().unwrap().get_children_mut();
+                // marker
+                tokens.push(Token::new(marker .. end-1));
+                // newline
+                tokens.push(Token::new_with_kind(end-1 .. end, TokenKind::Lextok(lextok::NEWLIN)));
+            } else {
+                token.push_token(Token::new_with_kind(start .. end, TokenKind::None));
+            }
+
+        } else if matches!(token.kind, TokenKind::CommandStack(CommandStack::Quote | CommandStack::Dquote))
+            && !token.range.is_empty()
+        {
+            // fill in missing bits of the string except the quotes
+            token.range.end = end - 1;
+            let tokstr = get_tokstr().map_or(b"" as _, |t| t.to_bytes());
+            token.add_tokstr(&tokstr[tokstr_start+1..tokstr.len()-1]);
+        }
+
+        // fill in missing bits around the command stack
+        let token = self.pop(Some(end));
+        if let Some(tokstr) = get_tokstr() {
+            let tokstr = &tokstr.to_bytes()[tokstr_start..];
+            token.add_tokstr(tokstr);
+        }
+
+        self.start = end;
     }
 
     fn getc(&mut self) -> c_int {
@@ -448,76 +537,9 @@ impl ParseState {
                 let end = self.get_current_index();
 
                 if zsh_sys::cmdsp > self.cmdsp {
-                    // push stack
-
-                    // add tokstr from before this command stack
-                    let tokstr = NonNull::new(self.tokstr.cast_mut()).or(NonNull::new(zsh_sys::tokstr));
-                    let tokstr_len = tokstr.map_or(0, |ptr| MetaStr::from_ptr(ptr.as_ptr()).count_bytes());
-                    self.stack.push(Token::new_with_kind(end - tokstr_len .. self.metalen, TokenKind::None));
-
-                    let cs = *zsh_sys::cmdstack.add(self.cmdsp as usize);
-                    let kind = TokenKind::from_command_stack(cs);
-                    if kind.ends_command() {
-                        self.pop(Some(end));
-                    }
-
-                    let mut command = Token::new_with_kind(end .. self.metalen, kind);
-                    let mut initial = Token::new(end..end);
-
-                    // check if heredoc is quoted
-                    if matches!(kind, TokenKind::CommandStack(CommandStack::Heredoc))
-                        && let Some(hdocs) = zsh_sys::hdocs.as_ref()
-                        && !hdocs.str_.is_null()
-                    {
-                        let word = MetaStr::from_ptr(hdocs.str_);
-                        let quoted = word.to_bytes().iter().any(|&c| super::zistype(c, zsh_sys::INULL));
-                        command.kind = TokenKind::Heredoc(quoted);
-                        initial.kind = TokenKind::None;
-                    }
-
-                    self.start = command.range.start;
-                    // new command stack and its initial token
-                    command.push_token(initial);
-                    self.stack.push(command);
-
+                    self.push_command_stack();
                 } else if zsh_sys::cmdsp < self.cmdsp {
-                    // pop stack
-
-                    let (token, meta) = loop {
-                        let (token, meta) = self.pop_with_meta(Some(end));
-                        if matches!(token.kind, TokenKind::Heredoc(_) | TokenKind::CommandStack(_)) {
-                            break (token, meta);
-                        }
-                    };
-
-                    if let TokenKind::Heredoc(quoted) = token.kind {
-                        // heredocs dont parse well
-                        // this is because zsh pushes a new context that overrides our getc
-                        // so we try reparse it ourselves
-                        if !quoted && let Some((marker, mut heredoc)) = Self::parse_heredoc(meta, start..end) {
-                            token.get_children_mut().append(&mut heredoc);
-                            let tokens = self.stack.last_mut().unwrap().get_children_mut();
-                            // marker
-                            tokens.push(Token::new(marker .. end-1));
-                            // newline
-                            tokens.push(Token::new_with_kind(end-1 .. end, TokenKind::Lextok(lextok::NEWLIN)));
-                        } else {
-                            token.push_token(Token::new_with_kind(start .. end, TokenKind::None));
-                        }
-
-                    } else if matches!(token.kind, TokenKind::CommandStack(CommandStack::Quote | CommandStack::Dquote)) && !token.range.is_empty() {
-                        // fill in missing bits of the string
-                        token.add_tokstr(b"");
-                    }
-
-                    // fill in missing bits around the command stack
-                    let token = self.pop(Some(end));
-                    if !zsh_sys::tokstr.is_null() {
-                        let tokstr = MetaStr::from_ptr(zsh_sys::tokstr).to_bytes();
-                        token.add_tokstr(tokstr);
-                    }
-
-                    self.start = end;
+                    self.pop_command_stack();
                 }
 
                 // normal token
