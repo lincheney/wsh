@@ -402,6 +402,9 @@ impl Ui {
                 ui.buffer.get_contents().clone()
             };
             let (complete, _tokens) = self.shell.parse(buffer.clone(), Default::default());
+            ::log::debug!("DEBUG(zloty) \t{}\t= {:?}", stringify!(_tokens), _tokens);
+            ::log::debug!("DEBUG(manses)\t{}\t= {:?}", stringify!(complete), complete);
+            ::log::debug!("DEBUG(judged)\t{}\t= {:?}", stringify!(buffer), buffer);
             if complete {
                 Some(buffer)
             } else {
