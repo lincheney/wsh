@@ -565,4 +565,12 @@ impl Shell {
         zsh::call_hook_func(name, args)
     }
 
+    pub fn winch_block(&self) {
+        zsh::winch_block()
+    }
+
+    pub fn winch_unblock(&self) {
+        zsh::winch_unblock()
+    }
+
 }

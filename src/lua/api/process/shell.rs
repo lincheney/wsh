@@ -37,7 +37,7 @@ async fn shell_run(ui: Ui, lua: Lua, val: LuaValue) -> Result<i64> {
 pub async fn shell_run_with_args(ui: Ui, _lua: Lua, cmd: ShellRunCmd, foreground: bool) -> Result<i64> {
 
     let code = ui.clone().shell.trampoline_out_callback(move |ui, token| {
-        ui.clone().shell_loop(async move {
+        ui.clone().shell_loop(false, async move {
             let result = ui.freeze_if(foreground, true, async {
                 match cmd {
                     ShellRunCmd::Simple(command) => ui.shell.exec(token, command.into()),

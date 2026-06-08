@@ -760,11 +760,14 @@ impl Ui {
         Ok(())
     }
 
-    pub fn shell_loop<F: 'static + Future>(&self, future: F) -> Result<F::Output> {
+    pub fn shell_loop<F: 'static + Future>(&self, winch_unblock: bool, future: F) -> Result<F::Output> {
         tokio::pin!(future);
 
         let mut queueing_enabled = self.shell.queue_signal_level();
         self.shell.dont_queue_signals()?;
+        if winch_unblock {
+            self.shell.winch_unblock();
+        }
 
         let result = loop {
             let trampoline = self.shell.trampoline_in();
@@ -777,20 +780,31 @@ impl Ui {
 
             match result {
                 ControlFlow::Break(x) => break Ok(x),
-                ControlFlow::Continue(Err(err)) => break Err(err),
+                ControlFlow::Continue(Err(err)) => break Err(anyhow::anyhow!(err)),
                 ControlFlow::Continue(Ok((callback, token))) => {
+                    if winch_unblock {
+                        self.shell.winch_block();
+                    }
                     self.shell.restore_queue_signals(queueing_enabled);
                     self.shell.trampoline_push();
                     callback(self.clone(), token);
                     self.shell.trampoline_pop();
                     queueing_enabled = self.shell.queue_signal_level();
-                    self.shell.dont_queue_signals()?;
+                    if let Err(err) = self.shell.dont_queue_signals() {
+                        break Err(anyhow::anyhow!(err));
+                    }
+                    if winch_unblock {
+                        self.shell.winch_unblock();
+                    }
                 },
             }
         };
 
+        if winch_unblock {
+            self.shell.winch_block();
+        }
         self.shell.restore_queue_signals(queueing_enabled);
-        Ok(result?)
+        result
     }
 
 }

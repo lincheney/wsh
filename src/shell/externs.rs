@@ -91,7 +91,7 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
         Some(b"lua") => {
             let result: Result<_> = (|| {
                 let ui = GlobalState::get()?;
-                ui.clone().shell_loop(ui.lua.load(iter.next().unwrap_or(b"" as _)).exec_async())??;
+                ui.clone().shell_loop(false, ui.lua.load(iter.next().unwrap_or(b"" as _)).exec_async())??;
                 Ok(())
             })();
 
@@ -159,7 +159,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
 
                 {
                     let ui = ui.clone();
-                    let result = ui.clone().shell_loop(async move {
+                    let result = ui.clone().shell_loop(false, async move {
                         // sometimes zsh will trash zle without refreshing
                         // redraw the ui
                         let drawn = FIRST_DRAWN.replace(true);
@@ -183,10 +183,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                     crate::log_if_err(result);
                 }
 
-                // allow sigwinch while we are waiting
-                // zsh::winch_unblock();
-
-                let result = ui.shell_loop(ui.shell.wait_for_accept_line());
+                let result = ui.shell_loop(false, ui.shell.wait_for_accept_line());
 
                 ui.clone().runtime.block_on(async move {
                     // sometimes zsh will trash zle without refreshing
@@ -196,8 +193,6 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                         ui.queue_draw();
                     }
                 });
-
-                // zsh::winch_block();
 
                 zsh_sys::errflag = 0;
 

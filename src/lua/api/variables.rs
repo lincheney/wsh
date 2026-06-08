@@ -114,7 +114,7 @@ async fn create_dynamic_var(
                 let weak = weak.clone();
                 Box::new(move |$($arg),*| {
                     if let Ok(ui) = Ui::try_upgrade(&weak) {
-                        match ui.shell_loop($result) {
+                        match ui.shell_loop(false, $result) {
                             Ok(Ok(val)) => return val,
                             Ok(Err(err)) => ::log::error!("{}", err),
                             Err(err) => ::log::error!("{}", err),
