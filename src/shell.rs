@@ -25,7 +25,7 @@ pub use zsh::{
     process,
     signals,
     functions::Function,
-    parser::{Token},
+    parser::{Token, ParserOptions},
     ZptyOpts,
     Zpty,
     set_zpty_size,

@@ -9,7 +9,7 @@ use anyhow::Result;
 use crate::keybind::{Event, KeyEvent, Key, Modifiers};
 use crate::print_lock::{PrintLock, PrintLockGuard};
 use nix::sys::termios;
-use crate::shell::{Shell, KeybindValue, process::PidMap};
+use crate::shell::{Shell, KeybindValue, process::PidMap, ParserOptions};
 use crate::lua::{LuaWrapper, EventCallbacks, HasEventCallbacks};
 pub mod buffer;
 
@@ -401,7 +401,10 @@ impl Ui {
                 let ui = self.borrow();
                 ui.buffer.get_contents().clone()
             };
-            let (complete, _tokens) = self.shell.parse(buffer.clone(), Default::default());
+            let (complete, _tokens) = self.shell.parse(
+                buffer.clone(),
+                ParserOptions{tokens: Some(false), ..ParserOptions::default()},
+            );
             ::log::debug!("DEBUG(zloty) \t{}\t= {:?}", stringify!(_tokens), _tokens);
             ::log::debug!("DEBUG(manses)\t{}\t= {:?}", stringify!(complete), complete);
             ::log::debug!("DEBUG(judged)\t{}\t= {:?}", stringify!(buffer), buffer);

@@ -17,8 +17,9 @@ fn get_tokstr<'a>() -> Option<&'a MetaStr> {
 #[derive(Clone, Copy, Deserialize)]
 #[serde(default)]
 pub struct ParserOptions {
-    comments: Option<bool>,
-    custom: bool,
+    pub comments: Option<bool>,
+    pub custom: bool,
+    pub tokens: Option<bool>,
 }
 
 impl Default for ParserOptions {
@@ -26,6 +27,7 @@ impl Default for ParserOptions {
         Self {
             comments: None,
             custom: true,
+            tokens: None,
         }
     }
 }
@@ -337,17 +339,9 @@ pub fn parse(mut cmd: BString, options: ParserOptions) -> (bool, Vec<Token>) {
     if cmd.trim().is_empty() {
         return (true, vec![])
     }
-
     // add newline at the end
     cmd.push_str(b"\n");
-
-    let (mut complete, token) = parse_internal(cmd, options);
-    if token.children.as_ref().is_none_or(|c| c.is_empty()) {
-        // no tokens???
-        complete = false;
-    }
-
-    (complete, token.children.unwrap())
+    parse_internal(cmd, options)
 }
 
 #[derive(Default)]
@@ -594,7 +588,7 @@ unsafe extern "C" fn hungetc_override(c: c_int) {
 fn parse_internal(
     cmd: BString,
     options: ParserOptions,
-) -> (bool, Token) {
+) -> (bool, Vec<Token>) {
 
     let metafied = MetaString::from(cmd.clone());
     let metalen = metafied.count_bytes();
@@ -618,14 +612,20 @@ fn parse_internal(
         }
         zsh_sys::lexflags = new_lexflags as _;
 
-        let old_hgetc = zsh_sys::hgetc;
-        zsh_sys::hgetc = Some(hgetc_override);
-        let old_hungetc = zsh_sys::hungetc;
-        zsh_sys::hungetc = Some(hungetc_override);
+        let need_tokens = options.tokens.unwrap_or(true);
 
-        PARSE_STATE.with_borrow_mut(|state| {
-            state.reset(metafied);
-        });
+        let old_hgetc = zsh_sys::hgetc;
+        let old_hungetc = zsh_sys::hungetc;
+        if need_tokens {
+            zsh_sys::hgetc = Some(hgetc_override);
+            zsh_sys::hungetc = Some(hungetc_override);
+        }
+
+        if need_tokens {
+            PARSE_STATE.with_borrow_mut(|state| {
+                state.reset(metafied);
+            });
+        }
 
         // we are complete if all the pointers are valid
         // we dont need to free, zsh uses zhalloc
@@ -634,20 +634,24 @@ fn parse_internal(
         }
 
         // merge everything together and postprocess
-        let token = PARSE_STATE.with_borrow_mut(|state| {
-            while state.stack.len() > 1 {
-                state.pop(None);
-            }
-            let mut token = state.stack.pop().unwrap();
-            token.postprocess(cmd.as_ref(), state.meta.as_ref(), &mut [0; _], allow_comments);
-            let end = token.children_end().unwrap_or(0);
-            if !complete && end < metalen {
-                token.push_token(Token::new_with_kind(end .. metalen, TokenKind::SyntaxError));
-            }
-            // ::log::debug!("DEBUG(curved)\t{}\t=\n{}", stringify!(s.debug_dump(cmd.as_ref(), 0)), token.debug_dump(cmd.as_ref(), 0));
+        let tokens = if need_tokens {
+            PARSE_STATE.with_borrow_mut(|state| {
+                while state.stack.len() > 1 {
+                    state.pop(None);
+                }
+                let mut token = state.stack.pop().unwrap();
+                token.postprocess(cmd.as_ref(), state.meta.as_ref(), &mut [0; _], allow_comments);
+                let end = token.children_end().unwrap_or(0);
+                if !complete && end < metalen {
+                    token.push_token(Token::new_with_kind(end .. metalen, TokenKind::SyntaxError));
+                }
+                ::log::debug!("DEBUG(curved)\t{}\t=\n{}", stringify!(s.debug_dump(cmd.as_ref(), 0)), token.debug_dump(cmd.as_ref(), 0));
 
-            token
-        });
+                token.children
+            })
+        } else {
+            None
+        };
 
         // restore
         zsh_sys::hgetc = old_hgetc;
@@ -660,6 +664,6 @@ fn parse_internal(
         super::set_error_verbosity(old_noerrs);
         zsh_sys::zcontext_restore();
 
-        (complete, token)
+        (complete, tokens.unwrap_or_else(Vec::new))
     }
 }
