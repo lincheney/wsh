@@ -229,22 +229,36 @@ impl Token {
         let mut i = 0;
         while i < children.len() {
             let slice = &children[i..];
-            let action = match slice {
+            match slice {
                 // (<|>|>>|<>|>\||>!|<&|>&|>&\|>&!|&>\||&>!|>>&|&>>|>>&\||>>&!|&>>\||&>>!) STRING
                 [
-                    Token{kind: TokenKind::Lextok(lextok::OUTANG | lextok::OUTANGBANG | lextok::DOUTANG | lextok::DOUTANGBANG | lextok::INANG | lextok::INOUTANG | lextok::INANGAMP | lextok::OUTANGAMP | lextok::AMPOUTANG | lextok::OUTANGAMPBANG | lextok::DOUTANGAMP | lextok::DOUTANGAMPBANG | lextok::TRINANG), ..},
+                    symbol @ Token{kind: TokenKind::Lextok(lextok::OUTANG | lextok::OUTANGBANG | lextok::DOUTANG | lextok::DOUTANGBANG | lextok::INANG | lextok::INOUTANG | lextok::INANGAMP | lextok::OUTANGAMP | lextok::AMPOUTANG | lextok::OUTANGAMPBANG | lextok::DOUTANGAMP | lextok::DOUTANGAMPBANG | lextok::TRINANG), ..},
+                    file @ Token{..},
                     // Token{kind: TokenKind::None | TokenKind::Lextok(lextok::STRING | lextok::LEXERR), ..},
-                ..] => Some((TokenKind::Redirect, 2)),
+                ..] => {
 
-                _ => None,
-            };
+                    let start = symbol.range.start;
+                    let end = file.range.end;
+                    let token = Token::new_with_kind(start..end, TokenKind::Redirect);
+                    let nested = children.splice(i..i+1, [token]).collect();
+                    children[i].children = Some(nested);
+                },
 
-            if let Some((kind, len)) = action && i+len <= children.len() {
-                let start = children[i].range.start;
-                let end = children[i+len-1].range.end;
-                let token = Token::new_with_kind(start..end, kind);
-                let nested = children.splice(i..i+len, [token]).collect();
-                children[i].children = Some(nested);
+                [
+                    first  @ Token{kind: TokenKind::Token(token::Qstring), ..},
+                    second @ Token{kind: TokenKind::Scope(CommandStack::Cmdsubst), ..},
+                ..] if
+                    first.range.end == second.range.start
+                    && second.children.as_ref().and_then(|c| c.first()).is_some_and(|t| matches!(t.kind, TokenKind::Token(token::Inpar)))
+                => {
+                    // move the qstring inside the Cmdsubst
+                    let qstring = children.remove(i);
+                    let cmdsubst = &mut children[i];
+                    cmdsubst.range.start = qstring.range.start;
+                    cmdsubst.get_children_mut().insert(0, qstring);
+                },
+
+                _ => (),
             }
 
             i += 1;
