@@ -338,8 +338,11 @@ impl Token {
             let range = offset + i .. offset + i + 1;
             if let Some(tok) = children.last_mut() && tok.range.end > range.start {
                 // do nothing if overlapping with previous
-            } else if super::is_token(c) {
-                children.push(Token::new_with_kind(range, TokenKind::from_token(c)));
+            } else if super::is_token(c)
+                && let TokenKind::Token(kind) = TokenKind::from_token(c)
+                && !matches!(kind, token::Dash | token::Bnull)
+            {
+                children.push(Token::new_with_kind(range, TokenKind::Token(kind)));
             } else if let Some(prev @ Token{kind: TokenKind::None, ..}) = children.last_mut() {
                 prev.range.end = range.end;
             } else {
