@@ -9,14 +9,17 @@ use std::ptr::null_mut;
 use super::bindings::{token, lextok, CommandStack};
 use super::{MetaStr, MetaString};
 
-fn untokenize(c: u8) -> u8 {
-    unsafe {
-        // ztokens has the wrong length, so use pointer arithmetic instead
-        // search for the token bc sometimes it is len > 1
-        #[allow(static_mut_refs)]
-        let ztokens = zsh_sys::ztokens.as_ptr();
-        *ztokens.add((c - token::Pound as u8) as usize) as u8
+fn untokenize(mut c: u8) -> u8 {
+    if super::is_token(c) {
+        unsafe {
+            // ztokens has the wrong length, so use pointer arithmetic instead
+            // search for the token bc sometimes it is len > 1
+            #[allow(static_mut_refs)]
+            let ztokens = zsh_sys::ztokens.as_ptr();
+            c = *ztokens.add((c - token::Pound as u8) as usize) as u8
+        }
     }
+    c
 }
 
 #[derive(Clone, Copy, Deserialize)]
