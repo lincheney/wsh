@@ -539,7 +539,7 @@ impl ParseState {
             let consumed = self.tokstr_map.get(&ptr).copied().unwrap_or(0);
             self.tokstr_map.insert(ptr, tokstr.count_bytes());
 
-            let tokstr = &tokstr.to_bytes()[consumed..];
+            let tokstr = &tokstr.to_bytes()[consumed.min(tokstr.count_bytes())..];
 
             // a lot of the time tokstr ends at end, but sometimes it is before
             let untokenized = tokstr.iter().copied().map(untokenize);
@@ -565,19 +565,22 @@ impl ParseState {
                     self.pop_command_stack();
                 }
 
-                // handle tokstr
-                self.add_tokstr();
-
                 // normal token
-                if start != end && zsh_sys::tok != zsh_sys::lextok_ENDINPUT {
-                    let token = Token::new_with_kind(start .. end, TokenKind::from_lextok(zsh_sys::tok));
+                if zsh_sys::tok != zsh_sys::lextok_ENDINPUT {
+                    let kind = TokenKind::from_lextok(zsh_sys::tok);
+                    // may have been handled already by tokstr
+                    let mut token = (start == end)
+                        .then(|| true)
+                        .and_then(|_| self.stack.last_mut().unwrap().get_children_mut().pop())
+                        .unwrap_or(Token::new(start .. end));
+                    token.kind = kind;
 
                     let prev = self.stack.last().unwrap();
                     let prev = prev.children.as_ref().and_then(|c| c.last()).unwrap_or(prev);
 
                     // this token starts a command
                     if prev.kind.followed_by_command() && token.kind.can_start_command() {
-                        self.stack.push(Token::new_with_kind(start..self.metalen, TokenKind::Command));
+                        self.stack.push(Token::new_with_kind(token.range.start..self.metalen, TokenKind::Command));
                     }
 
                     // this token ends a command
@@ -588,6 +591,9 @@ impl ParseState {
                     self.stack.last_mut().unwrap().push_token(token);
                     self.start = end;
                 }
+
+                // handle tokstr
+                self.add_tokstr();
 
                 self.cmdsp = zsh_sys::cmdsp;
 
