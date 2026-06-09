@@ -28,6 +28,7 @@ pub struct ParserOptions {
     pub comments: Option<bool>,
     pub custom: bool,
     pub tokens: Option<bool>,
+    pub allow_unfinished_heredoc: Option<bool>,
 }
 
 impl Default for ParserOptions {
@@ -36,6 +37,7 @@ impl Default for ParserOptions {
             comments: None,
             custom: true,
             tokens: None,
+            allow_unfinished_heredoc: None,
         }
     }
 }
@@ -48,6 +50,7 @@ pub enum TokenKind {
     Token(token),
     CommandStack(CommandStack),
     Heredoc(bool),
+    HeredocEnd,
     Initial,
     SyntaxError,
     Redirect,
@@ -140,6 +143,7 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Command => write!(fmt, "command"),
             TokenKind::Initial => write!(fmt, "initial"),
             TokenKind::Heredoc(_quoted) => write!(fmt, "heredoc"),
+            TokenKind::HeredocEnd => write!(fmt, "heredoc_end"),
             TokenKind::Arg0 => write!(fmt, "arg0"),
             TokenKind::Scope(_) => write!(fmt, "scope"),
             TokenKind::SyntaxError => write!(fmt, "syntax_error"),
@@ -243,7 +247,7 @@ impl Token {
                     let start = symbol.range.start;
                     let end = file.range.end;
                     let token = Token::new_with_kind(start..end, TokenKind::Redirect);
-                    let nested = children.splice(i..i+1, [token]).collect();
+                    let nested = children.splice(i..i+2, [token]).collect();
                     children[i].children = Some(nested);
                 },
 
@@ -348,7 +352,7 @@ impl Token {
         let children = self.get_children_mut();
 
         // add some tokens
-        for (i, &c) in tokstr.into_iter().enumerate() {
+        for (i, &c) in tokstr.iter().enumerate() {
             let range = offset + i .. offset + i + 1;
             if let Some(tok) = children.last_mut() && tok.range.end > range.start {
                 // do nothing if overlapping with previous
@@ -365,6 +369,14 @@ impl Token {
         }
     }
 
+    fn has_unfinished_heredoc(&self) -> bool {
+        if matches!(self.kind, TokenKind::Scope(CommandStack::Heredoc))
+            && !self.children.iter().flatten().any(|c| matches!(c.kind, TokenKind::HeredocEnd))
+        {
+            return true
+        }
+        self.children.iter().flatten().any(|c| c.has_unfinished_heredoc())
+    }
 
 }
 
@@ -408,21 +420,47 @@ impl ParseState {
         self.started = false;
     }
 
-    fn pop(&mut self, end: Option<usize>,) -> &mut Token {
-        self.pop_with_meta(end).0
-    }
-
-    fn pop_with_meta(&mut self, end: Option<usize>,) -> (&mut Token, &MetaStr) {
+    fn pop(&mut self, end: Option<usize>) -> &mut Token {
+        let meta = self.meta.as_ref();
         let mut token = self.stack.pop().unwrap();
         if let Some(end) = end {
             token.range.end = token.range.end.min(end);
         }
 
+        if let TokenKind::Heredoc(quoted) = token.kind {
+            let range = self.start .. self.get_current_index();
+
+            // heredocs dont parse well
+            // this is because zsh pushes a new context that overrides our getc
+            // so we try reparse it ourselves
+            if let Some((marker, mut heredoc)) = Self::parse_heredoc(quoted, meta, range.clone()) {
+                token.get_children_mut().append(&mut heredoc);
+
+                if marker < range.end {
+                    let parent = if self.stack.is_empty() {
+                        // wtf
+                        self.stack.push_mut(Token::new_with_kind(range.clone(), TokenKind::Scope(CommandStack::Heredoc)))
+                    } else {
+                        self.stack.last_mut().unwrap()
+                    }.get_children_mut();
+
+                    // marker
+                    parent.push(Token::new_with_kind(marker .. range.end-1, TokenKind::HeredocEnd));
+                    // newline
+                    parent.push(Token::new_with_kind(range.end-1 .. range.end, TokenKind::Lextok(lextok::NEWLIN)));
+                    return parent.insert_mut(parent.len()-2, token)
+                }
+
+            } else {
+                token.push_token(Token::new_with_kind(range, TokenKind::None));
+            }
+        }
+
         if self.stack.is_empty() {
             // wtf no parent tokens?
-            (self.stack.push_mut(token), self.meta.as_ref())
+            self.stack.push_mut(token)
         } else {
-            (self.stack.last_mut().unwrap().push_token(token), self.meta.as_ref())
+            self.stack.last_mut().unwrap().push_token(token)
         }
     }
 
@@ -432,37 +470,50 @@ impl ParseState {
         }
     }
 
-    fn parse_heredoc(meta: &MetaStr, range: Range<usize>) -> Option<(usize, Vec<Token>)> {
+    fn parse_heredoc(quoted: bool, meta: &MetaStr, range: Range<usize>) -> Option<(usize, Vec<Token>)> {
         let heredoc = &meta.to_bytes()[range.clone()];
 
         // get second last newline
-        let end = heredoc.iter()
-            .enumerate()
-            .rev()
-            .filter_map(|(i, &c)| (c == b'\n').then_some(i))
-            .nth(1)?;
+        let eof = unsafe{ zsh_sys::lexstop != 0 };
+        let end = if eof {
+            None
+        } else {
+            heredoc.iter()
+                .enumerate()
+                .rev()
+                .filter_map(|(i, &c)| (c == b'\n').then_some(i))
+                .nth(1)
+        }.unwrap_or(range.len());
         let heredoc = &heredoc[..end];
-        let marker_len = range.len() - end - 1;
+        let marker_len = (range.len() - end).saturating_sub(1);
 
-        let string = std::ffi::CString::new(heredoc).unwrap();
-        let mut string_ptr = string.as_ptr().cast_mut();
+        let mut token = Token::new(range.start .. range.start + heredoc.len());
+        if quoted {
+            token.push_token(Token::new_with_kind(token.range.clone(), TokenKind::None));
 
-        // parse it
-        let tokstr = unsafe {
-            let err = zsh_sys::parsestrnoerr(&raw mut string_ptr);
-            if err != 0 {
-                return None;
-            }
+        } else {
+            let string = std::ffi::CString::new(heredoc).unwrap();
+            let mut string_ptr = string.as_ptr().cast_mut();
 
-            // apparently it can be modified?
-            std::ffi::CStr::from_ptr(string_ptr)
-        };
+            // parse it
+            let tokstr = unsafe {
+                let err = zsh_sys::parsestrnoerr(&raw mut string_ptr);
+                if err != 0 {
+                    return None;
+                }
 
-        let mut token = Token::new(range.start .. range.start + string.count_bytes());
-        token.add_tokstr(range.start, tokstr.to_bytes());
-        token.push_token(Token::new_with_kind(range.end - 1 - marker_len .. range.end - marker_len, TokenKind::None));
+                // apparently it can be modified?
+                std::ffi::CStr::from_ptr(string_ptr)
+            };
 
-        Some((range.start + end + 1, token.children.unwrap()))
+            token.add_tokstr(range.start, tokstr.to_bytes());
+        }
+        if !eof {
+            // newline
+            token.push_token(Token::new_with_kind(range.end - 1 - marker_len .. range.end - marker_len, TokenKind::None));
+        }
+
+        Some((range.end - marker_len, token.children.unwrap()))
     }
 
     fn push_command_stack(&mut self) {
@@ -505,36 +556,20 @@ impl ParseState {
     }
 
     fn pop_command_stack(&mut self) {
-        let start = self.start;
         let end = self.get_current_index();
 
-        let (token, meta) = loop {
-            let (token, meta) = self.pop_with_meta(Some(end));
+        let token = loop {
+            let token = self.pop(Some(end));
             // clamp to children - need to do this or add_tokstr() won't work
             if let Some(end) = token.children_end() {
                 token.range.end = end;
             }
             if matches!(token.kind, TokenKind::Heredoc(_) | TokenKind::CommandStack(_)) {
-                break (token, meta);
+                break token;
             }
         };
 
-        if let TokenKind::Heredoc(quoted) = token.kind {
-            // heredocs dont parse well
-            // this is because zsh pushes a new context that overrides our getc
-            // so we try reparse it ourselves
-            if !quoted && let Some((marker, mut heredoc)) = Self::parse_heredoc(meta, start..end) {
-                token.get_children_mut().append(&mut heredoc);
-                let tokens = self.stack.last_mut().unwrap().get_children_mut();
-                // marker
-                tokens.push(Token::new(marker .. end-1));
-                // newline
-                tokens.push(Token::new_with_kind(end-1 .. end, TokenKind::Lextok(lextok::NEWLIN)));
-            } else {
-                token.push_token(Token::new_with_kind(start .. end, TokenKind::None));
-            }
-
-        } else if matches!(token.kind, TokenKind::CommandStack(CommandStack::Quote | CommandStack::Dquote))
+        if matches!(token.kind, TokenKind::CommandStack(CommandStack::Quote | CommandStack::Dquote))
             && !token.range.is_empty()
         {
             // fill in missing bits of the string except the quotes
@@ -587,7 +622,7 @@ impl ParseState {
                     let kind = TokenKind::from_lextok(zsh_sys::tok);
                     // may have been handled already by tokstr
                     let mut token = (start == end)
-                        .then(|| true)
+                        .then_some(true)
                         .and_then(|_| self.stack.last_mut().unwrap().get_children_mut().pop())
                         .unwrap_or(Token::new(start .. end));
                     token.kind = kind;
@@ -685,7 +720,15 @@ fn parse_internal(
         // we are complete if all the pointers are valid
         // we dont need to free, zsh uses zhalloc
         while zsh_sys::lexstop == 0 && zsh_sys::inbufct > 0 {
-            complete = !zsh_sys::parse_event(zsh_sys::lextok_ENDINPUT as _).is_null() && complete;
+            let only_newlines = PARSE_STATE.with_borrow(|state| {
+                state.meta.to_bytes()[state.get_current_index()..].iter().all(|&c| c == b'\n')
+            });
+
+            let ptr = zsh_sys::parse_event(zsh_sys::lextok_ENDINPUT as _);
+            // its ok if we only have newlines left and the prog didnt compile
+            if !only_newlines && ptr.is_null() {
+                complete = false;
+            }
         }
 
         // merge everything together and postprocess
@@ -696,10 +739,22 @@ fn parse_internal(
                 }
                 let mut token = state.stack.pop().unwrap();
                 token.postprocess(cmd.as_ref(), state.meta.as_ref(), &mut [0; _], allow_comments);
+
+                // anything remaining is a syntax error
                 let end = token.children_end().unwrap_or(0);
                 if !complete && end < metalen {
                     token.push_token(Token::new_with_kind(end .. metalen, TokenKind::SyntaxError));
                 }
+
+                // unfinished heredocs are technically syntactically correct
+                // but maybe you don't want that
+                if complete
+                    && !options.allow_unfinished_heredoc.unwrap_or(false)
+                    && token.has_unfinished_heredoc()
+                {
+                    complete = false;
+                }
+
                 // ::log::debug!("DEBUG(curved)\t{}\t=\n{}", stringify!(s.debug_dump(cmd.as_ref(), 0)), token.debug_dump(cmd.as_ref(), 0));
 
                 token.children
