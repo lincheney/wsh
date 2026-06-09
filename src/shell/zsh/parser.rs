@@ -261,6 +261,20 @@ impl Token {
                     cmdsubst.get_children_mut().insert(0, qstring);
                 },
 
+                [
+                    first  @ Token{kind: TokenKind::Token(token::String), ..},
+                    second @ Token{kind: TokenKind::Lextok(lextok::STRING), ..},
+                ..] if
+                    first.range.end == second.range.start
+                    && second.children.as_ref().and_then(|c| c.first()).is_some_and(|t| matches!(t.kind, TokenKind::Token(token::Snull)))
+                => {
+                    // $'...' style string, move the $ inside
+                    let dollar = children.remove(i);
+                    let string = &mut children[i];
+                    string.range.start = dollar.range.start;
+                    string.get_children_mut().insert(0, dollar);
+                },
+
                 _ => (),
             }
 
