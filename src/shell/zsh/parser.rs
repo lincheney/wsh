@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::ptr::NonNull;
 use std::cell::{RefCell};
 use bstr::{BStr, BString, ByteSlice, ByteVec};
@@ -8,9 +9,13 @@ use std::ptr::null_mut;
 use super::bindings::{token, lextok, CommandStack};
 use super::{MetaStr, MetaString};
 
-fn get_tokstr<'a>() -> Option<&'a MetaStr> {
+fn untokenize(c: u8) -> u8 {
     unsafe {
-        (!zsh_sys::tokstr.is_null()).then(|| MetaStr::from_ptr(zsh_sys::tokstr))
+        // ztokens has the wrong length, so use pointer arithmetic instead
+        // search for the token bc sometimes it is len > 1
+        #[allow(static_mut_refs)]
+        let ztokens = zsh_sys::ztokens.as_ptr();
+        *ztokens.add((c - token::Pound as u8) as usize) as u8
     }
 }
 
@@ -45,6 +50,8 @@ pub enum TokenKind {
     Redirect,
     Comment,
     Command,
+    Arg0,
+    Scope(CommandStack),
 }
 
 impl TokenKind {
@@ -130,7 +137,9 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Command => write!(fmt, "command"),
             TokenKind::Initial => write!(fmt, "initial"),
             TokenKind::Heredoc(_quoted) => write!(fmt, "heredoc"),
-            TokenKind::SyntaxError => write!(fmt, "stynax_error"),
+            TokenKind::Arg0 => write!(fmt, "arg0"),
+            TokenKind::Scope(_) => write!(fmt, "scope"),
+            TokenKind::SyntaxError => write!(fmt, "syntax_error"),
         }
     }
 }
@@ -232,7 +241,7 @@ impl Token {
 
             if let Some((kind, len)) = action && i+len <= children.len() {
                 let start = children[i].range.start;
-                let end = children[i+len].range.end;
+                let end = children[i+len-1].range.end;
                 let token = Token::new_with_kind(start..end, kind);
                 let nested = children.splice(i..i+len, [token]).collect();
                 children[i].children = Some(nested);
@@ -242,7 +251,13 @@ impl Token {
         }
     }
 
-    fn postprocess(&mut self, string: &BStr, meta: &MetaStr, meta_cache: &mut [usize; 256], allow_comments: bool) {
+    fn postprocess(
+        &mut self,
+        string: &BStr,
+        meta: &MetaStr,
+        meta_cache: &mut [usize; 256],
+        allow_comments: bool,
+    ) {
         // lstrip
         let nonblank = meta.to_bytes()[self.range.clone()]
             .iter()
@@ -275,13 +290,21 @@ impl Token {
 
         self.apply_custom_token();
 
-        // collapse empty command with only a command ending thing or comment
-        if matches!(self.kind, TokenKind::Command)
-            && let Some(children) = &mut self.children
-            && children.len() == 1
-            && (children[0].kind.ends_command() || matches!(children[0].kind, TokenKind::Comment))
-        {
-            *self = children.pop().unwrap();
+        if matches!(self.kind, TokenKind::Command) && let Some(children) = &mut self.children {
+            // collapse empty command with only a command ending thing or comment
+            if children.len() == 1
+                && (children[0].kind.ends_command() || matches!(children[0].kind, TokenKind::Comment))
+            {
+                *self = children.pop().unwrap();
+            } else {
+                // first string is the command
+                for t in children.iter_mut() {
+                    if matches!(t.kind, TokenKind::None | TokenKind::Scope(_) | TokenKind::Lextok(lextok::STRING)) {
+                        t.kind = TokenKind::Arg0;
+                        break
+                    }
+                }
+            }
         }
 
         // clamp end to children end
@@ -290,44 +313,20 @@ impl Token {
         }
     }
 
-    fn add_tokstr(&mut self, tokstr: &[u8]) {
-        // process the tokstr
-        let range = self.range.clone();
+    fn add_tokstr(&mut self, offset: usize, tokstr: &[u8]) {
         let children = self.get_children_mut();
 
-        let mut tokstr = tokstr.iter()
-            .take(range.len())
-            .enumerate()
-            .filter(|(_, c)| super::is_token(**c))
-            .map(|(i, &c)| (range.start + i, c))
-            .peekable();
-
-        // this intersperses children and tokens and simple strings
-        let mut start = range.start;
-        let mut childi = 0;
-        loop {
-            let next_child = children.get(childi);
-            let next_token = tokstr.peek();
-
-            if let Some(child) = next_child && next_token.is_none_or(|(i, _)| child.range.start <= *i) {
-                // child comes sooner
-                let range = child.range.clone();
-                children.insert(childi, Token::new_with_kind(start..range.start, TokenKind::None));
-                childi += 2;
-                start = range.end;
-            } else if let Some((i, _)) = next_token && next_child.is_none_or(|c| *i < c.range.start) {
-                let (i, tok) = tokstr.next().unwrap();
-                if i >= start {
-                    // in case the child overlaps with a token
-                    children.insert(childi, Token::new_with_kind(start..i, TokenKind::None));
-                    children.insert(childi+1, Token::new_with_kind(i..i+1, TokenKind::from_token(tok)));
-                    childi += 2;
-                    start = i+1;
-                }
+        // add some tokens
+        for (i, &c) in tokstr.into_iter().enumerate() {
+            let range = offset + i .. offset + i + 1;
+            if let Some(tok) = children.last_mut() && tok.range.end > range.start {
+                // do nothing if overlapping with previous
+            } else if super::is_token(c) {
+                children.push(Token::new_with_kind(range, TokenKind::from_token(c)));
+            } else if let Some(prev @ Token{kind: TokenKind::None, ..}) = children.last_mut() {
+                prev.range.end = range.end;
             } else {
-                // no more
-                children.push(Token::new_with_kind(start..range.end, TokenKind::None));
-                break
+                children.push(Token::new_with_kind(range, TokenKind::None));
             }
         }
     }
@@ -350,7 +349,7 @@ struct ParseState {
     metalen: usize,
     start: usize,
     stack: Vec<Token>,
-    tokstr_len_stack: Vec<usize>,
+    tokstr_map: HashMap<Option<NonNull<c_char>>, usize>,
     cmdsp: i32,
     started: bool,
     tokstr: *const c_char,
@@ -368,7 +367,8 @@ impl ParseState {
         self.start = 0;
         self.stack.clear();
         self.stack.push(Token::new(0..self.metalen));
-        self.stack.push(Token::new(0..0));
+        self.stack.push(Token::new_with_kind(0..0, TokenKind::Command));
+        self.tokstr_map.clear();
 
         self.cmdsp = 0;
         self.started = false;
@@ -425,7 +425,7 @@ impl ParseState {
         };
 
         let mut token = Token::new(range.start .. range.start + string.count_bytes());
-        token.add_tokstr(tokstr.to_bytes());
+        token.add_tokstr(range.start, tokstr.to_bytes());
         token.push_token(Token::new_with_kind(range.end - 1 - marker_len .. range.end - marker_len, TokenKind::None));
 
         Some((range.start + end + 1, token.children.unwrap()))
@@ -443,12 +443,11 @@ impl ParseState {
             }
 
             // add tokstr from before this command stack
-            let tokstr = NonNull::new(self.tokstr.cast_mut()).or(NonNull::new(zsh_sys::tokstr));
-            let tokstr_len = tokstr.map_or(0, |ptr| MetaStr::from_ptr(ptr.as_ptr()).count_bytes());
-            let offset = tokstr_len - self.tokstr_len_stack.last().copied().unwrap_or(0);
-            self.tokstr_len_stack.push(tokstr_len);
-            // token that contains everything incl stuff around the command stack
-            self.stack.push(Token::new_with_kind(end - offset .. self.metalen, TokenKind::None));
+            let scope = num::FromPrimitive::from_u8(cs).map_or(TokenKind::None, TokenKind::Scope);
+            self.stack.push(Token::new_with_kind(end .. end, scope));
+            self.add_tokstr();
+            let token = self.stack.last_mut().unwrap();
+            token.range.start = token.children.as_ref().and_then(|c| c.first()).map_or(end, |c| c.range.start);
 
             // token for the actual command stack
             let mut command = Token::new_with_kind(end .. self.metalen, kind);
@@ -474,9 +473,6 @@ impl ParseState {
     fn pop_command_stack(&mut self) {
         let start = self.start;
         let end = self.get_current_index();
-
-        self.tokstr_len_stack.pop();
-        let tokstr_start = self.tokstr_len_stack.last().copied().unwrap_or(0);
 
         let (token, meta) = loop {
             let (token, meta) = self.pop_with_meta(Some(end));
@@ -509,18 +505,34 @@ impl ParseState {
         {
             // fill in missing bits of the string except the quotes
             token.range.end = end - 1;
-            let tokstr = get_tokstr().map_or(b"" as _, |t| t.to_bytes());
-            token.add_tokstr(&tokstr[tokstr_start+1..tokstr.len()-1]);
         }
 
-        // fill in missing bits around the command stack
-        let token = self.pop(Some(end));
-        if let Some(tokstr) = get_tokstr() {
-            let tokstr = &tokstr.to_bytes()[tokstr_start..];
-            token.add_tokstr(tokstr);
-        }
+        // // fill in missing bits around the command stack
+        self.add_tokstr();
+        self.pop(Some(end));
 
         self.start = end;
+    }
+
+    fn add_tokstr(&mut self) {
+        let end = self.get_current_index();
+        unsafe {
+            let ptr = NonNull::new(self.tokstr.cast_mut()).or(NonNull::new(zsh_sys::tokstr));
+            let tokstr = ptr.map_or(meta_str!(c""), |ptr| MetaStr::from_ptr(ptr.as_ptr()));
+            let consumed = self.tokstr_map.get(&ptr).copied().unwrap_or(0);
+            self.tokstr_map.insert(ptr, tokstr.count_bytes());
+
+            let tokstr = &tokstr.to_bytes()[consumed..];
+
+            // a lot of the time tokstr ends at end, but sometimes it is before
+            let untokenized = tokstr.iter().copied().map(untokenize);
+            let start = (self.start .. end - tokstr.len())
+                .find(|&i| self.meta.to_bytes()[i .. i + tokstr.len()].iter().copied().eq(untokenized.clone()));
+            let start = start.unwrap_or(end - tokstr.len());
+            self.start = start + tokstr.len();
+
+            self.stack.last_mut().unwrap().add_tokstr(start, tokstr);
+        }
     }
 
     fn getc(&mut self) -> c_int {
@@ -535,6 +547,9 @@ impl ParseState {
                 } else if zsh_sys::cmdsp < self.cmdsp {
                     self.pop_command_stack();
                 }
+
+                // handle tokstr
+                self.add_tokstr();
 
                 // normal token
                 if start != end && zsh_sys::tok != zsh_sys::lextok_ENDINPUT {
@@ -645,7 +660,7 @@ fn parse_internal(
                 if !complete && end < metalen {
                     token.push_token(Token::new_with_kind(end .. metalen, TokenKind::SyntaxError));
                 }
-                ::log::debug!("DEBUG(curved)\t{}\t=\n{}", stringify!(s.debug_dump(cmd.as_ref(), 0)), token.debug_dump(cmd.as_ref(), 0));
+                // ::log::debug!("DEBUG(curved)\t{}\t=\n{}", stringify!(s.debug_dump(cmd.as_ref(), 0)), token.debug_dump(cmd.as_ref(), 0));
 
                 token.children
             })
