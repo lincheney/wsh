@@ -98,6 +98,12 @@ pub fn control_c() -> nix::Result<()> {
     nix::sys::signal::kill(nix::unistd::Pid::from_raw(0), nix::sys::signal::Signal::SIGINT)
 }
 
+pub enum FdAction {
+    RedirectFrom(RawFd, Option<RawFd>),
+    RedirectTo(RawFd, Option<RawFd>),
+    Close(RawFd),
+}
+
 impl Shell {
     pub fn new() -> Self {
         Shell {
@@ -205,7 +211,7 @@ impl Shell {
         zsh::execstring(string.as_ref(), Default::default())
     }
 
-    pub fn exec_subshell<I: Iterator<Item=(RawFd, Option<RawFd>, bool)>>(
+    pub fn exec_subshell<I: Iterator<Item=FdAction>>(
         &self,
         _token: TrampolineToken,
         string: &BStr,
@@ -223,11 +229,13 @@ impl Shell {
         let mut cmd = BString::new(vec![]);
         cmd.push_str("( ");
         // apply all the fd mappings
-        for (left, right, output) in fd_mapping {
-            match (right, output) {
-                (Some(right), true)  => write!(cmd, "exec {left}>/dev/fd/{right};").unwrap(),
-                (Some(right), false) => write!(cmd, "exec {left}</dev/fd/{right};").unwrap(),
-                (None, _) => write!(cmd, "__fd={left}; exec {{__fd}}<&-;").unwrap(),
+        for action in fd_mapping {
+            match action {
+                FdAction::RedirectFrom(fd, Some(other)) => write!(cmd, "exec {fd}</dev/fd/{other};").unwrap(),
+                FdAction::RedirectTo(fd, Some(other)) => write!(cmd, "exec {fd}>/dev/fd/{other};").unwrap(),
+                FdAction::RedirectFrom(fd, None) => write!(cmd, "exec {fd}</dev/null;").unwrap(),
+                FdAction::RedirectTo(fd, None) => write!(cmd, "exec {fd}>/dev/null;").unwrap(),
+                FdAction::Close(fd) => write!(cmd, "__fd={fd}; exec {{__fd}}<&-;").unwrap(),
             }
         }
         cmd.push_str("; eval '");

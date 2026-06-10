@@ -15,6 +15,7 @@ use crate::ui::{Ui};
 use crate::lua::api::asyncio::{ReadableFile, WriteableFile};
 use super::spawn::{Stdio, Process, CommandResult};
 use super::shell::Stream;
+use crate::shell::FdAction;
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -74,6 +75,15 @@ impl FdOverride {
             None => Ok(None),
         }
     }
+
+    fn fd_action(&self) -> FdAction {
+        let fd = self.stream.as_raw_fd();
+        let other = self.fd.as_ref().map(|fd| fd.as_raw_fd());
+        match self.stream {
+            Stream::Stdin(_) => FdAction::RedirectFrom(fd, other),
+            _ => FdAction::RedirectTo(fd, other),
+        }
+    }
 }
 
 async fn subshell_run(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
@@ -111,17 +121,12 @@ pub async fn subshell_run_with_args(ui: Ui, lua: Lua, args: FullShellRunArgs) ->
                     let stdout_pipe = stdout_pipe.flatten();
                     let stderr_pipe = stderr_pipe.flatten();
 
-                    let redirections = streams
-                        .iter()
-                        .flatten()
-                        .map(|x| (x.stream.as_raw_fd(), x.fd.as_ref().map(|fd| fd.as_raw_fd()), !matches!(x.stream, Stream::Stdin(_))) );
+                    let redirections = streams.iter().flatten().map(|s| s.fd_action());
                     let closes = [
                         stdin_pipe.as_ref().map(|x| x.as_raw_fd()),
                         stdout_pipe.as_ref().map(|x| x.as_raw_fd()),
                         stderr_pipe.as_ref().map(|x| x.as_raw_fd()),
-                    ].into_iter()
-                        .flatten()
-                        .map(|x| (x, None, true));
+                    ].into_iter().flatten().map(FdAction::Close);
                     let fds = redirections.chain(closes);
 
                     // fork it now to get the pid
