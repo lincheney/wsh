@@ -1,6 +1,6 @@
 return wish.plugin(function(wish, opts, plugin)
 
-    local QUERY = require('wish/syntax-query')
+    local QUERY = require('wish.syntax-query')
     local NAMESPACE = wish.add_buf_highlight_namespace()
 
     local UNMATCHED = { bg = 'red' }

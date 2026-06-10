@@ -5,6 +5,7 @@ mod shell;
 mod subshell;
 mod spawn;
 pub use shell::{shell_run_with_args, ShellRunCmd};
+pub use spawn::Stdio;
 
 pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
 
