@@ -2,7 +2,7 @@ use bstr::{BString, BStr};
 use crate::lua::LuaWrapper;
 use crate::shell::MetaString;
 use std::rc::Rc;
-use std::os::fd::{OwnedFd};
+use std::os::fd::{OwnedFd, AsFd, RawFd, AsRawFd, BorrowedFd};
 use std::io::{Read, Seek, Write};
 use std::fs::OpenOptions;
 use anyhow::Result;
@@ -12,16 +12,7 @@ use nix::sys::memfd::{memfd_create, MFdFlags};
 use crate::ui::Ui;
 use super::spawn::Stdio;
 
-pub enum ShellRunCmd {
-    Simple(BString),
-    Function {
-        func: Rc<crate::shell::Function>,
-        args: Vec<BString>,
-        arg0: Option<BString>,
-    },
-}
-
-enum Stream<T> {
+pub enum Stream<T> {
     Stdin(T),
     Stdout(Stdio),
     Stderr(Stdio),
@@ -35,6 +26,27 @@ impl<T> Stream<T> {
             Stream::Stdout(_) => nix::unistd::dup2_stdout(fd),
         }
     }
+
+    fn with_fd<R, F: FnOnce(BorrowedFd<'_>) -> R>(&self, func: F) -> R {
+        match self {
+            Stream::Stdin(_) => func(std::io::stdin().as_fd()),
+            Stream::Stdout(_) => func(std::io::stdout().as_fd()),
+            Stream::Stderr(_) => func(std::io::stderr().as_fd()),
+        }
+    }
+
+    pub fn as_raw_fd(&self) -> RawFd {
+        self.with_fd(|fd| fd.as_raw_fd())
+    }
+}
+
+pub enum ShellRunCmd {
+    Simple(BString),
+    Function {
+        func: Rc<crate::shell::Function>,
+        args: Vec<BString>,
+        arg0: Option<BString>,
+    },
 }
 
 // manages replacing a single fd (0, 1, or 2) temporarily, restoring it on drop
@@ -73,12 +85,7 @@ impl FdOverride {
             Stream::Stdout(x) => Stream::Stdout(x),
             Stream::Stderr(x) => Stream::Stderr(x),
         };
-
-        let saved_fd = match stream {
-            Stream::Stdin(_) => nix::unistd::dup(std::io::stdin()),
-            Stream::Stdout(_) => nix::unistd::dup(std::io::stdout()),
-            Stream::Stderr(_) => nix::unistd::dup(std::io::stderr()),
-        }?;
+        let saved_fd = stream.with_fd(|fd| nix::unistd::dup(fd))?;
 
         stream.dup2(&fd)?;
         Ok(Some(Self {

@@ -1,5 +1,5 @@
 use std::num::NonZeroU16;
-use std::os::fd::{AsRawFd};
+use std::os::fd::{AsRawFd, RawFd};
 use mlua::{prelude::*, UserData, UserDataMethods};
 use tokio::io::{
     BufReader,
@@ -100,10 +100,16 @@ fn add_writeable_methods<R: AsyncWrite+Unpin, T: 'static+Writeable<R>, M: UserDa
     });
 }
 
+impl<T: AsyncRead + AsRawFd> ReadableFile<T> {
+    pub fn as_raw_fd(&self) -> Option<RawFd> {
+        self.0.as_ref().map(|x| x.get_ref().as_raw_fd())
+    }
+}
+
 impl<T: AsyncRead + AsRawFd + Unpin + 'static> UserData for ReadableFile<T> {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("as_fd", |_lua, file, ()| {
-            Ok(file.0.as_ref().map(|x| x.get_ref().as_raw_fd()))
+            Ok(file.as_raw_fd())
         });
 
         methods.add_method_mut("close", |_lua, file, ()| {
@@ -146,10 +152,16 @@ impl<T: AsyncWrite> Writeable<BufWriter<T>> for WriteableFile<T> {
     }
 }
 
+impl<T: AsyncWrite + AsRawFd> WriteableFile<T> {
+    pub fn as_raw_fd(&self) -> Option<RawFd> {
+        self.0.as_ref().map(|x| x.get_ref().as_raw_fd())
+    }
+}
+
 impl<T: AsyncWrite + AsRawFd + Unpin + 'static> UserData for WriteableFile<T> {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
         methods.add_method("as_fd", |_lua, file, ()| {
-            Ok(file.0.as_ref().map(|x| x.get_ref().as_raw_fd()))
+            Ok(file.as_raw_fd())
         });
 
         methods.add_method_mut("close", |_lua, file, ()| {

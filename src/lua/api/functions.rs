@@ -60,7 +60,7 @@ impl UserData for Function {
                 stdout,
                 stderr,
             ).await.map_err(crate::lua::lua_error)?;
-            Ok(lua.pack_multi((code, stdout, stderr))?)
+            lua.pack_multi((code, stdout, stderr))
         });
     }
 }

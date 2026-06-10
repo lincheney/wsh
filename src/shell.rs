@@ -205,13 +205,12 @@ impl Shell {
         zsh::execstring(string.as_ref(), Default::default())
     }
 
-    pub fn exec_subshell(
+    pub fn exec_subshell<I: Iterator<Item=(RawFd, Option<RawFd>, bool)>>(
         &self,
         _token: TrampolineToken,
         string: &BStr,
         job_control: bool,
-        redirections: &[Option<(RawFd, RawFd, bool)>],
-        closes: &[Option<RawFd>],
+        fd_mapping: I,
     ) -> Result<c_long> {
 
         // okkkkkkkk
@@ -223,20 +222,12 @@ impl Shell {
 
         let mut cmd = BString::new(vec![]);
         cmd.push_str("( ");
-        for fd in closes.iter().flatten() {
-            write!(cmd, "__fd{fd}={fd}; ").unwrap();
-        }
-        cmd.push_str("exec ");
-        // close fds
-        for fd in closes.iter().flatten() {
-            write!(cmd, "{{__fd{fd}}}>&- ").unwrap();
-        }
-        // apply all the redirections
-        for (left, right, output) in redirections.iter().flatten() {
-            if *output {
-                write!(cmd, "{left}>/dev/fd/{right} ").unwrap();
-            } else {
-                write!(cmd, "{left}</dev/fd/{right} ").unwrap();
+        // apply all the fd mappings
+        for (left, right, output) in fd_mapping {
+            match (right, output) {
+                (Some(right), true)  => write!(cmd, "exec {left}>/dev/fd/{right};").unwrap(),
+                (Some(right), false) => write!(cmd, "exec {left}</dev/fd/{right};").unwrap(),
+                (None, _) => write!(cmd, "__fd={left}; exec {{__fd}}<&-;").unwrap(),
             }
         }
         cmd.push_str("; eval '");

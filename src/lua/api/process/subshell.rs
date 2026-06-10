@@ -1,19 +1,20 @@
 use crate::lua::LuaWrapper;
 use bstr::BString;
 use std::default::Default;
-use std::os::fd::{RawFd, AsRawFd, IntoRawFd};
-use std::fs::File;
+use std::os::fd::{AsRawFd, OwnedFd};
 use anyhow::{Result};
 use mlua::{prelude::*};
 use tokio::io::{
     BufReader,
     BufWriter,
 };
+use tokio::net::unix::pipe::{Sender, Receiver};
 use tokio::sync::{oneshot, watch};
 use serde::{Deserialize};
 use crate::ui::{Ui};
 use crate::lua::api::asyncio::{ReadableFile, WriteableFile};
 use super::spawn::{Stdio, Process, CommandResult};
+use super::shell::Stream;
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -32,53 +33,47 @@ enum SubshellRunArgs {
     Full(FullShellRunArgs),
 }
 
-#[derive(Debug)]
-struct OverriddenStream {
-    fd: RawFd,
-    replacement: RawFd,
-    closed: bool,
+struct FdOverride {
+    stream: Stream<Stdio>,
+    fd: Option<OwnedFd>,
 }
 
-impl OverriddenStream {
-    fn new<A: AsRawFd, B: IntoRawFd>(fd: &A, replacement: B) -> Self {
-        Self {
-            fd: fd.as_raw_fd(),
-            replacement: replacement.into_raw_fd(),
-            closed: false,
+impl FdOverride {
+
+    fn new_basic(stream: Stream<Stdio>) -> Result<Option<(Self, Option<(Sender, Receiver)>)>> {
+        let (Stream::Stdin(stdio) | Stream::Stdout(stdio) | Stream::Stderr(stdio)) = stream;
+        let result = Self {
+            stream,
+            fd: None,
+        };
+        match stdio {
+            Stdio::inherit => Ok(None),
+            Stdio::null  => Ok(Some((result, None))),
+            Stdio::piped => Ok(Some((result, Some(tokio::net::unix::pipe::pipe()?)))),
         }
     }
 
-    fn close(&mut self) -> Result<()> {
-        nix::unistd::close(self.replacement)?;
-        self.closed = true;
-        Ok(())
-    }
-}
-
-macro_rules! stdio_pipe {
-    ($args:expr, $name:ident, true) => (
-        stdio_pipe!($args, $name, File::create("/dev/null"), {
-            let (send, recv) = tokio::net::unix::pipe::pipe()?;
-            let fd = send.as_raw_fd();
-            let send = WriteableFile(Some(BufWriter::new(send)));
-            (Some(send), Some(OverriddenStream::new(&std::io::$name(), recv.into_nonblocking_fd()?)), Some(fd))
-        })
-    );
-    ($args:expr, $name:ident, false) => (
-        stdio_pipe!($args, $name, File::open("/dev/null"), {
-            let (send, recv) = tokio::net::unix::pipe::pipe()?;
-            let fd = recv.as_raw_fd();
-            let recv = ReadableFile(Some(BufReader::new(recv)), false);
-            (Some(recv), Some(OverriddenStream::new(&std::io::$name(), send.into_nonblocking_fd()?)), Some(fd))
-        })
-    );
-    ($args:expr, $name:ident, $null:expr, $piped:expr) => (
-        match $args.$name {
-            Stdio::inherit => (None, None, None),
-            Stdio::null => (None, Some(OverriddenStream::new(&std::io::$name(), $null?)), None),
-            Stdio::piped => $piped,
+    fn new_stdin(stdio: Stdio) -> Result<Option<(Self, Option<Sender>)>> {
+        match Self::new_basic(Stream::Stdin(stdio))? {
+            Some((mut result, Some((send, recv)))) => {
+                result.fd = Some(recv.into_nonblocking_fd()?);
+                Ok(Some((result, Some(send))))
+            },
+            Some((result, None)) => Ok(Some((result, None))),
+            None => Ok(None),
         }
-    );
+    }
+
+    fn new_out(stream: Stream<Stdio>) -> Result<Option<(Self, Option<Receiver>)>> {
+        match Self::new_basic(stream)? {
+            Some((mut result, Some((send, recv)))) => {
+                result.fd = Some(send.into_nonblocking_fd()?);
+                Ok(Some((result, Some(recv))))
+            },
+            Some((result, None)) => Ok(Some((result, None))),
+            None => Ok(None),
+        }
+    }
 }
 
 async fn subshell_run(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
@@ -100,12 +95,6 @@ pub async fn subshell_run_with_args(ui: Ui, lua: Lua, args: FullShellRunArgs) ->
         || matches!(args.stderr, Stdio::inherit)
     );
 
-    let stdin = stdio_pipe!(args, stdin, true);
-    let stdout = stdio_pipe!(args, stdout, false);
-    let stderr = stdio_pipe!(args, stderr, false);
-    let mut streams = [stdin.1, stdout.1, stderr.1];
-    let fds = [stdin.2, stdout.2, stderr.2];
-
     ui.clone().runtime.spawn_local(async move {
         let result = ui.clone().shell.trampoline_out_callback(move |mut ui, token| {
 
@@ -113,17 +102,41 @@ pub async fn subshell_run_with_args(ui: Ui, lua: Lua, args: FullShellRunArgs) ->
                 let mut result_sender = Some(result_sender);
 
                 let result = ui.freeze_if(foreground, true, async {
+
+                    let (stdin, stdin_pipe)   = FdOverride::new_stdin(args.stdin)?.unzip();
+                    let (stdout, stdout_pipe) = FdOverride::new_out(Stream::Stdout(args.stdout))?.unzip();
+                    let (stderr, stderr_pipe) = FdOverride::new_out(Stream::Stderr(args.stderr))?.unzip();
+                    let streams = [stdin, stdout, stderr];
+                    let stdin_pipe = stdin_pipe.flatten();
+                    let stdout_pipe = stdout_pipe.flatten();
+                    let stderr_pipe = stderr_pipe.flatten();
+
+                    let redirections = streams
+                        .iter()
+                        .flatten()
+                        .map(|x| (x.stream.as_raw_fd(), x.fd.as_ref().map(|fd| fd.as_raw_fd()), !matches!(x.stream, Stream::Stdin(_))) );
+                    let closes = [
+                        stdin_pipe.as_ref().map(|x| x.as_raw_fd()),
+                        stdout_pipe.as_ref().map(|x| x.as_raw_fd()),
+                        stderr_pipe.as_ref().map(|x| x.as_raw_fd()),
+                    ].into_iter()
+                        .flatten()
+                        .map(|x| (x, None, true));
+                    let fds = redirections.chain(closes);
+
                     // fork it now to get the pid
-                    let redirections = streams.each_ref().map(|s| s.as_ref().map(|s| (s.fd, s.replacement, s.fd != 0)));
-                    let pid = ui.shell.exec_subshell(token, args.command.as_ref(), false, &redirections, &fds)? as _;
-                    // close them or we will block
-                    for file in streams.iter_mut().flatten() {
-                        crate::log_if_err(file.close());
-                    }
-                    // send streams back to caller
-                    let _ = result_sender.take().unwrap().send(Ok((pid, stdin.0, stdout.0, stderr.0)));
-                    // get the status
+                    let pid = ui.shell.exec_subshell(token, args.command.as_ref(), false, fds)? as _;
                     let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, true);
+                    // close streams or we will block
+                    drop(streams);
+                    // send streams back to caller
+                    let _ = result_sender.take().unwrap().send(Ok((
+                        pid,
+                        stdin_pipe,
+                        stdout_pipe,
+                        stderr_pipe,
+                    )));
+                    // get the status
                     let code = match ui.shell.check_pid_status(pid as _) {
                         None | Some(-1) => pid_waiter.await.unwrap_or(-1) as _,
                         Some(code) => code as _,
@@ -159,9 +172,9 @@ pub async fn subshell_run_with_args(ui: Ui, lua: Lua, args: FullShellRunArgs) ->
             pid,
             result: CommandResult{ inner: receiver },
         },
-        stdin,
-        stdout,
-        stderr,
+        stdin.map(|stdin| WriteableFile(Some(BufWriter::new(stdin)))),
+        stdout.map(|stdout| ReadableFile(Some(BufReader::new(stdout)), false)),
+        stderr.map(|stderr| ReadableFile(Some(BufReader::new(stderr)), false)),
     ))?)
 }
 
