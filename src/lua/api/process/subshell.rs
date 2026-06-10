@@ -41,39 +41,34 @@ struct FdOverride {
 
 impl FdOverride {
 
-    fn new_basic(stream: Stream<Stdio>) -> Result<Option<(Self, Option<(Sender, Receiver)>)>> {
+    fn new_basic(stream: Stream<Stdio>) -> Result<Option<Option<(Sender, Receiver)>>> {
         let (Stream::Stdin(stdio) | Stream::Stdout(stdio) | Stream::Stderr(stdio)) = stream;
-        let result = Self {
-            stream,
-            fd: None,
-        };
         match stdio {
             Stdio::inherit => Ok(None),
-            Stdio::null  => Ok(Some((result, None))),
-            Stdio::piped => Ok(Some((result, Some(tokio::net::unix::pipe::pipe()?)))),
+            Stdio::null  => Ok(Some(None)),
+            Stdio::piped => Ok(Some(Some(tokio::net::unix::pipe::pipe()?))),
         }
     }
 
-    fn new_stdin(stdio: Stdio) -> Result<Option<(Self, Option<Sender>)>> {
-        match Self::new_basic(Stream::Stdin(stdio))? {
-            Some((mut result, Some((send, recv)))) => {
-                result.fd = Some(recv.into_nonblocking_fd()?);
-                Ok(Some((result, Some(send))))
+    fn new_stdin(stdio: Stdio) -> Result<(Option<Self>, Option<Sender>)> {
+        let stream = Stream::Stdin(stdio);
+        Ok(match Self::new_basic(stream)? {
+            Some(Some((send, recv))) => {
+                (Some(Self{ stream, fd: Some(recv.into_nonblocking_fd()?) }), Some(send))
             },
-            Some((result, None)) => Ok(Some((result, None))),
-            None => Ok(None),
-        }
+            Some(None) => (Some(Self{ stream, fd: None }), None),
+            None => (None, None),
+        })
     }
 
-    fn new_out(stream: Stream<Stdio>) -> Result<Option<(Self, Option<Receiver>)>> {
-        match Self::new_basic(stream)? {
-            Some((mut result, Some((send, recv)))) => {
-                result.fd = Some(send.into_nonblocking_fd()?);
-                Ok(Some((result, Some(recv))))
+    fn new_out(stream: Stream<Stdio>) -> Result<(Option<Self>, Option<Receiver>)> {
+        Ok(match Self::new_basic(stream)? {
+            Some(Some((send, recv))) => {
+                (Some(Self{ stream, fd: Some(send.into_nonblocking_fd()?) }), Some(recv))
             },
-            Some((result, None)) => Ok(Some((result, None))),
-            None => Ok(None),
-        }
+            Some(None) => (Some(Self{ stream, fd: None }), None),
+            None => (None, None),
+        })
     }
 
     fn fd_action(&self) -> FdAction {
@@ -113,13 +108,10 @@ pub async fn subshell_run_with_args(ui: Ui, lua: Lua, args: FullShellRunArgs) ->
 
                 let result = ui.freeze_if(foreground, true, async {
 
-                    let (stdin, stdin_pipe)   = FdOverride::new_stdin(args.stdin)?.unzip();
-                    let (stdout, stdout_pipe) = FdOverride::new_out(Stream::Stdout(args.stdout))?.unzip();
-                    let (stderr, stderr_pipe) = FdOverride::new_out(Stream::Stderr(args.stderr))?.unzip();
+                    let (stdin, stdin_pipe)   = FdOverride::new_stdin(args.stdin)?;
+                    let (stdout, stdout_pipe) = FdOverride::new_out(Stream::Stdout(args.stdout))?;
+                    let (stderr, stderr_pipe) = FdOverride::new_out(Stream::Stderr(args.stderr))?;
                     let streams = [stdin, stdout, stderr];
-                    let stdin_pipe = stdin_pipe.flatten();
-                    let stdout_pipe = stdout_pipe.flatten();
-                    let stderr_pipe = stderr_pipe.flatten();
 
                     let redirections = streams.iter().flatten().map(|s| s.fd_action());
                     let closes = [

@@ -12,6 +12,7 @@ use nix::sys::memfd::{memfd_create, MFdFlags};
 use crate::ui::Ui;
 use super::spawn::Stdio;
 
+#[derive(Copy, Clone)]
 pub enum Stream<T> {
     Stdin(T),
     Stdout(Stdio),
