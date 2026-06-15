@@ -265,7 +265,7 @@ impl Token {
 
                 [
                     first  @ Token{kind: TokenKind::Token(token::String), ..},
-                    second @ Token{kind: TokenKind::Lextok(lextok::STRING), ..},
+                    second @ Token{kind: TokenKind::Scope(CommandStack::Quote), ..},
                 ..] if
                     first.range.end == second.range.start
                     && second.children.as_ref().and_then(|c| c.first()).is_some_and(|t| matches!(t.kind, TokenKind::Token(token::Snull)))
@@ -275,6 +275,18 @@ impl Token {
                     let string = &mut children[i];
                     string.range.start = dollar.range.start;
                     string.get_children_mut().insert(0, dollar);
+                },
+
+                [
+                    first @ Token{kind: TokenKind::Heredoc(_), ..},
+                ..] if
+                    matches!(self.kind, TokenKind::Scope(CommandStack::Heredoc))
+                    && first.children.as_ref().and_then(|c| c.first()).is_some_and(|t| matches!(t.kind, TokenKind::Lextok(lextok::NEWLIN)))
+                => {
+                    // move first newline out
+                    let newlin = children[i].get_children_mut().remove(0);
+                    self.range.start = self.range.start.min(newlin.range.start);
+                    children.insert(i, newlin);
                 },
 
                 _ => (),
