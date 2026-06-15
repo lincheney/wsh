@@ -122,8 +122,8 @@ return wish.plugin(function(wish, opts, plugin)
             QUERY.apply_seq(rules[i], tokens, str, callback)
         end
         for i = 1, #tokens do
-            if tokens[i].nested then
-                apply_highlight_rules(rules, tokens[i].nested, str, highlights, priority+1)
+            if tokens[i].children then
+                apply_highlight_rules(rules, tokens[i].children, str, highlights, priority+1)
             end
         end
         return highlights
