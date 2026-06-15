@@ -251,7 +251,7 @@ impl Token {
 
                 [
                     first  @ Token{kind: TokenKind::Token(token::Qstring | token::String), ..},
-                    second @ Token{kind: TokenKind::Scope(CommandStack::Cmdsubst), ..},
+                    second @ Token{kind: TokenKind::Lextok(lextok::STRING) | TokenKind::Scope(CommandStack::Cmdsubst), ..},
                 ..] if
                     first.range.end == second.range.start
                     && second.children.as_ref().and_then(|c| c.first()).is_some_and(|t| matches!(t.kind, TokenKind::Token(token::Inpar)))
@@ -265,7 +265,7 @@ impl Token {
 
                 [
                     first  @ Token{kind: TokenKind::Token(token::String), ..},
-                    second @ Token{kind: TokenKind::Scope(CommandStack::Quote), ..},
+                    second @ Token{kind: TokenKind::Lextok(lextok::STRING) | TokenKind::Scope(CommandStack::Quote), ..},
                 ..] if
                     first.range.end == second.range.start
                     && second.children.as_ref().and_then(|c| c.first()).is_some_and(|t| matches!(t.kind, TokenKind::Token(token::Snull)))
@@ -637,9 +637,7 @@ impl ParseState {
                         .and_then(|_| self.stack.last_mut().unwrap().get_children_mut().pop())
                         .unwrap_or(Token::new(start .. end));
 
-                    if matches!(token.kind, TokenKind::None | TokenKind::Initial) {
-                        token.kind = kind;
-                    }
+                    token.kind = kind;
 
                     let prev = self.stack.last().unwrap();
                     let prev = prev.children.as_ref().and_then(|c| c.last()).unwrap_or(prev);
