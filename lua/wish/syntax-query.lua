@@ -4,7 +4,9 @@ function M.debug_tokens(tokens, buffer, indent)
     indent = indent or 0
     local output = {}
     for i = 1, #tokens do
-        local str = string.rep(' ', indent) .. string.format('%s: %q', tokens[i].kind, buffer:sub(tokens[i].start, tokens[i].finish))
+        local str = buffer:sub(tokens[i].start, tokens[i].finish)
+        str = string.format('%q', str):sub(2, -2):gsub('\\\n', '\\n'):gsub('\\.', {['\\"'] = '"'})
+        str = string.rep(' ', indent) .. (tokens[i].kind or '""') .. ': ' .. str
         table.insert(output, str)
         if tokens[i].children then
             table.insert(output, M.debug_tokens(tokens[i].children, buffer, indent+2))
