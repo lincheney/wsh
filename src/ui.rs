@@ -403,7 +403,7 @@ impl Ui {
             };
             let (complete, _tokens) = self.shell.parse(
                 buffer.clone(),
-                ParserOptions{tokens: Some(false), ..ParserOptions::default()},
+                ParserOptions::default(),
             );
             ::log::debug!("DEBUG(zloty) \t{}\t= {:?}", stringify!(_tokens), _tokens);
             ::log::debug!("DEBUG(manses)\t{}\t= {:?}", stringify!(complete), complete);

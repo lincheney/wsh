@@ -27,7 +27,6 @@ fn untokenize(mut c: u8) -> u8 {
 pub struct ParserOptions {
     pub comments: Option<bool>,
     pub custom: bool,
-    pub tokens: Option<bool>,
     pub allow_unfinished_heredoc: Option<bool>,
 }
 
@@ -36,7 +35,6 @@ impl Default for ParserOptions {
         Self {
             comments: None,
             custom: true,
-            tokens: None,
             allow_unfinished_heredoc: None,
         }
     }
@@ -370,12 +368,13 @@ impl Token {
     }
 
     fn has_unfinished_heredoc(&self) -> bool {
-        if matches!(self.kind, TokenKind::Scope(CommandStack::Heredoc))
-            && !self.children.iter().flatten().any(|c| matches!(c.kind, TokenKind::HeredocEnd))
-        {
-            return true
+        match self.kind {
+            TokenKind::Scope(CommandStack::Heredoc)
+                if !self.children.iter().flatten().any(|c| matches!(c.kind, TokenKind::HeredocEnd)) => true,
+            TokenKind::Command
+                if self.children.iter().flatten().any(|c| matches!(c.kind, TokenKind::Lextok(lextok::DINANG))) => true,
+            _ => self.children.iter().flatten().any(|c| c.has_unfinished_heredoc()),
         }
-        self.children.iter().flatten().any(|c| c.has_unfinished_heredoc())
     }
 
 }
@@ -705,20 +704,14 @@ fn parse_internal(
         }
         zsh_sys::lexflags = new_lexflags as _;
 
-        let need_tokens = options.tokens.unwrap_or(true);
-
         let old_hgetc = zsh_sys::hgetc;
         let old_hungetc = zsh_sys::hungetc;
-        if need_tokens {
-            zsh_sys::hgetc = Some(hgetc_override);
-            zsh_sys::hungetc = Some(hungetc_override);
-        }
+        zsh_sys::hgetc = Some(hgetc_override);
+        zsh_sys::hungetc = Some(hungetc_override);
 
-        if need_tokens {
-            PARSE_STATE.with_borrow_mut(|state| {
-                state.reset(metafied);
-            });
-        }
+        PARSE_STATE.with_borrow_mut(|state| {
+            state.reset(metafied);
+        });
 
         // we are complete if all the pointers are valid
         // we dont need to free, zsh uses zhalloc
@@ -735,36 +728,32 @@ fn parse_internal(
         }
 
         // merge everything together and postprocess
-        let tokens = if need_tokens {
-            PARSE_STATE.with_borrow_mut(|state| {
-                while state.stack.len() > 1 {
-                    state.pop(None);
-                }
-                let mut token = state.stack.pop().unwrap();
-                token.postprocess(cmd.as_ref(), state.meta.as_ref(), &mut [0; _], allow_comments);
+        let tokens = PARSE_STATE.with_borrow_mut(|state| {
+            while state.stack.len() > 1 {
+                state.pop(None);
+            }
+            let mut token = state.stack.pop().unwrap();
+            token.postprocess(cmd.as_ref(), state.meta.as_ref(), &mut [0; _], allow_comments);
 
-                // anything remaining is a syntax error
-                let end = token.children_end().unwrap_or(0);
-                if !complete && end < metalen {
-                    token.push_token(Token::new_with_kind(end .. metalen, TokenKind::SyntaxError));
-                }
+            // anything remaining is a syntax error
+            let end = token.children_end().unwrap_or(0);
+            if !complete && end < metalen {
+                token.push_token(Token::new_with_kind(end .. metalen, TokenKind::SyntaxError));
+            }
 
-                // unfinished heredocs are technically syntactically correct
-                // but maybe you don't want that
-                if complete
-                    && !options.allow_unfinished_heredoc.unwrap_or(false)
-                    && token.has_unfinished_heredoc()
-                {
-                    complete = false;
-                }
+            // unfinished heredocs are technically syntactically correct
+            // but maybe you don't want that
+            if complete
+            && !options.allow_unfinished_heredoc.unwrap_or(false)
+            && token.has_unfinished_heredoc()
+            {
+                complete = false;
+            }
 
                 // ::log::debug!("DEBUG(curved)\t{}\t=\n{}", stringify!(s.debug_dump(cmd.as_ref(), 0)), token.debug_dump(cmd.as_ref(), 0));
 
-                token.children
-            })
-        } else {
-            None
-        };
+            token.children
+        });
 
         // restore
         zsh_sys::hgetc = old_hgetc;
