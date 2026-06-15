@@ -26,7 +26,7 @@ function M.activate()
                 -- we have highlighted keys and waiting for one of them
                 if positions then
                     if positions[data] then
-                        wish.set_cursor(positions[data])
+                        wish.set_cursor(positions[data] + 1)
                         -- deactivate later
                         wish.schedule(M.deactivate)
                     else
@@ -67,7 +67,7 @@ function M.activate()
 
                 -- jump directly to the only match
                 if #matches == 1 then
-                    wish.set_cursor(matches[1])
+                    wish.set_cursor(matches[1] + 1)
                     -- deactivate later
                     wish.schedule(M.deactivate)
                     return

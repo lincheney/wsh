@@ -223,7 +223,7 @@ wish.set_keymap('<c-`>', function()
 end)
 
 wish.set_keymap('<c-f>', function()
-    require('wish/ft').activate()
+    require('wish.extras.ft').activate()
 end)
 
 local PASTE_NS = wish.add_buf_highlight_namespace()
