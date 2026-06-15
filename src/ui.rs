@@ -653,6 +653,8 @@ impl Ui {
     }
 
     pub async fn insert_or_set_buffer(&self, insert: bool, data: &[u8], cursor: Option<usize>) {
+        self.queue_draw();
+
         // if we need to invoke a shfunc, need to trampline out
         let (func, num_chars, old_buffer, old_cursor) = {
             let buffer = &mut self.borrow_mut().buffer;

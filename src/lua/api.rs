@@ -70,6 +70,7 @@ fn get_buffer(ui: &Ui, lua: &Lua, (): ()) -> Result<(mlua::String, usize)> {
 
 fn set_cursor(ui: &Ui, _lua: &Lua, val: usize) -> Result<()> {
     ui.borrow_mut().buffer.set_cursor(val.saturating_sub(1));
+    ui.queue_draw();
     Ok(())
 }
 
