@@ -252,7 +252,7 @@ impl Token {
                 },
 
                 [
-                    first  @ Token{kind: TokenKind::Token(token::Qstring), ..},
+                    first  @ Token{kind: TokenKind::Token(token::Qstring | token::String), ..},
                     second @ Token{kind: TokenKind::Scope(CommandStack::Cmdsubst), ..},
                 ..] if
                     first.range.end == second.range.start
@@ -625,7 +625,10 @@ impl ParseState {
                         .then_some(true)
                         .and_then(|_| self.stack.last_mut().unwrap().get_children_mut().pop())
                         .unwrap_or(Token::new(start .. end));
-                    token.kind = kind;
+
+                    if matches!(token.kind, TokenKind::None | TokenKind::Initial) {
+                        token.kind = kind;
+                    }
 
                     let prev = self.stack.last().unwrap();
                     let prev = prev.children.as_ref().and_then(|c| c.last()).unwrap_or(prev);
