@@ -51,7 +51,7 @@ wish.set_keymap('<end>',   function()
     local buffer, cursor = wish.get_buffer()
     local buflen = utf8.len(buffer) + 1
     if cursor == buflen then
-        require('wish/autosuggestions').accept_suggestion()
+        require('wish.extras.autosuggestions').accept_suggestion()
     else
         wish.set_cursor(buflen)
     end

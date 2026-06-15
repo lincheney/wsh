@@ -1,7 +1,8 @@
-return wish.plugin(function(wish, opts, plugin)
+local suggestion = ''
+
+local M = wish.plugin(function(wish, opts, plugin)
 
     local NAMESPACE = wish.add_buf_highlight_namespace()
-    local suggestion = ''
     local history = nil
 
     wish.add_event_callback('accept_line', function()
@@ -47,10 +48,12 @@ return wish.plugin(function(wish, opts, plugin)
 
     end)
 
-    function plugin.accept_suggestion()
-        if suggestion and suggestion ~= '' then
-            wish.set_buffer(suggestion)
-        end
-    end
-
 end)
+
+function M.accept_suggestion()
+    if suggestion and suggestion ~= '' then
+        wish.set_buffer(suggestion)
+    end
+end
+
+return M
