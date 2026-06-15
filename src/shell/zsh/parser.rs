@@ -149,6 +149,44 @@ impl std::fmt::Display for TokenKind {
     }
 }
 
+fn command_stack_starts_with_command(val: CommandStack) -> bool {
+    match val {
+        CommandStack::For => true,
+        CommandStack::While => true,
+        CommandStack::Repeat => true,
+        CommandStack::Until => true,
+        CommandStack::If => true,
+        CommandStack::Then => true,
+        CommandStack::Else => true,
+        CommandStack::Elif => true,
+        CommandStack::Cmdor => true,
+        CommandStack::Cmdand => true,
+        CommandStack::Pipe => true,
+        CommandStack::Errpipe => true,
+        CommandStack::Subsh => true,
+        CommandStack::Cursh => true,
+        CommandStack::Cmdsubst => true,
+        CommandStack::ElifThen => true,
+        CommandStack::Always => true,
+        CommandStack::Brace => true,
+
+        CommandStack::Function => false,
+        CommandStack::Select => false,
+        CommandStack::Math => false,
+        CommandStack::Cond => false,
+        CommandStack::Foreach => false,
+        CommandStack::Case => false,
+        CommandStack::Array => false,
+        CommandStack::Quote => false,
+        CommandStack::Dquote => false,
+        CommandStack::Bquote => false,
+        CommandStack::Mathsubst => false,
+        CommandStack::Heredoc => false,
+        CommandStack::Heredocd => false,
+        CommandStack::Braceparam => false,
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Token {
     pub range: Range<usize>,
@@ -227,7 +265,7 @@ impl Token {
         }
     }
 
-    fn apply_custom_token(&mut self) {
+    fn apply_custom_token(&mut self, string: &BStr) {
         let Some(children) = self.children.as_mut()
             else { return };
 
@@ -289,6 +327,39 @@ impl Token {
                     children.insert(i, newlin);
                 },
 
+                [ first, ..] if matches!(self.kind, TokenKind::Command) => {
+                    // keywords
+                    let kind = match first.as_str(string).as_bytes() {
+                        b"case" => Some(TokenKind::Lextok(lextok::CASE)),
+                        b"coproc" => Some(TokenKind::Lextok(lextok::COPROC)),
+                        b"for" => Some(TokenKind::Lextok(lextok::FOR)),
+                        b"foreach" => Some(TokenKind::Lextok(lextok::FOREACH)),
+                        b"function" => Some(TokenKind::Lextok(lextok::FUNC)),
+                        b"if" => Some(TokenKind::Lextok(lextok::IF)),
+                        b"repeat" => Some(TokenKind::Lextok(lextok::REPEAT)),
+                        b"select" => Some(TokenKind::Lextok(lextok::SELECT)),
+                        b"until" => Some(TokenKind::Lextok(lextok::UNTIL)),
+                        b"while" => Some(TokenKind::Lextok(lextok::WHILE)),
+                        _ if matches!(children.get(i+1), Some(Token{kind: TokenKind::Scope(CommandStack::Function), ..})) => Some(first.kind),
+                        _ => None,
+                    };
+                    if let Some(kind) = kind {
+                        children[i].kind = kind;
+
+                        if let Some(second) = children.get(i+1)
+                            && second.children.as_ref().is_some_and(|c| c.len() == 1)
+                            && matches!(second.children.as_ref().unwrap()[0].kind, TokenKind::CommandStack(_))
+                        {
+                            let first = children.remove(i);
+                            let second = &mut children[i];
+                            second.range.start = first.range.start;
+                            let child = &mut second.get_children_mut()[0];
+                            child.range.start = first.range.start;
+                            child.get_children_mut().insert(0, first);
+                        }
+                    }
+                },
+
                 _ => (),
             }
 
@@ -333,7 +404,7 @@ impl Token {
             self.kind = TokenKind::Comment;
         }
 
-        self.apply_custom_token();
+        self.apply_custom_token(string);
 
         if matches!(self.kind, TokenKind::Command) && let Some(children) = &mut self.children {
             // collapse empty command with only a command ending thing or comment
@@ -344,7 +415,7 @@ impl Token {
             } else {
                 // first string is the command
                 for t in children.iter_mut() {
-                    if matches!(t.kind, TokenKind::None | TokenKind::Scope(_) | TokenKind::Lextok(lextok::STRING)) {
+                    if matches!(t.kind, TokenKind::None | TokenKind::Lextok(lextok::STRING)) {
                         t.kind = TokenKind::Arg0;
                         break
                     }
@@ -396,7 +467,7 @@ pub fn parse(mut cmd: BString, options: ParserOptions) -> (bool, Vec<Token>) {
         return (true, vec![])
     }
     // add newline at the end
-    cmd.push_str(b"\n");
+    cmd.push_str(b"\n\n");
     parse_internal(cmd, options)
 }
 
@@ -539,7 +610,8 @@ impl ParseState {
             }
 
             // add tokstr from before this command stack
-            let scope = num::FromPrimitive::from_u8(cs).map_or(TokenKind::None, TokenKind::Scope);
+            let cs = num::FromPrimitive::from_u8(cs);
+            let scope = cs.map_or(TokenKind::None, TokenKind::Scope);
             self.stack.push(Token::new_with_kind(end .. end, scope));
             self.add_tokstr();
             let token = self.stack.last_mut().unwrap();
@@ -547,7 +619,11 @@ impl ParseState {
 
             // token for the actual command stack
             let mut command = Token::new_with_kind(end .. self.metalen, kind);
-            let mut initial = Token::new(end..end);
+            let mut initial = if let Some(cs) = cs && command_stack_starts_with_command(cs) {
+                Token::new(end..end)
+            } else {
+                Token::new_with_kind(end..end, TokenKind::None)
+            };
 
             // check if heredoc is quoted
             if matches!(kind, TokenKind::CommandStack(CommandStack::Heredoc))
@@ -639,7 +715,8 @@ impl ParseState {
 
                     token.kind = kind;
 
-                    let prev = self.stack.last().unwrap();
+                    let prev = self.stack.last_mut().unwrap();
+                    prev.range.start = prev.range.start.min(token.range.start);
                     let prev = prev.children.as_ref().and_then(|c| c.last()).unwrap_or(prev);
 
                     // this token starts a command

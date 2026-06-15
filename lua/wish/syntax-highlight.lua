@@ -1,42 +1,35 @@
 local QUERY = require('wish.syntax-query')
 
 local RULES = {
-    { { hl='command', kind='command' } },
+    { {hl='command', kind='arg0'} },
     -- comments
     { {hl='comment', kind='comment'} },
     -- punctuation
     { {hl='symbol', regex='^\\W+$'}, priority=-1000 },
     -- strings
-    {
-        {hl='string', kind='Dnull|Snull'},
-        {hl='string', not_kind='Dnull|Snull', mod='*'},
-        {hl='string', kind='Dnull|Snull', mod='?'},
-        priority=-1,
-    },
+    { {hl='string', kind='Dquote|Squote'}, priority=-1 },
     -- heredocs
-    { {hl='string', kind='heredoc_body'} },
-    { {hl='heredoc_tag', kind='heredoc_open_tag|heredoc_close_tag'} },
+    { {hl='string', kind='heredoc'} },
+    { {hl='heredoc_tag', kind='heredoc_end'} },
+    {
+        {kind='DINANG'},
+        {hl='heredoc_tag', kind='STRING'},
+    },
     -- escapes
-    {{ kind='STRING|command', contains={
-        {hl='escape', kind='Bnull'},
-        {hl='escape', kind='', regex='^[^ ]', hlregex='^[^ ]'},
-    } }},
-    {{ kind='STRING|command', contains={
-        {hl='escape_space', kind='Bnull'},
-        {hl='escape_space', kind='', regex='^ ', hlregex='^ '},
-    } }},
-    {{ kind='STRING|command', contains={
+    { {hl='escape_space', kind='STRING|arg0', hlregex='\\\\ '} },
+    { {hl='escape', kind='STRING|arg0', hlregex='\\\\.'} },
+    {{ kind='STRING|arg0', contains={
         {kind='String'},
         {kind='Snull'},
         {hl='escape', not_kind='Snull', hlregex=[=[\\x[0-9a-fA-F]{0,2}|\\u\d{0,4}|\\.]=], mod='*'},
         {kind='Snull', mod='?'},
     } }},
-    {{ kind='STRING|command', contains={
+    {{ kind='STRING|arg0', contains={
         {kind='Dnull'},
         {hl='escape', not_kind='Dnull', hlregex='\\\\.', mod='*'},
         {kind='Dnull', mod='?'},
     } }},
-    {{ kind='heredoc_body', contains={{contains={
+    {{ kind='heredoc', contains={{contains={
         { hl='escape', kind='Bnull'},
         { hl='escape', regex='^[\\\\$]', hlregex='^[\\\\$]'},
     } }} }},
@@ -44,9 +37,7 @@ local RULES = {
     { {hl='env_var_key', kind='ENVSTRING', hlregex='^[^=]+'} },
     { {hl='env_var_value', kind='ENVSTRING', hlregex='=(.*)$'} },
     -- reset highlight on substitutions in strings
-    { {kind='STRING|command', contains={
-        {hl='normal', kind='substitution'},
-    } } },
+    { {hl='normal', kind='Cmdsubst'} },
     { {hl='number', kind='STRING', regex='^\\d+$' } },
     { {hl='flag', kind='STRING', regex='^-', hlregex='^-[^=]*'} },
     { {hl='flag_value', kind='STRING', regex='^-.*=', hlregex='^-[^=]*=(.+)'} },
@@ -54,19 +45,14 @@ local RULES = {
     -- variables
     {
         {hl='variable', kind='Qstring|String'},
-        {hl='variable', kind='|String|Quest'},
+        {hl='variable', kind='|String|Quest', hlregex='^([@?*]|\\d+|[a-zA-Z]\\w*)'},
     },
-    {
-        {hl='variable', kind='Qstring|String'},
-        {hl='variable', kind='Inbrace'},
-        {hl='variable', mod='*?'},
-        {hl='variable', kind='Outbrace'},
-    },
+    { { hl='variable', kind='STRING|scope', regex='^\\$\\{' } },
     -- but reset highlights on these
     { {hl='redirect', kind='redirect'} },
     -- function
-    { {kind='function', contains={ {hl='func', kind='FUNC'}, {hl='func', kind='STRING', mod='?'} }} },
-    { {kind='function', contains={ {mod='^'}, {hl='func', kind='STRING'} }} },
+    { {kind='Function', contains={ {hl='func', kind='FUNC'}, {hl='func', kind='STRING', mod='?'} }} },
+    { {kind='Function', contains={ {mod='^'}, {hl='func', kind='STRING'} }} },
     -- keywords
     { {hl='keyword', kind='CASE|COPROC|DOLOOP|DONE|ELIF|ELSE|ZEND|ESAC|FI|FOR|FOREACH|FUNC|IF|NOCORRECT|REPEAT|SELECT|THEN|TIME|UNTIL|WHILE|TYPESET'} },
 }
