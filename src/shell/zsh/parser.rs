@@ -212,6 +212,27 @@ impl Token {
         &cmd[self.range.clone()]
     }
 
+    fn truncate_to(&mut self, len: usize) {
+        if len < self.range.start {
+            // whole thing is truncated
+            self.children = None;
+            self.range = len .. len;
+
+        } else if len < self.range.end {
+            // truncate in the middle
+            self.range.end = len;
+            if let Some(children) = &mut self.children {
+                children.retain_mut(|token| {
+                    token.truncate_to(len);
+                    !token.range.is_empty()
+                });
+                if children.is_empty() {
+                    self.children = None;
+                }
+            }
+        }
+    }
+
     #[allow(dead_code)]
     fn debug_dump(&self, cmd: &BStr, indent: usize) -> String {
         let mut string = format!(
@@ -466,9 +487,10 @@ pub fn parse(mut cmd: BString, options: ParserOptions) -> (bool, Vec<Token>) {
     if cmd.trim().is_empty() {
         return (true, vec![])
     }
+    let len = cmd.len();
     // add newline at the end
     cmd.push_str(b"\n\n");
-    parse_internal(cmd, options)
+    parse_internal(cmd, options, len)
 }
 
 #[derive(Default)]
@@ -767,6 +789,7 @@ unsafe extern "C" fn hungetc_override(c: c_int) {
 fn parse_internal(
     cmd: BString,
     options: ParserOptions,
+    len: usize,
 ) -> (bool, Vec<Token>) {
 
     let metafied = MetaString::from(cmd.clone());
@@ -827,12 +850,13 @@ fn parse_internal(
             if !complete && end < metalen {
                 token.push_token(Token::new_with_kind(end .. metalen, TokenKind::SyntaxError));
             }
+            token.truncate_to(len);
 
             // unfinished heredocs are technically syntactically correct
             // but maybe you don't want that
             if complete
-            && !options.allow_unfinished_heredoc.unwrap_or(false)
-            && token.has_unfinished_heredoc()
+                && !options.allow_unfinished_heredoc.unwrap_or(false)
+                && token.has_unfinished_heredoc()
             {
                 complete = false;
             }
@@ -853,6 +877,6 @@ fn parse_internal(
         super::set_error_verbosity(old_noerrs);
         zsh_sys::zcontext_restore();
 
-        (complete, tokens.unwrap_or_else(Vec::new))
+        (complete, tokens.unwrap_or_default())
     }
 }
