@@ -1,15 +1,16 @@
 local M = {}
 
-function M.debug_tokens(tokens, buffer)
-    local x = {}
+function M.debug_tokens(tokens, buffer, indent)
+    indent = indent or 0
+    local output = {}
     for i = 1, #tokens do
-        x[i] = {
-            buffer:sub(tokens[i].start, tokens[i].finish),
-            tokens[i].kind,
-            tokens[i].children and M.debug_tokens(tokens[i].children, buffer)
-        }
+        local str = string.rep(' ', indent) .. string.format('%s: %q', tokens[i].kind, buffer:sub(tokens[i].start, tokens[i].finish))
+        table.insert(output, str)
+        if tokens[i].children then
+            table.insert(output, M.debug_tokens(tokens[i].children, buffer, indent+2))
+        end
     end
-    return x
+    return table.concat(output, '\n')
 end
 
 local function apply_matcher(matcher, token, str)
@@ -181,7 +182,26 @@ local function parse_buffer()
     local buffer = wish.get_buffer()
     -- rehighlight if last buffer was not a valid zsh command
     -- or the new buffer has changed (excepting ending whitespace changes)
-    if not prev_complete or string.sub(buffer, 1, #prev_buffer) ~= prev_buffer or string.find(buffer, '%S', #prev_buffer+1) then
+    if not prev_complete or buffer ~= prev_buffer then
+    -- or string.sub(buffer, 1, #prev_buffer) ~= prev_buffer or string.find(buffer, '%S', #prev_buffer+1) then
+        -- buffer = "cat <<EOF >file\nasflskjd $(asd) \nEOF\n\n"
+        -- buffer = 'cat <<EOF\nasflskjd\n# comment'
+        -- buffer = 'echo "hello world \n#comment'
+        -- buffer = 'echo | ! echo \n#comment\n'
+        -- buffer = 'echo \'hello\' "world ${x:-3} " \n#comment\n'
+        -- buffer = '( echo 123 ); echo 13\n# comment\n'
+        -- buffer = 'echo "one $(two $x ) $three" \'asdf\'\n# comment\n'
+        -- buffer = '() { \n'
+        -- buffer = '> >(l) " echo 123 "\n'
+        -- buffer = 'echo $(hello -l)\n'
+        -- buffer = 'echo "$(x=1 hello -l) $x"\n'
+        -- buffer = 'echo 123;'
+        -- buffer = '() { \n# comment\n'
+        -- buffer = '() { x=1 asdf; }\necho 123\n# comment\n'
+        -- buffer = 'if x; then y; fi\n# comment\n'
+        -- buffer = 'a \'asd\''
+        -- buffer = [["asdf${ad} $(echo)"]]
+        -- buffer = 'echo \\ '
         -- is this going to be slow? do we need a debounce or something?
         prev_complete, prev_tokens = wish.parse(buffer)
         -- wish.log.debug(wish.repr(M.debug_tokens(prev_tokens, buffer), true))
