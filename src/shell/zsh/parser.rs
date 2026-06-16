@@ -462,12 +462,16 @@ impl Token {
     }
 
     fn has_unfinished_heredoc(&self) -> bool {
+        let mut children = self.children.iter().flatten();
         match self.kind {
             TokenKind::Scope(CommandStack::Heredoc)
-                if !self.children.iter().flatten().any(|c| matches!(c.kind, TokenKind::HeredocEnd)) => true,
+                if !children.clone().any(|c| matches!(c.kind, TokenKind::HeredocEnd))
+                => true,
             TokenKind::Command
-                if self.children.iter().flatten().any(|c| matches!(c.kind, TokenKind::Lextok(lextok::DINANG))) => true,
-            _ => self.children.iter().flatten().any(|c| c.has_unfinished_heredoc()),
+                if children.clone().any(|c| matches!(c.kind, TokenKind::Lextok(lextok::DINANG)))
+                    && !children.clone().any(|c| matches!(c.kind, TokenKind::Scope(CommandStack::Heredoc)))
+                => true,
+            _ => children.clone().any(|c| c.has_unfinished_heredoc()),
         }
     }
 
