@@ -136,7 +136,12 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
     // pop the trailing line break
     tokens.pop();
 
-    let max_visual = tokens.last().map_or(0, |t| t.visual_lineno) + 1;
+    let max_visual = match tokens.last() {
+        // fit one more line if the last one is a linebreak
+        Some(ScrollWrapToken{ visual_lineno, inner: WrapToken::LineBreak, .. }) => visual_lineno + 2,
+        Some(ScrollWrapToken{ visual_lineno, .. }) => visual_lineno + 1,
+        _ => 1,
+    };
 
     let (start, end) = if !tokens.is_empty() && let Some(max_height) = max_height {
 
