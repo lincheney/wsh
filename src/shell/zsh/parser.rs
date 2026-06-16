@@ -450,7 +450,7 @@ impl Token {
                 // do nothing if overlapping with previous
             } else if super::is_token(c)
                 && let TokenKind::Token(kind) = TokenKind::from_token(c)
-                && !matches!(kind, token::Dash | token::Bnull)
+                && !matches!(kind, token::Dash | token::Bnull | token::Equals)
             {
                 children.push(Token::new_with_kind(range, TokenKind::Token(kind)));
             } else if let Some(prev @ Token{kind: TokenKind::None, ..}) = children.last_mut() {
