@@ -1,3 +1,4 @@
+use crate::lua::{HasEventCallbacks};
 use std::cell::Cell;
 use std::os::raw::*;
 use anyhow::{Result};
@@ -42,6 +43,18 @@ fn restore_widget(name: &MetaStr, state: &Cell<bindings::ZleIntFunc>) -> Result<
     Ok(())
 }
 
+fn move_in_history(forward: bool) -> Result<()> {
+    GlobalState::with(|ui| {
+        if ui.borrow_mut().buffer.move_in_history(forward) {
+            let ui = ui.clone();
+            ui.clone().shell_loop(false, async move {
+                ui.trigger_buffer_change_callbacks().await
+            })?;
+        }
+        Ok(())
+    })?
+}
+
 // --- undo widget override ---
 
 static UNDO_NAME: &MetaStr = meta_str!(c".undo");
@@ -50,10 +63,7 @@ thread_local! {
 }
 
 unsafe extern "C" fn custom_undo(_args: *mut *mut c_char) -> c_int {
-    let result = GlobalState::with(|ui| {
-        ui.borrow_mut().buffer.move_in_history(false);
-    });
-    match result {
+    match move_in_history(false) {
         Ok(()) => 0,
         Err(e) => {
             log::error!("custom_undo: {e}");
@@ -78,10 +88,7 @@ thread_local! {
 }
 
 unsafe extern "C" fn custom_redo(_args: *mut *mut c_char) -> c_int {
-    let result = GlobalState::with(|ui| {
-        ui.borrow_mut().buffer.move_in_history(true);
-    });
-    match result {
+    match move_in_history(true) {
         Ok(()) => 0,
         Err(e) => {
             log::error!("custom_redo: {e}");
@@ -128,10 +135,7 @@ thread_local! {
 unsafe extern "C" fn custom_vi_undo_change(_args: *mut *mut c_char) -> c_int {
     // in zsh this toggles between end-of-undo-list and one step back;
     // for wish buffer, just do a regular undo
-    let result = GlobalState::with(|ui| {
-        ui.borrow_mut().buffer.move_in_history(false);
-    });
-    match result {
+    match move_in_history(false) {
         Ok(()) => 0,
         Err(e) => {
             log::error!("custom_vi_undo_change: {e}");

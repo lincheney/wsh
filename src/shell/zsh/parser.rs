@@ -462,7 +462,7 @@ impl Token {
     }
 
     fn has_unfinished_heredoc(&self) -> bool {
-        let mut children = self.children.iter().flatten();
+        let children = self.children.iter().flatten();
         match self.kind {
             TokenKind::Scope(CommandStack::Heredoc)
                 if !children.clone().any(|c| matches!(c.kind, TokenKind::HeredocEnd))
