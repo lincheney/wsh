@@ -1,7 +1,7 @@
 local QUERY = require('wish.syntax-query')
 
 local RULES = {
-    { {hl='command', kind='arg0'} },
+    { {hl='command', kind='|STRING'}, {mod='*'} },
     -- comments
     { {hl='comment', kind='comment'} },
     -- punctuation
@@ -16,15 +16,15 @@ local RULES = {
         {hl='heredoc_tag', kind='STRING'},
     },
     -- escapes
-    { {hl='escape_space', kind='STRING|arg0', hlregex='\\\\ '} },
-    { {hl='escape', kind='STRING|arg0', hlregex='\\\\.'} },
-    {{ kind='STRING|arg0', contains={
+    { {hl='escape_space', kind='|STRING', hlregex='\\\\ '} },
+    { {hl='escape', kind='|STRING', hlregex='\\\\.'} },
+    {{ kind='|STRING', contains={
         {kind='String'},
         {kind='Snull'},
         {hl='escape', not_kind='Snull', hlregex=[=[\\x[0-9a-fA-F]{0,2}|\\u\d{0,4}|\\.]=], mod='*'},
         {kind='Snull', mod='?'},
     } }},
-    {{ kind='STRING|arg0', contains={
+    {{ kind='|STRING', contains={
         {kind='Dnull'},
         {hl='escape', not_kind='Dnull', hlregex='\\\\.', mod='*'},
         {kind='Dnull', mod='?'},

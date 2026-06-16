@@ -54,7 +54,6 @@ pub enum TokenKind {
     Redirect,
     Comment,
     Command,
-    Arg0,
     Scope(CommandStack),
 }
 
@@ -142,7 +141,6 @@ impl std::fmt::Display for TokenKind {
             TokenKind::Initial => write!(fmt, "initial"),
             TokenKind::Heredoc(_quoted) => write!(fmt, "heredoc"),
             TokenKind::HeredocEnd => write!(fmt, "heredoc_end"),
-            TokenKind::Arg0 => write!(fmt, "arg0"),
             TokenKind::Scope(_) => write!(fmt, "scope"),
             TokenKind::SyntaxError => write!(fmt, "syntax_error"),
         }
@@ -433,14 +431,6 @@ impl Token {
                 && (children[0].kind.ends_command() || matches!(children[0].kind, TokenKind::Comment))
             {
                 *self = children.pop().unwrap();
-            } else {
-                // first string is the command
-                for t in children.iter_mut() {
-                    if matches!(t.kind, TokenKind::None | TokenKind::Lextok(lextok::STRING)) {
-                        t.kind = TokenKind::Arg0;
-                        break
-                    }
-                }
             }
         }
 
