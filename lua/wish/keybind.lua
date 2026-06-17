@@ -213,52 +213,9 @@ wish.set_keymap('<a-a>', function()
     wish.trigger_event_callback('accept_line')
     wish.call_hook_func{'preexec', buffer}
     wish.set_buffer('', 0)
-    require('wish/background-job').run_in_background(buffer)
+    require('wish.background-job').run_in_background(buffer)
 end)
 
 wish.set_keymap('<c-`>', function()
-    require('wish/background-job').focus_next_job{key = "`", control = true}
+    require('wish.background-job').focus_next_job{key = "`", control = true}
 end)
-
-wish.set_keymap('<c-f>', function()
-    require('wish.extras.ft').activate()
-end)
-
-local PASTE_NS = wish.add_buf_highlight_namespace()
-local clear_paste = nil
-wish.add_event_callback('paste', function(data)
-    -- insert this into the buffer
-    if #data > 0 then
-        local id = math.random()
-        clear_paste = id
-        local buffer, cursor = wish.get_buffer()
-
-        -- paste
-        wish.insert_at_cursor(data)
-
-        -- flash blue for a bit
-        wish.add_buf_highlight{
-            namespace = PASTE_NS,
-            fg = 'blue',
-            start = cursor,
-            finish = cursor + utf8.len(data) - 1,
-        }
-
-        wish.schedule(function()
-            wish.sleep(0.5)
-            if clear_paste == id then
-                wish.clear_buf_highlights(PASTE_NS)
-            end
-        end)
-    end
-end)
-wish.add_event_callback('accept_line', function()
-    wish.clear_buf_highlights(PASTE_NS)
-end)
-
-wish.set_status_bar{
-    text = 'asd',
-    align = 'Center',
-    bg = 'darkgrey',
-}
-wish.redraw()

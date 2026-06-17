@@ -50,4 +50,17 @@ function M.append(first, second)
     return first
 end
 
+function M.filter(tbl, condition)
+    local shift = 0
+    for i = 1, #tbl do
+        if not condition(tbl[i], i) then
+            shift = shift + 1
+            tbl[i] = nil
+        elseif shift > 0 then
+            tbl[i - shift] = tbl[i]
+            tbl[i] = nil
+        end
+    end
+end
+
 return M
