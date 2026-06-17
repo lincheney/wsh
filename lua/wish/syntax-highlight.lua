@@ -12,7 +12,7 @@ local RULES = {
     { {hl='string', kind='heredoc'} },
     { {hl='heredoc_tag', kind='heredoc_end'} },
     {
-        {kind='DINANG'},
+        {kind='DINANG|DINANGDASH'},
         {hl='heredoc_tag', kind='STRING'},
     },
     -- escapes

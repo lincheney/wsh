@@ -337,7 +337,7 @@ impl Token {
                 [
                     first @ Token{kind: TokenKind::Heredoc(_), ..},
                 ..] if
-                    matches!(self.kind, TokenKind::Scope(CommandStack::Heredoc))
+                    matches!(self.kind, TokenKind::Scope(CommandStack::Heredoc | CommandStack::Heredocd))
                     && first.children.as_ref().and_then(|c| c.first()).is_some_and(|t| matches!(t.kind, TokenKind::Lextok(lextok::NEWLIN)))
                 => {
                     // move first newline out
@@ -464,12 +464,12 @@ impl Token {
     fn has_unfinished_heredoc(&self) -> bool {
         let children = self.children.iter().flatten();
         match self.kind {
-            TokenKind::Scope(CommandStack::Heredoc)
+            TokenKind::Scope(CommandStack::Heredoc | CommandStack::Heredocd)
                 if !children.clone().any(|c| matches!(c.kind, TokenKind::HeredocEnd))
                 => true,
             TokenKind::Command
-                if children.clone().any(|c| matches!(c.kind, TokenKind::Lextok(lextok::DINANG)))
-                    && !children.clone().any(|c| matches!(c.kind, TokenKind::Scope(CommandStack::Heredoc)))
+                if children.clone().any(|c| matches!(c.kind, TokenKind::Lextok(lextok::DINANG | lextok::DINANGDASH)))
+                    && !children.clone().any(|c| matches!(c.kind, TokenKind::Scope(CommandStack::Heredoc | CommandStack::Heredocd)))
                 => true,
             _ => children.clone().any(|c| c.has_unfinished_heredoc()),
         }
@@ -642,7 +642,7 @@ impl ParseState {
             };
 
             // check if heredoc is quoted
-            if matches!(kind, TokenKind::CommandStack(CommandStack::Heredoc))
+            if matches!(kind, TokenKind::CommandStack(CommandStack::Heredoc | CommandStack::Heredocd))
                 && let Some(hdocs) = zsh_sys::hdocs.as_ref()
                 && !hdocs.str_.is_null()
             {
