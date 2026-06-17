@@ -37,6 +37,7 @@ impl Constraint {
 
         Size {
             size,
+            min,
             max,
             flex: self.flex,
         }
@@ -46,6 +47,7 @@ impl Constraint {
 #[derive(Debug)]
 pub struct Size {
     pub size: Unit,
+    pub min: Option<Unit>,
     pub max: Option<Unit>,
     flex: Option<NonZero<Unit>>,
 }
@@ -68,6 +70,7 @@ impl Size {
     }
 }
 
+#[derive(Debug)]
 pub struct SizeArray<'a>(pub &'a mut [Size]);
 
 impl SizeArray<'_> {
@@ -92,6 +95,35 @@ impl SizeArray<'_> {
         }
     }
 
+    fn truncate_to(&mut self, available: Unit) {
+        let mut overflow = self.current_size().saturating_sub(available);
+
+        // try to reduce non flex first
+        while self.0.iter_mut()
+            .filter(|s| s.flex.is_none() && s.min.is_none_or(|min| s.size > min))
+            .take(overflow as _)
+            .map(|s| {
+                s.size -= 1;
+                overflow -= 1;
+            }).count() > 0
+        {
+        }
+
+        // we will have to violate min sizes now
+        // start with the biggest
+        while overflow > 0 && let Some(s) = self.0.iter_mut().filter(|s| s.flex.is_none()).max_by_key(|s| s.size) {
+            s.size -= 1;
+            overflow -= 1;
+        }
+
+        // remove from flex as well???
+        while overflow > 0 && let Some(s) = self.0.iter_mut().max_by_key(|s| s.size) {
+            s.size -= 1;
+            overflow -= 1;
+        }
+
+    }
+
     // distribute `total` cells among slots according to per-slot flex weights,
     // lower bounds, and upper bounds. converges by fixing slots that hit their
     // bounds and redistributing remaining space among the rest.
@@ -101,6 +133,7 @@ impl SizeArray<'_> {
 
             if self.current_size() >= available {
                 // already run out of space
+                self.truncate_to(available);
                 return
             }
 
@@ -117,6 +150,7 @@ impl SizeArray<'_> {
             let mut remaining = available.saturating_sub(self.current_size());
             if remaining == 0 {
                 // already run out of space
+                self.truncate_to(available);
                 return
             }
 

@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::ops::Range;
 use super::text::{HighlightedRange};
 use super::style::Style;
@@ -151,16 +152,26 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
         let end = tokens.get(end.saturating_sub(1)).or(tokens.last()).unwrap().visual_lineno + 1;
         let current_height = end - start;
 
-        let space = max_height.saturating_sub(current_height);
-        if space > 0 {
-            // can fit more lines
-            // prefer to add space on the bottom first?
-            let end = (end + space / 2).min(max_visual);
-            let start = end.saturating_sub(max_height);
-            let end = start + max_height;
-            (start, end)
-        } else {
-            (start, end)
+        match max_height.cmp(&current_height) {
+            Ordering::Equal => (start, end),
+            Ordering::Less if matches!(scroll, ScrollPosition::StickyBottom) => {
+                // truncate the start
+                let start = (start + (current_height - max_height)).min(max_visual);
+                (start, end)
+            },
+            Ordering::Less => {
+                // truncate the end
+                let end = (end - (current_height - max_height)).min(max_visual);
+                (start, end)
+            },
+            Ordering::Greater => {
+                // can fit more lines
+                // prefer to add space on the bottom first?
+                let end = (end + (max_height - current_height) / 2).min(max_visual);
+                let start = end.saturating_sub(max_height);
+                let end = start + max_height;
+                (start, end)
+            },
         }
 
     } else {

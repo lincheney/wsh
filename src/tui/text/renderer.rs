@@ -103,7 +103,7 @@ impl<'a> TextRenderer<'a> {
             scroll.position,
         );
 
-        let scrollbar_range = if scroll.show_scrollbar && !(scrolled.range.start == 0 || scrolled.range.end >= scrolled.total_line_count.max(1)) {
+        let scrollbar_range = if scroll.show_scrollbar && !(scrolled.range.start == 0 && scrolled.range.end >= scrolled.total_line_count.max(1)) {
             let num_lines = scrolled.total_line_count.max(1);
             let text_height = text_height.unwrap_or(num_lines);
             let height = (text_height as f64 * scrolled.range.len() as f64 / num_lines as f64).round().max(1.) as usize;
