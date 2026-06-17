@@ -15,7 +15,12 @@ return wish.plugin(function(wish, opts, plugin)
         ['{'] = '}',
     }
     local RULES = {
-        { { regex='^[(){}]$' } },
+        { {regex = '^[(){}]$', highlight = true} },
+        { {kind = 'heredoc_end', highlight = true} },
+        {
+            {kind = 'DINANG|DINANGDASH'},
+            {kind = 'STRING', highlight = true},
+        },
     }
 
     local have_prev_brackets = false
@@ -29,7 +34,9 @@ return wish.plugin(function(wish, opts, plugin)
         local brackets = {}
         QUERY.apply_rules(RULES, tokens, str, function(matches)
             for i = 1, #matches do
-                table.insert(brackets, matches[i][2])
+                if matches[i][1].highlight then
+                    table.insert(brackets, matches[i][2])
+                end
             end
         end)
         wish.table.sort_by(brackets, 'start')
@@ -39,13 +46,22 @@ return wish.plugin(function(wish, opts, plugin)
         -- match up the brackets
         for i = 1, #brackets do
             local tokstr = string.sub(str, brackets[i].start, brackets[i].finish)
-            table.insert(items, {brackets[i], MATCHING_BRACKET[tokstr]})
+            local expected = tokstr
+            local rhs
+            if brackets[i].kind == 'heredoc_end' then
+                expected = 'heredoc'
+            elseif brackets[i].kind == 'STRING' then
+                rhs = 'heredoc'
+            else
+                rhs = MATCHING_BRACKET[tokstr]
+            end
+            table.insert(items, {brackets[i], rhs})
 
-            if MATCHING_BRACKET[tokstr] then
+            if rhs then
                 table.insert(stack, items[#items])
             else
                 for j = #stack, 1, -1 do
-                    if tokstr == stack[j][2] then
+                    if expected == stack[j][2] then
                         items[#items][3] = true
                         stack[j][3] = true
 
