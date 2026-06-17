@@ -15,6 +15,7 @@ pub struct Highlight<T> {
     pub namespace: T,
     pub virtual_text: Option<BString>,
     pub conceal: Option<bool>,
+    pub priority: f64,
 }
 
 impl<T: Default> From<Style> for Highlight<T> {
@@ -25,6 +26,7 @@ impl<T: Default> From<Style> for Highlight<T> {
             namespace: T::default(),
             virtual_text: None,
             conceal: None,
+            priority: 0.,
         }
     }
 }
@@ -97,6 +99,14 @@ pub struct Text<T=()> {
     pub dirty: bool,
 }
 
+fn add_highlight<T>(highlights: &mut Vec<HighlightedRange<T>>, hl: HighlightedRange<T>) {
+    // sort in reverse order so higher priority comes first
+    let index = match highlights.binary_search_by(|x| x.inner.priority.total_cmp(&hl.inner.priority)) {
+        Ok(index) | Err(index) => index,
+    };
+    highlights.insert(index, hl);
+}
+
 impl<T> Text<T> {
 
     pub fn get(&self) -> &[BString] {
@@ -108,7 +118,7 @@ impl<T> Text<T> {
     }
 
     pub fn add_highlight(&mut self, hl: HighlightedRange<T>) {
-        self.highlights.push(hl);
+        add_highlight(&mut self.highlights, hl);
     }
 
     pub fn clear_highlights(&mut self) {
@@ -126,7 +136,7 @@ impl<T> Text<T> {
 
     pub fn push_line(&mut self, line: BString, hl: Option<Highlight<T>>) {
         if let Some(hl) = hl {
-            self.highlights.push(HighlightedRange{
+            add_highlight(&mut self.highlights, HighlightedRange{
                 lineno: self.lines.len(),
                 start: 0,
                 end: line.len(),
@@ -143,7 +153,7 @@ impl<T> Text<T> {
         let lineno = self.lines.len() - 1;
         let line = self.lines.last_mut().unwrap();
         if let Some(hl) = hl {
-            self.highlights.push(HighlightedRange{
+            add_highlight(&mut self.highlights, HighlightedRange{
                 lineno,
                 start: line.len(),
                 end: line.len() + str.len(),
@@ -161,7 +171,7 @@ impl<T> Text<T> {
             }
         }
         if let Some(hl) = hl {
-            self.highlights.push(HighlightedRange{
+            self.add_highlight(HighlightedRange{
                 lineno,
                 start: 0,
                 end: line.len(),
@@ -179,7 +189,7 @@ impl<T> Text<T> {
             }
         }
         if let Some(hl) = hl {
-            self.highlights.push(HighlightedRange{
+            add_highlight(&mut self.highlights, HighlightedRange{
                 lineno,
                 start: offset,
                 end: offset + str.len(),
@@ -289,7 +299,7 @@ impl<T: Clone> Text<T> {
         self.lines.extend(lines);
         if let Some(hl) = hl {
             for (i, line) in self.lines[old_len..].iter().enumerate() {
-                self.highlights.push(HighlightedRange{
+                add_highlight(&mut self.highlights, HighlightedRange{
                     lineno: old_len + i,
                     start: 0,
                     end: line.len(),

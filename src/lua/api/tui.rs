@@ -626,11 +626,13 @@ struct BufferHighlight {
     virtual_text: Option<BString>,
     conceal: Option<bool>,
     namespace: Option<usize>,
+    priority: Option<f64>,
 }
 
 fn add_buf_highlight(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<()> {
     let hl: BufferHighlight = lua.from_value(val)?;
     let blend = !hl.style.no_blend;
+    let priority = hl.priority.unwrap_or_default();
     let style: tui::widget::StyleOptions = hl.style.inner.into();
 
     ui.borrow_mut().buffer.add_highlight(tui::text::HighlightedRange{
@@ -643,6 +645,7 @@ fn add_buf_highlight(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<()> {
             virtual_text: hl.virtual_text,
             conceal: hl.conceal,
             blend,
+            priority,
         },
     });
     ui.queue_draw();

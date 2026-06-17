@@ -122,6 +122,7 @@ impl CommandLine<'_> {
                     namespace: PREDISPLAY_NS,
                     virtual_text: Some(text.clone()),
                     conceal: None,
+                    priority: 0.,
                 },
             });
         }

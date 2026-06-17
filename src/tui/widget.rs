@@ -134,6 +134,7 @@ impl Widget {
                     namespace: (),
                     virtual_text: need_space.then(|| b" ".into()),
                     conceal: None,
+                    priority: 0.,
                 },
             });
         } else {
