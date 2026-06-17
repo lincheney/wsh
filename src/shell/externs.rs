@@ -33,7 +33,7 @@ impl GlobalState {
         let shell = Shell::new();
         let mut ui = Ui::new(event_ctrl, shell, runtime)?;
 
-        ui.clone().runtime.block_on(async move {
+        ui.clone().shell_loop(false, async move {
             zsh::completion::override_compadd()?;
             zsh::widget::overrides::override_all()?;
             zsh::signals::init(&ui)?;
@@ -50,7 +50,7 @@ impl GlobalState {
                 }
             }
             Ok(ui)
-        })
+        })?
     }
 
     pub fn with<T, F: FnOnce(&Ui) -> T>(f: F) -> Result<T> {
@@ -77,10 +77,6 @@ impl Drop for GlobalState {
         zsh::bin_zle::restore_zle();
     }
 }
-
-// pub fn shell_loop<F: 'static + Future>(future: F) -> Result<F::Output> {
-    // GlobalState::get().and_then(|state| state.shell_loop(future))
-// }
 
 
 unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _options: zsh_sys::Options, _func: c_int) -> c_int {
