@@ -69,7 +69,6 @@ return wish.plugin(function(wish, opts, plugin)
             current_preview = nil
             -- hide only main msg in case saved msg is visible
             wish.set_message{id = msg, hidden = false, text = ' ', border = {enabled = false}}
-            wish.redraw()
             return
         end
 
@@ -124,7 +123,6 @@ return wish.plugin(function(wish, opts, plugin)
                     hidden = false,
                 }
                 wish.set_message{id = layout_msg, hidden = false}
-                wish.redraw()
             end),
         }
 
@@ -156,7 +154,6 @@ return wish.plugin(function(wish, opts, plugin)
     function plugin.hide()
         if visible then
             wish.set_message{id = layout_msg, hidden = true}
-            wish.redraw()
             visible = false
         end
     end
@@ -208,7 +205,6 @@ return wish.plugin(function(wish, opts, plugin)
                 title_top = {text = current_preview.command .. ' (saved)'},
             },
         }
-        wish.redraw()
     end
 
     local function check_is_in_msg(msg, x, y)
@@ -222,7 +218,6 @@ return wish.plugin(function(wish, opts, plugin)
         local scrolled = check_is_in_msg(msg, args.x, args.y) or check_is_in_msg(saved_msg, args.x, args.y)
         if scrolled then
             wish.scroll_message(scrolled, 1)
-            wish.redraw()
         end
     end)
 
@@ -230,7 +225,6 @@ return wish.plugin(function(wish, opts, plugin)
         local scrolled = check_is_in_msg(msg, args.x, args.y) or check_is_in_msg(saved_msg, args.x, args.y)
         if scrolled then
             wish.scroll_message(scrolled, -1)
-            wish.redraw()
         end
     end)
 

@@ -26,7 +26,6 @@ return wish.plugin(function(wish, opts, plugin)
         },
     }
 
-    local have_prev_brackets = false
     QUERY.add_buffer_callback(function(tokens, str)
         if not plugin.is_enabled() then
             return true
@@ -102,11 +101,6 @@ return wish.plugin(function(wish, opts, plugin)
             end
             wish.add_buf_highlight(hl)
         end
-
-        if have_prev_brackets or #brackets > 0 then
-            wish.redraw()
-        end
-        have_prev_brackets = #brackets > 0
     end)
 
 end)

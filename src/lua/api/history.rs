@@ -54,6 +54,7 @@ async fn goto_history_internal(ui: Ui, index: HistoryIndex) -> Result<()> {
         } else if new_cursor.is_some() {
             ui.borrow_mut().buffer.set(None, new_cursor);
         }
+        ui.queue_draw();
 
         new_buffer.is_some()
     };

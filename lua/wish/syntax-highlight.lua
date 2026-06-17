@@ -130,8 +130,6 @@ return wish.plugin(function(wish, opts, plugin)
         for i = 1, #highlights do
             wish.add_buf_highlight(highlights[i])
         end
-
-        wish.redraw()
     end)
 
 end)

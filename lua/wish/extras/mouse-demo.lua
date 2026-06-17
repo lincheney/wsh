@@ -8,7 +8,6 @@ return wish.plugin(function(wish, opts, plugin)
             border = { enabled = true, title = 'Mouse Demo' },
             persist = true,
         }
-        wish.redraw()
 
         -- Enable SGR mouse mode
         wish.enable_mouse_mode(true)
@@ -53,7 +52,6 @@ return wish.plugin(function(wish, opts, plugin)
                 fg = inside and 'green' or 'red',
             },
         }
-        wish.redraw()
     end)
 
     -- function plugin.disable_hook()

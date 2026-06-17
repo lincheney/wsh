@@ -42,7 +42,6 @@ function show_history(widget, filter, data)
 
         if filter and result then
             wish.goto_history(history[result].histnum)
-            wish.redraw()
         end
     end)
 end

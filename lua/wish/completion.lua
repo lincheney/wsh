@@ -47,7 +47,6 @@ function M.complete()
 
     -- loading message
     wish.set_message{id = msg, hidden = false, text = 'Loading matches ...', fg = 'grey'}
-    wish.redraw{now = true}
 
     local result = SELECTION.start()
     loaded = true
@@ -58,13 +57,10 @@ function M.complete()
     if result then
         wish.set_message{id = msg, hidden = true}
         wish.insert_completion(all_matches[result])
-        wish.redraw()
     elseif cancelled then
         wish.set_message{id = msg, hidden = true}
-        wish.redraw()
     elseif not all_matches or #all_matches == 0 then
         wish.set_message{id = msg, hidden = false, text='No completion matches', fg='lightred'}
-        wish.redraw()
     end
 
 end

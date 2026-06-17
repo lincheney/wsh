@@ -16,7 +16,6 @@ local function start_proc()
     state.cursor = wish.get_cursor()
     -- go to last line
     wish.set_cursor(utf8.len(wish.get_buffer()) + 1)
-    wish.redraw()
 
     state.proc = wish.async.spawn{
         args = {
@@ -88,9 +87,9 @@ function M.start(opts)
         io.stdout:write('\x1b[A')
         io.stdout:flush()
 
-        wish.redraw{buffer=true, messages=true}
+        -- wish.redraw{buffer=true, messages=true}
         wish.set_cursor(state.cursor)
-        wish.redraw{all = true}
+        -- wish.redraw{all = true}
     end
 
     state = nil

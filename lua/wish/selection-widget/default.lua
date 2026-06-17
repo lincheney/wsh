@@ -13,7 +13,6 @@ function M.stop()
 
         if selection_widget and wish.check_message(selection_widget) then
             wish.set_message{id = selection_widget, hidden = true}
-            wish.redraw()
         end
     end
 end
@@ -125,7 +124,6 @@ local function recalc_filter()
 
     if selection_widget and wish.check_message(selection_widget) then
         wish.set_message{id = selection_widget, text = #text > 0 and text or ''}
-        wish.redraw()
     end
 end
 

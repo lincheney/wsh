@@ -26,7 +26,6 @@ return wish.plugin(function(wish, opts, plugin)
             key_event_id = nil
         end
         wish.clear_buf_highlights(NAMESPACE)
-        wish.redraw()
     end
 
     local deactivate_now = plugin.deactivate
@@ -104,7 +103,6 @@ return wish.plugin(function(wish, opts, plugin)
                         wish.add_buf_highlight(hl)
                         positions[c] = m
                     end
-                    wish.redraw()
                 end,
 
                 finally = function(err)
@@ -123,7 +121,6 @@ return wish.plugin(function(wish, opts, plugin)
             namespace = NAMESPACE,
         })
         wish.add_buf_highlight(hl)
-        wish.redraw()
     end
 
 end)

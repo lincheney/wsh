@@ -8,9 +8,6 @@ local M = wish.plugin(function(wish, opts, plugin)
     wish.add_event_callback('accept_line', function()
         history = nil
         wish.clear_buf_highlights(NAMESPACE)
-        if suggestion and suggestion ~= '' then
-            wish.redraw{now = true}
-        end
     end)
 
     wish.add_event_callback('buffer_change', function()
@@ -44,8 +41,6 @@ local M = wish.plugin(function(wish, opts, plugin)
                 namespace = NAMESPACE,
             }
         end
-        wish.redraw()
-
     end)
 
 end)

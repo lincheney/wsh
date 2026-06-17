@@ -585,6 +585,7 @@ fn set_message(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<usize> {
         node.has_parent = true;
         tui.nodes.add_child(id);
     }
+    ui.queue_draw();
     Ok(id)
 }
 
@@ -595,10 +596,12 @@ fn clear_messages(ui: &Ui, _lua: &Lua, all: bool) -> Result<()> {
     } else {
         tui.clear_non_persistent();
     }
+    ui.queue_draw();
     Ok(())
 }
 
 fn check_message(ui: &Ui, _lua: &Lua, id: usize) -> Result<bool> {
+    ui.queue_draw();
     Ok(ui.borrow().tui.get_node(id).is_some())
 }
 
@@ -606,6 +609,7 @@ fn remove_message(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
     let tui = &mut ui.borrow_mut().tui;
     if tui.remove(id).is_some() {
         tui.dirty = true;
+        ui.queue_draw();
         Ok(())
     } else {
         anyhow::bail!("can't find widget with id {}", id)
@@ -641,11 +645,13 @@ fn add_buf_highlight(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<()> {
             blend,
         },
     });
+    ui.queue_draw();
 
     Ok(())
 }
 
 fn clear_buf_highlights(ui: &Ui, _lua: &Lua, namespace: Option<usize>) -> Result<()> {
+    ui.queue_draw();
     let mut ui = ui.borrow_mut();
     if let Some(namespace) = namespace {
         ui.buffer.clear_highlights_in_namespace(namespace);
@@ -667,6 +673,7 @@ fn scroll_message(ui: &Ui, _lua: &Lua, (id, delta): (usize, isize)) -> Result<()
         Some(Node{ kind: NodeKind::Widget(widget), .. }) => {
             if widget.scroll(delta, true) {
                 tui.dirty = true;
+                ui.queue_draw();
             }
             Ok(())
         },
@@ -681,6 +688,7 @@ fn scroll_message_to(ui: &Ui, _lua: &Lua, (id, line): (usize, usize)) -> Result<
         Some(Node{ kind: NodeKind::Widget(widget), .. }) => {
             if widget.scroll(line as isize, false) {
                 tui.dirty = true;
+                ui.queue_draw();
             }
             Ok(())
         },
@@ -695,6 +703,7 @@ fn feed_ansi_message(ui: &Ui, _lua: &Lua, (id, value): (usize, LuaString)) -> Re
     match tui.get_node_mut(id) {
         Some(Node{ kind: NodeKind::Widget(widget), .. }) => {
             widget.feed_ansi((&*value.as_bytes()).into());
+            ui.queue_draw();
             tui.dirty = true;
             Ok(())
         },
@@ -710,6 +719,7 @@ fn clear_message(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
         Some(node) => node.clear(),
         _ => anyhow::bail!("can't find widget with id {id}"),
     }
+    ui.queue_draw();
     Ok(())
 }
 
@@ -734,6 +744,7 @@ fn message_to_ansi_string(ui: &Ui, _lua: &Lua, (id, width): (usize, Option<u16>)
 
 fn set_status_bar(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<()> {
     let options: Option<MessageOptions> = lua.from_value(val)?;
+    ui.queue_draw();
     let mut ui = ui.borrow_mut();
     if let Some(options) = options {
         match options.inner {
@@ -827,6 +838,7 @@ fn style_to_sgr(_lua: &Lua, options: StyleOptions) -> LuaResult<BString> {
 }
 
 async fn allocate_height(ui: Ui, _lua: Lua, height: u16) -> Result<()> {
+    ui.queue_draw();
     ui.allocate_height(height).await
 }
 

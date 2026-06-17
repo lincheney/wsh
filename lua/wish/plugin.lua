@@ -66,8 +66,6 @@ return function(plugin_fn)
             wish.unset_var(state.vars[i])
             state.vars[i] = nil
         end
-
-        wish.redraw()
     end
 
     function plugin_obj.enable(config)

@@ -188,7 +188,6 @@ wish.set_keymap('<f12>', function()
                 break
             end
             wish.feed_ansi_message(id, stdout)
-            wish.redraw()
         end
         proc:wait()
     end)
@@ -204,7 +203,6 @@ wish.set_keymap('<f12>', function()
     -- error("ARGGHH")
     -- local msg = wish.set_message{text="hello world " .. math.random()}
     -- msg:set_text_weight('Bold');
-    -- wish.redraw()
 end)
 
 
@@ -245,20 +243,17 @@ wish.add_event_callback('paste', function(data)
             start = cursor,
             finish = cursor + utf8.len(data) - 1,
         }
-        wish.redraw()
 
         wish.schedule(function()
             wish.sleep(0.5)
             if clear_paste == id then
                 wish.clear_buf_highlights(PASTE_NS)
-                wish.redraw()
             end
         end)
     end
 end)
 wish.add_event_callback('accept_line', function()
     wish.clear_buf_highlights(PASTE_NS)
-    wish.redraw()
 end)
 
 wish.set_status_bar{

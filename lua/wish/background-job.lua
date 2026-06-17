@@ -62,7 +62,6 @@ local function update_message(job)
     end
 
     wish.set_message(props)
-    wish.redraw()
 end
 
 local function unfocus()
@@ -135,7 +134,6 @@ function M.run_in_background(command)
                     end)
                 end
             end
-            wish.redraw()
         end
 
         job.code = job.proc:wait()
