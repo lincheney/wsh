@@ -279,11 +279,11 @@ impl Ui {
         // sigint
         // cancel the current command line?
 
-        self.insert_or_set_buffer(false, b"", None).await;
         if self.shell.accept_line(Some(b"".into())).await.is_err() {
             return Ok(())
         }
         self.borrow_mut().reset();
+        self.trigger_buffer_change_callbacks().await;
         self.start_cmd(Some(&"".into())).await?;
         Ok(())
     }
