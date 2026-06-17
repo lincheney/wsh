@@ -3,13 +3,16 @@ return wish.plugin(function(wish, opts, plugin)
     local QUERY = require('wish.syntax-query')
     local NAMESPACE = wish.add_buf_highlight_namespace()
 
-    local UNMATCHED = { bg = 'red' }
-    local COLOURS = {
+    local styles = opts.styles or {
         {fg = 'lightblue' },
         {fg = 'lightred' },
         {fg = 'lightgreen' },
         {fg = 'lightyellow' },
     }
+    local unmatched_style = opts.unmatched_style or {
+        bg = 'red'
+    }
+
     local MATCHING_BRACKET = {
         ['('] = ')',
         ['{'] = '}',
@@ -90,12 +93,12 @@ return wish.plugin(function(wish, opts, plugin)
                 if left then
                     level = level + 1
                 end
-                wish.table.merge(hl, COLOURS[level % #COLOURS + 1])
+                wish.table.merge(hl, styles[level % #styles + 1])
                 if not left then
                     level = level - 1
                 end
             else
-                wish.table.merge(hl, UNMATCHED)
+                wish.table.merge(hl, unmatched_style)
             end
             wish.add_buf_highlight(hl)
         end
