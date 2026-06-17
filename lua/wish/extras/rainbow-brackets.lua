@@ -93,12 +93,12 @@ return wish.plugin(function(wish, opts, plugin)
                 if left then
                     level = level + 1
                 end
-                wish.table.merge(hl, styles[level % #styles + 1])
+                hl = wish.table.merge(wish.table.copy(styles[level % #styles + 1]), hl)
                 if not left then
                     level = level - 1
                 end
             else
-                wish.table.merge(hl, unmatched_style)
+                hl = wish.table.merge(wish.table.copy(unmatched_style), hl)
             end
             wish.add_buf_highlight(hl)
         end

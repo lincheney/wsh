@@ -5,9 +5,7 @@ wish.table = require('wish.table')
 wish.style = require('wish.style')
 wish.utf8 = require('wish.utf8')
 require('wish.keybind')
-
 require('wish.syntax-highlight').enable()
-require('wish.extras.rainbow-brackets').enable()
 
 local config_home = os.getenv('XDG_CONFIG_HOME')
 if not config_home then

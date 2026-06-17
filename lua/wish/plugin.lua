@@ -156,7 +156,7 @@ return function(plugin_fn)
 
         wish.try{
             try = function()
-                plugin_fn(proxy, config, plugin_obj)
+                plugin_fn(proxy, config or {}, plugin_obj)
 
                 if config and config.keybinds then
                     for k, v in pairs(config.keybinds) do
