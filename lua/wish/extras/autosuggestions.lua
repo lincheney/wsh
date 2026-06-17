@@ -1,9 +1,12 @@
-local suggestion = ''
-
-local M = wish.plugin(function(wish, opts, plugin)
+return wish.plugin(function(wish, opts, plugin)
 
     local NAMESPACE = wish.add_buf_highlight_namespace()
     local history = nil
+    local suggestion = ''
+
+    local style = opts.style or {
+        dim = true,
+    }
 
     wish.add_event_callback('accept_line', function()
         history = nil
@@ -33,22 +36,26 @@ local M = wish.plugin(function(wish, opts, plugin)
         wish.clear_buf_highlights(NAMESPACE)
         local suffix = suggestion and suggestion:sub(#buffer + 1)
         if suffix and suffix ~= ''  then
-            wish.add_buf_highlight{
+            local hl = wish.table.merge(wish.table.copy(style), {
                 start = math.pow(2, 32) - 1,
                 finish = math.pow(2, 32) - 1,
-                dim = true,
                 virtual_text = suffix,
                 namespace = NAMESPACE,
-            }
+            })
+            wish.add_buf_highlight(hl)
         end
     end)
 
-end)
-
-function M.accept_suggestion()
-    if suggestion and suggestion ~= '' then
-        wish.set_buffer(suggestion)
+    function plugin.accept_suggestion_at_end()
+        local buffer, cursor = wish.get_buffer()
+        local buflen = wish.utf8.len(buffer) + 1
+        if cursor == buflen then
+            if suggestion and suggestion ~= '' then
+                wish.set_buffer(suggestion)
+            end
+        else
+            wish.set_cursor(buflen)
+        end
     end
-end
 
-return M
+end)
