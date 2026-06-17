@@ -86,7 +86,7 @@ impl Match {
         let removal_trigger = if let Some(name) = self.inner.get_remf() {
             RemovalTrigger::Function{name: name.to_owned(), len: suf.graphemes().count()}
         } else if let Some(chars) = self.inner.get_rems() {
-            let mut regex = format!("^[{}]", chars.to_owned().unmetafy());
+            let mut regex = format!("^[{}]", chars.unmetafy());
             let match_empty = regex.contains("\\-");
             if match_empty {
                 regex = regex.replace("\\-", "");

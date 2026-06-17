@@ -37,15 +37,7 @@ const fn is_trivially_meta(string: &[u8]) -> bool {
     true
 }
 
-pub fn unmetafy(bytes: &BStr) -> Cow<'_, BStr> {
-    if bytes.contains(&super::Meta) {
-        Cow::Owned(MetaString{ inner: CString::new(bytes.to_owned()).unwrap() }.unmetafy())
-    } else {
-        Cow::Borrowed(bytes)
-    }
-}
-
-pub fn unmetafy_in_place(bytes: &mut [u8]) -> i32 {
+fn unmetafy_in_place(bytes: &mut [u8]) -> i32 {
     unsafe {
         let mut len = 0i32;
         zsh_sys::unmetafy(bytes.as_mut_ptr().cast(), &raw mut len);
@@ -88,10 +80,14 @@ impl MetaString {
     }
 
     pub fn unmetafy(self) -> BString {
-        let mut bytes: BString = self.inner.into_bytes_with_nul().into();
-        let len = unmetafy_in_place(bytes.as_mut());
-        bytes.truncate(len as _);
-        bytes
+        if self.inner.as_bytes().contains(&super::Meta) {
+            let mut bytes = self.inner.into_bytes_with_nul();
+            let len = unmetafy_in_place(bytes.as_mut());
+            bytes.truncate(len as _);
+            bytes.into()
+        } else {
+            self.inner.into_bytes().into()
+        }
     }
 
 }
@@ -207,10 +203,10 @@ impl MetaStr {
     }
 
     pub fn unmetafy(&self) -> Cow<'_, BStr> {
-        if is_trivially_meta(self.inner.to_bytes()) {
-            Cow::Borrowed(self.inner.to_bytes().into())
-        } else {
+        if self.to_bytes().contains(&super::Meta) {
             Cow::Owned(self.to_owned().unmetafy())
+        } else {
+            Cow::Borrowed(self.to_bytes().into())
         }
     }
 

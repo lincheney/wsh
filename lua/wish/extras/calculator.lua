@@ -1,5 +1,4 @@
 return wish.plugin(function(wish)
-    wish.pprint('calc')
 
     local CUSTOM_COMMAND = require('wish.custom_command')
 
