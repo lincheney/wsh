@@ -39,7 +39,7 @@ return wish.plugin(function(wish, opts, plugin)
     }
 
     local buffer_change_callback = nil
-    local accept_line_callback = nil
+    local message_resize_callback = nil
     local current_preview = nil
 
     local function debounce(delay, func)
@@ -62,6 +62,8 @@ return wish.plugin(function(wish, opts, plugin)
         end
     end
 
+    local live_preview
+
     local function preview(command)
         visible = true
 
@@ -69,10 +71,14 @@ return wish.plugin(function(wish, opts, plugin)
             current_preview = nil
             -- hide only main msg in case saved msg is visible
             wish.set_message{id = msg, hidden = false, text = ' ', border = {enabled = false}}
+            if message_resize_callback then
+                wish.remove_event_callback(message_resize_callback)
+                message_resize_callback = nil
+            end
             return
         end
 
-        local proc = wish.async.zpty(command)
+        local proc = wish.async.zpty{args = command, height = 1}
         -- kill any old proc
         if current_preview and not current_preview.proc:is_finished() then
             current_preview.proc:term()
@@ -85,7 +91,9 @@ return wish.plugin(function(wish, opts, plugin)
             buffer = '',
             output = '',
             proc = proc,
-            is_current = function(self) return self == current_preview end,
+            is_current = function(self)
+                return self == current_preview
+            end,
             read_once = function(self)
                 local data = self.proc.stdout:read()
                 if not self:is_current() then
@@ -137,10 +145,28 @@ return wish.plugin(function(wish, opts, plugin)
             end)
         end
 
+        if not message_resize_callback then
+            message_resize_callback = wish.add_event_callback('message_resize', function(ids)
+                if not current_preview then
+                    return
+                end
+                for i = 1, #ids do
+                    if ids[i] == msg then
+                        wish.schedule(function()
+                            local geom = wish.get_message_geometry(msg)
+                            wish.pprint(geom.height - 2)
+                            current_preview.proc:set_tty_size(geom.height - 2, geom.width)
+                        end)
+                        break
+                    end
+                end
+            end)
+        end
+
         return current_preview
     end
 
-    local live_preview = debounce(0.2, function()
+    live_preview = debounce(0.2, function()
         local command = wish.get_buffer()
         local preview = preview(command)
         while preview and preview:read_once() do
@@ -163,6 +189,10 @@ return wish.plugin(function(wish, opts, plugin)
             wish.enable_mouse_mode(false)
         end
         wish.remove_event_callback(buffer_change_callback)
+        if message_resize_callback then
+            wish.remove_event_callback(message_resize_callback)
+            message_resize_callback = nil
+        end
         if hide_on_stop then
             plugin.hide()
         end
