@@ -25,13 +25,14 @@ impl Layout {
         self.children.iter().any(|c| map.get(c).is_some_and(|node| node.is_visible(map, tmp)))
     }
 
-    fn refresh(
+    fn refresh<'a>(
         &self,
         map: &HashMap<usize, Node>,
         max_width: u16,
         max_height: Option<u16>,
         tmp: bool,
-    ) -> (u16, u16) {
+        mut resized: Option<&'a mut Vec<usize>>,
+    ) -> ((u16, u16), Option<&'a mut Vec<usize>>) {
 
         let visible: Vec<&Node> = self.children.iter()
             .filter_map(|cid| map.get(cid))
@@ -39,14 +40,14 @@ impl Layout {
             .collect();
 
         if visible.is_empty() {
-            return (0, 0);
+            return ((0, 0), resized);
         }
 
-        match self.direction {
+        let dim = match self.direction {
             Direction::Vertical => {
                 let mut sizes: Vec<_> = visible.iter().map(|node| {
                     // given unlimited height, how much do you want?
-                    let desired_height = node.refresh(map, max_width, None, true).1;
+                    let ((_, desired_height), _) = node.refresh(map, max_width, None, true, None);
                     node.height_spec.into_size(max_height, Some(desired_height))
                 }).collect();
                 let mut sizes = sizing::SizeArray(&mut sizes);
@@ -55,9 +56,10 @@ impl Layout {
                 let mut width = 0u16;
                 let mut height = 0u16;
                 for (child, size) in visible.iter().zip(sizes.0.iter()) {
-                    let size = child.refresh(map, max_width, Some(size.size), false);
-                    width = width.max(size.0);
-                    height += size.1;
+                    let dim;
+                    (dim, resized) = child.refresh(map, max_width, Some(size.size), false, resized);
+                    width = width.max(dim.0);
+                    height += dim.1;
                 }
                 (width, height.min(max_height.unwrap_or(height)))
             },
@@ -71,14 +73,16 @@ impl Layout {
                 let mut width = 0u16;
                 let mut height = 0u16;
                 for (child, size) in visible.iter().zip(sizes.0.iter()) {
-                    let dim = child.refresh(map, size.size, max_height, tmp);
+                    let dim;
+                    (dim, resized) = child.refresh(map, size.size, max_height, tmp, resized);
                     let child_height = child.height_spec.into_size(max_height, Some(dim.1)).size;
                     width += dim.0;
                     height = height.max(child_height);
                 }
                 (width, height.min(max_height.unwrap_or(u16::MAX)))
             },
-        }
+        };
+        (dim, resized)
     }
 }
 
@@ -161,28 +165,61 @@ impl Node {
         }
     }
 
-    pub(super) fn refresh(
+    pub(super) fn refresh<'a>(
         &self,
         map: &HashMap<usize, Node>,
         max_width: u16,
         max_height: Option<u16>,
         tmp: bool,
-    ) -> (u16, u16) {
+        mut resized: Option<&'a mut Vec<usize>>,
+    ) -> ((u16, u16), Option<&'a mut Vec<usize>>) {
 
-        let mut dim = (0, 0);
-        if !self.is_hidden() {
-            let height = match &self.kind {
-                NodeKind::Widget(widget) => widget.get_height_for_width(max_width),
-                NodeKind::Layout(layout) => layout.refresh(map, max_width, max_height, tmp).1,
-            };
-            let height = height.min(max_height.unwrap_or(height));
-            let height = self.height_spec.into_size(max_height, Some(height)).size;
-            dim = (max_width, height);
+        if self.is_hidden() {
+            if !tmp && let Some(resized) = &mut resized {
+                self.collect_hidden_children(map, resized);
+            }
+            self.set_size((0, 0), tmp);
+            return ((0, 0), resized);
         }
 
-        self.set_size(dim, tmp);
-        dim
+        let height = match &self.kind {
+            NodeKind::Widget(widget) => widget.get_height_for_width(max_width),
+            NodeKind::Layout(layout) => {
+                let dim;
+                (dim, resized) = layout.refresh(map, max_width, max_height, tmp, resized);
+                dim.1
+            },
+        };
+        let height = height.min(max_height.unwrap_or(height));
+        let height = self.height_spec.into_size(max_height, Some(height)).size;
+        let dim = (max_width, height);
+
+        if dim != self.get_size(tmp) {
+            self.set_size(dim, tmp);
+            if !tmp && let Some(resized) = &mut resized {
+                resized.push(self.id);
+            }
+        }
+
+        (dim, resized)
     }
+
+    fn collect_hidden_children(&self, map: &HashMap<usize, Node>, vec: &mut Vec<usize>) {
+        // assume self.is_hidden()
+        debug_assert!(self.is_hidden());
+
+        if self.get_size(false) != (0, 0) && let NodeKind::Layout(layout) = &self.kind {
+            self.set_size((0, 0), false);
+            vec.push(self.id);
+            vec.extend(&layout.children);
+            for id in &layout.children {
+                if let Some(node) = map.get(id) {
+                    node.collect_hidden_children(map, vec);
+                }
+            }
+        }
+    }
+
 }
 
 #[derive(Default)]
@@ -281,7 +318,7 @@ impl Nodes {
         self.size.get().1
     }
 
-    pub fn refresh(&mut self, max_width: u16, max_height: Option<u16>) {
+    pub fn refresh(&mut self, max_width: u16, max_height: Option<u16>) -> Vec<usize> {
         // draw any cursors
         // this is such a hack
         for node in self.map.values_mut() {
@@ -290,7 +327,9 @@ impl Nodes {
             }
         }
 
-        self.size.set(self.root.refresh(&self.map, max_width, max_height, false));
+        let mut resized = vec![];
+        self.size.set(self.root.refresh(&self.map, max_width, max_height, false, Some(&mut resized)).0);
+        resized
     }
 
     pub fn render<W: Write, C: Canvas>(

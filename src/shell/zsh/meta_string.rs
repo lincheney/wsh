@@ -213,7 +213,7 @@ impl MetaStr {
     pub fn len_up_to(&self, num_bytes: usize) -> usize {
         let mut len = 0;
         let mut meta = false;
-        for &c in self.inner.to_bytes().into_iter().take(num_bytes) {
+        for &c in self.inner.to_bytes().iter().take(num_bytes) {
             if meta {
                 meta = false
             } else if c == Meta {

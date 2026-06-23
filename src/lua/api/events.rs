@@ -168,6 +168,7 @@ event_types!(
     precmd(data: Option<&BString>),
     paste(data: &BString),
     window_resize(width: u32, height: u32),
+    message_resize(ids: &[usize]),
 );
 
 

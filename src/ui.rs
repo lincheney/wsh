@@ -154,14 +154,18 @@ impl Ui {
     pub async fn draw(&self) -> Result<()> {
         self.is_drawing.set(false);
         if let Ok(mut lock) = self.print_lock.try_lock() && lock.get_value() == 0 {
-            self.draw_with_lock(&mut lock).await
+            let resized = self.draw_with_lock(&mut lock).await?;
+            if !resized.is_empty() {
+                self.trigger_message_resize_callbacks(&resized).await;
+            }
+            Ok(())
         } else {
             // the shell will draw it later
             Ok(())
         }
     }
 
-    async fn draw_with_lock(&self, _lock: &mut PrintLockGuard<'_>) -> Result<()> {
+    async fn draw_with_lock(&self, _lock: &mut PrintLockGuard<'_>) -> Result<Vec<usize>> {
         let mut size = None;
         let mut shell_vars = None;
         let mut cursor_y = None;
@@ -171,7 +175,7 @@ impl Ui {
             let need_cursor_y;
 
             let size = {
-                let ui = &mut *self.borrow_mut();
+                let mut ui = self.borrow_mut();
 
                 if size == Some(ui.size) {
                     return ui.draw(shell_vars, cursor_y);
@@ -188,14 +192,14 @@ impl Ui {
                 need_cursor_y = ui.dirty;
 
                 if !(ui.dirty || ui.buffer.dirty || ui.tui.dirty || ui.status_bar.dirty) {
-                    return Ok(())
+                    return Ok(vec![])
                 }
 
                 need_shell_vars = ui.dirty || ui.cmdline.is_dirty();
 
                 if !need_cursor_y && !need_shell_vars {
                     // don't need to refresh anything, draw immediately
-                    return ui.draw(shell_vars, cursor_y)
+                    return ui.draw(shell_vars, cursor_y);
                 }
                 ui.size
             };
@@ -919,12 +923,12 @@ impl UiInner {
     }
 
 
-    fn draw(&mut self, shell_vars: Option<crate::tui::command_line::ShellVars>, cursor_y: Option<u32>) -> Result<()> {
+    fn draw(&mut self, shell_vars: Option<crate::tui::command_line::ShellVars>, cursor_y: Option<u32>) -> Result<Vec<usize>> {
         if let Some(shell_vars) = shell_vars {
             self.cmdline.shell_vars = shell_vars;
         }
         let cmdline = self.cmdline.make_command_line(&mut self.buffer);
-        self.tui.draw(
+        let resized = self.tui.draw(
             &mut self.stdout,
             self.size,
             cursor_y,
@@ -933,7 +937,7 @@ impl UiInner {
             self.dirty,
         )?;
         self.dirty = false;
-        Ok(())
+        Ok(resized)
     }
 
 }

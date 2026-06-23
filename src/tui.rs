@@ -149,7 +149,7 @@ impl Tui {
         let width = std::num::NonZero::new(width).map_or(80, |w| w.get());
 
         // refresh tmp size
-        node.refresh(&self.nodes.map, width, None, true);
+        node.refresh(&self.nodes.map, width, None, true, None);
 
         let mut string = vec![];
         let mut writer = Cursor::new(&mut string);
@@ -197,11 +197,13 @@ impl Tui {
         mut cmdline: command_line::CommandLine<'_>,
         status_bar: &mut status_bar::StatusBar,
         clear: bool,
-    ) -> Result<()> {
+    ) -> Result<Vec<usize>> {
+
+        let mut resized_ids = vec![];
 
         // quit early if nothing is dirty
         if !clear && !cmdline.is_dirty() && !self.dirty && !status_bar.dirty {
-            return Ok(())
+            return Ok(resized_ids)
         }
 
         if clear {
@@ -247,7 +249,7 @@ impl Tui {
             // even if there is more space we could get by scrolling, we should avoid it because it is jarring
             // so this is the only one that cares about the height
             let max_height = self.max_height.saturating_sub(status_bar.get_height() as u32 + cmdline.get_height() as u32);
-            self.nodes.refresh(
+            resized_ids = self.nodes.refresh(
                 width as _,
                 Some(max_height as _),
             );
@@ -324,7 +326,7 @@ impl Tui {
         self.dirty = false;
         cmdline.set_is_dirty(false);
         status_bar.dirty = false;
-        Ok(())
+        Ok(resized_ids)
     }
 
 }
