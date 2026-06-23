@@ -1,4 +1,3 @@
-use std::ops::{Index, IndexMut};
 use super::cell::Cell;
 use super::rect::Rect;
 use super::drawer::Canvas;
@@ -21,44 +20,69 @@ impl Buffer {
             cell.reset();
         }
     }
-}
 
-impl Index<(u16, u16)> for Buffer {
-    type Output = Cell;
-    fn index(&self, (x, y): (u16, u16)) -> &Cell {
-        &self.content[(y * self.area.width + x) as usize]
+    fn coord_to_index(&self, (x, y): (u16, u16)) -> usize {
+        (y * self.area.width + x) as _
     }
-}
 
-impl IndexMut<(u16, u16)> for Buffer {
-    fn index_mut(&mut self, (x, y): (u16, u16)) -> &mut Cell {
-        &mut self.content[(y * self.area.width + x) as usize]
+    fn get(&self, pos: (u16, u16)) -> Option<&Cell> {
+        let index = self.coord_to_index(pos);
+        if cfg!(debug_assertions) {
+            if index >= self.content.len() {
+                log::error!("Trying to draw outside of bounds: size={:?}, pos={pos:?}", self.get_size());
+            }
+        }
+        self.content.get(index)
+    }
+
+    fn get_mut(&mut self, pos: (u16, u16)) -> Option<&mut Cell> {
+        let index = self.coord_to_index(pos);
+        if cfg!(debug_assertions) {
+            if index >= self.content.len() {
+                log::error!("Trying to draw outside of bounds: size={:?}, pos={pos:?}", self.get_size());
+            }
+        }
+        self.content.get_mut(index)
     }
 }
 
 impl Canvas for Buffer {
-    fn get_cell(&self, pos: (u16, u16)) -> &Cell {
-        &self[pos]
+    fn get_cell(&self, pos: (u16, u16)) -> Option<&Cell> {
+        self.get(pos)
     }
 
-    fn get_cell_mut(&mut self, pos: (u16, u16)) -> &mut Cell {
-        &mut self[pos]
+    fn get_cell_mut(&mut self, pos: (u16, u16)) -> Option<&mut Cell> {
+        self.get_mut(pos)
     }
 
     fn set_cell(&mut self, pos: (u16, u16), cell: &Cell) {
-        self[pos] = cell.clone();
+        if let Some(c) = self.get_cell_mut(pos) {
+            *c = cell.clone();
+        }
     }
 
     fn get_cell_range(&self, start: (u16, u16), end: (u16, u16)) -> &[Cell] {
-        let s = (start.1 * self.area.width + start.0) as usize;
-        let e = (end.1   * self.area.width + end.0)   as usize;
-        &self.content[s..e]
+        let start = self.coord_to_index(start);
+        let end = self.coord_to_index(end);
+        let len = self.content.len();
+        if cfg!(debug_assertions) {
+            if start >= len || end > len {
+                log::error!("Trying to draw outside of bounds: len={len}, start={start:?}, end={end:?}");
+            }
+        }
+        &self.content[start.min(len)..end.min(len)]
     }
 
     fn get_cell_range_mut(&mut self, start: (u16, u16), end: (u16, u16)) -> &mut [Cell] {
-        let s = (start.1 * self.area.width + start.0) as usize;
-        let e = (end.1   * self.area.width + end.0)   as usize;
-        &mut self.content[s..e]
+        let start = self.coord_to_index(start);
+        let end = self.coord_to_index(end);
+        let len = self.content.len();
+        if cfg!(debug_assertions) {
+            if start >= len || end > len {
+                log::error!("Trying to draw outside of bounds: len={len}, start={start:?}, end={end:?}");
+            }
+        }
+        &mut self.content[start..end]
     }
 
     fn get_size(&self) -> (u16, u16) {

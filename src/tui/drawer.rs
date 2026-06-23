@@ -18,8 +18,8 @@ use crossterm::{
 use super::{Cell, Style, Modifier};
 
 pub trait Canvas {
-    fn get_cell(&self, pos: (u16, u16)) -> &Cell;
-    fn get_cell_mut(&mut self, pos: (u16, u16)) -> &mut Cell;
+    fn get_cell(&self, pos: (u16, u16)) -> Option<&Cell>;
+    fn get_cell_mut(&mut self, pos: (u16, u16)) -> Option<&mut Cell>;
     fn set_cell(&mut self, pos: (u16, u16), cell: &Cell);
     fn get_cell_range(&self, start: (u16, u16), end: (u16, u16)) -> &[Cell];
     fn get_cell_range_mut(&mut self, start: (u16, u16), end: (u16, u16)) -> &mut [Cell];
@@ -32,12 +32,12 @@ pub struct DummyCanvas {
     cell: Cell,
 }
 impl Canvas for DummyCanvas {
-    fn get_cell(&self, _pos: (u16, u16)) -> &Cell {
-        &self.cell
+    fn get_cell(&self, _pos: (u16, u16)) -> Option<&Cell> {
+        Some(&self.cell)
     }
 
-    fn get_cell_mut(&mut self, _pos: (u16, u16)) -> &mut Cell {
-        &mut self.cell
+    fn get_cell_mut(&mut self, _pos: (u16, u16)) -> Option<&mut Cell> {
+        Some(&mut self.cell)
     }
 
     fn set_cell(&mut self, _pos: (u16, u16), _cell: &Cell) {
@@ -155,8 +155,9 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
                 // TODO what about when it is a multi width char
                 let pos = (self.term_width() - 1, self.pos.1);
                 self.move_to_pos(pos, force_wrap)?;
-                let cell = self.canvas.get_cell(pos).clone();
-                self.draw_cell(&cell, true)?;
+                if let Some(cell) = self.canvas.get_cell(pos) {
+                    self.draw_cell(&cell.clone(), true)?;
+                }
             }
         }
         Ok(())
@@ -169,8 +170,8 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
     }
 
     pub fn clear_cells(&mut self, (x, y): (u16, u16), n: u16) {
-        for i in 0..n {
-            self.canvas.get_cell_mut((x + i, y)).reset();
+        for cell in self.canvas.get_cell_range_mut((x, y), (x + n, y)) {
+            cell.reset();
         }
     }
 
@@ -300,7 +301,7 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
             pos = (0, pos.1 + 1);
         }
 
-        let draw = force || will_wrap || self.canvas.get_cell(pos) != cell;
+        let draw = force || will_wrap || self.canvas.get_cell(pos).is_some_and(|c| c != cell);
         if draw {
             // move to the location
             self.move_to_cur_pos(false)?;
