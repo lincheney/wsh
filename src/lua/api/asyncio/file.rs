@@ -10,31 +10,36 @@ use tokio::io::{
     AsyncWriteExt,
     AsyncBufReadExt,
 };
+use tokio::sync::{RwLock, RwLockWriteGuard};
 
-trait Writeable<W: AsyncWrite> {
-    fn get_writer(&mut self) -> &mut Option<W>;
+trait Writeable<W: 'static + AsyncWrite> {
+    async fn get_writer(&self) -> RwLockWriteGuard<'_, Option<W>>;
 }
 
-trait Readable<R: AsyncRead> {
-    fn get_reader(&mut self) -> Option<&mut R>;
+trait Readable<R: 'static + AsyncRead> {
+    async fn get_reader(&self) -> RwLockWriteGuard<'_, Option<R>>;
     fn is_tty_master(&self) -> bool;
 }
 
-pub struct ReadableFile<T>(pub Option<BufReader<T>>, pub bool);
-impl<T: AsyncRead> Readable<BufReader<T>> for ReadableFile<T> {
-    fn get_reader(&mut self) -> Option<&mut BufReader<T>> {
-        self.0.as_mut()
+pub struct ReadableFile<T> {
+    pub inner: RwLock<Option<BufReader<T>>>,
+    pub is_tty_master: bool,
+    pub fd: RawFd,
+}
+impl<T: 'static + AsyncRead> Readable<BufReader<T>> for ReadableFile<T> {
+    async fn get_reader(&self) -> RwLockWriteGuard<'_, Option<BufReader<T>>> {
+        self.inner.write().await
     }
     fn is_tty_master(&self) -> bool {
-        self.1
+        self.is_tty_master
     }
 }
 
-fn add_readable_methods<R: AsyncRead+Unpin, T: 'static+Readable<R>, M: UserDataMethods<T>>(methods: &mut M) {
+fn add_readable_methods<R: 'static+AsyncRead+Unpin, T: 'static+Readable<R>, M: UserDataMethods<T>>(methods: &mut M) {
 
-    methods.add_async_method_mut("read", |lua, mut file, ()| async move {
+    methods.add_async_method("read", |lua, file, ()| async move {
         let is_tty_master = file.is_tty_master();
-        if let Some(file) = file.get_reader() {
+        if let Some(file) = &mut *file.get_reader().await {
             let mut buf = [0; 4096];
             loop {
                 match file.read(&mut buf).await {
@@ -52,8 +57,8 @@ fn add_readable_methods<R: AsyncRead+Unpin, T: 'static+Readable<R>, M: UserDataM
         Ok(None)
     });
 
-    methods.add_async_method_mut("read_to_end", |lua, mut file, ()| async move {
-        if let Some(file) = file.get_reader() {
+    methods.add_async_method("read_to_end", |lua, file, ()| async move {
+        if let Some(file) = &mut *file.get_reader().await {
             let mut buf = vec![];
             file.read_to_end(&mut buf).await?;
             return Ok(Some(lua.create_string(&buf)?));
@@ -63,10 +68,10 @@ fn add_readable_methods<R: AsyncRead+Unpin, T: 'static+Readable<R>, M: UserDataM
 
 }
 
-fn add_bufreadable_methods<R: AsyncRead+AsyncBufReadExt+Unpin, T: 'static+Readable<R>, M: UserDataMethods<T>>(methods: &mut M) {
+fn add_bufreadable_methods<R: 'static+AsyncRead+AsyncBufReadExt+Unpin, T: 'static+Readable<R>, M: UserDataMethods<T>>(methods: &mut M) {
 
-    methods.add_async_method_mut("read_until", |lua, mut file, val: u8| async move {
-        if let Some(file) = file.get_reader() {
+    methods.add_async_method("read_until", |lua, file, val: u8| async move {
+        if let Some(file) = &mut *file.get_reader().await {
             let mut buf = vec![];
             let n = file.read_until(val, &mut buf).await?;
             if n != 0 {
@@ -77,8 +82,8 @@ fn add_bufreadable_methods<R: AsyncRead+AsyncBufReadExt+Unpin, T: 'static+Readab
     });
 
 
-    methods.add_async_method_mut("read_line", |lua, mut file, ()| async move {
-        if let Some(file) = file.get_reader() {
+    methods.add_async_method("read_line", |lua, file, ()| async move {
+        if let Some(file) = &mut *file.get_reader().await {
             let mut buf = vec![];
             let n = file.read_until(b'\n', &mut buf).await?;
             if n != 0 {
@@ -90,9 +95,9 @@ fn add_bufreadable_methods<R: AsyncRead+AsyncBufReadExt+Unpin, T: 'static+Readab
 
 }
 
-fn add_writeable_methods<R: AsyncWrite+Unpin, T: 'static+Writeable<R>, M: UserDataMethods<T>>(methods: &mut M) {
-    methods.add_async_method_mut("write", |_lua, mut file, val: LuaString| async move {
-        if let Some(file) = file.get_writer() {
+fn add_writeable_methods<R: 'static+AsyncWrite+Unpin, T: 'static+Writeable<R>, M: UserDataMethods<T>>(methods: &mut M) {
+    methods.add_async_method("write", |_lua, file, val: LuaString| async move {
+        if let Some(file) = &mut *file.get_writer().await {
             file.write_all(&val.as_bytes()).await?;
             file.flush().await?;
         }
@@ -102,7 +107,7 @@ fn add_writeable_methods<R: AsyncWrite+Unpin, T: 'static+Writeable<R>, M: UserDa
 
 impl<T: AsyncRead + AsRawFd> ReadableFile<T> {
     pub fn as_raw_fd(&self) -> Option<RawFd> {
-        self.0.as_ref().map(|x| x.get_ref().as_raw_fd())
+        Some(self.fd)
     }
 }
 
@@ -112,12 +117,12 @@ impl<T: AsyncRead + AsRawFd + Unpin + 'static> UserData for ReadableFile<T> {
             Ok(file.as_raw_fd())
         });
 
-        methods.add_method_mut("close", |_lua, file, ()| {
-            file.0 = None;
+        methods.add_async_method("close", |_lua, file, ()| async move {
+            *file.inner.write().await = None;
             Ok(())
         });
 
-        methods.add_method_mut("set_tty_size", |_lua, file, (rows, cols): (Option<u16>, Option<u16>)| {
+        methods.add_method("set_tty_size", |_lua, file, (rows, cols): (Option<u16>, Option<u16>)| {
             if !file.is_tty_master() {
                 return Err(LuaError::RuntimeError("not a tty master".into()))
             }
@@ -133,8 +138,7 @@ impl<T: AsyncRead + AsRawFd + Unpin + 'static> UserData for ReadableFile<T> {
                 None
             };
 
-            if let Some(file) = file.0.as_ref() {
-                let fd = file.get_ref().as_raw_fd();
+            if let Some(fd) = file.as_raw_fd() {
                 crate::shell::set_zpty_size(fd, None, rows, cols).map_err(|e| LuaError::RuntimeError(e.to_string()))?;
             }
             Ok(())
@@ -145,27 +149,30 @@ impl<T: AsyncRead + AsRawFd + Unpin + 'static> UserData for ReadableFile<T> {
     }
 }
 
-pub struct WriteableFile<T>(pub Option<BufWriter<T>>);
-impl<T: AsyncWrite> Writeable<BufWriter<T>> for WriteableFile<T> {
-    fn get_writer(&mut self) -> &mut Option<BufWriter<T>> {
-        &mut self.0
+pub struct WriteableFile<T>{
+    pub inner: RwLock<Option<BufWriter<T>>>,
+    pub fd: RawFd,
+}
+impl<T: 'static + AsyncWrite> Writeable<BufWriter<T>> for WriteableFile<T> {
+    async fn get_writer(&self) -> RwLockWriteGuard<'_, Option<BufWriter<T>>> {
+        self.inner.write().await
     }
 }
 
 impl<T: AsyncWrite + AsRawFd> WriteableFile<T> {
-    pub fn as_raw_fd(&self) -> Option<RawFd> {
-        self.0.as_ref().map(|x| x.get_ref().as_raw_fd())
+    pub fn as_raw_fd(&self) -> RawFd {
+        self.fd
     }
 }
 
 impl<T: AsyncWrite + AsRawFd + Unpin + 'static> UserData for WriteableFile<T> {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_method("as_fd", |_lua, file, ()| {
+        methods.add_async_method("as_fd", |_lua, file, ()| async move {
             Ok(file.as_raw_fd())
         });
 
-        methods.add_method_mut("close", |_lua, file, ()| {
-            file.0 = None;
+        methods.add_async_method("close", |_lua, file, ()| async move {
+            *file.inner.write().await = None;
             Ok(())
         });
 

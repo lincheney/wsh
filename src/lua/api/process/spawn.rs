@@ -1,3 +1,4 @@
+use std::os::fd::AsRawFd;
 use crate::lua::LuaWrapper;
 use bstr::BString;
 use std::str::FromStr;
@@ -10,7 +11,7 @@ use tokio::io::{
     BufWriter,
 };
 use tokio::process::Command;
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{oneshot, watch, RwLock};
 use serde::{Deserialize, Deserializer, de};
 use crate::ui::{Ui};
 use crate::lua::api::asyncio::{ReadableFile, WriteableFile};
@@ -200,9 +201,20 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
             };
             let child = proc.insert(child);
 
-            let stdin  = child.stdin.take().map(|s| WriteableFile(Some(BufWriter::new(s))));
-            let stdout = child.stdout.take().map(|s| ReadableFile(Some(BufReader::new(s)), false));
-            let stderr = child.stderr.take().map(|s| ReadableFile(Some(BufReader::new(s)), false));
+            let stdin  = child.stdin.take().map(|s| WriteableFile{
+                fd: s.as_raw_fd(),
+                inner: RwLock::new(Some(BufWriter::new(s))),
+            });
+            let stdout = child.stdout.take().map(|s| ReadableFile{
+                fd: s.as_raw_fd(),
+                inner: RwLock::new(Some(BufReader::new(s))),
+                is_tty_master: false,
+            });
+            let stderr = child.stderr.take().map(|s| ReadableFile{
+                fd: s.as_raw_fd(),
+                inner: RwLock::new(Some(BufReader::new(s))),
+                is_tty_master: false,
+            });
 
             let _ = result_sender.take().unwrap().send(Ok((pid, stdin, stdout, stderr)));
 

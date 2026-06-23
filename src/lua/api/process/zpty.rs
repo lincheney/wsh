@@ -1,3 +1,4 @@
+use std::os::fd::AsRawFd;
 use crate::lua::LuaWrapper;
 use crate::shell::{MetaString};
 use std::rc::Rc;
@@ -12,7 +13,7 @@ use std::io::{Read, Write};
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use tokio::io::{unix::AsyncFd, ReadBuf, AsyncRead, AsyncWrite, BufWriter, BufReader};
-use tokio::sync::{watch};
+use tokio::sync::{watch, RwLock};
 use serde::{Deserialize};
 use crate::ui::{Ui};
 use crate::lua::api::asyncio::{ReadableFile, WriteableFile};
@@ -111,8 +112,15 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let pty = crate::utils::dup_fd(unsafe{ std::os::fd::BorrowedFd::borrow_raw(zpty.fd) })?;
     // crate::utils::set_nonblocking_fd(&pty)?;
     let pty = Rc::new(AsyncFd::new(pty.into())?);
-    let stdin = WriteableFile(Some(BufWriter::new(AsyncZpty{ inner: pty.clone() })));
-    let stdout = ReadableFile(Some(BufReader::new(AsyncZpty{ inner: pty })), true);
+    let stdin = WriteableFile{
+        fd: pty.as_raw_fd(),
+        inner: RwLock::new(Some(BufWriter::new(AsyncZpty{ inner: pty.clone() }))),
+    };
+    let stdout = ReadableFile{
+        fd: pty.as_raw_fd(),
+        inner: RwLock::new(Some(BufReader::new(AsyncZpty{ inner: pty }))),
+        is_tty_master: true,
+    };
 
     let pid = zpty.pid;
     ui.clone().runtime.spawn_local(async move {

@@ -9,7 +9,7 @@ use tokio::io::{
     BufWriter,
 };
 use tokio::net::unix::pipe::{Sender, Receiver};
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{oneshot, watch, RwLock};
 use serde::{Deserialize};
 use crate::ui::{Ui};
 use crate::lua::api::asyncio::{ReadableFile, WriteableFile};
@@ -169,9 +169,20 @@ pub async fn subshell_run_with_args(ui: Ui, lua: Lua, args: FullShellRunArgs) ->
             pid,
             result: CommandResult{ inner: receiver },
         },
-        stdin.map(|stdin| WriteableFile(Some(BufWriter::new(stdin)))),
-        stdout.map(|stdout| ReadableFile(Some(BufReader::new(stdout)), false)),
-        stderr.map(|stderr| ReadableFile(Some(BufReader::new(stderr)), false)),
+        stdin.map(|stdin| WriteableFile{
+            fd: stdin.as_raw_fd(),
+            inner: RwLock::new(Some(BufWriter::new(stdin))),
+        } ),
+        stdout.map(|stdout| ReadableFile{
+            fd: stdout.as_raw_fd(),
+            inner: RwLock::new(Some(BufReader::new(stdout))),
+            is_tty_master: false,
+        }),
+        stderr.map(|stderr| ReadableFile{
+            fd: stderr.as_raw_fd(),
+            inner: RwLock::new(Some(BufReader::new(stderr))),
+            is_tty_master: false,
+        }),
     ))?)
 }
 
