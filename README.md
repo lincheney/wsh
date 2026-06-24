@@ -67,7 +67,7 @@ i wish i could have
 * [ ] snippets?
 * [ ] capture job status reporting
 * [x] recursive keymaps
-* [ ] recursive keymaps in lua
+* [x] recursive keymaps in lua
 * [ ] control c style escape hatch
     * [x] lua
     * [ ] anywhere else?
