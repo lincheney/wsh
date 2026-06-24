@@ -4,6 +4,7 @@ return wish.plugin(function(wish, opts, plugin)
     local timeout = opts.timeout
     local min_height = opts.min_height or 3
     local hide_on_stop = opts.hide_on_stop ~= false
+    local resize_tty = opts.resize_tty
     local style = opts.style and opts.style.main or {
         border = {
             fg = 'magenta',
@@ -145,7 +146,7 @@ return wish.plugin(function(wish, opts, plugin)
             end)
         end
 
-        if not message_resize_callback then
+        if not message_resize_callback and resize_tty then
             message_resize_callback = wish.add_event_callback('message_resize', function(ids)
                 if not current_preview then
                     return
