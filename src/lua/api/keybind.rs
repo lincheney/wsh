@@ -6,6 +6,7 @@ use anyhow::Result;
 use mlua::{prelude::*, Function};
 use crate::keybind::event::{Event, EventIndex};
 use crate::lua::{Ui};
+use crate::keybind::Action;
 
 #[derive(Default)]
 pub struct KeybindMapping {
@@ -36,31 +37,20 @@ impl TryFrom<&Event> for EventPayload {
     }
 }
 
-pub async fn invoke_keybind_callback(ui: &Ui, event: &Event) -> bool {
-
-    let Ok(index) = event.try_into() else {
-        return false;
-    };
-
-    // look for a lua callback
-    let callback = {
-        let ui = ui.borrow();
-        let mut keymaps = ui.keybinds.iter().rev();
-        loop {
-            let Some(k) = keymaps.next() else {
-                return false;
-            };
+pub async fn invoke_keybind_callback(ui: &Ui, event: &Event) -> Option<Action> {
+    if let Ok(index) = event.try_into() {
+        // look for a lua callback
+        for k in ui.borrow().keybinds.iter().rev() {
             if let Some(callback) = k.inner.get(&index) {
-                break callback.clone();
+                let payload: Option<EventPayload> = event.try_into().ok();
+                ui.call_lua_fn(true, callback.clone(), payload).await;
+                return Some(Action::Done{success: true});
             } else if k.no_fallthrough {
-                return true;
+                return Some(Action::Done{success: true});
             }
         }
-    };
-
-    let payload: Option<EventPayload> = event.try_into().ok();
-    ui.call_lua_fn(true, callback, payload).await;
-    true
+    }
+    None
 }
 
 fn set_keymap(ui: &Ui, _lua: &Lua, (key, callback, layer): (String, Function, Option<usize>)) -> Result<()> {

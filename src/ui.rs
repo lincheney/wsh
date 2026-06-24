@@ -1,15 +1,15 @@
 use std::ops::ControlFlow;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use bstr::{BStr, BString};
+use bstr::{BString};
 use std::future::Future;
 use std::default::Default;
 use mlua::prelude::*;
 use anyhow::Result;
-use crate::keybind::{Event, KeyEvent, Key, Modifiers};
+use crate::keybind::{Event};
 use crate::print_lock::{PrintLock, PrintLockGuard};
 use nix::sys::termios;
-use crate::shell::{Shell, KeybindValue, process::PidMap, ParserOptions};
+use crate::shell::{Shell, process::PidMap, ParserOptions};
 use crate::lua::{LuaWrapper, EventCallbacks, HasEventCallbacks};
 pub mod buffer;
 
@@ -27,11 +27,6 @@ use crate::tui::{
 
 const ENABLE_SGR_MOUSE: style::Print<&str> = style::Print("\x1b[?1000;1006h");
 const DISABLE_SGR_MOUSE: style::Print<&str> = style::Print("\x1b[?1000;1006l");
-
-enum KeybindOutput {
-    String(BString),
-    Value(Result<bool>),
-}
 
 pub struct TermiosInputFlags {
     pub intr: u8,
@@ -252,14 +247,9 @@ impl Ui {
             _ => (),
         }
 
-        if let Some(result) = self.handle_key(&event, event_buffer.as_ref()).await {
-            self.cancel_completion_suffix();
-            return result
-        }
-
-        self.handle_key_default(event, event_buffer.as_ref()).await?;
+        let result = crate::keybind::KeyHandler(self).handle(&event, event_buffer.as_ref()).await?;
         self.cancel_completion_suffix();
-        Ok(true)
+        Ok(matches!(result, None | Some(crate::keybind::Action::Done{success: true})))
     }
 
     pub async fn handle_window_resize(&self, width: u32, height: u32) -> Result<bool> {
@@ -462,194 +452,6 @@ impl Ui {
         } else {
             anyhow::bail!("ui not running")
         }
-    }
-
-    async fn handle_key(&mut self, event: &Event, buf: &BStr) -> Option<Result<bool>> {
-        let mut mapping = match self.handle_key_simple(event, buf).await? {
-            KeybindOutput::Value(x) => return Some(x),
-            KeybindOutput::String(string) => string,
-        };
-
-        // shucks, gotta do recursion
-        let mut success = true;
-        for _hop in 0..20 {
-            let mut parser = crate::keybind::parser::Parser::default();
-            parser.feed(mapping.as_ref());
-            mapping.clear();
-            for (event, buf) in parser.iter() {
-                match self.handle_key_simple(&event, buf.as_ref()).await {
-                    Some(KeybindOutput::Value(x)) => {
-                        if let Ok(x) = x {
-                            success = success && x;
-                            continue
-                        }
-                        return Some(x) // error
-                    },
-                    Some(KeybindOutput::String(mut string)) => {
-                        mapping.append(&mut string);
-                        continue
-                    },
-                    None => (),
-                }
-
-                let x = self.handle_key_default(event, buf.as_ref()).await;
-                if let Ok(x) = x {
-                    success = success && x;
-                } else {
-                    return Some(x) // error
-                }
-            }
-
-            if mapping.is_empty() {
-                return Some(Ok(success))
-            }
-        }
-
-        // TODO we still have a mapping
-        // let mut ui = self.inner.borrow_mut();
-        // ui.buffer.insert_at_cursor(string.as_ref());
-        // return Some(Ok(true))
-
-        Some(Ok(true))
-    }
-
-    async fn handle_key_simple(&mut self, event: &Event, buf: &BStr) -> Option<KeybindOutput> {
-        enum Value {
-            String(BString),
-            Widget{buffer: Option<BString>, cursor: Option<usize>, output: Option<BString>, accept_line: bool},
-        }
-
-        if crate::lua::invoke_keybind_callback(self, event).await {
-            return Some(KeybindOutput::Value(Ok(true)))
-        }
-
-        if buf.len() == 1 {
-            // zsh doesn't run widgets if eof
-            let is_eof = {
-                let ui = self.borrow();
-                buf == &[ui.termios_input_flags.eof] && ui.buffer.get_contents().is_empty()
-            };
-            if is_eof {
-                self.shell.exit(0);
-                // this should error as we exit
-                let _ = self.shell.accept_line(None).await;
-                return None;
-            }
-        }
-
-        let mut lastchar = [0; 4];
-        let len = buf.len().min(lastchar.len());
-        lastchar[..len].copy_from_slice(&buf[..len]);
-
-        // look for a zle widget
-        let ui = self.clone();
-        let buf: crate::shell::MetaString = buf.to_owned().into();
-
-        let result = match KeybindValue::find(buf.as_ref())? {
-            KeybindValue::String(string) => {
-                // recurse
-                Value::String(string)
-            },
-            // skip not found or where we have our own impl
-            KeybindValue::Widget(widget) if widget.is_self_insert() || widget.is_undefined_key() => {
-                return None
-            },
-            KeybindValue::Widget(widget) if widget.is_accept_line() => {
-                Value::Widget{accept_line: true, buffer: None, cursor: None, output: None}
-            },
-            KeybindValue::Widget(mut widget) => {
-                // execute the widget
-                let lock = if widget.is_internal() {
-                    // are all internal widgets safe to run without locking ui?
-                    // they should all output only to shout which we are already capturing?
-                    None
-                } else {
-                    // a widget may run subprocesses so lock the ui
-                    Some(ui.has_foreground_process.lock().await)
-                };
-                let (buffer, cursor) = {
-                    let ui = self.borrow();
-                    (ui.buffer.get_contents().clone(), ui.buffer.get_cursor())
-                };
-
-                self.shell.set_zle_buffer(buffer.clone(), cursor as _);
-                self.shell.set_lastchar(lastchar);
-
-                let (output, _) = self.shell.trampoline_out_callback(Box::new(move |ui: Self, token| {
-                    widget.exec_and_get_output(token, &ui.shell, None, [].into_iter())
-                })).await.unwrap();
-
-                let (new_buffer, new_cursor) = self.shell.get_zle_buffer();
-                let new_cursor = new_cursor.unwrap_or(new_buffer.len() as _) as _;
-                let new_buffer = (new_buffer != buffer).then_some(new_buffer);
-                let new_cursor = (new_cursor != cursor).then_some(new_cursor);
-                let accept_line = self.shell.has_accepted_line();
-                drop(lock);
-
-                Value::Widget{
-                    buffer: new_buffer,
-                    cursor: new_cursor,
-                    output: if output.is_empty() { None } else { Some(output) },
-                    accept_line,
-                }
-            },
-        };
-
-        match result {
-            Value::String(string) => Some(KeybindOutput::String(string)),
-            Value::Widget{buffer, mut cursor, output, accept_line} => {
-                {
-                    if let Some(buffer) = &buffer {
-                        self.insert_or_set_buffer(false, buffer, cursor.take()).await;
-                    }
-
-                    let mut ui = self.borrow_mut();
-
-                    // check for any output e.g. zle -M
-                    if let Some(output) = &output {
-                        ui.tui.add_zle_message(output.as_ref());
-                    }
-                    ui.buffer.set(None, cursor);
-                }
-
-                if buffer.is_some() {
-                    self.trigger_buffer_change_callbacks().await;
-                }
-                // anything could have happened, so trigger a redraw
-                self.queue_draw();
-
-                // this widget may have called accept-line somewhere inside
-                if accept_line {
-                    Some(KeybindOutput::Value(self.accept_line().await))
-                } else {
-                    Some(KeybindOutput::Value(Ok(true)))
-                }
-            },
-        }
-    }
-
-    async fn handle_key_default(&mut self, event: Event, _buf: &BStr) -> Result<bool> {
-        match event {
-
-            Event::Key(KeyEvent{ key: Key::Char(c), modifiers }) if modifiers.difference(Modifiers::SHIFT).is_empty() => {
-                let mut buf = [0; 4];
-                let c = c.encode_utf8(&mut buf).as_bytes();
-                self.insert_or_set_buffer(true, c, None).await;
-                self.trigger_buffer_change_callbacks().await;
-                self.queue_draw();
-            },
-
-            Event::Key(KeyEvent{ key: Key::Enter, modifiers }) if modifiers.difference(Modifiers::SHIFT).is_empty() => {
-                return self.accept_line().await;
-            },
-
-            Event::BracketedPaste(data) => {
-                self.trigger_paste_callbacks(&data).await;
-            },
-
-            _ => (),
-        }
-        Ok(true)
     }
 
     fn cancel_completion_suffix(&self) {
