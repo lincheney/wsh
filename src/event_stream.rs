@@ -83,7 +83,7 @@ impl EventStream {
         (stream, controller)
     }
 
-    pub async fn run<T: Read+AsRawFd+Send+Sync+'static>(mut self, file: T, mut ui: crate::ui::Ui) -> anyhow::Result<i32> {
+    pub async fn run<T: Read+AsRawFd+'static>(mut self, file: T, mut ui: crate::ui::Ui) -> anyhow::Result<i32> {
 
         // read events
         let mut reader = AsyncFd::new(file)?;
@@ -98,8 +98,8 @@ impl EventStream {
                     else { continue };
                 guard?.clear_ready();
                 match reader.get_mut().read(&mut buf) {
-                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => (),
                     Ok(0) => return Ok(()),
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => (),
                     Err(err) => return Err(err)?,
 
                     Ok(n) => {
@@ -144,9 +144,7 @@ impl EventStream {
             let ui = ui.clone();
             crate::spawn_and_log::<_, _, anyhow::Error>(&ui.clone(), async move {
                 let Some(sigint) = crate::shell::signals::sigint::get_subscriber()
-                    else {
-                        anyhow::bail!("cannot subscribe to sigint events");
-                    };
+                    else { anyhow::bail!("cannot subscribe to sigint events"); };
                 while let Some(sigint) = sigint.upgrade() {
                     sigint.notified().await;
                     crate::log_if_err(ui.handle_interrupt().await);

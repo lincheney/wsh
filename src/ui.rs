@@ -244,12 +244,8 @@ impl Ui {
 
     pub async fn handle_event(&mut self, event: Event, event_buffer: BString) -> Result<bool> {
         match event {
-            Event::Key(ev) => {
-                self.trigger_key_callbacks(&ev.into(), &event_buffer).await?;
-            },
-            Event::Mouse(ev) => {
-                self.trigger_mouse_callbacks(&ev.into(), &event_buffer).await?;
-            },
+            Event::Key(ev) => self.trigger_key_callbacks(&ev.into(), &event_buffer).await?,
+            Event::Mouse(ev) => self.trigger_mouse_callbacks(&ev.into(), &event_buffer).await?,
             _ => (),
         }
 

@@ -170,6 +170,7 @@ event_types!(
     paste(data: &BString),
     window_resize(width: u32, height: u32),
     message_resize(ids: &[usize]),
+    exit(),
 );
 
 

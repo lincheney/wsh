@@ -74,9 +74,6 @@ impl std::fmt::Debug for cmatch {
     }
 }
 
-unsafe impl Send for cmatch {}
-unsafe impl Sync for cmatch {}
-
 #[derive(num_derive::FromPrimitive, Debug, Copy, Clone, PartialEq)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum lextok {

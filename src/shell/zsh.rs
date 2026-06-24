@@ -16,6 +16,7 @@ pub mod variables;
 pub mod functions;
 pub mod signals;
 pub mod process;
+pub mod exit;
 #[macro_use]
 mod meta_string;
 pub use widget::ZleWidget;

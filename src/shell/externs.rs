@@ -15,7 +15,7 @@ thread_local! {
     static FIRST_DRAWN: Cell<bool> = const{ Cell::new(false) };
 }
 
-fn teardown() {
+pub(in crate::shell) fn teardown() {
     STATE.take();
 }
 
@@ -25,6 +25,7 @@ impl GlobalState {
     fn init() -> Result<Ui> {
         crate::logging::init();
         fork::init();
+        zsh::exit::init();
 
         let runtime = crate::async_runtime::Runtime::new()?;
 
@@ -77,6 +78,7 @@ impl Drop for GlobalState {
         zsh::completion::restore_compadd();
         zsh::widget::overrides::restore_all();
         zsh::bin_zle::restore_zle();
+        zsh::exit::cleanup();
     }
 }
 
@@ -283,11 +285,6 @@ fn teardown_if_err<T, E: std::fmt::Debug>(ui: &Ui, result: Result<T, E>) -> Opti
     }
 }
 
-#[derive(Debug)]
-struct Features(zsh_sys::features);
-unsafe impl Send for Features {}
-unsafe impl Sync for Features {}
-
 const DEFAULT_BUILTIN: zsh_sys::builtin = zsh_sys::builtin{
     node: zsh_sys::hashnode{ next: null_mut(), nam: null_mut(), flags: 0 },
     handlerfunc: None,
@@ -299,7 +296,7 @@ const DEFAULT_BUILTIN: zsh_sys::builtin = zsh_sys::builtin{
 };
 
 thread_local! {
-    static MODULE_FEATURES: Features = {
+    static MODULE_FEATURES: zsh_sys::features = {
         let bn_list = Box::new([
             zsh_sys::builtin{
                 node: zsh_sys::hashnode{
@@ -313,7 +310,7 @@ thread_local! {
         ]);
         let bn_list = Box::leak(bn_list);
 
-        Features(zsh_sys::features{
+        zsh_sys::features{
             // builtins
             bn_list: bn_list.as_mut_ptr(), bn_size: bn_list.len() as _,
             // conditions
@@ -324,7 +321,7 @@ thread_local! {
             mf_list: null_mut(), mf_size: 0,
             // abstract features
             n_abstract: 0,
-        })
+        }
     };
 }
 
@@ -348,7 +345,7 @@ pub extern "C" fn setup_() -> c_int {
 #[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn features_(module: zsh_sys::Module, features: *mut *mut *mut c_char) -> c_int {
     unsafe {
-        let module_features = MODULE_FEATURES.with(|x| &raw const x.0).cast_mut();
+        let module_features = MODULE_FEATURES.with(|x| &raw const *x).cast_mut();
         *features = zsh_sys::featuresarray(module, module_features);
     }
     0
@@ -358,7 +355,7 @@ pub unsafe extern "C" fn features_(module: zsh_sys::Module, features: *mut *mut 
 #[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn enables_(module: zsh_sys::Module, enables: *mut *mut c_int) -> c_int {
     unsafe {
-        let module_features = MODULE_FEATURES.with(|x| &raw const x.0).cast_mut();
+        let module_features = MODULE_FEATURES.with(|x| &raw const *x).cast_mut();
         zsh_sys::handlefeatures(module, module_features, enables)
     }
 }
@@ -372,7 +369,7 @@ pub extern "C" fn boot_() -> c_int {
 #[allow(clippy::missing_safety_doc)]
 pub unsafe extern "C" fn cleanup_(module: zsh_sys::Module) -> c_int {
     unsafe {
-        let module_features = MODULE_FEATURES.with(|x| &raw const x.0).cast_mut();
+        let module_features = MODULE_FEATURES.with(|x| &raw const *x).cast_mut();
         zsh_sys::setfeatureenables(module, module_features, null_mut())
     }
 }
