@@ -26,17 +26,17 @@ local function apply_matcher(matcher, token, str)
     local kind = token.kind or ''
     if matcher.kind then
         if type(matcher.kind) == 'string' then
-            matcher.kind = wish.regex(matcher.kind)
+            matcher.kind = wish.regex('^(' .. matcher.kind .. ')$')
         end
-        if not matcher.kind:is_full_match(kind) then
+        if not matcher.kind:is_match(kind) then
             return
         end
     end
     if matcher.not_kind then
         if type(matcher.not_kind) == 'string' then
-            matcher.not_kind = wish.regex(matcher.not_kind)
+            matcher.not_kind = wish.regex('^(' .. matcher.not_kind .. ')$')
         end
-        if matcher.not_kind:is_full_match(kind) then
+        if matcher.not_kind:is_match(kind) then
             return
         end
     end
