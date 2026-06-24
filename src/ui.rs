@@ -210,15 +210,19 @@ impl Ui {
         }
     }
 
-    pub async fn call_lua_fn<T: IntoLuaMulti + 'static>(&self, draw: bool, callback: mlua::Function, arg: T) -> Result<()> {
+    pub async fn call_lua_fn<T: IntoLuaMulti + 'static>(&self, draw: bool, callback: mlua::Function, arg: T) -> Result<Option<LuaValue>> {
         let result = self.lua.call_lua_fn(callback, arg).await;
-        if result.is_err() {
-            let mut ui = self.clone();
-            if !ui.report_error(result)? && draw {
-                ui.queue_draw();
-            }
+
+        match result {
+            Ok(result) => Ok(Some(result)),
+            err => {
+                let mut ui = self.clone();
+                if !ui.report_error(err)? && draw {
+                    ui.queue_draw();
+                }
+                Ok(None)
+            },
         }
-        Ok(())
     }
 
     pub fn report_error<T, E: std::fmt::Display>(&mut self, result: std::result::Result<T, E>) -> Result<bool> {

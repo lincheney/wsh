@@ -57,8 +57,8 @@ pub async fn invoke_keybind_callback(ui: &Ui, event: &Event) -> Result<Option<Ac
 
         if let Some(callback) = callback {
             let payload: Option<EventPayload> = event.try_into().ok();
-            return Ok(Some(match ui.lua.call_lua_fn(callback, payload).await? {
-                mlua::Value::String(s) => Action::Mapping(s.as_bytes().as_ref().into()),
+            return Ok(Some(match ui.call_lua_fn(true, callback, payload).await? {
+                Some(mlua::Value::String(s)) => Action::Mapping(s.as_bytes().as_ref().into()),
                 _ => Action::Done{exit: false},
             }));
         }
