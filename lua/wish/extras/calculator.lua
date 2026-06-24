@@ -30,8 +30,8 @@ return wish.plugin(function(wish)
         if expr then
             local value = do_maths(expr)
             local args = wish.table.merge({}, wish.style.number, {
-                start = math.pow(2, 32) - 1,
-                finish = math.pow(2, 32) - 1,
+                start = wish.MAXNUM,
+                finish = wish.MAXNUM,
                 dim = true,
                 virtual_text = ' = ' .. value,
                 namespace = NAMESPACE,

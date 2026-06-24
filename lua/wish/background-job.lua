@@ -33,7 +33,7 @@ local function update_message(job)
     if active_job and job == active_job.job then
         props.dim = false
         props.show_cursor = true
-        wish.add_buf_highlight{namespace = NAMESPACE, start = 0, finish = 2^32 - 1, dim = true}
+        wish.add_buf_highlight{namespace = NAMESPACE, start = 0, finish = wish.MAXNUM, dim = true}
     else
         props.dim = true
         props.show_cursor = false

@@ -117,7 +117,7 @@ return wish.plugin(function(wish, opts, plugin)
         -- dim everything
         local hl = wish.table.merge(wish.table.copy(dim_style), {
             start = 0,
-            finish = math.pow(2, 32) - 1,
+            finish = wish.MAXNUM,
             namespace = NAMESPACE,
         })
         wish.add_buf_highlight(hl)

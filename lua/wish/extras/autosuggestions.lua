@@ -37,8 +37,8 @@ return wish.plugin(function(wish, opts, plugin)
         local suffix = suggestion and suggestion:sub(#buffer + 1)
         if suffix and suffix ~= ''  then
             local hl = wish.table.merge(wish.table.copy(style), {
-                start = math.pow(2, 32) - 1,
-                finish = math.pow(2, 32) - 1,
+                start = wish.MAXNUM,
+                finish = wish.MAXNUM,
                 virtual_text = suffix,
                 namespace = NAMESPACE,
             })

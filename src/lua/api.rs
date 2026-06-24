@@ -9,6 +9,7 @@ use anyhow::Result;
 use crate::lua::{Ui};
 use std::time::SystemTime;
 
+mod number;
 pub mod keybind;
 mod string;
 mod completion;
@@ -68,14 +69,16 @@ fn get_buffer(ui: &Ui, lua: &Lua, (): ()) -> Result<(mlua::String, usize)> {
     Ok((lua.create_string(buffer.get_contents())?, buffer.get_cursor() + 1))
 }
 
-fn set_cursor(ui: &Ui, _lua: &Lua, val: usize) -> Result<()> {
+fn set_cursor(ui: &Ui, _lua: &Lua, val: number::PossiblyMaxUsize) -> Result<()> {
+    let val: usize = val.into();
     ui.try_borrow_mut()?.buffer.set_cursor(val.saturating_sub(1));
     ui.queue_draw();
     Ok(())
 }
 
-async fn set_buffer(ui: Ui, _lua: Lua, (val, cursor): (mlua::String, Option<usize>)) -> Result<()> {
-    ui.insert_or_set_buffer(false, &val.as_bytes(), cursor.map(|c| c.saturating_sub(1))).await?;
+async fn set_buffer(ui: Ui, _lua: Lua, (val, cursor): (mlua::String, Option<number::PossiblyMaxUsize>)) -> Result<()> {
+    let cursor = cursor.map(|c| usize::from(c).saturating_sub(1));
+    ui.insert_or_set_buffer(false, &val.as_bytes(), cursor).await?;
     ui.trigger_buffer_change_callbacks().await?;
     ui.queue_draw();
     Ok(())
@@ -255,6 +258,7 @@ pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
     lua.api.set("time", lua.create_function(time)?)?;
     lua.api.set("shell_quote", lua.create_function(shell_quote)?)?;
     lua.api.set("try", lua.create_async_function(lua_try)?)?;
+    lua.api.set("MAXNUM", lua.create_any_userdata(number::MaxNumber)?)?;
 
     keybind::init_lua(lua)?;
     string::init_lua(lua)?;

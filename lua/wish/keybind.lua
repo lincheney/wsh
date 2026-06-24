@@ -27,9 +27,9 @@ wish.set_keymap('<c-k>', function()
 end)
 
 wish.set_keymap('<c-a>',   function() wish.set_cursor(0) end)
-wish.set_keymap('<c-e>',   function() wish.set_cursor(buflen) end)
+wish.set_keymap('<c-e>',   function() wish.set_cursor(wish.MAXNUM) end)
 wish.set_keymap('<home>',  function() wish.set_cursor(0) end)
-wish.set_keymap('<end>',   function() wish.set_cursor(buflen) end)
+wish.set_keymap('<end>',   function() wish.set_cursor(wish.MAXNUM) end)
 wish.set_keymap('<left>',  function() wish.set_cursor(math.max(0, wish.get_cursor() - 1)) end)
 wish.set_keymap('<right>', function() wish.set_cursor(wish.get_cursor() + 1) end)
 

@@ -618,9 +618,9 @@ fn remove_message(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
-struct BufferHighlight {
-    start: usize,
-    finish: usize,
+struct PartialBufferHighlight {
+    // start: super::number::PossiblyMaxUsize,
+    // finish: super::number::PossiblyMaxUsize,
     #[serde(flatten)]
     style: BufferStyleOptions,
     virtual_text: Option<BString>,
@@ -630,15 +630,26 @@ struct BufferHighlight {
 }
 
 fn add_buf_highlight(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<()> {
-    let hl: BufferHighlight = lua.from_value(val)?;
+    let span = if let Some(table) = val.as_table() {
+        let start: super::number::PossiblyMaxUsize = table.raw_get("start")?;
+        let finish: super::number::PossiblyMaxUsize = table.raw_get("finish")?;
+        table.raw_remove("start")?;
+        table.raw_remove("finish")?;
+        Some((start, finish))
+    } else {
+        None
+    };
+    let hl: PartialBufferHighlight = lua.from_value(val)?;
+    let (start, finish) = span.unwrap();
+
     let blend = !hl.style.no_blend;
     let priority = hl.priority.unwrap_or_default();
     let style: tui::widget::StyleOptions = hl.style.inner.into();
 
     ui.try_borrow_mut()?.buffer.add_highlight(tui::text::HighlightedRange{
         lineno: 0,
-        start: hl.start.saturating_sub(1),
-        end: hl.finish,
+        start: usize::from(start).saturating_sub(1),
+        end: finish.into(),
         inner: tui::text::Highlight{
             style: style.as_style(),
             namespace: hl.namespace.unwrap_or(0),
