@@ -38,7 +38,7 @@ impl<'de> Deserialize<'de> for Signal {
 
 #[derive(Clone)]
 pub struct CommandResult {
-    pub inner: watch::Receiver<Option<std::io::Result<i32>>>,
+    pub inner: watch::Receiver<Option<Result<i32>>>,
 }
 
 impl CommandResult {
@@ -188,17 +188,25 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         let mut proc = None;
         let result: Result<Result<_>> = ui.freeze_if(foreground, true, async {
 
-            let (child, pid, mut pid_waiter) = {
-                let (result, queue_result) = ui.shell.with_queued_signals(|| {
-                    command.spawn().map(|child| {
-                        let pid = child.id().unwrap();
-                        let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, true);
-                        (child, pid, pid_waiter)
-                    })
-                });
-                crate::log_if_err(queue_result);
-                result?
+            let (result, queue_result) = ui.shell.with_queued_signals(|| {
+                command.spawn().map(|child| {
+                    let pid = child.id().unwrap();
+                    let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, true);
+                    (child, pid, pid_waiter)
+                })
+            });
+            crate::log_if_err(queue_result);
+            let (child, pid, pid_waiter) = result?;
+
+            let mut pid_waiter = match pid_waiter {
+                Ok(pid_waiter) => pid_waiter,
+                Err(err) => {
+                    // ignore error
+                    let _ = sender.send(Some(Err(err)));
+                    return Ok(());
+                },
             };
+
             let child = proc.insert(child);
 
             let stdin  = child.stdin.take().map(|s| WriteableFile{
@@ -229,7 +237,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
                     } else {
                         pid_waiter.await.ok()
                     };
-                    crate::shell::process::deregister_pid(&ui, pid as _);
+                    crate::shell::process::deregister_pid(&ui, pid as _)?;
                     code
                 }
             );
@@ -256,7 +264,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
                     let _ = result_sender.send(Err(err));
                 } else {
                     let err: Result<()> = Err(err);
-                    ui.report_error(err);
+                    crate::log_if_err(ui.report_error(err));
                 }
             },
             _ => (),

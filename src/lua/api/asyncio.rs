@@ -9,7 +9,7 @@ pub use file::{ReadableFile, WriteableFile};
 fn schedule(ui: &Ui, _lua: &Lua, cb: LuaFunction) -> Result<()> {
     let ui = ui.clone();
     ui.clone().runtime.spawn_local(async move {
-        ui.call_lua_fn(false, cb, ()).await;
+        crate::log_if_err(ui.call_lua_fn(false, cb, ()).await);
     });
     Ok(())
 }

@@ -39,9 +39,11 @@ impl GlobalState {
             zsh::signals::init(&ui)?;
 
             if !crate::is_forked() {
-                events.spawn(&ui, teardown);
-                ui.report_error(ui.lua.init_lua());
-                ui.borrow().activate()?;
+                events.spawn(&ui, |ui, result| {
+                    teardown_if_err(ui, result);
+                });
+                let _ = ui.report_error(ui.lua.init_lua())?;
+                ui.try_borrow()?.activate()?;
                 zsh::bin_zle::override_zle();
 
                 unsafe {
@@ -173,7 +175,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                                 ui.start_cmd(None).await?;
                                 Ok(())
                             }.await);
-                            ui.trigger_init_callbacks().await;
+                            teardown_if_err(&ui, ui.trigger_init_callbacks().await);
                         }
                     });
                     crate::log_if_err(result);
@@ -241,8 +243,9 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
 
             } else if cmd == zsh_sys::ZLE_CMD_RESET_PROMPT as _ {
                 // redraw the prompt
-                ui.borrow_mut().cmdline.prompt_dirty = true;
-                ui.queue_draw();
+                if let Some(mut ui) = teardown_if_err(&ui, ui.try_borrow_mut()) {
+                    ui.cmdline.prompt_dirty = true;
+                }
                 return null_mut()
 
             }
@@ -257,6 +260,28 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
     }
 }
 
+fn teardown_if_err<T, E: std::fmt::Debug>(ui: &Ui, result: Result<T, E>) -> Option<T> {
+    match result {
+        Ok(x) => Some(x),
+        Err(e) => {
+            // something failed really really bad
+            // unload the module
+            teardown();
+            // restore the shell settings
+            if let Ok(mut ui) = ui.try_borrow_mut() {
+                ui.deactivate();
+            } else {
+                crate::log_if_err(crossterm::terminal::disable_raw_mode());
+            }
+            // break out of shell loop if necessary
+            ui.shell.accept_line(Some("".into()));
+            // log the original error
+            eprintln!("FATAL: {e:?}");
+            log::error!("FATAL: {e:?}");
+            None
+        },
+    }
+}
 
 #[derive(Debug)]
 struct Features(zsh_sys::features);

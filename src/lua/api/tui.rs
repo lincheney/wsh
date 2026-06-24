@@ -575,7 +575,7 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
 fn set_message(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<usize> {
     let options: MessageOptions = lua.from_value(val)?;
 
-    let tui = &mut ui.borrow_mut().tui;
+    let tui = &mut ui.try_borrow_mut()?.tui;
     tui.dirty = true;
 
     let node = process_message(tui, options)?;
@@ -590,7 +590,7 @@ fn set_message(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<usize> {
 }
 
 fn clear_messages(ui: &Ui, _lua: &Lua, all: bool) -> Result<()> {
-    let tui = &mut ui.borrow_mut().tui;
+    let tui = &mut ui.try_borrow_mut()?.tui;
     if all {
         tui.clear_all();
     } else {
@@ -602,11 +602,11 @@ fn clear_messages(ui: &Ui, _lua: &Lua, all: bool) -> Result<()> {
 
 fn check_message(ui: &Ui, _lua: &Lua, id: usize) -> Result<bool> {
     ui.queue_draw();
-    Ok(ui.borrow().tui.get_node(id).is_some())
+    Ok(ui.try_borrow()?.tui.get_node(id).is_some())
 }
 
 fn remove_message(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
-    let tui = &mut ui.borrow_mut().tui;
+    let tui = &mut ui.try_borrow_mut()?.tui;
     if tui.remove(id).is_some() {
         tui.dirty = true;
         ui.queue_draw();
@@ -635,7 +635,7 @@ fn add_buf_highlight(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<()> {
     let priority = hl.priority.unwrap_or_default();
     let style: tui::widget::StyleOptions = hl.style.inner.into();
 
-    ui.borrow_mut().buffer.add_highlight(tui::text::HighlightedRange{
+    ui.try_borrow_mut()?.buffer.add_highlight(tui::text::HighlightedRange{
         lineno: 0,
         start: hl.start.saturating_sub(1),
         end: hl.finish,
@@ -655,7 +655,7 @@ fn add_buf_highlight(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<()> {
 
 fn clear_buf_highlights(ui: &Ui, _lua: &Lua, namespace: Option<usize>) -> Result<()> {
     ui.queue_draw();
-    let mut ui = ui.borrow_mut();
+    let mut ui = ui.try_borrow_mut()?;
     if let Some(namespace) = namespace {
         ui.buffer.clear_highlights_in_namespace(namespace);
     } else {
@@ -665,13 +665,13 @@ fn clear_buf_highlights(ui: &Ui, _lua: &Lua, namespace: Option<usize>) -> Result
 }
 
 fn add_buf_highlight_namespace(ui: &Ui, _lua: &Lua, _val: ()) -> Result<usize> {
-    let mut ui = ui.borrow_mut();
+    let mut ui = ui.try_borrow_mut()?;
     ui.buffer.highlight_counter += 1;
     Ok(ui.buffer.highlight_counter)
 }
 
 fn scroll_message(ui: &Ui, _lua: &Lua, (id, delta): (usize, isize)) -> Result<()> {
-    let tui = &mut ui.borrow_mut().tui;
+    let tui = &mut ui.try_borrow_mut()?.tui;
     match tui.get_node_mut(id) {
         Some(Node{ kind: NodeKind::Widget(widget), .. }) => {
             if widget.scroll(delta, true) {
@@ -686,7 +686,7 @@ fn scroll_message(ui: &Ui, _lua: &Lua, (id, delta): (usize, isize)) -> Result<()
 }
 
 fn scroll_message_to(ui: &Ui, _lua: &Lua, (id, line): (usize, usize)) -> Result<()> {
-    let tui = &mut ui.borrow_mut().tui;
+    let tui = &mut ui.try_borrow_mut()?.tui;
     match tui.get_node_mut(id) {
         Some(Node{ kind: NodeKind::Widget(widget), .. }) => {
             if widget.scroll(line as isize, false) {
@@ -701,7 +701,7 @@ fn scroll_message_to(ui: &Ui, _lua: &Lua, (id, line): (usize, usize)) -> Result<
 }
 
 fn feed_ansi_message(ui: &Ui, _lua: &Lua, (id, value): (usize, LuaString)) -> Result<()> {
-    let tui = &mut ui.borrow_mut().tui;
+    let tui = &mut ui.try_borrow_mut()?.tui;
 
     match tui.get_node_mut(id) {
         Some(Node{ kind: NodeKind::Widget(widget), .. }) => {
@@ -716,7 +716,7 @@ fn feed_ansi_message(ui: &Ui, _lua: &Lua, (id, value): (usize, LuaString)) -> Re
 }
 
 fn clear_message(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
-    let tui = &mut ui.borrow_mut().tui;
+    let tui = &mut ui.try_borrow_mut()?.tui;
 
     match tui.get_node_mut(id) {
         Some(node) => node.clear(),
@@ -727,7 +727,7 @@ fn clear_message(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
 }
 
 fn get_message_text(ui: &Ui, _lua: &Lua, id: usize) -> Result<Vec<BString>> {
-    let tui = &ui.borrow().tui;
+    let tui = &ui.try_borrow()?.tui;
 
     match tui.get_node(id) {
         Some(Node{ kind: NodeKind::Widget(widget), .. }) => Ok(widget.inner.get().into()),
@@ -737,7 +737,7 @@ fn get_message_text(ui: &Ui, _lua: &Lua, id: usize) -> Result<Vec<BString>> {
 }
 
 fn message_to_ansi_string(ui: &Ui, _lua: &Lua, (id, width): (usize, Option<u16>)) -> Result<mlua::BString> {
-    let tui = &mut ui.borrow_mut().tui;
+    let tui = &mut ui.try_borrow_mut()?.tui;
 
     match tui.render_to_string(id, width) {
         None => anyhow::bail!("can't find widget with id {}", id),
@@ -748,7 +748,7 @@ fn message_to_ansi_string(ui: &Ui, _lua: &Lua, (id, width): (usize, Option<u16>)
 fn set_status_bar(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<()> {
     let options: Option<MessageOptions> = lua.from_value(val)?;
     ui.queue_draw();
-    let mut ui = ui.borrow_mut();
+    let mut ui = ui.try_borrow_mut()?;
     if let Some(options) = options {
         match options.inner {
             MessageInner::Widget { style, text } => {
@@ -773,7 +773,7 @@ async fn enable_mouse_mode(ui: Ui, _lua: Lua, enable: Option<bool>) -> Result<()
         ui.print_lock.lock_exclusive().await,
     );
 
-    let mut ui = ui.borrow_mut();
+    let mut ui = ui.try_borrow_mut()?;
     let mouse_mode = enable.unwrap_or(true);
     if mouse_mode != ui.mouse_mode {
         ui.mouse_mode = mouse_mode;
@@ -785,7 +785,7 @@ async fn enable_mouse_mode(ui: Ui, _lua: Lua, enable: Option<bool>) -> Result<()
 }
 
 fn get_message_geometry(ui: &Ui, lua: &Lua, id: usize) -> Result<Option<LuaTable>> {
-    let tui = &ui.borrow().tui;
+    let tui = &ui.try_borrow()?.tui;
 
     if let Some(geom) = tui.get_node_geometry(id) {
         let table = lua.create_table_from([
@@ -801,7 +801,7 @@ fn get_message_geometry(ui: &Ui, lua: &Lua, id: usize) -> Result<Option<LuaTable
 }
 
 fn get_status_bar_geometry(ui: &Ui, lua: &Lua, (): ()) -> Result<Option<LuaTable>> {
-    let ui = ui.borrow();
+    let ui = ui.try_borrow()?;
     if let Some(geom) = ui.tui.get_status_bar_geometry(&ui.status_bar) {
         let table = lua.create_table_from([
             ("x", geom.x),

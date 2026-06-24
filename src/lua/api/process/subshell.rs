@@ -122,24 +122,37 @@ pub async fn subshell_run_with_args(ui: Ui, lua: Lua, args: FullShellRunArgs) ->
                     let fds = redirections.chain(closes);
 
                     // fork it now to get the pid
-                    let pid = ui.shell.exec_subshell(token, args.command.as_ref(), false, fds)? as _;
-                    let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, true);
+                    let (result, queue_result) = ui.shell.with_queued_signals::<Result<_>, _>(|| {
+                        let pid = ui.shell.exec_subshell(token, args.command.as_ref(), false, fds)? as _;
+                        let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, true);
+                        Ok((pid, pid_waiter))
+                    });
+                    crate::log_if_err(queue_result);
+                    let (pid, pid_waiter) = result?;
+
                     // close streams or we will block
                     drop(streams);
-                    // send streams back to caller
-                    let _ = result_sender.take().unwrap().send(Ok((
-                        pid,
-                        stdin_pipe,
-                        stdout_pipe,
-                        stderr_pipe,
-                    )));
-                    // get the status
-                    let code = match ui.shell.check_pid_status(pid as _) {
-                        None | Some(-1) => pid_waiter.await.unwrap_or(-1) as _,
-                        Some(code) => code as _,
-                    };
+                    match pid_waiter {
+                        Ok(pid_waiter) => {
+                            // send streams back to caller
+                            let _ = result_sender.take().unwrap().send(Ok((
+                                pid,
+                                stdin_pipe,
+                                stdout_pipe,
+                                stderr_pipe,
+                            )));
+                            // get the status
+                            let code = match ui.shell.check_pid_status(pid as _) {
+                                None | Some(-1) => pid_waiter.await.unwrap_or(-1) as _,
+                                Some(code) => code as _,
+                            };
 
-                    let _ = sender.send(Some(Ok(code)));
+                            let _ = sender.send(Some(Ok(code)));
+                        },
+                        Err(err) => {
+                            let _ = sender.send(Some(Err(err)));
+                        },
+                    }
                     Ok::<_, anyhow::Error>(())
                 }).await;
 
@@ -149,7 +162,7 @@ pub async fn subshell_run_with_args(ui: Ui, lua: Lua, args: FullShellRunArgs) ->
                             let _ = result_sender.send(Err(err));
                         } else {
                             let err: Result<()> = Err(err);
-                            ui.report_error(err);
+                            crate::log_if_err(ui.report_error(err));
                         }
                     },
                     _ => (),

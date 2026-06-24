@@ -51,13 +51,15 @@ impl KeyHandler<'_> {
         if buf.len() == 1 {
             // zsh doesn't run widgets if eof
             let is_eof = {
-                let ui = self.borrow();
+                let ui = self.try_borrow()?;
                 buf == &[ui.termios_input_flags.eof] && ui.buffer.get_contents().is_empty()
             };
             if is_eof {
                 self.shell.exit(0);
                 // this should error as we exit
-                let _ = self.shell.accept_line(None).await;
+                if let Some(result) = self.shell.accept_line(None) {
+                    let _ = result.await;
+                }
                 return Ok(Some(Action::Done{exit: true}));
             }
         }
@@ -100,7 +102,7 @@ impl KeyHandler<'_> {
                         Some(ui.has_foreground_process.lock().await)
                     };
                     let (old_buffer, old_cursor) = {
-                        let ui = self.borrow();
+                        let ui = self.try_borrow()?;
                         (ui.buffer.get_contents().clone(), ui.buffer.get_cursor())
                     };
 
@@ -121,10 +123,10 @@ impl KeyHandler<'_> {
 
                 {
                     if let Some(buffer) = &new_buffer {
-                        self.insert_or_set_buffer(false, buffer, new_cursor.take()).await;
+                        self.insert_or_set_buffer(false, buffer, new_cursor.take()).await?;
                     }
 
-                    let mut ui = self.borrow_mut();
+                    let mut ui = self.try_borrow_mut()?;
 
                     // check for any output e.g. zle -M
                     if let Some(output) = &output {
@@ -134,7 +136,7 @@ impl KeyHandler<'_> {
                 }
 
                 if new_buffer.is_some() {
-                    self.trigger_buffer_change_callbacks().await;
+                    self.trigger_buffer_change_callbacks().await?;
                 }
                 // anything could have happened, so trigger a redraw
                 self.queue_draw();
@@ -151,8 +153,8 @@ impl KeyHandler<'_> {
             Event::Key(KeyEvent{ key: Key::Char(c), modifiers }) if modifiers.difference(Modifiers::SHIFT).is_empty() => {
                 let mut buf = [0; 4];
                 let c = c.encode_utf8(&mut buf).as_bytes();
-                self.insert_or_set_buffer(true, c, None).await;
-                self.trigger_buffer_change_callbacks().await;
+                self.insert_or_set_buffer(true, c, None).await?;
+                self.trigger_buffer_change_callbacks().await?;
                 self.queue_draw();
                 Ok(Some(Action::Done{exit: false}))
             },
@@ -162,7 +164,7 @@ impl KeyHandler<'_> {
             },
 
             Event::BracketedPaste(data) => {
-                self.trigger_paste_callbacks(data).await;
+                self.trigger_paste_callbacks(data).await?;
                 Ok(Some(Action::Done{exit: false}))
             },
 

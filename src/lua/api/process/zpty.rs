@@ -105,7 +105,16 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         width: args.width,
     };
     // TODO capture shout
-    let zpty = ui.shell.zpty(name, cmd.as_ref(), opts)?;
+
+    // fork it now to get the pid
+    let (result, queue_result) = ui.shell.with_queued_signals::<Result<_>, _>(|| {
+        let zpty = ui.shell.zpty(name, cmd.as_ref(), opts)?;
+        let pid_waiter = crate::shell::process::register_pid(&ui, zpty.pid as _, true);
+        Ok((zpty, pid_waiter))
+    });
+    crate::log_if_err(queue_result);
+    let (zpty, pid_waiter) = result?;
+    let pid_waiter = pid_waiter?;
 
     // do not drop the pty fd as zsh will do it for us
     // so we dup the fd to one we own instead
@@ -124,8 +133,6 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
 
     let pid = zpty.pid;
     ui.clone().runtime.spawn_local(async move {
-        // get the status
-        let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, false);
         let code = match ui.shell.check_pid_status(pid as _) {
             None | Some(-1) => pid_waiter.await.unwrap_or(-1),
             Some(code) => code,

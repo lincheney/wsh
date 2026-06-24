@@ -40,19 +40,27 @@ impl TryFrom<&Event> for EventPayload {
 pub async fn invoke_keybind_callback(ui: &Ui, event: &Event) -> Result<Option<Action>> {
     if let Ok(index) = event.try_into() {
         // look for a lua callback
-        let this = ui.borrow();
-        let mut iter = this.keybinds.iter().rev();
-        while let Some(k) = iter.next() {
-            if let Some(callback) = k.inner.get(&index).cloned() {
-                drop(this);
-                let payload: Option<EventPayload> = event.try_into().ok();
-                return Ok(Some(match ui.lua.call_lua_fn(callback, payload).await? {
-                    mlua::Value::String(s) => Action::Mapping(s.as_bytes().as_ref().into()),
-                    _ => Action::Done{exit: false},
-                }));
-            } else if k.no_fallthrough {
-                return Ok(Some(Action::Done{exit: false}));
-            }
+
+        let callback = {
+            let ui = ui.try_borrow()?;
+            (|| {
+                for k in ui.keybinds.iter().rev() {
+                    if let Some(callback) = k.inner.get(&index) {
+                        return Some(callback.clone())
+                    } else if k.no_fallthrough {
+                        return None
+                    }
+                }
+                None
+            })()
+        };
+
+        if let Some(callback) = callback {
+            let payload: Option<EventPayload> = event.try_into().ok();
+            return Ok(Some(match ui.lua.call_lua_fn(callback, payload).await? {
+                mlua::Value::String(s) => Action::Mapping(s.as_bytes().as_ref().into()),
+                _ => Action::Done{exit: false},
+            }));
         }
     }
     Ok(None)
@@ -61,7 +69,7 @@ pub async fn invoke_keybind_callback(ui: &Ui, event: &Event) -> Result<Option<Ac
 fn set_keymap(ui: &Ui, _lua: &Lua, (key, callback, layer): (String, Function, Option<usize>)) -> Result<()> {
     let key = EventIndex::parse_from_label(&key)?;
 
-    let mut ui = ui.borrow_mut();
+    let mut ui = ui.try_borrow_mut()?;
     let layer = if let Some(layer) = layer {
         if let Some(layer) = ui.keybinds.iter_mut().find(|k| k.id == layer) {
             layer
@@ -78,7 +86,7 @@ fn set_keymap(ui: &Ui, _lua: &Lua, (key, callback, layer): (String, Function, Op
 
 fn add_keymap_layer(ui: &Ui, _lua: &Lua, no_fallthrough: Option<bool>) -> Result<usize> {
     let no_fallthrough = no_fallthrough.unwrap_or(false);
-    let mut ui = ui.borrow_mut();
+    let mut ui = ui.try_borrow_mut()?;
     ui.keybind_layer_counter += 1;
     let id = ui.keybind_layer_counter;
     ui.keybinds.push(KeybindMapping{id, inner: HashMap::default(), no_fallthrough});
@@ -86,7 +94,7 @@ fn add_keymap_layer(ui: &Ui, _lua: &Lua, no_fallthrough: Option<bool>) -> Result
 }
 
 fn del_keymap_layer(ui: &Ui, _lua: &Lua, layer: usize) -> Result<()> {
-    let mut ui = ui.borrow_mut();
+    let mut ui = ui.try_borrow_mut()?;
     ui.keybinds.retain(|k| k.id != layer);
     Ok(())
 }

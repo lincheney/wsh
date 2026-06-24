@@ -51,20 +51,21 @@ pub fn clear_pids() {
     let _ = pidset::PidTable::clear();
 }
 
-pub fn register_pid(ui: &crate::ui::Ui, pid: pidset::Pid, add_to_jobtab: bool) -> oneshot::Receiver<i32> {
+pub fn register_pid(ui: &crate::ui::Ui, pid: pidset::Pid, add_to_jobtab: bool) -> Result<oneshot::Receiver<i32>> {
     let (sender, receiver) = oneshot::channel();
-    let pid_map = &mut ui.borrow_mut().pid_map;
+    let pid_map = &mut ui.try_borrow_mut()?.pid_map;
     pid_map.insert(pid, sender);
     let _ = pidset::PidTable::register_pid(pid, add_to_jobtab);
-    receiver
+    Ok(receiver)
 }
 
-pub fn deregister_pid(ui: &crate::ui::Ui, pid: pidset::Pid) {
-    let pid_map = &mut ui.borrow_mut().pid_map;
+pub fn deregister_pid(ui: &crate::ui::Ui, pid: pidset::Pid) -> Result<()> {
+    let pid_map = &mut ui.try_borrow_mut()?.pid_map;
     pid_map.remove(&pid);
     if matches!(pidset::PidTable::deregister_pid(pid), Ok(Some(true))) {
         jobtab_retain_iter(|proc| proc.pid != pid).for_each(|_| ());
     }
+    Ok(())
 }
 
 pub(in crate::shell) fn check_pid_status(pid: pidset::Pid) -> Option<i32> {
@@ -150,8 +151,8 @@ pub(super) fn cleanup() {
 pub(super) fn init(ui: &crate::ui::Ui) -> Result<()> {
     // spawn a reader task
     let ui_clone = ui.clone();
-    let writer = super::signals::self_pipe::<_, _, std::convert::Infallible>(ui, move || {
-        let pid_map = &mut ui_clone.borrow_mut().pid_map;
+    let writer = super::signals::self_pipe::<_, _, std::cell::BorrowMutError>(ui, move || {
+        let pid_map = &mut ui_clone.try_borrow_mut()?.pid_map;
         if !pid_map.is_empty() {
             // check for pids that are done
             let _ = pidset::PidTable::extract_finished_pids(|pid, status| {

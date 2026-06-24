@@ -161,7 +161,7 @@ impl EventStream {
                 else { continue };
             match msg {
                 Some(Message::Event(event, event_buffer)) => {
-                    if !ui.handle_event(event, event_buffer).await {
+                    if !ui.handle_event(event, event_buffer).await? {
                         return Ok(0)
                     }
                 },
@@ -180,7 +180,7 @@ impl EventStream {
 
     }
 
-    pub fn spawn<F: 'static + Fn()>(self, ui: &crate::ui::Ui, abort: F) {
+    pub fn spawn<F: 'static + Fn(&crate::ui::Ui, Result<i32>)>(self, ui: &crate::ui::Ui, abort_if_err: F) {
         // spawn a task to take care of keyboard input
 
         let ui = ui.clone();
@@ -193,17 +193,7 @@ impl EventStream {
                 self.run(tty, ui.clone()).await
             }.await;
 
-            if let Err(e) = result {
-                // it panicked
-                // unload the module
-                abort();
-                // restore the shell settings
-                crate::log_if_err(ui.borrow_mut().deactivate());
-                // break out of shell loop if necessary
-                crate::log_if_err(ui.shell.accept_line(Some("".into())).await);
-                // log the original error
-                crate::log_if_err::<(), _>(Err(e));
-            }
+            abort_if_err(&ui, result);
         });
     }
 }

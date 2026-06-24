@@ -6,19 +6,19 @@ use serde::{Deserialize, Serialize};
 use crate::ui::Ui;
 use crate::keybind;
 
-fn get_non_empty_owned_callbacks(ui: &Ui, typ: EventType) -> Option<Vec<(usize, Function)>> {
-    let callbacks = &ui.borrow().event_callbacks;
+fn get_non_empty_owned_callbacks(ui: &Ui, typ: EventType) -> Result<Option<Vec<(usize, Function)>>> {
+    let callbacks = &ui.try_borrow()?.event_callbacks;
     let callbacks = callbacks.get_callbacks(typ);
     if callbacks.is_empty() {
-        None
+        Ok(None)
     } else {
-        Some(callbacks.clone())
+        Ok(Some(callbacks.clone()))
     }
 }
 
 async fn trigger_callbacks_multi_value(ui: &Ui, callbacks: Vec<(usize, Function)>, args: LuaMultiValue) {
     for (_, cb) in callbacks {
-        ui.call_lua_fn(false, cb, args.clone()).await;
+        crate::log_if_err(ui.call_lua_fn(false, cb, args.clone()).await);
     }
 }
 
@@ -75,15 +75,15 @@ macro_rules! event_types {
         pub trait HasEventCallbacks {
         $(
             #[allow(unused_parens)]
-            async fn [<trigger_ $name _callbacks>](&self, $($arg: $type),*);
+            async fn [<trigger_ $name _callbacks>](&self, $($arg: $type),*) -> Result<()>;
         )*
         }
 
         impl HasEventCallbacks for Ui {
         $(
             #[allow(unused_parens)]
-            async fn [<trigger_ $name _callbacks>](&self, $($arg: $type),*) {
-                if let Some(callbacks) = get_non_empty_owned_callbacks(&self, EventType::$name) {
+            async fn [<trigger_ $name _callbacks>](&self, $($arg: $type),*) -> Result<()> {
+                if let Some(callbacks) = get_non_empty_owned_callbacks(&self, EventType::$name)? {
                     let args = ($(
                         self.lua.to_value_with(
                             &$arg,
@@ -93,6 +93,7 @@ macro_rules! event_types {
                     let args = self.lua.pack_multi(args).unwrap();
                     trigger_callbacks_multi_value(&self, callbacks, args).await;
                 }
+                Ok(())
             }
         )*
         }
@@ -100,7 +101,7 @@ macro_rules! event_types {
         async fn trigger_event_callback(ui: Ui, _lua: Lua, (event, args): (String, LuaMultiValue)) -> Result<()> {
             let callbacks = match event.as_ref() {
                 $(
-                stringify!($name) => get_non_empty_owned_callbacks(&ui, EventType::$name),
+                stringify!($name) => get_non_empty_owned_callbacks(&ui, EventType::$name)?,
                 )*
                 _ => anyhow::bail!("invalid event {event}"),
             };
@@ -174,11 +175,11 @@ event_types!(
 
 fn add_event_callback(ui: &Ui, lua: &Lua, (typ, callback): (LuaValue, Function)) -> Result<usize> {
     let typ: EventType = lua.from_value(typ)?;
-    Ok(ui.borrow_mut().event_callbacks.add_event_callback(typ, callback))
+    Ok(ui.try_borrow_mut()?.event_callbacks.add_event_callback(typ, callback))
 }
 
 fn remove_event_callback(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
-    ui.borrow_mut().event_callbacks.remove_event_callback(id);
+    ui.try_borrow_mut()?.event_callbacks.remove_event_callback(id);
     Ok(())
 }
 

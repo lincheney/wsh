@@ -179,7 +179,7 @@ impl Shell {
         receiver
     }
 
-    pub async fn accept_line(&self, line: Option<BString>) -> Result<bool, oneshot::error::RecvError> {
+    pub fn accept_line(&self, line: Option<BString>) -> Option<oneshot::Receiver<()>> {
         let (sender, receiver) = oneshot::channel();
 
         let previous = {
@@ -189,10 +189,10 @@ impl Shell {
         if let Some(Trampoline::Resumed(previous)) = previous && previous.send(line).is_err() {
             // unable to trampoline out, return early
             self.accept_line_trampoline.take();
-            return Ok(false);
+            None
+        } else {
+            Some(receiver)
         }
-
-        receiver.await.map(|_| true)
     }
 
     pub fn init_interactive(&self) {
@@ -273,7 +273,7 @@ impl Shell {
         callback: Box<dyn FnMut(Vec<zsh::completion::Match>) -> ControlFlow<()>>,
     ) -> Result<BString> {
         // this may block for a long time
-        let sink = &mut *self.sink.borrow_mut();
+        let sink = &mut *self.sink.try_borrow_mut()?;
         let (msg, _) = zsh::capture_shout(sink, || zsh::completion::get_completions(line, callback));
         Ok(msg)
     }

@@ -1,4 +1,5 @@
 use std::os::raw::{c_int};
+use std::cell::BorrowError;
 use std::sync::atomic::{AtomicPtr, Ordering, AtomicUsize};
 use crate::ui::{Ui, WeakUi};
 use std::cell::RefCell;
@@ -50,8 +51,8 @@ impl LuaWrapper {
         })
     }
 
-    fn get_weak_ui(&self) -> WeakUi {
-        self.ui.borrow().clone()
+    fn get_weak_ui(&self) -> Result<WeakUi, BorrowError> {
+        self.ui.try_borrow().map(|ui| ui.clone())
     }
 
     fn try_upgrade_ui(ui: &WeakUi) -> LuaResult<Ui> {
@@ -73,57 +74,55 @@ impl LuaWrapper {
         Ok(())
     }
 
-    pub fn make_fn<F, A, R>(&self, func: F) -> LuaResult<LuaFunction>
+    pub fn make_fn<F, A, R>(&self, func: F) -> Result<LuaFunction>
     where
         F: Fn(&Ui, &Lua, A) -> Result<R> + 'static,
         A: FromLuaMulti,
         R: IntoLuaMulti,
     {
-        let ui = self.get_weak_ui();
-        self.inner.create_function(move |lua, value| {
+        let ui = self.get_weak_ui()?;
+        Ok(self.inner.create_function(move |lua, value| {
             let ui = Self::try_upgrade_ui(&ui)?;
             func(&ui, lua, value).map_err(lua_error)
-        })
+        })?)
     }
 
-    pub fn set_fn<F, A, R>(&self, name: &str, func: F) -> LuaResult<()>
+    pub fn set_fn<F, A, R>(&self, name: &str, func: F) -> Result<()>
     where
         F: Fn(&Ui, &Lua, A) -> Result<R> + 'static,
         A: FromLuaMulti,
         R: IntoLuaMulti,
     {
 
-        let func = self.make_fn(func)?;
-        self.api.set(name, func)
+        Ok(self.api.set(name, self.make_fn(func)?)?)
     }
 
-    pub fn make_async_fn<F, A, R, T>(&self, func: F) -> LuaResult<LuaFunction>
+    pub fn make_async_fn<F, A, R, T>(&self, func: F) -> Result<LuaFunction>
     where
         F: Fn(Ui, Lua, A) -> T + 'static + Clone,
         A: FromLuaMulti + 'static,
         R: IntoLuaMulti,
         T: Future<Output=Result<R>> + 'static,
     {
-        let ui = self.get_weak_ui();
-        self.inner.create_async_function(move |lua, value| {
+        let ui = self.get_weak_ui()?;
+        Ok(self.inner.create_async_function(move |lua, value| {
             let ui = ui.clone();
             let func = func.clone();
             async move {
                 let ui = Self::try_upgrade_ui(&ui)?;
                 func(ui, lua, value).await.map_err(lua_error)
             }
-        })
+        })?)
     }
 
-    pub fn set_async_fn<F, A, R, T>(&self, name: &str, func: F) -> LuaResult<()>
+    pub fn set_async_fn<F, A, R, T>(&self, name: &str, func: F) -> Result<()>
     where
         F: Fn(Ui, Lua, A) -> T + 'static + Clone,
         A: FromLuaMulti + 'static,
         R: IntoLuaMulti,
         T: Future<Output=Result<R>> + 'static,
     {
-        let func = self.make_async_fn(func)?;
-        self.api.set(name, func)
+        Ok(self.api.set(name, self.make_async_fn(func)?)?)
     }
 
     pub async fn call_lua_fn<T: IntoLuaMulti + 'static>(&self, callback: mlua::Function, arg: T) -> LuaResult<LuaValue> {

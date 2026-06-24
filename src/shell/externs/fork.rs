@@ -19,7 +19,9 @@ extern "C" fn postfork_child() {
             // we shouldn't have to rush this, since we don't have any child processes
             // we shouldn't get any SIGCHLD yet
             crate::shell::zsh::process::clear_pids();
-            ui.borrow_mut().pid_map.clear();
+            if let Ok(mut ui) = ui.try_borrow_mut() {
+                ui.pid_map.clear();
+            }
         }
     });
 }

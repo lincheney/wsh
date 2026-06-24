@@ -60,52 +60,52 @@ struct RedrawOptions {
 }
 
 fn get_cursor(ui: &Ui, _lua: &Lua, (): ()) -> Result<usize> {
-    Ok(ui.borrow().buffer.get_cursor() + 1)
+    Ok(ui.try_borrow()?.buffer.get_cursor() + 1)
 }
 
 fn get_buffer(ui: &Ui, lua: &Lua, (): ()) -> Result<(mlua::String, usize)> {
-    let buffer = &ui.borrow().buffer;
+    let buffer = &ui.try_borrow()?.buffer;
     Ok((lua.create_string(buffer.get_contents())?, buffer.get_cursor() + 1))
 }
 
 fn set_cursor(ui: &Ui, _lua: &Lua, val: usize) -> Result<()> {
-    ui.borrow_mut().buffer.set_cursor(val.saturating_sub(1));
+    ui.try_borrow_mut()?.buffer.set_cursor(val.saturating_sub(1));
     ui.queue_draw();
     Ok(())
 }
 
 async fn set_buffer(ui: Ui, _lua: Lua, (val, cursor): (mlua::String, Option<usize>)) -> Result<()> {
-    ui.insert_or_set_buffer(false, &val.as_bytes(), cursor.map(|c| c.saturating_sub(1))).await;
-    ui.trigger_buffer_change_callbacks().await;
+    ui.insert_or_set_buffer(false, &val.as_bytes(), cursor.map(|c| c.saturating_sub(1))).await?;
+    ui.trigger_buffer_change_callbacks().await?;
     ui.queue_draw();
     Ok(())
 }
 
 async fn insert_at_cursor(ui: Ui, _lua: Lua, val: mlua::String) -> Result<()> {
-    ui.insert_or_set_buffer(true, &val.as_bytes(), None).await;
-    ui.trigger_buffer_change_callbacks().await;
+    ui.insert_or_set_buffer(true, &val.as_bytes(), None).await?;
+    ui.trigger_buffer_change_callbacks().await?;
     ui.queue_draw();
     Ok(())
 }
 
 async fn delete_at_cursor(ui: Ui, _lua: Lua, count: isize) -> Result<()> {
-    ui.borrow_mut().buffer.delete_at_cursor(count.unsigned_abs(), count >= 0);
-    ui.trigger_buffer_change_callbacks().await;
+    ui.try_borrow_mut()?.buffer.delete_at_cursor(count.unsigned_abs(), count >= 0);
+    ui.trigger_buffer_change_callbacks().await?;
     ui.queue_draw();
     Ok(())
 }
 
 async fn undo_buffer(ui: Ui, _lua: Lua, (): ()) -> Result<()> {
-    if ui.borrow_mut().buffer.move_in_history(false) {
-        ui.trigger_buffer_change_callbacks().await;
+    if ui.try_borrow_mut()?.buffer.move_in_history(false) {
+        ui.trigger_buffer_change_callbacks().await?;
         ui.queue_draw();
     }
     Ok(())
 }
 
 async fn redo_buffer(ui: Ui, _lua: Lua, (): ()) -> Result<()> {
-    if ui.borrow_mut().buffer.move_in_history(true) {
-        ui.trigger_buffer_change_callbacks().await;
+    if ui.try_borrow_mut()?.buffer.move_in_history(true) {
+        ui.trigger_buffer_change_callbacks().await?;
         ui.queue_draw();
     }
     Ok(())
@@ -119,7 +119,7 @@ async fn redraw(ui: Ui, lua: Lua, val: Option<LuaValue>) -> Result<()> {
     if let Some(val) = val {
         let val: RedrawOptions = lua.from_value(val)?;
         {
-            let mut ui = ui.borrow_mut();
+            let mut ui = ui.try_borrow_mut()?;
             if val.all { ui.dirty = true; }
             if val.prompt { ui.cmdline.prompt_dirty = true; }
             if val.predisplay { ui.cmdline.predisplay_dirty = true; }
@@ -149,7 +149,7 @@ fn get_cwd(ui: &Ui, _lua: &Lua, (): ()) -> Result<BString> {
 }
 
 fn get_size(ui: &Ui, _lua: &Lua, (): ()) -> Result<(u32, u32)> {
-    Ok(ui.borrow().size)
+    Ok(ui.try_borrow()?.size)
 }
 
 async fn call_hook_func(ui: Ui, _lua: Lua, mut args: Vec<BString>) -> Result<Option<i32>> {
@@ -161,8 +161,8 @@ async fn call_hook_func(ui: Ui, _lua: Lua, mut args: Vec<BString>) -> Result<Opt
 }
 
 async fn print(ui: Ui, _lua: Lua, value: BString) -> Result<()> {
-    ui.freeze_if(true, false, async {
-        ui.borrow_mut().stdout.write_all(value.as_ref())
+    ui.freeze_if::<Result<()>, _>(true, false, async {
+        Ok(ui.try_borrow_mut()?.stdout.write_all(value.as_ref())?)
     }).await??;
     Ok(())
 }

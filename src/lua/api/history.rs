@@ -37,7 +37,7 @@ async fn goto_history_internal(ui: Ui, index: HistoryIndex) -> Result<()> {
     let changed = {
 
         let (buffer, cursor) = {
-            let ui = ui.borrow();
+            let ui = ui.try_borrow()?;
             (ui.buffer.get_contents().clone(), ui.buffer.get_cursor())
         };
 
@@ -50,16 +50,16 @@ async fn goto_history_internal(ui: Ui, index: HistoryIndex) -> Result<()> {
         let new_cursor = (new_cursor != cursor).then_some(new_cursor);
 
         if let Some(new_buffer) = &new_buffer {
-            ui.insert_or_set_buffer(false, new_buffer, new_cursor).await;
+            ui.insert_or_set_buffer(false, new_buffer, new_cursor).await?;
         } else if new_cursor.is_some() {
-            ui.borrow_mut().buffer.set(None, new_cursor);
+            ui.try_borrow_mut()?.buffer.set(None, new_cursor);
         }
         ui.queue_draw();
 
         new_buffer.is_some()
     };
     if changed {
-        ui.trigger_buffer_change_callbacks().await;
+        ui.trigger_buffer_change_callbacks().await?;
     }
     Ok(())
 }

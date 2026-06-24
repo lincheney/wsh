@@ -1,5 +1,5 @@
 use std::ops::ControlFlow;
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, RefCell, BorrowError, BorrowMutError};
 use std::rc::Rc;
 use bstr::{BString};
 use std::future::Future;
@@ -124,16 +124,16 @@ impl Ui {
     }
 
 
-    pub fn borrow(&self) -> std::cell::Ref<'_, UiInner> {
-        self.inner.borrow()
+    pub fn try_borrow(&self) -> Result<std::cell::Ref<'_, UiInner>, BorrowError> {
+        self.inner.try_borrow()
     }
 
-    pub fn borrow_mut(&self) -> std::cell::RefMut<'_, UiInner> {
-        self.inner.borrow_mut()
+    pub fn try_borrow_mut(&self) -> Result<std::cell::RefMut<'_, UiInner>, BorrowMutError> {
+        self.inner.try_borrow_mut()
     }
 
     pub async fn start_cmd(&self, buffer: Option<&BString>) -> Result<()> {
-        self.trigger_precmd_callbacks(buffer).await;
+        self.trigger_precmd_callbacks(buffer).await?;
         self.draw().await
     }
 
@@ -151,7 +151,7 @@ impl Ui {
         if let Ok(mut lock) = self.print_lock.try_lock() && lock.get_value() == 0 {
             let resized = self.draw_with_lock(&mut lock).await?;
             if !resized.is_empty() {
-                self.trigger_message_resize_callbacks(&resized).await;
+                self.trigger_message_resize_callbacks(&resized).await?;
             }
             Ok(())
         } else {
@@ -170,7 +170,7 @@ impl Ui {
             let need_cursor_y;
 
             let size = {
-                let mut ui = self.borrow_mut();
+                let mut ui = self.try_borrow_mut()?;
 
                 if size == Some(ui.size) {
                     return ui.draw(shell_vars, cursor_y);
@@ -210,57 +210,57 @@ impl Ui {
         }
     }
 
-    pub async fn call_lua_fn<T: IntoLuaMulti + 'static>(&self, draw: bool, callback: mlua::Function, arg: T) {
+    pub async fn call_lua_fn<T: IntoLuaMulti + 'static>(&self, draw: bool, callback: mlua::Function, arg: T) -> Result<()> {
         let result = self.lua.call_lua_fn(callback, arg).await;
         if result.is_err() {
             let mut ui = self.clone();
-            if !ui.report_error(result) && draw {
+            if !ui.report_error(result)? && draw {
                 ui.queue_draw();
             }
         }
+        Ok(())
     }
 
-    pub fn report_error<T, E: std::fmt::Display>(&mut self, result: std::result::Result<T, E>) -> bool {
+    pub fn report_error<T, E: std::fmt::Display>(&mut self, result: std::result::Result<T, E>) -> Result<bool> {
         if let Err(err) = result {
             log::error!("{err}");
-            self.show_error_message(&format!("ERROR: {err}"));
-            true
+            self.show_error_message(&format!("ERROR: {err}"))?;
+            Ok(true)
         } else {
-            false
+            Ok(false)
         }
     }
 
-    pub fn show_error_message(&mut self, msg: &str) {
-        let mut ui = self.borrow_mut();
+    pub fn show_error_message(&mut self, msg: &str) -> Result<()> {
+        let mut ui = self.try_borrow_mut()?;
         ui.tui.add_error_message(msg);
         self.queue_draw();
+        Ok(())
     }
 
-    pub async fn handle_event(&mut self, event: Event, event_buffer: BString) -> bool {
+    pub async fn handle_event(&mut self, event: Event, event_buffer: BString) -> Result<bool> {
         match event {
             Event::Key(ev) => {
-                self.trigger_key_callbacks(&ev.into(), &event_buffer).await;
+                self.trigger_key_callbacks(&ev.into(), &event_buffer).await?;
             },
             Event::Mouse(ev) => {
-                self.trigger_mouse_callbacks(&ev.into(), &event_buffer).await;
+                self.trigger_mouse_callbacks(&ev.into(), &event_buffer).await?;
             },
             _ => (),
         }
 
         let result = crate::keybind::KeyHandler(self).handle(&event, event_buffer.as_ref()).await;
-        self.cancel_completion_suffix();
-        if result.is_err() {
-            if !self.report_error(result) {
-                self.queue_draw();
-            }
+        self.cancel_completion_suffix()?;
+        match result? {
+            Some(crate::keybind::Action::Done{exit: true}) => Ok(false),
+            _ => Ok(true),
         }
-        true
     }
 
     pub async fn handle_window_resize(&self, width: u32, height: u32) -> Result<bool> {
-        self.borrow_mut().size = (width, height);
+        self.try_borrow_mut()?.size = (width, height);
         self.queue_draw();
-        self.trigger_window_resize_callbacks(width, height).await;
+        self.trigger_window_resize_callbacks(width, height).await?;
         Ok(true)
     }
 
@@ -268,7 +268,7 @@ impl Ui {
         let _fg_lock = self.has_foreground_process.lock().await;
         let _print_lock = self.print_lock.lock_exclusive().await;
 
-        let mut ui = self.borrow_mut();
+        let mut ui = self.try_borrow_mut()?;
         ui.termios_input_flags.intr = intr;
         ui.apply_intr(intr)?;
         Ok(())
@@ -278,18 +278,21 @@ impl Ui {
         // sigint
         // cancel the current command line?
 
-        if self.shell.accept_line(Some(b"".into())).await.is_err() {
+        let Some(result) = self.shell.accept_line(Some(b"".into())) else {
+            return Ok(())
+        };
+        if result.await.is_err() {
             return Ok(())
         }
-        self.borrow_mut().reset();
-        self.trigger_buffer_change_callbacks().await;
+        self.try_borrow_mut()?.reset();
+        self.trigger_buffer_change_callbacks().await?;
         self.start_cmd(Some(&"".into())).await?;
         Ok(())
     }
 
     fn pre_accept_line<'a>(&'a self, lock: &mut PrintLockGuard<'a>) -> Result<()> {
         {
-            self.borrow_mut().tui.clear_non_persistent();
+            self.try_borrow_mut()?.tui.clear_non_persistent();
             // TODO handle errors here properly
         }
         self.events.pause();
@@ -320,7 +323,7 @@ impl Ui {
                 print_lock = self.print_lock.try_lock().unwrap();
                 &mut print_lock
             };
-            self.borrow_mut().prepare_for_unhandled_output()?;
+            self.try_borrow_mut()?.prepare_for_unhandled_output()?;
             print_lock.acquire();
             Ok(true)
         }
@@ -334,7 +337,7 @@ impl Ui {
             Ok(false)
         } else {
             let mut print_lock = self.print_lock.lock().await;
-            self.borrow_mut().prepare_for_unhandled_output()?;
+            self.try_borrow_mut()?.prepare_for_unhandled_output()?;
             print_lock.acquire();
             Ok(true)
         }
@@ -361,14 +364,14 @@ impl Ui {
         if print_lock.get_value() == 1 {
 
             {
-                self.borrow().activate()?;
+                self.try_borrow()?.activate()?;
             }
 
             // move down one line if not at start of line
             let cursor = self.events.get_cursor_position();
             let cursor = tokio::time::timeout(crate::DEFAULT_DURATION, cursor).await.unwrap().unwrap_or((0, 0));
 
-            let ui = &mut *self.borrow_mut();
+            let ui = &mut *self.try_borrow_mut()?;
             if cursor.0 != 0 {
                 queue!(ui.stdout, style::Print("\r\n"))?;
             }
@@ -383,7 +386,7 @@ impl Ui {
 
     async fn post_accept_line<'a>(&'a self, lock: &mut PrintLockGuard<'a>) -> Result<()> {
         {
-            self.borrow_mut().reset();
+            self.try_borrow_mut()?.reset();
         }
         self.events.unpause();
         self.recover_from_unhandled_output(Some(lock)).await?;
@@ -397,7 +400,7 @@ impl Ui {
 
         let buffer = {
             let buffer = {
-                let ui = self.borrow();
+                let ui = self.try_borrow()?;
                 ui.buffer.get_contents().clone()
             };
             let (complete, _tokens) = self.shell.parse(
@@ -416,7 +419,7 @@ impl Ui {
 
         // time to execute
         if let Some(buffer) = buffer {
-            self.trigger_accept_line_callbacks(&buffer).await;
+            self.trigger_accept_line_callbacks(&buffer).await?;
 
             {
                 let fg_lock = self.has_foreground_process.lock().await;
@@ -427,7 +430,10 @@ impl Ui {
                 self.pre_accept_line(&mut print_lock)?;
                 // acceptline doesn't actually accept the line right now
                 // only when we return control to zle using the trampoline
-                if self.shell.accept_line(Some(buffer.clone())).await.is_err() {
+                let Some(result) = self.shell.accept_line(Some(buffer.clone())) else {
+                    return Ok(false)
+                };
+                if result.await.is_err() {
                     return Ok(false)
                 }
                 self.post_accept_line(&mut print_lock).await?;
@@ -435,12 +441,12 @@ impl Ui {
                 drop(fg_lock);
             }
 
-            self.trigger_buffer_change_callbacks().await;
+            self.trigger_buffer_change_callbacks().await?;
             self.start_cmd(Some(&buffer)).await?;
 
         } else {
-            self.insert_or_set_buffer(true, b"\n", None).await;
-            self.trigger_buffer_change_callbacks().await;
+            self.insert_or_set_buffer(true, b"\n", None).await?;
+            self.trigger_buffer_change_callbacks().await?;
             self.draw().await?;
         }
 
@@ -459,16 +465,17 @@ impl Ui {
         }
     }
 
-    fn cancel_completion_suffix(&self) {
-        self.borrow_mut().buffer.replace_completion_suffix(None);
+    fn cancel_completion_suffix(&self) -> Result<()> {
+        self.try_borrow_mut()?.buffer.replace_completion_suffix(None);
+        Ok(())
     }
 
-    pub async fn insert_or_set_buffer(&self, insert: bool, data: &[u8], cursor: Option<usize>) {
+    pub async fn insert_or_set_buffer(&self, insert: bool, data: &[u8], cursor: Option<usize>) -> Result<()> {
         self.queue_draw();
 
         // if we need to invoke a shfunc, need to trampline out
         let (func, num_chars, old_buffer, old_cursor) = {
-            let buffer = &mut self.borrow_mut().buffer;
+            let buffer = &mut self.try_borrow_mut()?.buffer;
 
             let insert = if insert {
                 Some(data)
@@ -489,7 +496,7 @@ impl Ui {
                             // easy, but no longer a plain insert
                             buffer.splice_at(buffer.cursor_byte_pos() - suffix.byte_len, insert, suffix.byte_len, true);
                             buffer.set(None, cursor);
-                            return
+                            return Ok(())
                         },
                         Ok((func, num_chars)) => {
                             // pita = trampoline
@@ -500,12 +507,12 @@ impl Ui {
                 } else {
                     buffer.insert_at_cursor(insert);
                     buffer.set(None, cursor);
-                    return
+                    return Ok(())
                 }
 
             } else {
                 buffer.set(Some(data), cursor);
-                return
+                return Ok(())
             }
         };
 
@@ -522,10 +529,11 @@ impl Ui {
         let zle = self.shell.get_zle_buffer();
         drop(lock);
 
-        let buffer = &mut self.borrow_mut().buffer;
+        let buffer = &mut self.try_borrow_mut()?.buffer;
         buffer.set(Some(&zle.0), Some(zle.1.unwrap_or(zle.0.len() as _) as usize));
         // finally add the data we wanted originally
         buffer.set(Some(data), cursor);
+        Ok(())
     }
 
     pub async fn freeze_if<T, F: Future<Output = T>>(
@@ -567,7 +575,7 @@ impl Ui {
             self.has_foreground_process.lock().await,
             self.print_lock.lock_exclusive().await,
         );
-        let mut stdout = self.borrow().stdout.lock();
+        let mut stdout = self.try_borrow()?.stdout.lock();
         crate::tui::allocate_height(&mut stdout, height)?;
         drop(locks);
         Ok(())
@@ -676,22 +684,21 @@ impl UiInner {
         Ok(())
     }
 
-    pub fn deactivate(&mut self) -> Result<()> {
+    pub fn deactivate(&mut self) {
         if self.enhanced_keyboard {
             // queue!(self.stdout, event::PopKeyboardEnhancementFlags)?;
         }
 
-        self.apply_intr(crate::keybind::CONTROL_C_BYTE)?; // control c
+        crate::log_if_err(self.apply_intr(crate::keybind::CONTROL_C_BYTE)); // control c
 
-        execute!(
+        crate::log_if_err(execute!(
             self.stdout,
             DISABLE_SGR_MOUSE,
             event::DisableBracketedPaste,
             event::DisableFocusChange,
-        )?;
+        ));
 
-        crossterm::terminal::disable_raw_mode()?;
-        Ok(())
+        crate::log_if_err(crossterm::terminal::disable_raw_mode());
     }
 
     fn reset(&mut self) {
@@ -702,7 +709,7 @@ impl UiInner {
     }
 
     fn prepare_for_unhandled_output(&mut self) -> Result<()> {
-        self.deactivate()?;
+        self.deactivate();
         let y_offset = self.cmdline.y_offset_to_end();
         self.dirty = true;
 
@@ -751,8 +758,6 @@ impl UiInner {
 
 impl Drop for UiInner {
     fn drop(&mut self) {
-        if let Err(err) = self.deactivate() {
-            log::error!("{:?}", err);
-        }
+        self.deactivate();
     }
 }

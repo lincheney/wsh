@@ -45,11 +45,11 @@ fn restore_widget(name: &MetaStr, state: &Cell<bindings::ZleIntFunc>) -> Result<
 
 fn move_in_history(forward: bool) -> Result<()> {
     GlobalState::with(|ui| {
-        if ui.borrow_mut().buffer.move_in_history(forward) {
+        if ui.try_borrow_mut()?.buffer.move_in_history(forward) {
             let ui = ui.clone();
             ui.clone().shell_loop(false, async move {
                 ui.trigger_buffer_change_callbacks().await
-            })?;
+            })??;
         }
         Ok(())
     })?
