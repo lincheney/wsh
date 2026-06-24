@@ -32,7 +32,7 @@ enum FunctionArgs {
 
 impl UserData for Function {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_async_meta_method_mut(mlua::MetaMethod::Call, |lua, func, mut args: LuaMultiValue| async move {
+        methods.add_async_meta_method(mlua::MetaMethod::Call, |lua, func, mut args: LuaMultiValue| async move {
 
             let (args, foreground, stdin, stdout, stderr) = if args.is_empty() {
                 (vec![], None, None, Stdio::inherit, Stdio::inherit)

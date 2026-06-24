@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use crate::lua::LuaWrapper;
 use anyhow::Result;
 use mlua::{prelude::*, UserData, UserDataMethods};
@@ -13,12 +14,12 @@ fn schedule(ui: &Ui, _lua: &Lua, cb: LuaFunction) -> Result<()> {
     Ok(())
 }
 
-struct Sender(Option<tokio::sync::oneshot::Sender<LuaValue>>);
-struct Receiver(Option<tokio::sync::oneshot::Receiver<LuaValue>>);
+struct Sender(Cell<Option<tokio::sync::oneshot::Sender<LuaValue>>>);
+struct Receiver(Cell<Option<tokio::sync::oneshot::Receiver<LuaValue>>>);
 
 impl UserData for Sender {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_meta_method_mut(mlua::MetaMethod::Call, |_lua, sender, val| {
+        methods.add_meta_method(mlua::MetaMethod::Call, |_lua, sender, val| {
             if let Some(sender) = sender.0.take() {
                 let _ = sender.send(val);
             }
@@ -28,7 +29,7 @@ impl UserData for Sender {
 }
 impl UserData for Receiver {
     fn add_methods<M: UserDataMethods<Self>>(methods: &mut M) {
-        methods.add_async_meta_method_mut(mlua::MetaMethod::Call, |_lua, mut receiver, ()| async move {
+        methods.add_async_meta_method(mlua::MetaMethod::Call, |_lua, receiver, ()| async move {
             if let Some(receiver) = receiver.0.take() {
                 Ok(Some(receiver.await.map_err(|e| LuaError::RuntimeError(e.to_string()))?))
             } else {
@@ -50,8 +51,8 @@ pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
     tbl.set("promise", lua.create_function(|lua, ()| {
         let (sender, receiver) = tokio::sync::oneshot::channel();
         lua.pack_multi((
-            Sender(Some(sender)),
-            Receiver(Some(receiver)),
+            Sender(Cell::new(Some(sender))),
+            Receiver(Cell::new(Some(receiver))),
         ))
     })?)?;
 
