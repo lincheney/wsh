@@ -161,7 +161,7 @@ impl EventStream {
                 else { continue };
             match msg {
                 Some(Message::Event(event, event_buffer)) => {
-                    if !ui.handle_event(event, event_buffer).await? {
+                    if !ui.handle_event(event, event_buffer).await {
                         return Ok(0)
                     }
                 },

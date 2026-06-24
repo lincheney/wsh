@@ -43,7 +43,7 @@ impl KeyHandler<'_> {
     }
 
     async fn handle_simple(&mut self, event: &Event, buf: &BStr) -> Result<Option<Action>> {
-        if let Some(result) = crate::lua::invoke_keybind_callback(self.0, event).await {
+        if let Some(result) = crate::lua::invoke_keybind_callback(self.0, event).await? {
             return Ok(Some(result));
         }
 

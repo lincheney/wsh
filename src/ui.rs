@@ -236,7 +236,7 @@ impl Ui {
         self.queue_draw();
     }
 
-    pub async fn handle_event(&mut self, event: Event, event_buffer: BString) -> Result<bool> {
+    pub async fn handle_event(&mut self, event: Event, event_buffer: BString) -> bool {
         match event {
             Event::Key(ev) => {
                 self.trigger_key_callbacks(&ev.into(), &event_buffer).await;
@@ -247,9 +247,14 @@ impl Ui {
             _ => (),
         }
 
-        let result = crate::keybind::KeyHandler(self).handle(&event, event_buffer.as_ref()).await?;
+        let result = crate::keybind::KeyHandler(self).handle(&event, event_buffer.as_ref()).await;
         self.cancel_completion_suffix();
-        Ok(matches!(result, None | Some(crate::keybind::Action::Done{success: true})))
+        if result.is_err() {
+            if !self.report_error(result) {
+                self.queue_draw();
+            }
+        }
+        true
     }
 
     pub async fn handle_window_resize(&self, width: u32, height: u32) -> Result<bool> {
