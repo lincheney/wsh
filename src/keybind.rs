@@ -24,8 +24,9 @@ bitflags::bitflags! {
     }
 }
 
+#[derive(Debug)]
 pub enum Action {
-    Done{success: bool},
+    Done{exit: bool},
     Mapping(BString),
 }
 
@@ -57,7 +58,7 @@ impl KeyHandler<'_> {
                 self.shell.exit(0);
                 // this should error as we exit
                 let _ = self.shell.accept_line(None).await;
-                return Ok(Some(Action::Done{success: false}));
+                return Ok(Some(Action::Done{exit: true}));
             }
         }
 
@@ -79,7 +80,7 @@ impl KeyHandler<'_> {
             // skip not found or where we have our own impl
             KeybindValue::Widget(widget) if widget.is_self_insert() || widget.is_undefined_key() => {
                 // continue to default
-                Ok(None)
+                self.handle_default(event, buf).await
             },
             KeybindValue::Widget(mut widget) => {
 
@@ -139,8 +140,8 @@ impl KeyHandler<'_> {
                 self.queue_draw();
 
                 // this widget may have called accept-line somewhere inside
-                let success = !accept_line || self.accept_line().await?;
-                Ok(Some(Action::Done{success}))
+                let exit = accept_line && !self.accept_line().await?;
+                Ok(Some(Action::Done{exit}))
             },
         }
     }
@@ -153,16 +154,16 @@ impl KeyHandler<'_> {
                 self.insert_or_set_buffer(true, c, None).await;
                 self.trigger_buffer_change_callbacks().await;
                 self.queue_draw();
-                Ok(Some(Action::Done{success: true}))
+                Ok(Some(Action::Done{exit: false}))
             },
 
             Event::Key(KeyEvent{ key: Key::Enter, modifiers }) if modifiers.difference(Modifiers::SHIFT).is_empty() => {
-                self.accept_line().await.map(|success| Some(Action::Done{success}))
+                self.accept_line().await.map(|success| Some(Action::Done{exit: !success}))
             },
 
             Event::BracketedPaste(data) => {
                 self.trigger_paste_callbacks(data).await;
-                Ok(Some(Action::Done{success: true}))
+                Ok(Some(Action::Done{exit: false}))
             },
 
             _ => Ok(None),
@@ -171,7 +172,7 @@ impl KeyHandler<'_> {
 
     async fn handle_mapping(&mut self, mut mapping: BString) -> Result<Option<Action>> {
         // shucks, gotta do recursion
-        let mut success = true;
+        let mut exit = false;
         for _hop in 0..20 {
             let mut parser = crate::keybind::parser::Parser::default();
             parser.feed(mapping.as_ref());
@@ -179,8 +180,8 @@ impl KeyHandler<'_> {
 
             for (event, buf) in parser.iter() {
                 match self.handle_simple(&event, buf.as_ref()).await? {
-                    Some(Action::Done{success: x}) => {
-                        success = success && x;
+                    Some(Action::Done{exit: x}) => {
+                        exit = exit || x;
                     },
                     Some(Action::Mapping(mut string)) => {
                         mapping.append(&mut string);
@@ -190,12 +191,13 @@ impl KeyHandler<'_> {
             }
 
             if mapping.is_empty() {
-                return Ok(Some(Action::Done{success}))
+                return Ok(Some(Action::Done{exit}))
             }
         }
+        log::error!("exceeded recursion limit trying to execute mapping");
 
         // TODO we still have a mapping
-        Ok(Some(Action::Done{success: false}))
+        Ok(Some(Action::Done{exit: false}))
     }
 
 }

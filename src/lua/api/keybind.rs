@@ -40,15 +40,18 @@ impl TryFrom<&Event> for EventPayload {
 pub async fn invoke_keybind_callback(ui: &Ui, event: &Event) -> Result<Option<Action>> {
     if let Ok(index) = event.try_into() {
         // look for a lua callback
-        for k in ui.borrow().keybinds.iter().rev() {
-            if let Some(callback) = k.inner.get(&index) {
+        let this = ui.borrow();
+        let mut iter = this.keybinds.iter().rev();
+        while let Some(k) = iter.next() {
+            if let Some(callback) = k.inner.get(&index).cloned() {
+                drop(this);
                 let payload: Option<EventPayload> = event.try_into().ok();
-                return Ok(Some(match ui.lua.call_lua_fn(callback.clone(), payload).await? {
+                return Ok(Some(match ui.lua.call_lua_fn(callback, payload).await? {
                     mlua::Value::String(s) => Action::Mapping(s.as_bytes().as_ref().into()),
-                    _ => Action::Done{ success: true },
+                    _ => Action::Done{exit: false},
                 }));
             } else if k.no_fallthrough {
-                return Ok(Some(Action::Done { success: true }));
+                return Ok(Some(Action::Done{exit: false}));
             }
         }
     }
