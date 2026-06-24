@@ -21,6 +21,9 @@ pub fn init() {
 
 pub fn cleanup() {
     unsafe {
-        zsh_sys::deletehookfunc(c"exit".as_ptr().cast_mut(), Some(exit_hook));
+        // do NOT deletehookfunc while in the middle of exiting, will cause use after free
+        if zsh_sys::exit_pending == 0 {
+            zsh_sys::deletehookfunc(c"exit".as_ptr().cast_mut(), Some(exit_hook));
+        }
     }
 }

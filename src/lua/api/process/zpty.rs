@@ -144,7 +144,7 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
         // this will close the original zpty fds
         // which is ok for us since we have dup-ed them
         ui.shell.zpty_delete(zpty.name)
-    });
+    })?;
 
     Ok(lua.pack_multi((
         super::spawn::Process{

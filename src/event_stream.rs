@@ -182,7 +182,7 @@ impl EventStream {
         // spawn a task to take care of keyboard input
 
         let ui = ui.clone();
-        ui.clone().runtime.spawn_local(async move {
+        let _ = ui.clone().runtime.spawn_local(async move {
             let result = async {
                 let tty = std::fs::File::open("/dev/tty")?;
                 // move to an fd >= 10

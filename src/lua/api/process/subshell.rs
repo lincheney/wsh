@@ -173,7 +173,7 @@ pub async fn subshell_run_with_args(ui: Ui, lua: Lua, args: FullShellRunArgs) ->
         }).await;
         crate::log_if_err(result);
 
-    });
+    })?;
 
     let (pid, stdin, stdout, stderr) = result_receiver.await.unwrap()?;
 

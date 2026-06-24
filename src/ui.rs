@@ -597,7 +597,7 @@ impl Ui {
                     result = &mut future => ControlFlow::Break(result),
                     result = trampoline => ControlFlow::Continue(result),
                 )
-            });
+            })?;
 
             match result {
                 ControlFlow::Break(x) => break Ok(x),

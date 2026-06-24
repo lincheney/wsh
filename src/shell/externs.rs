@@ -9,14 +9,17 @@ use crate::shell::{Shell, zsh, MetaString, MetaSlice};
 
 
 thread_local! {
-    static STATE: RefCell<Option<Ui>> = const{ RefCell::new(None) };
+    static STATE: RefCell<Option<(Ui, GlobalState)>> = const{ RefCell::new(None) };
     static ORIGINAL_ZLE_ENTRY_PTR: Cell<Option<zsh_sys::ZleEntryPoint>> = const{ Cell::new(None) };
     static IS_RUNNING: Cell<bool> = const{ Cell::new(false) };
     static FIRST_DRAWN: Cell<bool> = const{ Cell::new(false) };
 }
 
 pub(in crate::shell) fn teardown() {
-    STATE.take();
+    if let Some((ui, _)) = STATE.take() {
+        // do this otherwise runtime will hold strong refs to ui and keep it alive
+        crate::log_if_err(ui.runtime.shutdown());
+    }
 }
 
 pub struct GlobalState;
@@ -58,7 +61,7 @@ impl GlobalState {
 
     pub fn with<T, F: FnOnce(&Ui) -> T>(f: F) -> Result<T> {
         STATE.with_borrow(|ui| {
-            if let Some(ui) = ui {
+            if let Some((ui, _)) = ui {
                 Ok(f(ui))
             } else {
                 anyhow::bail!("wish is not running")
@@ -185,14 +188,14 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
 
                 let result = ui.shell_loop(false, ui.shell.wait_for_accept_line());
 
-                ui.clone().runtime.block_on(async move {
+                teardown_if_err(&ui.clone(), ui.clone().runtime.block_on(async move {
                     // sometimes zsh will trash zle without refreshing
                     // redraw the ui
                     if ui.zle_cmd_refresh().await.unwrap() {
                         // draw LATER
                         ui.queue_draw();
                     }
-                });
+                }));
 
                 zsh_sys::errflag = 0;
 
@@ -236,11 +239,11 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
 
             } else if cmd == zsh_sys::ZLE_CMD_REFRESH as _ {
                 // redraw the ui
-                ui.clone().runtime.weak_block_on(async move {
+                teardown_if_err(&ui.clone(), ui.clone().runtime.weak_block_on(async move {
                     if ui.zle_cmd_refresh().await.unwrap() {
                         crate::log_if_err(ui.draw().await);
                     }
-                });
+                }));
                 return null_mut()
 
             } else if cmd == zsh_sys::ZLE_CMD_RESET_PROMPT as _ {
@@ -330,7 +333,7 @@ pub extern "C" fn setup_() -> c_int {
     match GlobalState::init() {
         Ok(ui) => {
             STATE.with_borrow_mut(|state| {
-                *state = Some(ui);
+                *state = Some((ui, GlobalState));
             });
             0
         },

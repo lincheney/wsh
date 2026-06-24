@@ -53,8 +53,8 @@ pub fn register_fd(fd: RawFd, hook: &SharedFdChangeHook, mut cancellable: crate:
 
     crate::shell::externs::GlobalState::with(|ui| {
 
-        let _guard = ui.runtime.enter();
-        let reader = match AsyncFd::new(fd) {
+        let reader = ui.runtime.enter(|| AsyncFd::new(fd))?;
+        let reader = match reader {
             Ok(reader) => reader,
             Err(err) => {
                 run_hook(hook, fd, Some(err));
@@ -86,7 +86,7 @@ pub fn register_fd(fd: RawFd, hook: &SharedFdChangeHook, mut cancellable: crate:
                     break
                 }
             }
-        });
+        })?;
 
         Ok(())
     })?

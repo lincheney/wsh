@@ -270,7 +270,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
             _ => (),
         }
 
-    });
+    })?;
 
     let (pid, stdin, stdout, stderr) = result_receiver.await.unwrap()?;
     Ok(lua.pack_multi((
