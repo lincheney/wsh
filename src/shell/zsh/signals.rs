@@ -143,6 +143,8 @@ where
     E: std::error::Error + Send + Sync + 'static,
 {
     let (reader, writer) = std::io::pipe()?;
+    let reader = crate::utils::move_fd(reader)?;
+    let writer = crate::utils::move_fd(writer)?;
     crate::utils::set_fd_nonblocking(&writer)?;
     crate::utils::set_fd_nonblocking(&reader)?;
 
