@@ -42,7 +42,7 @@ impl GlobalState {
         ui.clone().shell_loop(false, async move {
             zsh::completion::override_compadd()?;
             zsh::widget::overrides::override_all()?;
-            zsh::signals::init(&ui)?;
+            zsh::signals::init(ui.clone())?;
 
             if !crate::is_forked() {
                 events.spawn(&ui, |ui, result| {

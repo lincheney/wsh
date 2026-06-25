@@ -2,12 +2,9 @@ use tokio::sync::{oneshot};
 use std::collections::HashMap;
 use anyhow::Result;
 use nix::sys::signal;
-use std::os::fd::{IntoRawFd, BorrowedFd};
 use std::os::raw::{c_int, c_void};
-use std::sync::{atomic::{AtomicI32, Ordering}};
 mod pidset;
 
-static SELF_PIPE: AtomicI32 = AtomicI32::new(-1);
 pub type PidMap = HashMap<pidset::Pid, oneshot::Sender<i32>>;
 // pub static PID_MAP: Mutex<Option<HashMap<pidset::Pid, oneshot::Sender<i32>>>> = Mutex::new(None);
 static mut THIS_JOB: i32 = 1;
@@ -113,15 +110,25 @@ pub(super) fn sighandler(trapped: bool) -> c_int {
 
             // notify that we found something
             if found {
-                let pipe = SELF_PIPE.load(Ordering::Acquire);
-                if pipe != -1 {
-                    nix::unistd::write(BorrowedFd::borrow_raw(pipe), b"0").unwrap();
-                }
+                super::write_to_self_pipe(super::SIGCHLD_BYTE);
             }
         });
 
         0
     }
+}
+
+pub fn handle_sigchld(ui: &crate::ui::Ui) -> Result<()> {
+    let pid_map = &mut ui.try_borrow_mut()?.pid_map;
+    if !pid_map.is_empty() {
+        // check for pids that are done
+        let _ = pidset::PidTable::extract_finished_pids(|pid, status| {
+            if let Some(sender) = pid_map.remove(&pid) {
+                let _ = sender.send(status);
+            }
+        });
+    }
+    Ok(())
 }
 
 extern "C" fn before_trap_hook(_hook: zsh_sys::Hookdef, _arg: *mut c_void) -> c_int {
@@ -133,45 +140,16 @@ extern "C" fn before_trap_hook(_hook: zsh_sys::Hookdef, _arg: *mut c_void) -> c_
     0
 }
 
-fn close_self_pipe() {
-    let fd = SELF_PIPE.swap(-1, Ordering::AcqRel);
-    if fd != -1 {
-        let _ = nix::unistd::close(fd);
-    }
-}
-
 pub(super) fn cleanup() {
     unsafe {
         zsh_sys::deletehookfunc(c"before_trap".as_ptr().cast_mut(), Some(before_trap_hook));
     }
-    close_self_pipe();
     let _ = pidset::PidTable::clear();
 }
 
-pub(super) fn init(ui: &crate::ui::Ui) -> Result<()> {
-    // spawn a reader task
-    let ui_clone = ui.clone();
-    let writer = super::self_pipe::<_, _, std::cell::BorrowMutError>(ui, move || {
-        let pid_map = &mut ui_clone.try_borrow_mut()?.pid_map;
-        if !pid_map.is_empty() {
-            // check for pids that are done
-            let _ = pidset::PidTable::extract_finished_pids(|pid, status| {
-                if let Some(sender) = pid_map.remove(&pid) {
-                    let _ = sender.send(status);
-                }
-            });
-        }
-        Ok(())
-    })?;
-
-    // set the writer for the handler to use
-    SELF_PIPE.store(writer.into_raw_fd(), Ordering::Release);
-
+pub(super) fn init(ui: &crate::ui::Ui) -> Result<crate::ui::Ui> {
     unsafe {
         zsh_sys::addhookfunc(c"before_trap".as_ptr().cast_mut(), Some(before_trap_hook));
     }
-
-    super::hook_signal(signal::Signal::SIGCHLD)?;
-
-    Ok(())
+    Ok(ui.clone())
 }

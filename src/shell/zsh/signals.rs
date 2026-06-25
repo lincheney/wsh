@@ -4,9 +4,16 @@ use std::os::raw::{c_int};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::cell::RefCell;
 use tokio::io::AsyncReadExt;
+use std::os::fd::{IntoRawFd, BorrowedFd};
 pub mod sigwinch;
 pub mod sigint;
 pub mod sigchld;
+
+pub static GLOBAL_SELF_PIPE: AtomicI32 = AtomicI32::new(-1);
+
+pub const SIGCHLD_BYTE: u8 = b'c';
+pub const SIGWINCH_BYTE: u8 = b'w';
+pub const SIGINT_BYTE: u8 = b'i';
 
 thread_local! {
     static ORIGINAL_SIGACTIONS: RefCell<Vec<(signal::Signal, signal::SigAction)>> = const{ RefCell::new(Vec::new()) };
@@ -123,7 +130,7 @@ pub(super) fn install_signal_handler(
     Ok(())
 }
 
-pub(super) fn hook_signal(signal: signal::Signal) -> Result<()> {
+fn hook_signal(signal: signal::Signal) -> Result<()> {
     install_signal_handler(signal, true, None)?;
     unsafe {
         // now set the trap
@@ -138,35 +145,47 @@ pub(super) fn hook_signal(signal: signal::Signal) -> Result<()> {
     Ok(())
 }
 
-pub(super) fn self_pipe<C, T, E>(ui: &crate::ui::Ui, callback: C) -> Result<std::io::PipeWriter>
-where
-    C: Fn() -> Result<T, E> + 'static,
-    E: std::error::Error + Send + Sync + 'static,
-{
+fn spawn_self_pipe_reader(ui: crate::ui::Ui) -> Result<()> {
     let (reader, writer) = std::io::pipe()?;
     let reader = crate::utils::move_fd(reader)?;
     let writer = crate::utils::move_fd(writer)?;
     crate::utils::set_fd_nonblocking(&writer)?;
     crate::utils::set_fd_nonblocking(&reader)?;
 
-    // spawn a reader task
-    let mut reader = tokio::net::unix::pipe::Receiver::from_owned_fd(reader.into())?;
-    crate::spawn_and_log::<_, (), anyhow::Error>(ui, async move {
+    GLOBAL_SELF_PIPE.store(writer.into_raw_fd(), Ordering::Release);
+
+    let sigchld_data = sigchld::init(&ui)?;
+    let sigwinch_data = sigwinch::init(&ui)?;
+    let sigint_data = sigint::init(&ui)?;
+
+    crate::spawn_and_log::<_, (), anyhow::Error>(&ui.clone(), async move {
+        let mut reader = tokio::net::unix::pipe::Receiver::from_owned_fd(reader.into())?;
         let mut buf = [0];
         loop {
             match reader.read_exact(&mut buf).await {
-                Ok(_) => { callback()?; }
+                Ok(_) if buf[0] == SIGCHLD_BYTE => { crate::log_if_err(sigchld::handle_sigchld(&sigchld_data)); },
+                Ok(_) if buf[0] == SIGWINCH_BYTE => sigwinch::handle_sigwinch(&sigwinch_data),
+                Ok(_) if buf[0] == SIGINT_BYTE => sigint::handle_sigint(&sigint_data),
+                Ok(_) => log::error!("Invalid signal byte: {}", buf[0]),
                 Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
                 Err(e) => return Err(e.into()),
             }
         }
         Ok(())
     });
-
-    Ok(writer)
+    Ok(())
 }
 
-pub fn init(ui: &crate::ui::Ui) -> Result<()> {
+pub fn write_to_self_pipe(byte: u8) -> bool {
+    let pipe = GLOBAL_SELF_PIPE.load(Ordering::Acquire);
+    if pipe != -1 {
+        let pipe = unsafe{ BorrowedFd::borrow_raw(pipe) };
+        nix::unistd::write(pipe, &[byte]).unwrap();
+    }
+    pipe != -1
+}
+
+pub fn init(ui: crate::ui::Ui) -> Result<()> {
     let (err1, err2) = super::with_queued_signals(|| {
 
         #[allow(static_mut_refs)]
@@ -180,9 +199,11 @@ pub fn init(ui: &crate::ui::Ui) -> Result<()> {
             resize_array(&mut super::siglists, trapcount, SIGTRAPPED_COUNT as usize);
         }
 
-        sigchld::init(ui)?;
-        sigwinch::init(ui)?;
-        sigint::init(ui)?;
+        spawn_self_pipe_reader(ui)?;
+        hook_signal(signal::Signal::SIGCHLD)?;
+        hook_signal(signal::Signal::SIGINT)?;
+        hook_signal(signal::Signal::SIGWINCH)?;
+
         Ok(())
     });
     err2?;
@@ -196,6 +217,11 @@ pub fn cleanup() {
             crate::log_if_err(unsafe { signal::sigaction(sig, &old_action) });
         }
     });
+
+    let fd = GLOBAL_SELF_PIPE.swap(-1, Ordering::AcqRel);
+    if fd != -1 {
+        let _ = nix::unistd::close(fd);
+    }
 
     sigchld::cleanup();
     sigwinch::cleanup();
