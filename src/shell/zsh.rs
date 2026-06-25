@@ -5,7 +5,7 @@ use nix::libc;
 use std::os::fd::{RawFd};
 use std::os::raw::*;
 use std::default::Default;
-use std::ptr::null_mut;
+use std::ptr::{null_mut, read_volatile, write_volatile};
 use bstr::{BString, ByteSlice};
 
 mod bindings;
@@ -384,20 +384,21 @@ pub fn capture_shout<T, F: FnOnce() -> T>(
 
 pub fn queue_signal_level() -> i32 {
     unsafe {
-        zsh_sys::queueing_enabled
+        read_volatile(&raw const zsh_sys::queueing_enabled)
     }
 }
 
 fn queue_signals() {
     unsafe {
-        zsh_sys::queueing_enabled += 1;
+        write_volatile(&raw mut zsh_sys::queueing_enabled, queue_signal_level() + 1);
     }
 }
 
 fn unqueue_signals() -> nix::Result<()> {
     unsafe {
-        zsh_sys::queueing_enabled -= 1;
-        if zsh_sys::queueing_enabled == 0 {
+        let level = queue_signal_level() - 1;
+        write_volatile(&raw mut zsh_sys::queueing_enabled, level);
+        if level == 0 {
             run_queued_signals()?;
         }
     }
@@ -408,13 +409,18 @@ fn run_queued_signals() -> nix::Result<()> {
     const MAX_QUEUE_SIZE: i32 = 128;
 
     unsafe {
-        while zsh_sys::queue_front != zsh_sys::queue_rear { /* while signals in queue */
-            zsh_sys::queue_front = (zsh_sys::queue_front + 1) % MAX_QUEUE_SIZE;
-            let sigset = zsh_sys::signal_mask_queue[zsh_sys::queue_front as usize];
+        loop {
+            let queue_front = read_volatile(&raw const zsh_sys::queue_front);
+            if queue_front == read_volatile(&raw const zsh_sys::queue_rear) { /* while signals in queue */
+                break
+            }
+            let queue_front = queue_front + 1;
+            write_volatile(&raw mut zsh_sys::queue_front, queue_front % MAX_QUEUE_SIZE);
+            let sigset = zsh_sys::signal_mask_queue[queue_front as usize];
             let sigset = signal::SigSet::from_sigset_t_unchecked(std::mem::transmute::<zsh_sys::__sigset_t, nix::libc::sigset_t>(sigset));
             let mut oset = signal::SigSet::empty();
             signal::sigprocmask(signal::SigmaskHow::SIG_SETMASK, Some(&sigset), Some(&mut oset))?;
-            zsh_sys::zhandler(zsh_sys::signal_queue[zsh_sys::queue_front as usize]);
+            zsh_sys::zhandler(zsh_sys::signal_queue[queue_front as usize]);
             signal::sigprocmask(signal::SigmaskHow::SIG_SETMASK, Some(&oset), None)?;
         }
     }
@@ -423,14 +429,14 @@ fn run_queued_signals() -> nix::Result<()> {
 
 pub fn dont_queue_signals() -> nix::Result<()> {
     unsafe {
-        zsh_sys::queueing_enabled = 0;
+        write_volatile(&raw mut zsh_sys::queueing_enabled, 0);
         run_queued_signals()
     }
 }
 
 pub fn restore_queue_signals(level: i32) {
     unsafe {
-        zsh_sys::queueing_enabled = level;
+        write_volatile(&raw mut zsh_sys::queueing_enabled, level);
     }
 }
 
