@@ -19,6 +19,8 @@ pub(in crate::shell) fn teardown() {
     if let Some((ui, _)) = STATE.take() {
         // do this otherwise runtime will hold strong refs to ui and keep it alive
         crate::log_if_err(ui.runtime.shutdown());
+        // this should be the last strong ref
+        debug_assert_eq!(std::rc::Rc::strong_count(&ui.0), 1);
     }
 }
 
