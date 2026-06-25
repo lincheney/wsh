@@ -17,7 +17,7 @@ extern "C" fn postfork_child() {
         // since we are now the child, we won't be able to wait for any of them
         // we shouldn't have to rush this, since we don't have any child processes
         // we shouldn't get any SIGCHLD yet
-        crate::shell::zsh::process::clear_pids();
+        crate::shell::zsh::signals::sigchld::clear_pids();
         if let Ok(mut ui) = ui.try_borrow_mut() {
             ui.pid_map.clear();
         }

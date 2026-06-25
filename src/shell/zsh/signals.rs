@@ -6,6 +6,7 @@ use std::cell::RefCell;
 use tokio::io::AsyncReadExt;
 pub mod sigwinch;
 pub mod sigint;
+pub mod sigchld;
 
 thread_local! {
     static ORIGINAL_SIGACTIONS: RefCell<Vec<(signal::Signal, signal::SigAction)>> = const{ RefCell::new(Vec::new()) };
@@ -90,7 +91,7 @@ pub fn invoke_signal_handler_entrypoint(arg: Option<&[u8]>) -> c_int {
 
 fn invoke_signal_handler(sig: c_int, trapped: bool) -> c_int {
     match sig.try_into() {
-        Ok(signal::Signal::SIGCHLD) => super::process::sighandler(trapped),
+        Ok(signal::Signal::SIGCHLD) => sigchld::sighandler(trapped),
         Ok(signal::Signal::SIGWINCH) => sigwinch::sighandler(trapped),
         // Ok(signal::Signal::SIGINT) => sigint::sighandler(),
         _ => 1, // unknown
@@ -179,7 +180,7 @@ pub fn init(ui: &crate::ui::Ui) -> Result<()> {
             resize_array(&mut super::siglists, trapcount, SIGTRAPPED_COUNT as usize);
         }
 
-        super::process::init(ui)?;
+        sigchld::init(ui)?;
         sigwinch::init(ui)?;
         sigint::init(ui)?;
         Ok(())
@@ -196,7 +197,7 @@ pub fn cleanup() {
         }
     });
 
-    super::process::cleanup();
+    sigchld::cleanup();
     sigwinch::cleanup();
     sigint::cleanup();
 }

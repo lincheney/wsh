@@ -80,7 +80,7 @@ pub(super) fn sighandler(trapped: bool) -> c_int {
             for (&pid, (status, add)) in pids.iter() {
                 // register these pids
                 if *add && status.get() < 0 && !jobtab_iter().any(|proc| proc.pid == pid) {
-                    super::add_pid(pid);
+                    crate::shell::zsh::add_pid(pid);
                 }
             }
         });
@@ -151,7 +151,7 @@ pub(super) fn cleanup() {
 pub(super) fn init(ui: &crate::ui::Ui) -> Result<()> {
     // spawn a reader task
     let ui_clone = ui.clone();
-    let writer = super::signals::self_pipe::<_, _, std::cell::BorrowMutError>(ui, move || {
+    let writer = super::self_pipe::<_, _, std::cell::BorrowMutError>(ui, move || {
         let pid_map = &mut ui_clone.try_borrow_mut()?.pid_map;
         if !pid_map.is_empty() {
             // check for pids that are done
@@ -171,7 +171,7 @@ pub(super) fn init(ui: &crate::ui::Ui) -> Result<()> {
         zsh_sys::addhookfunc(c"before_trap".as_ptr().cast_mut(), Some(before_trap_hook));
     }
 
-    super::signals::hook_signal(signal::Signal::SIGCHLD)?;
+    super::hook_signal(signal::Signal::SIGCHLD)?;
 
     Ok(())
 }

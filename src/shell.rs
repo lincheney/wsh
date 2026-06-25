@@ -22,7 +22,6 @@ pub use zsh::{
     completion,
     history,
     variables,
-    process,
     signals,
     functions::Function,
     parser::{Token, ParserOptions},
@@ -312,7 +311,7 @@ impl Shell {
     }
 
     pub fn check_pid_status(&self, pid: i32) -> Option<c_int> {
-        zsh::process::check_pid_status(pid)
+        zsh::signals::sigchld::check_pid_status(pid)
     }
 
     pub fn get_var(&self, name: &MetaStr, zle: bool) -> anyhow::Result<Option<variables::Value>> {

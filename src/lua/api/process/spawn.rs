@@ -191,7 +191,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
             let (result, queue_result) = ui.shell.with_queued_signals(|| {
                 command.spawn().map(|child| {
                     let pid = child.id().unwrap();
-                    let pid_waiter = crate::shell::process::register_pid(&ui, pid as _, true);
+                    let pid_waiter = crate::shell::signals::sigchld::register_pid(&ui, pid as _, true);
                     (child, pid, pid_waiter)
                 })
             });
@@ -237,7 +237,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
                     } else {
                         pid_waiter.await.ok()
                     };
-                    crate::shell::process::deregister_pid(&ui, pid as _)?;
+                    crate::shell::signals::sigchld::deregister_pid(&ui, pid as _)?;
                     code
                 }
             );

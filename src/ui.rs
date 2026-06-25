@@ -9,7 +9,7 @@ use anyhow::Result;
 use crate::keybind::{Event};
 use crate::print_lock::{PrintLock, PrintLockGuard};
 use nix::sys::termios;
-use crate::shell::{Shell, process::PidMap, ParserOptions};
+use crate::shell::{Shell, signals::sigchld::PidMap, ParserOptions};
 use crate::lua::{LuaWrapper, EventCallbacks, HasEventCallbacks};
 pub mod buffer;
 
