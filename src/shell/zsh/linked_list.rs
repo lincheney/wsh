@@ -10,10 +10,6 @@ pub struct LinkedList<'a, T: ?Sized> {
 
 impl<'a, T: ?Sized> LinkedList<'a, T> {
 
-    pub fn new<I: Iterator<Item=&'a T>>(iter: I) -> Self {
-        Self::new_from_ptrs(iter.map(|x| x as _))
-    }
-
     pub fn new_from_ptrs<I: Iterator<Item=*const T>>(iter: I) -> Self {
 
         let nodes: Vec<_> = iter.map(|ptr| zsh_sys::linknode {
