@@ -270,7 +270,6 @@ enum UnderlineOption {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 enum HyperlinkOption {
-    None,
     Url(String),
     Detailed { url: String, id: Option<String> },
 }
@@ -374,7 +373,7 @@ impl From<StyleOptions> for tui::widget::StyleOptions {
             blink: style.blink,
             hyperlink: match style.hyperlink {
                 None => None,
-                Some(HyperlinkOption::None) => Some(None),
+                Some(HyperlinkOption::Url(url)) if url.is_empty() => Some(None),
                 Some(HyperlinkOption::Url(url)) => Some(Some(Rc::new(Hyperlink {
                     url: url.into(),
                     id: None,
