@@ -1,3 +1,4 @@
+use std::range::Range;
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -338,7 +339,7 @@ impl Nodes {
         tmp: bool,
     ) -> std::io::Result<()> {
         let mut renderer = NodeRenderer::new_for_layout(&self.root, &self.map, tmp);
-        let callback: Option<fn(&mut Drawer<W, C>, usize, usize, usize)> = None;
+        let callback: Option<fn(&mut Drawer<W, C>, usize, Range<usize>)> = None;
         renderer.render(drawer, false, true, callback)?;
         drawer.clear_to_end_of_line(None)
     }
@@ -350,7 +351,7 @@ impl Nodes {
         tmp: bool,
     ) -> std::io::Result<()> {
         let mut renderer = NodeRenderer::new(node, &self.map, tmp);
-        let callback: Option<fn(&mut Drawer<W, C>, usize, usize, usize)> = None;
+        let callback: Option<fn(&mut Drawer<W, C>, usize, Range<usize>)> = None;
         renderer.render(drawer, false, true, callback)?;
         drawer.clear_to_end_of_line(None)
     }
@@ -475,7 +476,7 @@ impl<'a> Renderer for NodeRenderer<'a, std::slice::Iter<'a, usize>> {
     where
         W :Write,
         C: Canvas,
-        F: FnMut(&mut Drawer<W, C>, usize, usize, usize)
+        F: FnMut(&mut Drawer<W, C>, usize, Range<usize>)
     {
 
         if self.finished() {

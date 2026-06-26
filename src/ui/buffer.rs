@@ -1,3 +1,4 @@
+use std::range::Range;
 use byteyarn::ByteYarn;
 use std::io::Write;
 use bstr::{BStr, BString, ByteSlice};
@@ -244,7 +245,7 @@ impl Buffer {
         self.byte_pos(self.cursor)
     }
 
-    pub fn render<W :Write, C: Canvas, F: FnMut(&mut Drawer<W, C>, usize, usize, usize)>(
+    pub fn render<W :Write, C: Canvas, F: FnMut(&mut Drawer<W, C>, usize, Range<usize>)>(
         &self,
         drawer: &mut Drawer<W, C>,
         initial_indent: u16,

@@ -22,7 +22,7 @@ pub trait Renderer {
     where
         W :Write,
         C: Canvas,
-        F: FnMut(&mut Drawer<W, C>, usize, usize, usize)
+        F: FnMut(&mut Drawer<W, C>, usize, Range<usize>)
         ;
 
     fn render<W, C, F>(
@@ -35,7 +35,7 @@ pub trait Renderer {
     where
         W :Write,
         C: Canvas,
-        F: FnMut(&mut Drawer<W, C>, usize, usize, usize),
+        F: FnMut(&mut Drawer<W, C>, usize, Range<usize>),
     {
         while self.draw_one_line(drawer, newline, pad, &mut callback)? {
             newline = true;
@@ -106,14 +106,14 @@ impl<'a> TextRenderer<'a> {
         let scrollbar_range = if scroll.show_scrollbar && !(scrolled.range.start == 0 && scrolled.range.end >= scrolled.total_line_count.max(1)) {
             let num_lines = scrolled.total_line_count.max(1);
             let text_height = text_height.unwrap_or(num_lines);
-            let height = (text_height as f64 * scrolled.range.len() as f64 / num_lines as f64).round().max(1.) as usize;
+            let height = (text_height as f64 * std::ops::Range::from(scrolled.range).len() as f64 / num_lines as f64).round().max(1.) as usize;
             let start = text_height as f64 * scrolled.range.start as f64 / num_lines as f64;
             let start = (start.round().max(0.) as usize).min(text_height.saturating_sub(height));
             let end = start + height.max(1);
 
             let mut cell = Cell::new(SCROLLBAR_CHAR);
             cell.style = text.style.clone();
-            Some((start .. end, cell))
+            Some(((start .. end).into(), cell))
         } else {
             None
         };
@@ -177,7 +177,7 @@ impl Renderer for TextRenderer<'_> {
     where
         W :Write,
         C: Canvas,
-        F: FnMut(&mut Drawer<W, C>, usize, usize, usize),
+        F: FnMut(&mut Drawer<W, C>, usize, Range<usize>),
     {
 
         let remaining_height = match &mut self.remaining_height {
@@ -246,7 +246,7 @@ impl Renderer for TextRenderer<'_> {
                     drawer.draw_cell(&cell, false)?;
                 }
                 if let Some(callback) = callback {
-                    callback(drawer, token.lineno, token.start, token.end);
+                    callback(drawer, token.lineno, token.range);
                 }
             }
 

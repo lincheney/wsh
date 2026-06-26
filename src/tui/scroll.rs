@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::ops::Range;
+use std::range::Range;
 use super::text::{HighlightedRange};
 use super::style::Style;
 use bstr::{BString, BStr};
@@ -16,8 +16,7 @@ pub enum ScrollPosition {
 pub struct ScrollWrapToken<'a> {
     pub lineno: usize,
     visual_lineno: usize,
-    pub start: usize,
-    pub end: usize,
+    pub range: Range<usize>,
     pub inner: WrapToken<'a>,
     pub style: Option<Style>,
 }
@@ -106,13 +105,12 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
             init_style.clone(),
             max_width,
             initial_indent,
-            |start, end, token, style| {
+            |range, token, style| {
                 let is_line_break = matches!(token, WrapToken::LineBreak);
                 tokens.push(ScrollWrapToken {
                     lineno: i,
                     visual_lineno: total_line_count,
-                    start,
-                    end,
+                    range,
                     inner: token,
                     style,
                 });
@@ -126,8 +124,7 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
         tokens.push(ScrollWrapToken {
             lineno: i,
             visual_lineno: total_line_count,
-            start: line.len(),
-            end: line.len(),
+            range: (line.len() .. line.len()).into(),
             inner: WrapToken::LineBreak,
             style: None,
         });
@@ -188,7 +185,7 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
 
     Scrolled {
         total_line_count,
-        range: start .. end,
+        range: (start .. end).into(),
         in_view: tokens,
     }
 }

@@ -170,8 +170,8 @@ impl CommandLine<'_> {
             // also record where is the cursor
             let cursor = self.buffer.cursor_byte_pos();
             let mut cursor_coord = drawer.get_pos();
-            self.buffer.render(drawer, cursor_coord.0, Some(|drawer: &mut Drawer<W, C>, lineno, _start, end| {
-                if end == cursor && lineno == 0 {
+            self.buffer.render(drawer, cursor_coord.0, Some(|drawer: &mut Drawer<W, C>, lineno, range: std::range::Range<_>| {
+                if range.end == cursor && lineno == 0 {
                     cursor_coord = drawer.get_pos();
                 }
             }))?;

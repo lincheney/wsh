@@ -1,3 +1,4 @@
+use std::range::Range;
 use std::borrow::Cow;
 use unicode_width::UnicodeWidthStr;
 use bstr::{BStr, ByteSlice};
@@ -43,10 +44,9 @@ pub enum WrapToken<'a> {
 
 pub fn wrap_grapheme<
     'a,
-    F: FnMut(usize, usize, WrapToken<'a>, Option<Style>)
+    F: FnMut(Range<usize>, WrapToken<'a>, Option<Style>)
 >(
-    start: usize,
-    end: usize,
+    range: Range<usize>,
     grapheme: &'a str,
     line: &'a BStr,
     style: Option<Style>,
@@ -56,42 +56,42 @@ pub fn wrap_grapheme<
 ) -> usize {
     if grapheme == "\n" {
         // newline
-        callback(start, end, WrapToken::LineBreak, None);
+        callback(range, WrapToken::LineBreak, None);
         0
 
     } else if grapheme == "\t" {
         let width = if pos >= max_width {
             pos = 0;
-            callback(start, start, WrapToken::LineBreak, None);
+            callback((range.start..range.start).into(), WrapToken::LineBreak, None);
             max_width
         } else {
             max_width - pos
         }.min(super::text::TAB_WIDTH);
         for _ in 0 .. width {
-            callback(start, end, WrapToken::String(Cow::Borrowed(" ")), style.clone());
+            callback(range, WrapToken::String(Cow::Borrowed(" ")), style.clone());
         }
         pos + width
 
-    } else if grapheme.width() > 0 && (grapheme != "\u{FFFD}" || line[start..end] == grapheme) {
+    } else if grapheme.width() > 0 && (grapheme != "\u{FFFD}" || &line.as_bytes()[range] == grapheme.as_bytes()) {
         if pos + grapheme.width() > max_width {
             pos = 0;
-            callback(start, start, WrapToken::LineBreak, None);
+            callback((range.start..range.start).into(), WrapToken::LineBreak, None);
         }
-        callback(start, end, WrapToken::String(Cow::Borrowed(grapheme)), style);
+        callback(range, WrapToken::String(Cow::Borrowed(grapheme)), style);
         pos + grapheme.width()
 
     } else {
         // invalid text
         let width = 2 + 4 + 1;
         let style = style.map(|s| s.patch(ESCAPE_STYLE));
-        for (i, c) in line[start .. end].iter().enumerate() {
+        for (i, c) in line.as_bytes()[range].iter().enumerate() {
             if pos + width > max_width {
                 pos = 0;
-                callback(start, start, WrapToken::LineBreak, None);
+                callback((range.start..range.start).into(), WrapToken::LineBreak, None);
             }
             let string = format!("<u{c:04x}>");
             debug_assert_eq!(string.width(), width);
-            callback(start + i, start + i + 1, WrapToken::String(Cow::Owned(string)), style.clone());
+            callback((range.start + i .. range.start + i + 1).into(), WrapToken::String(Cow::Owned(string)), style.clone());
             pos += width;
         }
         pos
@@ -102,7 +102,7 @@ pub fn wrap<
     'a,
     T: 'a,
     I: Clone + Iterator<Item=&'a HighlightedRange<T>>,
-    F: FnMut(usize, usize, WrapToken<'a>, Option<Style>)
+    F: FnMut(Range<usize>, WrapToken<'a>, Option<Style>)
 >(
     line: &'a BStr,
     highlights: I,
@@ -120,8 +120,8 @@ pub fn wrap<
         if let Some(text) = &hl.inner.virtual_text {
             let style = init_style.as_ref().map(|s| merge_highlights(s.clone(), [&hl.inner].into_iter()));
             for (s, e, grapheme) in text.grapheme_indices() {
-                pos = wrap_grapheme(s, e, grapheme, text.as_ref(), style.clone(), max_width, pos, |_, _, token, style| {
-                    callback(start, start, token, style);
+                pos = wrap_grapheme((s..e).into(), grapheme, text.as_ref(), style.clone(), max_width, pos, |_, token, style| {
+                    callback((start..start).into(), token, style);
                 });
             }
         }
@@ -159,7 +159,7 @@ pub fn wrap<
         }
 
         if !conceal {
-            pos = wrap_grapheme(start, end, grapheme, line, style.clone(), max_width, pos, &mut callback);
+            pos = wrap_grapheme((start..end).into(), grapheme, line, style.clone(), max_width, pos, &mut callback);
         }
     }
 
