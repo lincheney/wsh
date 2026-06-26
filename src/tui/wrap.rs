@@ -117,7 +117,7 @@ pub fn wrap<
     let mut style = init_style.clone();
 
     let handle_virtual_text = |hl: &'a HighlightedRange<T>, start, mut pos, callback: &mut F, init_style: &Option<Style>| {
-        if let Some(text) = &hl.inner.virtual_text {
+        if let Some(text) = &hl.inner.virtual_text && !text.is_empty() {
             let style = init_style.as_ref().map(|s| merge_highlights(s.clone(), [&hl.inner].into_iter()));
             for (s, e, grapheme) in text.grapheme_indices() {
                 pos = wrap_grapheme((s..e).into(), grapheme, text.as_ref(), style.clone(), max_width, pos, |_, token, style| {

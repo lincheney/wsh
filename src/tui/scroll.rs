@@ -75,7 +75,8 @@ impl<'a> Scrolled<'a> {
 
 pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
     lines: &'a [BString],
-    highlights: I,
+    highlights: &'a [HighlightedRange<T>],
+    extra_highlights: I,
     init_style: Option<Style>,
     max_width: usize,
     max_height: Option<usize>,
@@ -90,18 +91,26 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
 
     let mut total_line_count = 0;
     let mut tokens = vec![];
+    let mut start = 0;
 
     // add a dummy line at the end
     for (i, line) in lines.iter().map(|l| l.as_ref()).chain(std::iter::once(BStr::new(b""))).enumerate() {
 
         let past_end = i >= lines.len();
-        if past_end && !highlights.clone().any(|hl| hl.lineno >= i && hl.inner.virtual_text.is_some()) {
+
+        let line_filter = |h: &HighlightedRange<T>| h.lineno == i || (past_end && h.lineno > i);
+        let end = start + highlights[start..].partition_point(line_filter);
+        let highlights = highlights[start..end].iter()
+            .chain(extra_highlights.clone().filter(|h| line_filter(h)));
+        start = end;
+
+        if past_end && !highlights.clone().any(|hl| hl.inner.has_virtual_text()) {
             continue
         }
 
         super::wrap::wrap(
             line,
-            highlights.clone().filter(|hl| hl.lineno == i || (past_end && hl.lineno > i)),
+            highlights.clone(),
             init_style.clone(),
             max_width,
             initial_indent,

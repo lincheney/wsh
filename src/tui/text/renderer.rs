@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::range::Range;
 use unicode_width::UnicodeWidthStr;
 use std::io::Write;
 use crate::tui::{Drawer, Canvas, Cell, text::Alignment, border::Border};
@@ -95,7 +95,8 @@ impl<'a> TextRenderer<'a> {
         let text_height = height.map(|h| h.saturating_sub(border_h));
         let scrolled = crate::tui::scroll::wrap(
             &text.lines,
-            text.highlights.iter().chain(extra_highlights),
+            &text.highlights,
+            extra_highlights,
             Some(text.style.clone()),
             content_width - if scroll.show_scrollbar { 1 } else { 0 },
             text_height,

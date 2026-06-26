@@ -24,6 +24,15 @@ impl<T> Highlight<T> {
         && self.virtual_text.as_ref().is_none_or(|s| s.is_empty())
         && !self.conceal.unwrap_or_default()
     }
+
+    pub fn may_cause_resize(&self) -> bool {
+        // only conceal and virtual text affect sizing
+        self.conceal.unwrap_or_default() || self.has_virtual_text()
+    }
+
+    pub fn has_virtual_text(&self) -> bool {
+        self.virtual_text.as_ref().is_some_and(|x| !x.is_empty())
+    }
 }
 
 impl<T: Default> From<Style> for Highlight<T> {
@@ -108,8 +117,8 @@ pub struct Text<T=()> {
 }
 
 fn add_highlight<T>(highlights: &mut Vec<HighlightedRange<T>>, hl: HighlightedRange<T>) {
-    // sort in reverse order so higher priority comes first
-    let index = match highlights.binary_search_by(|x| x.inner.priority.total_cmp(&hl.inner.priority)) {
+    // sort in reverse order of priority so higher priority comes first
+    let index = match highlights.binary_search_by(|x| hl.lineno.cmp(&x.lineno).then(hl.inner.priority.total_cmp(&x.inner.priority).reverse())) {
         Ok(index) | Err(index) => index,
     };
     highlights.insert(index, hl);
@@ -254,19 +263,21 @@ impl<T> Text<T> {
     {
 
         let mut pos = (initial_indent, 0);
-        // only conceal and virtual text affect sizing
-        let highlights = self.highlights.iter()
-            .chain(extra_highlights)
-            .filter(|h| h.inner.conceal.unwrap_or_default() || h.inner.virtual_text.as_ref().is_some_and(|x| !x.is_empty()));
+        let mut start = 0;
 
         // add a dummy line at the end
         for (i, line) in self.lines.iter().map(|l| l.as_ref()).chain(std::iter::once(BStr::new(b""))).enumerate() {
             let past_end = i >= self.lines.len();
 
-            let highlights = highlights.clone().filter(|h| h.lineno == i || (past_end && h.lineno > i));
+            let line_filter = |h: &HighlightedRange<T>| h.lineno == i || (past_end && h.lineno > i);
+            let end = start + self.highlights[start..].partition_point(line_filter);
+            let highlights = self.highlights[start..end].iter()
+                .chain(extra_highlights.clone().filter(|h| line_filter(h)))
+                .filter(|h| h.inner.may_cause_resize());
+            start = end;
 
             // dont draw the dummy line if there is no virtual text
-            if past_end && !highlights.clone().any(|hl| hl.inner.virtual_text.is_some()) {
+            if past_end && !highlights.clone().any(|hl| hl.inner.has_virtual_text()) {
                 continue
             }
 
