@@ -1,3 +1,4 @@
+use std::rc::Rc;
 pub use crossterm::style::Color;
 
 bitflags::bitflags! {
@@ -15,15 +16,22 @@ bitflags::bitflags! {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hyperlink {
+    pub url: Rc<str>,
+    pub id: Option<Rc<str>>,
+}
+
 /// A style description where `None` fields and unset modifier bits mean "not explicitly set".
 ///
 /// Two styles are merged with `patch`: the other style's explicitly-set fields override self.
 /// `modifier_mask` tracks which modifier bits were explicitly set; `modifier` holds their values.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Style {
     pub fg:              Option<Color>,
     pub bg:              Option<Color>,
     pub underline_color: Option<Color>,
+    pub hyperlink:       Option<Rc<Hyperlink>>,
     /// actual values of modifier bits
     pub modifier:        Modifier,
     /// which modifier bits are explicitly set
@@ -36,6 +44,7 @@ impl Style {
             fg: None,
             bg: None,
             underline_color: None,
+            hyperlink: None,
             modifier: Modifier::empty(),
             modifier_mask: Modifier::empty(),
         }
@@ -47,6 +56,7 @@ impl Style {
             fg: other.fg.or(self.fg),
             bg: other.bg.or(self.bg),
             underline_color: other.underline_color.or(self.underline_color),
+            hyperlink: other.hyperlink.or(self.hyperlink),
             modifier: (!other.modifier_mask & self.modifier) | (other.modifier_mask & other.modifier),
             modifier_mask: self.modifier_mask.union(other.modifier_mask),
         }
@@ -80,6 +90,11 @@ impl Style {
 
     pub const fn underline_color(mut self, c: Color) -> Self {
         self.underline_color = Some(c);
+        self
+    }
+
+    pub fn hyperlink(mut self, url: Option<Rc<Hyperlink>>) -> Self {
+        self.hyperlink = url;
         self
     }
 }

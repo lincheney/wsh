@@ -1,6 +1,7 @@
 use bstr::BStr;
 use std::default::Default;
-use crate::tui::{Style, Modifier};
+use std::rc::Rc;
+use crate::tui::{Style, Modifier, Hyperlink};
 use crate::tui::border::{Border};
 use crossterm::style::Color;
 mod ansi;
@@ -27,6 +28,7 @@ pub struct StyleOptions {
     pub strikethrough: Option<bool>,
     pub reversed: Option<bool>,
     pub blink: Option<bool>,
+    pub hyperlink: Option<Option<Rc<Hyperlink>>>,
 }
 
 impl StyleOptions {
@@ -71,6 +73,7 @@ impl StyleOptions {
             fg: self.fg,
             bg: self.bg,
             underline_color,
+            hyperlink: self.hyperlink.clone().flatten(),
             modifier,
             modifier_mask,
         }
@@ -87,6 +90,7 @@ impl StyleOptions {
             strikethrough: other.strikethrough.or(self.strikethrough),
             reversed: other.reversed.or(self.reversed),
             blink: other.blink.or(self.blink),
+            hyperlink: other.hyperlink.clone().or_else(|| self.hyperlink.clone()),
         }
     }
 

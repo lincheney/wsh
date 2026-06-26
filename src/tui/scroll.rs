@@ -103,7 +103,7 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
         super::wrap::wrap(
             line,
             highlights.clone().filter(|hl| hl.lineno == i || (past_end && hl.lineno > i)),
-            init_style,
+            init_style.clone(),
             max_width,
             initial_indent,
             |start, end, token, style| {

@@ -287,7 +287,7 @@ impl<T> Text<T> {
         if self.style == Style::default() {
             None
         } else {
-            Some(Cell::new_with_style(" ", self.style))
+            Some(Cell::new_with_style(" ", self.style.clone()))
         }
     }
 

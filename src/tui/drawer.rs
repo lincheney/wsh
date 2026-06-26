@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use unicode_width::UnicodeWidthStr;
 use std::io::{Result, Write};
 use crossterm::{
@@ -15,7 +16,26 @@ use crossterm::{
         Color,
     },
 };
-use super::{Cell, Style, Modifier};
+use super::{Cell, Style, Modifier, Hyperlink};
+
+pub struct SetHyperlink(pub Option<Rc<Hyperlink>>);
+
+impl crossterm::Command for SetHyperlink {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        if let Some(h) = &self.0 {
+            f.write_str("\x1b]8;")?;
+            if let Some(id) = &h.id {
+                f.write_str("id=")?;
+                f.write_str(id)?;
+            }
+            f.write_str(";")?;
+            f.write_str(&h.url)?;
+            f.write_str("\x1b\\")
+        } else {
+            f.write_str("\x1b]8;;\x1b\\")
+        }
+    }
+}
 
 pub trait Canvas {
     fn get_cell(&self, pos: (u16, u16)) -> Option<&Cell>;
@@ -64,6 +84,7 @@ pub struct Drawer<'a, 'b, W, C> {
     fg: Color,
     bg: Color,
     underline_color: Color,
+    hyperlink: Option<Rc<super::style::Hyperlink>>,
     modifier: Modifier,
 }
 
@@ -77,6 +98,7 @@ impl<'a, 'b, W, C> Drawer<'a, 'b, W, C> {
             fg: Color::Reset,
             bg: Color::Reset,
             underline_color: Color::Reset,
+            hyperlink: None,
             modifier: Modifier::default(),
         }
     }
@@ -179,6 +201,10 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
         self.fg = Color::Reset;
         self.bg = Color::Reset;
         self.underline_color = Color::Reset;
+        if self.hyperlink.is_some() {
+            self.hyperlink = None;
+            queue!(self.writer, SetHyperlink(None))?;
+        }
         self.modifier = Modifier::default();
         queue!(self.writer, ResetColor)
     }
@@ -213,14 +239,14 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
 
             let cells = self.canvas.get_cell_range_mut(self.pos, (width, self.pos.1));
 
-            let style = cell.map(|c| c.style);
-            if !Self::cells_are_cleared(cells, style) {
+            let style = cell.as_ref().map(|c| c.style.clone());
+            if !Self::cells_are_cleared(cells, style.clone()) {
                 for c in cells.iter_mut() {
                     c.reset();
                 }
                 if let Some(style) = style {
                     for c in cells.iter_mut() {
-                        c.style = style;
+                        c.style = style.clone();
                     }
                 }
                 self.move_to_cur_pos(true)?;
@@ -244,14 +270,14 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
             return Ok(())
         };
 
-        let style = cell.map(|c| c.style);
-        if !Self::cells_are_cleared(cells, style) {
+        let style = cell.as_ref().map(|c| c.style.clone());
+        if !Self::cells_are_cleared(cells, style.clone()) {
             for c in cells.iter_mut() {
                 c.reset();
             }
             if let Some(style) = style {
                 for c in cells.iter_mut() {
-                    c.style = style;
+                    c.style = style.clone();
                 }
             }
             self.move_to_cur_pos(true)?;
@@ -326,6 +352,11 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
         let cell_fg = cell.style.fg.unwrap_or(Color::Reset);
         let cell_bg = cell.style.bg.unwrap_or(Color::Reset);
         let cell_uc = cell.style.underline_color.unwrap_or(Color::Reset);
+
+        if cell.style.hyperlink != self.hyperlink {
+            self.hyperlink = cell.style.hyperlink.clone();
+            queue!(self.writer, SetHyperlink(self.hyperlink.clone()))?;
+        }
 
         if cell_modifier != self.modifier {
             self.draw_modifier(cell_modifier)?;

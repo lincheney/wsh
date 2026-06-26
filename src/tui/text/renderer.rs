@@ -90,13 +90,13 @@ impl<'a> TextRenderer<'a> {
         let scroll = scroll.unwrap_or(Scroll{ show_scrollbar: false, position: ScrollPosition::Line(0) });
 
         let mut indent_cell = Cell::EMPTY;
-        indent_cell.style = text.style;
+        indent_cell.style = text.style.clone();
 
         let text_height = height.map(|h| h.saturating_sub(border_h));
         let scrolled = crate::tui::scroll::wrap(
             &text.lines,
             text.highlights.iter().chain(extra_highlights),
-            Some(text.style),
+            Some(text.style.clone()),
             content_width - if scroll.show_scrollbar { 1 } else { 0 },
             text_height,
             initial_indent,
@@ -112,7 +112,7 @@ impl<'a> TextRenderer<'a> {
             let end = start + height.max(1);
 
             let mut cell = Cell::new(SCROLLBAR_CHAR);
-            cell.style = text.style;
+            cell.style = text.style.clone();
             Some((start .. end, cell))
         } else {
             None
@@ -240,8 +240,8 @@ impl Renderer for TextRenderer<'_> {
                 if let WrapToken::String(symbol) = &token.inner {
                     cell.reset();
                     cell.set_text(symbol);
-                    if let Some(style) = token.style {
-                        cell.style = style;
+                    if let Some(style) = &token.style {
+                        cell.style = style.clone();
                     }
                     drawer.draw_cell(&cell, false)?;
                 }

@@ -63,7 +63,7 @@ impl Title {
         let highlights = self.text.highlights.iter();
         let mut finished = false;
         let mut cells = vec![];
-        super::wrap::wrap(first_line.into(), highlights, Some(self.text.style), width - 2, 0, |_, _, token, style| {
+        super::wrap::wrap(first_line.into(), highlights, Some(self.text.style.clone()), width - 2, 0, |_, _, token, style| {
             if !finished && let super::wrap::WrapToken::String(s) = token {
                 let mut cell = Cell::new(&s);
                 if let Some(style) = style {
@@ -136,12 +136,12 @@ impl Border {
         }
 
         let chars = Chars::from(self.kind);
-        let cell = Cell::new_with_style(chars.horizontal, self.style);
+        let cell = Cell::new_with_style(chars.horizontal, self.style.clone());
         render_row(
             drawer,
             width,
-            if self.has_left() { Cell::new_with_style(chars.top_left, self.style) } else { cell.clone() },
-            if self.has_right() { Cell::new_with_style(chars.top_right, self.style) } else { cell.clone() },
+            if self.has_left() { Cell::new_with_style(chars.top_left, self.style.clone()) } else { cell.clone() },
+            if self.has_right() { Cell::new_with_style(chars.top_right, self.style.clone()) } else { cell.clone() },
             cell,
             self.title_top.as_ref(),
         )
@@ -157,12 +157,12 @@ impl Border {
         }
 
         let chars = Chars::from(self.kind);
-        let cell = Cell::new_with_style(chars.horizontal, self.style);
+        let cell = Cell::new_with_style(chars.horizontal, self.style.clone());
         render_row(
             drawer,
             width,
-            if self.has_left() { Cell::new_with_style(chars.bottom_left, self.style) } else { cell.clone() },
-            if self.has_right() { Cell::new_with_style(chars.bottom_right, self.style) } else { cell.clone() },
+            if self.has_left() { Cell::new_with_style(chars.bottom_left, self.style.clone()) } else { cell.clone() },
+            if self.has_right() { Cell::new_with_style(chars.bottom_right, self.style.clone()) } else { cell.clone() },
             cell,
             self.title_bottom.as_ref(),
         )
@@ -171,7 +171,7 @@ impl Border {
     pub fn render_left<W: Write, C: Canvas>(&self, drawer: &mut Drawer<W, C>) -> std::io::Result<()> {
         if self.has_left() {
             let chars = Chars::from(self.kind);
-            let cell = Cell::new_with_style(chars.vertical, self.style);
+            let cell = Cell::new_with_style(chars.vertical, self.style.clone());
             drawer.draw_cell(&cell, false)
         } else {
             Ok(())
@@ -181,7 +181,7 @@ impl Border {
     pub fn render_right<W: Write, C: Canvas>(&self, drawer: &mut Drawer<W, C>) -> std::io::Result<()> {
         if self.has_right() {
             let chars = Chars::from(self.kind);
-            let cell = Cell::new_with_style(chars.vertical, self.style);
+            let cell = Cell::new_with_style(chars.vertical, self.style.clone());
             drawer.draw_cell(&cell, false)
         } else {
             Ok(())

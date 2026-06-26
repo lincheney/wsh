@@ -27,7 +27,7 @@ pub mod layout;
 pub mod error_message;
 pub use drawer::{Drawer, Canvas, DummyCanvas};
 pub use error_message::ErrorMessage;
-pub use style::{Style, Modifier};
+pub use style::{Style, Modifier, Hyperlink};
 pub use cell::Cell;
 pub use buffer::Buffer;
 
@@ -160,6 +160,7 @@ impl Tui {
         let mut drawer = drawer::Drawer::new(&mut canvas, &mut writer, (0, 0));
 
         self.nodes.render_node(node, &mut drawer, true).unwrap();
+        drawer.reset_colours().unwrap();
         Some(string.into())
     }
 

@@ -1,6 +1,7 @@
 use crate::lua::LuaWrapper;
 use bstr::BString;
 use std::default::Default;
+use std::rc::Rc;
 use serde::{Deserialize, Serialize};
 use anyhow::Result;
 use crossterm::style::Color;
@@ -11,6 +12,7 @@ use crate::tui::{
     layout::{self, Node, NodeKind, Layout},
     Style,
     Modifier,
+    Hyperlink,
     text::Alignment,
     Cell,
     sizing,
@@ -265,6 +267,14 @@ enum UnderlineOption {
     Options(UnderlineStyleOptions),
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+enum HyperlinkOption {
+    None,
+    Url(String),
+    Detailed { url: String, id: Option<String> },
+}
+
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
 #[serde(default)]
 struct StyleOptions {
@@ -277,6 +287,7 @@ struct StyleOptions {
     strikethrough: Option<bool>,
     reversed: Option<bool>,
     blink: Option<bool>,
+    hyperlink: Option<HyperlinkOption>,
 }
 
 impl FromLua for StyleOptions {
@@ -295,7 +306,8 @@ impl StyleOptions {
             self.underline.is_none() &&
             self.strikethrough.is_none() &&
             self.reversed.is_none() &&
-            self.blink.is_none()
+            self.blink.is_none() &&
+            self.hyperlink.is_none()
     }
 }
 
@@ -325,6 +337,12 @@ impl From<Style> for StyleOptions {
             strikethrough: get_modifier!(Modifier::CROSSED_OUT),
             reversed:      get_modifier!(Modifier::REVERSED),
             blink:         get_modifier!(Modifier::SLOW_BLINK),
+            hyperlink: style.hyperlink.as_ref().map(|h| {
+                HyperlinkOption::Detailed {
+                    url: h.url.to_string(),
+                    id: h.id.as_ref().map(|id| id.to_string()),
+                }
+            }),
         }
     }
 }
@@ -354,6 +372,18 @@ impl From<StyleOptions> for tui::widget::StyleOptions {
             strikethrough: style.strikethrough,
             reversed: style.reversed,
             blink: style.blink,
+            hyperlink: match style.hyperlink {
+                None => None,
+                Some(HyperlinkOption::None) => Some(None),
+                Some(HyperlinkOption::Url(url)) => Some(Some(Rc::new(Hyperlink {
+                    url: url.into(),
+                    id: None,
+                }))),
+                Some(HyperlinkOption::Detailed { url, id }) => Some(Some(Rc::new(Hyperlink {
+                    url: url.into(),
+                    id: id.map(|id| id.into()),
+                }))),
+            },
        }
     }
 }
@@ -439,11 +469,11 @@ fn set_widget_options(
                 let style: tui::widget::StyleOptions = options.style.clone().into();
                 widget.border.sides = sides;
                 widget.border.kind = options.r#type.unwrap_or(SerdeWrap(widget.border.kind)).0;
-                widget.border.style = widget.border.style.patch(style.as_style());
+                widget.border.style = widget.border.style.clone().patch(style.as_style());
 
                 if let Some(text) = options.title_top {
                     let title = widget.border.title_top.get_or_insert_default();
-                    title.text.style = widget.border.style;
+                    title.text.style = widget.border.style.clone();
                     parse_text_parts(text.text, &mut title.text);
                     if let Some(align) = text.align {
                         title.alignment = align.0;
@@ -452,7 +482,7 @@ fn set_widget_options(
 
                 if let Some(text) = options.title_bottom {
                     let title = widget.border.title_bottom.get_or_insert_default();
-                    title.text.style = widget.border.style;
+                    title.text.style = widget.border.style.clone();
                     parse_text_parts(text.text, &mut title.text);
                     if let Some(align) = text.align {
                         title.alignment = align.0;

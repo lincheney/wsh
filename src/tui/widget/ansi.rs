@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use std::ops::Range;
 use unicode_width::{UnicodeWidthStr};
 use bstr::{BStr, BString, ByteSlice};
@@ -16,6 +17,7 @@ enum State {
     EscOther,
     CsiOther,
     Apc,
+    Osc,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -201,7 +203,7 @@ impl Parser {
         }
 
         let width = string.width();
-        self.splice(text, None, Some(string), Some(self.style));
+        self.splice(text, None, Some(string), Some(self.style.clone()));
         self.cursor_x += width;
     }
 
@@ -214,6 +216,7 @@ impl Parser {
                 (State::None, b'\x1b') => State::Esc,
                 (State::Esc, b'[') => State::Csi,
                 (State::Esc, b'_') => State::Apc,
+                (State::Esc, b']') => State::Osc,
 
                 (State::Apc, b'\x07') => {
                     if self.buffer.starts_with(b"G") {
@@ -244,12 +247,26 @@ impl Parser {
                     State::Apc
                 },
 
+                (State::Osc, b'\x07') => {
+                    self.handle_osc();
+                    State::None
+                },
+                (State::Osc, b'\\') if self.buffer.ends_with(b"\x1b") => {
+                    self.buffer.pop(); // remove the ESC
+                    self.handle_osc();
+                    State::None
+                },
+                (State::Osc, _) => {
+                    self.buffer.push(*c);
+                    State::Osc
+                },
+
                 (State::Csi | State::CsiParams, b'0'..=b'9' | b';' | b':') => {
                     self.buffer.push(*c);
                     State::CsiParams
                 },
                 (State::Csi | State::CsiParams, b'm') => {
-                    self.style = parse_ansi_col(self.style, self.buffer.as_ref());
+                    self.style = parse_ansi_col(self.style.clone(), self.buffer.as_ref());
                     self.buffer.clear();
                     State::None
                 },
@@ -346,6 +363,34 @@ impl Parser {
         self.cursor_x = 0;
         self.need_newline = false;
         self.captured_sequences.borrow_mut().clear();
+    }
+
+    fn handle_osc(&mut self) {
+        if self.buffer.starts_with(b"8;") {
+            let mut parts = self.buffer[2..].splitn(2, |c| *c == b';');
+            let params = parts.next();
+            let url = parts.next();
+            if let Some(url) = url {
+                if url.is_empty() {
+                    self.style.hyperlink = None;
+                } else {
+                    let mut id = None;
+                    if let Some(params) = params {
+                        for param in params.split(|c| *c == b':') {
+                            if param.starts_with(b"id=") {
+                                id = Some(std::str::from_utf8(&param[3..]).unwrap_or("").into());
+                                break;
+                            }
+                        }
+                    }
+                    self.style.hyperlink = Some(Rc::new(crate::tui::style::Hyperlink {
+                        url: std::str::from_utf8(url).unwrap_or("").into(),
+                        id,
+                    }));
+                }
+            }
+        }
+        self.buffer.clear();
     }
 
     pub fn render<W: std::io::Write, C: crate::tui::Canvas>(&self, drawer: &mut crate::tui::Drawer<W, C>) -> std::io::Result<()> {

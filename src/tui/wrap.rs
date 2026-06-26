@@ -14,7 +14,7 @@ pub fn merge_highlights<'a, T: 'a, I: Iterator<Item=&'a Highlight<T>>>(init: Sty
             style = Style::new();
         }
         let reverse = style.has_modifier(Modifier::REVERSED);
-        style = style.patch(h.style);
+        style = style.patch(h.style.clone());
         if reverse == h.style.has_modifier(Modifier::REVERSED) {
             style = style.remove_modifier(Modifier::REVERSED);
         } else {
@@ -68,7 +68,7 @@ pub fn wrap_grapheme<
             max_width - pos
         }.min(super::text::TAB_WIDTH);
         for _ in 0 .. width {
-            callback(start, end, WrapToken::String(Cow::Borrowed(" ")), style);
+            callback(start, end, WrapToken::String(Cow::Borrowed(" ")), style.clone());
         }
         pos + width
 
@@ -91,7 +91,7 @@ pub fn wrap_grapheme<
             }
             let string = format!("<u{c:04x}>");
             debug_assert_eq!(string.width(), width);
-            callback(start + i, start + i + 1, WrapToken::String(Cow::Owned(string)), style);
+            callback(start + i, start + i + 1, WrapToken::String(Cow::Owned(string)), style.clone());
             pos += width;
         }
         pos
@@ -113,13 +113,13 @@ pub fn wrap<
 ) {
 
     let mut pos = initial_indent;
-    let mut style = init_style;
+    let mut style = init_style.clone();
 
-    let handle_virtual_text = |hl: &'a HighlightedRange<T>, start, mut pos, callback: &mut F| {
+    let handle_virtual_text = |hl: &'a HighlightedRange<T>, start, mut pos, callback: &mut F, init_style: &Option<Style>| {
         if let Some(text) = &hl.inner.virtual_text {
-            let style = init_style.map(|s| merge_highlights(s, [&hl.inner].into_iter()));
+            let style = init_style.as_ref().map(|s| merge_highlights(s.clone(), [&hl.inner].into_iter()));
             for (s, e, grapheme) in text.grapheme_indices() {
-                pos = wrap_grapheme(s, e, grapheme, text.as_ref(), style, max_width, pos, |_, _, token, style| {
+                pos = wrap_grapheme(s, e, grapheme, text.as_ref(), style.clone(), max_width, pos, |_, _, token, style| {
                     callback(start, start, token, style);
                 });
             }
@@ -132,11 +132,11 @@ pub fn wrap<
 
         if highlights.clone().any(|h| h.start == start || h.end == start) {
 
-            style = init_style.map(|s| {
+            style = init_style.as_ref().map(|s| {
                 let highlights = highlights.clone()
                     .filter(|h| h.start <= start && start < h.end)
                     .map(|hl| &hl.inner);
-                merge_highlights(s, highlights)
+                merge_highlights(s.clone(), highlights)
             });
 
             conceal = merge_conceal(
@@ -152,20 +152,20 @@ pub fn wrap<
             let x = if conceal { end } else { start };
             for hl in highlights.clone() {
                 if hl.start == start {
-                    pos = handle_virtual_text(hl, x, pos, &mut callback);
+                    pos = handle_virtual_text(hl, x, pos, &mut callback, &init_style);
                 }
             }
         }
 
         if !conceal {
-            pos = wrap_grapheme(start, end, grapheme, line, style, max_width, pos, &mut callback);
+            pos = wrap_grapheme(start, end, grapheme, line, style.clone(), max_width, pos, &mut callback);
         }
     }
 
     // virtual text
     for hl in highlights {
         if hl.start >= line.len() {
-            pos = handle_virtual_text(hl, hl.start, pos, &mut callback);
+            pos = handle_virtual_text(hl, hl.start, pos, &mut callback, &init_style);
         }
     }
 
