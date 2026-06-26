@@ -211,7 +211,7 @@ impl Ui {
     }
 
     pub async fn call_lua_fn<T: IntoLuaMulti + 'static>(&self, draw: bool, callback: mlua::Function, arg: T) -> Result<Option<LuaValue>> {
-        let result = self.lua.call_lua_fn(callback, arg).await;
+        let result = crate::lua::call_lua_fn(&callback, arg).await;
 
         match result {
             Ok(result) => Ok(Some(result)),
@@ -581,7 +581,7 @@ impl Ui {
         Ok(())
     }
 
-    pub fn shell_loop<F: 'static + Future>(&self, winch_unblock: bool, future: F) -> Result<F::Output> {
+    pub fn shell_loop<F: Future>(&self, winch_unblock: bool, future: F) -> Result<F::Output> {
         tokio::pin!(future);
 
         let mut queueing_enabled = self.shell.queue_signal_level();

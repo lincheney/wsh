@@ -23,6 +23,13 @@ pub fn lua_error<S: ToString>(msg: S) -> mlua::Error {
     mlua::Error::RuntimeError(msg.to_string())
 }
 
+pub async fn call_lua_fn<T: IntoLuaMulti + 'static, R: FromLuaMulti>(callback: &mlua::Function, arg: T) -> LuaResult<R> {
+    LUA_LEVEL.fetch_add(1, Ordering::Relaxed);
+    let result = callback.call_async::<R>(arg).await;
+    LUA_LEVEL.fetch_sub(1, Ordering::Relaxed);
+    result
+}
+
 pub struct LuaWrapper {
     inner: Lua,
     pub api: LuaTable,
@@ -123,13 +130,6 @@ impl LuaWrapper {
         T: Future<Output=Result<R>> + 'static,
     {
         Ok(self.api.set(name, self.make_async_fn(func)?)?)
-    }
-
-    pub async fn call_lua_fn<T: IntoLuaMulti + 'static>(&self, callback: mlua::Function, arg: T) -> LuaResult<LuaValue> {
-        LUA_LEVEL.fetch_add(1, Ordering::Relaxed);
-        let result = callback.call_async::<LuaValue>(arg).await;
-        LUA_LEVEL.fetch_sub(1, Ordering::Relaxed);
-        result
     }
 
 }

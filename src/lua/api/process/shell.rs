@@ -167,7 +167,7 @@ pub async fn shell_run_with_args(
     );
 
     let result = ui.clone().shell.trampoline_out_callback(move |ui, token| {
-        ui.clone().shell_loop(false, async move {
+        ui.clone().shell_loop(false, async {
 
             let result: Result<_> = ui.freeze_if(foreground, true, async {
 

@@ -205,7 +205,7 @@ async fn lua_try(lua: Lua, args: LuaTable) -> LuaResult<LuaMultiValue> {
         args.get("finally")?
     };
 
-    let mut result = func.call_async(()).await;
+    let mut result = crate::lua::call_lua_fn(&func, ()).await;
     let mut error = None;
 
     if let Some(catch) = catch {
@@ -213,7 +213,7 @@ async fn lua_try(lua: Lua, args: LuaTable) -> LuaResult<LuaMultiValue> {
             Ok(x) => Ok(x),
             Err(e) => {
                 let err = e.clone().into_lua(&lua).unwrap();
-                let catch_result: LuaResult<LuaValue> = catch.call_async(err.clone()).await;
+                let catch_result: LuaResult<LuaValue> = crate::lua::call_lua_fn(&catch, err.clone()).await;
                 error = Some(err);
                 match catch_result {
                     Ok(_) => Ok(LuaMultiValue::new()),
@@ -226,7 +226,7 @@ async fn lua_try(lua: Lua, args: LuaTable) -> LuaResult<LuaMultiValue> {
 
 
     if let Some(finally) = finally {
-        let finally_result: LuaResult<()> = finally.call_async(error).await;
+        let finally_result: LuaResult<()> = crate::lua::call_lua_fn(&finally, error).await;
         result = match (result, finally_result) {
             (x, Ok(_)) => x,
             (Ok(_), Err(e)) => Err(e),

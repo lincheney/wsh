@@ -39,7 +39,7 @@ impl GlobalState {
         let shell = Shell::new();
         let mut ui = Ui::new(event_ctrl, shell, runtime)?;
 
-        ui.clone().shell_loop(false, async move {
+        ui.clone().shell_loop(false, async {
             zsh::completion::override_compadd()?;
             zsh::widget::overrides::override_all()?;
             zsh::signals::init(ui.clone())?;
@@ -164,7 +164,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
 
                 {
                     let ui = ui.clone();
-                    let result = ui.clone().shell_loop(false, async move {
+                    let result = ui.clone().shell_loop(false, async {
                         // sometimes zsh will trash zle without refreshing
                         // redraw the ui
                         let drawn = FIRST_DRAWN.replace(true);

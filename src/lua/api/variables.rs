@@ -78,14 +78,14 @@ fn export_var(ui: &Ui, _lua: &Lua, name: BString) -> Result<()> {
 async fn in_param_scope(ui: Ui, _lua: Lua, func: LuaFunction) -> Result<LuaValue> {
     // TODO
     ui.shell.startparamscope();
-    let result = func.call_async(()).await;
+    let result = crate::lua::call_lua_fn(&func, ()).await;
     ui.shell.endparamscope();
     Ok(result?)
 }
 
 async fn in_zle_param_scope(ui: Ui, _lua: Lua, func: LuaFunction) -> Result<LuaValue> {
     ui.shell.start_zle_scope();
-    let result = func.call_async(()).await;
+    let result = crate::lua::call_lua_fn(&func, ()).await;
     ui.shell.end_zle_scope();
     Ok(result?)
 }
@@ -132,14 +132,14 @@ async fn create_dynamic_var(
         ($func:ident) => (
             ui.shell.$func(
                 crate::shell::MetaString::from(name).as_ref(),
-                make_dynamic_var_func!(| | get.call_async(())),
+                make_dynamic_var_func!(| | crate::lua::call_lua_fn(&get, ())),
                 if let Some(set) = set {
-                    Some(make_dynamic_var_func!(|x| set.call_async(x)))
+                    Some(make_dynamic_var_func!(|x| crate::lua::call_lua_fn(&set, x)))
                 } else {
                     None
                 },
                 if let Some(unset) = unset {
-                    Some(make_dynamic_var_func!(|x| unset.call_async(x)))
+                    Some(make_dynamic_var_func!(|x| crate::lua::call_lua_fn(&unset, x)))
                 } else {
                     None
                 },
