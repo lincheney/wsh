@@ -269,7 +269,7 @@ impl Shell {
         &self,
         _token: TrampolineToken,
         line: BString,
-        callback: Box<dyn FnMut(Vec<zsh::completion::Match>) -> ControlFlow<()>>,
+        callback: Box<dyn FnMut(std::iter::Peekable<zsh::completion::MatchIter>) -> ControlFlow<()>>,
     ) -> Result<BString> {
         // this may block for a long time
         let sink = &mut *self.sink.try_borrow_mut()?;

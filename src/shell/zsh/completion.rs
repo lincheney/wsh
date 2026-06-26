@@ -137,7 +137,7 @@ struct CompaddState {
     // original compadd function
     original: Option<Builtin>,
     // callback to send matches
-    callback: Option<Box<dyn FnMut(Vec<Match>) -> ControlFlow<()>>>,
+    callback: Option<Box<dyn FnMut(std::iter::Peekable<MatchIter>) -> ControlFlow<()>>>,
     // matches we have already seen
     seen: HashSet<*const bindings::cmatch>,
 }
@@ -146,6 +146,22 @@ impl CompaddState {
     fn reset(&mut self) {
         self.callback.take();
         self.seen.clear();
+    }
+}
+
+pub struct MatchIter<'a> {
+    inner: super::linked_list::Iter,
+    seen: &'a mut HashSet<*const bindings::cmatch>,
+}
+impl Iterator for MatchIter<'_> {
+    type Item = Match;
+    fn next(&mut self) -> Option<Self::Item> {
+        for ptr in &mut self.inner {
+            if let Some(m) = unsafe{ (ptr as *const bindings::cmatch).as_ref() } && self.seen.insert(m as _) {
+                return Some(Match::new(m));
+            }
+        }
+        None
     }
 }
 
@@ -171,13 +187,9 @@ unsafe extern "C" fn compadd_handlerfunc(nam: *mut c_char, argv: *mut *mut c_cha
                 // compadd can change the list matches points to by changing the group
                 // so we use a hashset to store what matches we've seen before
 
-                let matches: Vec<_> = super::linked_list::iter_linklist(bindings::matches)
-                    .filter_map(|ptr| (ptr as *const bindings::cmatch).as_ref())
-                    .filter(|m| compadd.seen.insert(*m as _))
-                    .map(Match::new)
-                    .collect();
-
-                if !matches.is_empty() && callback(matches).is_break() {
+                let matches = super::linked_list::iter_linklist(bindings::matches);
+                let mut matches = MatchIter{ inner: matches, seen: &mut compadd.seen }.peekable();
+                if matches.peek().is_some() && callback(matches).is_break() {
                     compadd.callback.take();
                 }
             }
@@ -220,7 +232,7 @@ pub fn restore_compadd() {
 // so there's no "low-level" function to hook into
 // the best we can do is emulate completecall()
 
-pub fn get_completions(line: BString, callback: Box<dyn FnMut(Vec<Match>) -> ControlFlow<()>>) {
+pub fn get_completions(line: BString, callback: Box<dyn FnMut(std::iter::Peekable<MatchIter>) -> ControlFlow<()>>) {
     COMPADD_STATE.with_borrow_mut(|compadd| {
         if let Some(compadd) = compadd {
             compadd.callback = Some(callback);

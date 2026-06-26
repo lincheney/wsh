@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 use std::pin::Pin;
-use std::ptr::null_mut;
+use std::ptr::{null_mut, NonNull};
 use std::os::raw::c_void;
 
 pub struct LinkedList<'a, T: ?Sized> {
@@ -46,29 +46,44 @@ impl<'a, T: ?Sized> LinkedList<'a, T> {
     }
 }
 
-pub fn iter_linklist(list: zsh_sys::LinkList) -> impl Iterator<Item=*mut c_void> {
-    unsafe {
-        let mut node = list.as_mut().and_then(|list| list.list.first.as_mut());
-        std::iter::from_fn(move || {
-            let n = node.take()?;
-            node = n.next.as_mut();
-            Some(n.dat)
-        })
+pub struct Iter {
+    first: Option<NonNull<zsh_sys::linknode>>,
+    last: Option<NonNull<zsh_sys::linknode>>,
+}
+impl Iterator for Iter {
+    type Item = *mut c_void;
+    fn next(&mut self) -> Option<Self::Item> {
+        let node = self.first.take()?;
+        let node = unsafe{ node.as_ref() };
+        if self.first == self.last {
+            self.first = None;
+        } else {
+            self.first = NonNull::new(node.next);
+        }
+        Some(node.dat)
     }
 }
 
-pub fn rev_iter_linklist(list: zsh_sys::LinkList) -> impl Iterator<Item=*mut c_void> {
+impl DoubleEndedIterator for Iter {
+    // Required method
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let node = self.last.take()?;
+        let node = unsafe{ node.as_ref() };
+        if self.first == self.last {
+            self.last = None;
+        } else {
+            self.last = NonNull::new(node.prev);
+        }
+        Some(node.dat)
+    }
+}
+
+pub fn iter_linklist(list: zsh_sys::LinkList) -> Iter {
     unsafe {
-        let first = list.as_mut().map(|list| list.list.first);
-        let mut node = list.as_mut().and_then(|list| list.list.last.as_mut());
-        std::iter::from_fn(move || {
-            let n = node.take()?;
-            if n.prev == first.unwrap() {
-                node = None;
-            } else {
-                node = n.prev.as_mut();
-            }
-            Some(n.dat)
-        })
+        let list = list.as_ref();
+        Iter{
+            first: list.and_then(|list| NonNull::new(list.list.first)),
+            last: list.and_then(|list| NonNull::new(list.list.last)),
+        }
     }
 }
