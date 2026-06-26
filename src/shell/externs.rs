@@ -143,8 +143,9 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
 
                 let mut keymap = [b'm', b'a', b'i', b'n', 0];
                 zsh::done = 0;
-                zsh::lpromptbuf = crate::EMPTY_STR.as_ptr().cast_mut();
-                zsh::rpromptbuf = crate::EMPTY_STR.as_ptr().cast_mut();
+                // zsh may free these
+                zsh::lpromptbuf = std::ffi::CString::default().into_raw();
+                zsh::rpromptbuf = std::ffi::CString::default().into_raw();
                 zsh::free_prepostdisplay();
                 zsh::zlereadflags = *(flags_ptr as *const c_int);
                 zsh::histline = zsh_sys::curhist as _;
@@ -210,6 +211,10 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                 zsh_sys::free(zsh::zleline.cast());
                 zsh::zleline = null_mut();
                 zsh_sys::zleactive = 0;
+                drop(std::ffi::CString::from_raw(zsh::lpromptbuf));
+                zsh::lpromptbuf = null_mut();
+                drop(std::ffi::CString::from_raw(zsh::rpromptbuf));
+                zsh::rpromptbuf = null_mut();
 
                 IS_RUNNING.set(false);
                 return match result {
