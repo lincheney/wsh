@@ -166,16 +166,10 @@ impl Ui {
         let mut cursor_y = None;
 
         loop {
-            let need_shell_vars;
-            let need_cursor_y;
+            let mut ui = self.try_borrow_mut()?;
 
-            let size = {
-                let mut ui = self.try_borrow_mut()?;
-
-                if size == Some(ui.size) {
-                    return ui.draw(shell_vars, cursor_y);
-                }
-                // if the size has changed, recompute everything
+            // if the size has changed, recompute everything
+            if size != Some(ui.size) {
 
                 size = Some(ui.size);
                 let (width, height) = ui.size;
@@ -184,29 +178,25 @@ impl Ui {
                     ui.tui.max_height = height;
                     ui.dirty = true;
                 }
-                need_cursor_y = ui.dirty;
 
-                if !(ui.dirty || ui.buffer.dirty || ui.tui.dirty || ui.status_bar.dirty) {
+                if ui.dirty || ui.cmdline.is_dirty() {
+                    shell_vars = Some(crate::tui::command_line::CommandLineState::get_shell_vars(&self.shell, ui.size.0));
+
+                    if ui.dirty {
+                        // get the cursor y then reacquire the ui next loop
+                        drop(ui);
+                        let cursor = self.events.get_cursor_position();
+                        cursor_y = Some(tokio::time::timeout(crate::DEFAULT_DURATION, cursor).await.unwrap()?.1 as _);
+                        continue;
+                    }
+
+                } else if !(ui.dirty || ui.buffer.dirty || ui.tui.dirty || ui.status_bar.dirty) {
                     return Ok(vec![])
                 }
 
-                need_shell_vars = ui.dirty || ui.cmdline.is_dirty();
-
-                if !need_cursor_y && !need_shell_vars {
-                    // don't need to refresh anything, draw immediately
-                    return ui.draw(shell_vars, cursor_y);
-                }
-                ui.size
-            };
-
-            // get the shell vars and cursor y then reacquire the ui
-            if need_shell_vars {
-                shell_vars = Some(crate::tui::command_line::CommandLineState::get_shell_vars(&self.shell, size.0));
             }
-            if need_cursor_y {
-                let cursor = self.events.get_cursor_position();
-                cursor_y = Some(tokio::time::timeout(crate::DEFAULT_DURATION, cursor).await.unwrap()?.1 as _);
-            }
+
+            return ui.draw(shell_vars, cursor_y);
         }
     }
 
