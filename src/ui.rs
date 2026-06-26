@@ -23,6 +23,7 @@ use crossterm::{
 };
 use crate::tui::{
     MoveDown,
+    MoveUp,
 };
 
 const ENABLE_SGR_MOUSE: style::Print<&str> = style::Print("\x1b[?1000;1006h");
@@ -286,19 +287,19 @@ impl Ui {
             // TODO handle errors here properly
         }
         self.events.pause();
-        self.prepare_for_unhandled_output_blocking(Some(lock))?;
+        self.prepare_for_unhandled_output_blocking(Some(lock), true)?;
         Ok(())
     }
 
     pub fn zle_cmd_trash(&self) -> Result<bool> {
         if self.print_lock.zle_cmd_trash() {
-            self.prepare_for_unhandled_output_blocking(None)
+            self.prepare_for_unhandled_output_blocking(None, true)
         } else {
             Ok(false)
         }
     }
 
-    fn prepare_for_unhandled_output_blocking<'a>(&'a self, lock: Option<&mut PrintLockGuard<'a>>) -> Result<bool> {
+    fn prepare_for_unhandled_output_blocking<'a>(&'a self, lock: Option<&mut PrintLockGuard<'a>>, end_sync: bool) -> Result<bool> {
         // TODO if forked and trashed, zsh will NOT recover
         // we're going go to end up with janky output
         // how do we solve this?
@@ -313,13 +314,13 @@ impl Ui {
                 print_lock = self.print_lock.try_lock().unwrap();
                 &mut print_lock
             };
-            self.try_borrow_mut()?.prepare_for_unhandled_output()?;
+            self.try_borrow_mut()?.prepare_for_unhandled_output(end_sync)?;
             print_lock.acquire();
             Ok(true)
         }
     }
 
-    async fn prepare_for_unhandled_output(&self) -> Result<bool> {
+    pub async fn prepare_for_unhandled_output(&self, end_sync: bool) -> Result<bool> {
         // TODO if forked and trashed, zsh will NOT recover
         // we're going go to end up with janky output
         // how do we solve this?
@@ -327,7 +328,7 @@ impl Ui {
             Ok(false)
         } else {
             let mut print_lock = self.print_lock.lock().await;
-            self.try_borrow_mut()?.prepare_for_unhandled_output()?;
+            self.try_borrow_mut()?.prepare_for_unhandled_output(end_sync)?;
             print_lock.acquire();
             Ok(true)
         }
@@ -335,13 +336,18 @@ impl Ui {
 
     pub async fn zle_cmd_refresh(&self) -> Result<bool> {
         if self.print_lock.zle_cmd_refresh() {
-            self.recover_from_unhandled_output(None).await
+            self.recover_from_unhandled_output(None, false).await
         } else {
             Ok(false)
         }
     }
 
-    pub async fn recover_from_unhandled_output<'a>(&'a self, lock: Option<&mut PrintLockGuard<'a>>) -> Result<bool> {
+    pub async fn recover_from_unhandled_output<'a>(
+        &'a self,
+        lock: Option<&mut PrintLockGuard<'a>>,
+        allow_dirty: bool,
+    ) -> Result<bool> {
+
         let mut print_lock;
         let print_lock = if let Some(lock) = lock {
             lock
@@ -357,21 +363,66 @@ impl Ui {
                 self.try_borrow()?.activate()?;
             }
 
-            // move down one line if not at start of line
-            let cursor = self.events.get_cursor_position();
-            let cursor = tokio::time::timeout(crate::DEFAULT_DURATION, cursor).await.unwrap().unwrap_or((0, 0));
+            if allow_dirty {
+                let ui = &mut *self.try_borrow_mut()?;
+                ui.cmdline.make_command_line(&mut ui.buffer).reset();
 
-            let ui = &mut *self.try_borrow_mut()?;
-            if cursor.0 != 0 {
-                queue!(ui.stdout, style::Print("\r\n"))?;
+                let y_offset = ui.cmdline.y_offset_to_end();
+                ui.dirty = true;
+
+                // move back up
+                queue!(ui.stdout, BeginSynchronizedUpdate, MoveUp(y_offset))?;
+                if ui.cmdline.cursor_coord.0 != 0 {
+                    queue!(
+                        ui.stdout,
+                        MoveUp(1),
+                        MoveToColumn(ui.cmdline.cursor_coord.0),
+                    )?;
+                }
+
+            } else {
+                // move down one line if not at start of line
+                let cursor = self.events.get_cursor_position();
+                let cursor = tokio::time::timeout(crate::DEFAULT_DURATION, cursor).await.unwrap().unwrap_or((0, 0));
+
+                let ui = &mut *self.try_borrow_mut()?;
+                if cursor.0 != 0 {
+                    queue!(ui.stdout, style::Print("\r\n"))?;
+                }
+                execute!(ui.stdout, style::ResetColor)?;
+                ui.dirty = true;
+                ui.cmdline.make_command_line(&mut ui.buffer).hard_reset();
             }
-            execute!(ui.stdout, style::ResetColor)?;
-            ui.cmdline.make_command_line(&mut ui.buffer).hard_reset();
-            ui.dirty = true;
         }
 
         print_lock.release();
         Ok(print_lock.get_value() == 0)
+    }
+
+    pub fn exec_widget(&self, widget: &crate::shell::ZleWidget, token: crate::shell::TrampolineToken) -> Result<()> {
+        // widget may do anything so need to freeze
+
+        self.events.pause();
+        let (fg_lock, mut print_lock) = self.runtime.block_on(async {
+            let fg_lock = self.has_foreground_process.lock().await;
+            let print_lock = self.print_lock.lock().await;
+            (fg_lock, print_lock)
+        })?;
+        // no sync in case widget is fast
+        // we assume that widgets are well behaved wrt rendering
+        // otherwise they would also screw up rendering in normal zsh
+        self.prepare_for_unhandled_output_blocking(Some(&mut print_lock), false)?;
+
+        let (_code, refreshed) = widget.exec_and_recover(token, &mut self.try_borrow_mut()?.stdout, None, [].into_iter());
+
+        self.events.unpause();
+        let recovered = self.runtime.block_on(self.recover_from_unhandled_output(Some(&mut print_lock), !refreshed))?;
+        drop(fg_lock);
+        drop(print_lock);
+        if crate::log_if_err(recovered) == Some(true) {
+            self.queue_draw();
+        }
+        Ok(())
     }
 
     async fn post_accept_line<'a>(&'a self, lock: &mut PrintLockGuard<'a>) -> Result<()> {
@@ -379,7 +430,7 @@ impl Ui {
             self.try_borrow_mut()?.reset();
         }
         self.events.unpause();
-        self.recover_from_unhandled_output(Some(lock)).await?;
+        self.recover_from_unhandled_output(Some(lock), false).await?;
         Ok(())
     }
 
@@ -538,7 +589,7 @@ impl Ui {
             if freeze_events {
                 self.events.pause();
             }
-            self.prepare_for_unhandled_output().await?;
+            self.prepare_for_unhandled_output(true).await?;
             Some(self.has_foreground_process.lock().await)
         } else {
             None
@@ -550,7 +601,7 @@ impl Ui {
             if freeze_events {
                 self.events.unpause();
             }
-            let recovered = self.recover_from_unhandled_output(None).await;
+            let recovered = self.recover_from_unhandled_output(None, false).await;
             drop(lock);
             if crate::log_if_err(recovered) == Some(true) {
                 self.queue_draw();
@@ -698,7 +749,7 @@ impl UiInner {
         self.dirty = true;
     }
 
-    fn prepare_for_unhandled_output(&mut self) -> Result<()> {
+    fn prepare_for_unhandled_output(&mut self, end_sync: bool) -> Result<()> {
         self.deactivate();
         let y_offset = self.cmdline.y_offset_to_end();
         self.dirty = true;
@@ -718,11 +769,18 @@ impl UiInner {
             )?;
         }
 
-        execute!(
+        queue!(
             self.stdout,
             Clear(ClearType::FromCursorDown),
-            EndSynchronizedUpdate,
         )?;
+        if end_sync {
+            execute!(
+                self.stdout,
+                EndSynchronizedUpdate,
+            )?;
+        } else {
+            execute!(self.stdout)?;
+        }
         Ok(())
     }
 

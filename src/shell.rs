@@ -31,6 +31,7 @@ pub use zsh::{
     MetaStr,
     MetaString,
     MetaSlice,
+    ZleWidget,
 };
 pub use variables::Variable;
 

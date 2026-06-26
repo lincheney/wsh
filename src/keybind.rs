@@ -84,55 +84,46 @@ impl KeyHandler<'_> {
                 // continue to default
                 self.handle_default(event, buf).await
             },
-            KeybindValue::Widget(mut widget) => {
+            KeybindValue::Widget(widget) => {
 
                 let mut new_buffer = None;
                 let mut new_cursor = None;
-                let mut output = None;
                 let mut accept_line = widget.is_accept_line();
 
                 if !accept_line {
                     // execute the widget
-                    let lock = if widget.is_internal() {
-                        // are all internal widgets safe to run without locking ui?
-                        // they should all output only to shout which we are already capturing?
-                        None
-                    } else {
-                        // a widget may run subprocesses so lock the ui
-                        Some(ui.has_foreground_process.lock().await)
-                    };
-                    let (old_buffer, old_cursor) = {
-                        let ui = self.try_borrow()?;
-                        (ui.buffer.get_contents().clone(), ui.buffer.get_cursor())
-                    };
 
-                    self.shell.set_zle_buffer(old_buffer.clone(), old_cursor as _);
-                    self.shell.set_lastchar(lastchar);
+                    let result = self.shell.trampoline_out_callback(Box::new(move |ui: Ui, token| {
 
-                    output = self.shell.trampoline_out_callback(Box::new(move |ui: Ui, token| {
-                        Some(widget.exec_and_get_output(token, &ui.shell, None, [].into_iter()).0)
-                    })).await?;
+                        let (old_buffer, old_cursor) = {
+                            let ui = ui.try_borrow()?;
+                            (ui.buffer.get_contents().clone(), ui.buffer.get_cursor())
+                        };
+                        ui.shell.set_zle_buffer(old_buffer.clone(), old_cursor as _);
+                        ui.shell.set_lastchar(lastchar);
 
-                    let (buffer, cursor) = self.shell.get_zle_buffer();
-                    let cursor = cursor.unwrap_or(buffer.len() as _) as _;
-                    new_buffer = (old_buffer != buffer).then_some(buffer);
-                    new_cursor = (old_cursor != cursor).then_some(cursor);
-                    accept_line = self.shell.has_accepted_line();
-                    drop(lock);
+                        ui.exec_widget(&widget, token)?;
+
+                        let (buffer, cursor) = ui.shell.get_zle_buffer();
+                        let cursor = cursor.unwrap_or(buffer.len() as _) as _;
+
+                        anyhow::Ok((
+                            (old_buffer != buffer).then_some(buffer),
+                            (old_cursor != cursor).then_some(cursor),
+                            ui.shell.has_accepted_line(),
+                        ))
+                    })).await;
+
+                    (new_buffer, new_cursor, accept_line) = result??;
                 }
 
                 {
                     if let Some(buffer) = &new_buffer {
                         self.insert_or_set_buffer(false, buffer, new_cursor.take()).await?;
                     }
-
-                    let mut ui = self.try_borrow_mut()?;
-
-                    // check for any output e.g. zle -M
-                    if let Some(output) = &output {
-                        ui.tui.add_zle_message(output.as_ref());
+                    if let Some(cursor) = new_cursor {
+                        ui.try_borrow_mut()?.buffer.set_cursor(cursor);
                     }
-                    ui.buffer.set(None, new_cursor);
                 }
 
                 if new_buffer.is_some() {

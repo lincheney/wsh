@@ -297,7 +297,6 @@ impl<T> Text<T> {
                 pos = (0, pos.1 + 1);
             }
         }
-        ::log::debug!("DEBUG(behalf)\t{}\t= {:?}", stringify!(123), 123);
 
         if pos != (0, 0) {
             pos.1 += 1;
