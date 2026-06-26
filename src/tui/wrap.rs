@@ -111,6 +111,7 @@ pub fn wrap<
     initial_indent: usize,
     mut callback: F,
 ) {
+    // TODO performance is terrible if too many lines
 
     let mut pos = initial_indent;
     let mut style = init_style.clone();

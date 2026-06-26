@@ -254,14 +254,16 @@ impl<T> Text<T> {
     {
 
         let mut pos = (initial_indent, 0);
+        // only conceal and virtual text affect sizing
+        let highlights = self.highlights.iter()
+            .chain(extra_highlights)
+            .filter(|h| h.inner.conceal.unwrap_or_default() || h.inner.virtual_text.as_ref().is_some_and(|x| !x.is_empty()));
 
         // add a dummy line at the end
         for (i, line) in self.lines.iter().map(|l| l.as_ref()).chain(std::iter::once(BStr::new(b""))).enumerate() {
             let past_end = i >= self.lines.len();
 
-            let highlights = self.highlights.iter()
-                .chain(extra_highlights.clone())
-                .filter(|h| h.lineno == i || (past_end && h.lineno > i));
+            let highlights = highlights.clone().filter(|h| h.lineno == i || (past_end && h.lineno > i));
 
             // dont draw the dummy line if there is no virtual text
             if past_end && !highlights.clone().any(|hl| hl.inner.virtual_text.is_some()) {
