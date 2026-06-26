@@ -280,17 +280,17 @@ impl Parser {
                         match param {
                             0 => {
                                 let range = cursor_x .. last_line.len();
-                                self.splice(text, Some(range), None, Some(Style::new()));
+                                self.splice(text, Some(range), None, Some(self.style.clone()));
                             },
                             1 => {
                                 let range = 0 .. cursor_x;
                                 let replace_with = " ".repeat(self.cursor_x);
-                                self.splice(text, Some(range), Some(replace_with), Some(Style::new()));
+                                self.splice(text, Some(range), Some(replace_with), Some(self.style.clone()));
                             },
                             2 => {
                                 let range = 0 .. last_line.len();
                                 let replace_with = " ".repeat(self.cursor_x);
-                                self.splice(text, Some(range), Some(replace_with), Some(Style::new()));
+                                self.splice(text, Some(range), Some(replace_with), Some(self.style.clone()));
                             },
                             _ => (),
                         }

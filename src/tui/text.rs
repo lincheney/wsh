@@ -18,6 +18,14 @@ pub struct Highlight<T> {
     pub priority: f64,
 }
 
+impl<T> Highlight<T> {
+    fn is_empty(&self) -> bool {
+        self.style == Style::default()
+        && self.virtual_text.as_ref().is_none_or(|s| s.is_empty())
+        && !self.conceal.unwrap_or_default()
+    }
+}
+
 impl<T: Default> From<Style> for Highlight<T> {
     fn from(style: Style) -> Self {
         Self {
@@ -188,7 +196,7 @@ impl<T> Text<T> {
                 h.shift(offset .. offset, str.len());
             }
         }
-        if let Some(hl) = hl {
+        if let Some(hl) = hl && !hl.is_empty() {
             add_highlight(&mut self.highlights, HighlightedRange{
                 lineno,
                 start: offset,
