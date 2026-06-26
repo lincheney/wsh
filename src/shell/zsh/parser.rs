@@ -681,7 +681,10 @@ impl ParseState {
 
         // // fill in missing bits around the command stack
         self.add_tokstr();
-        self.pop(Some(end));
+        let scope = self.pop(Some(end));
+        if let Some(first_child) = scope.children.iter().flatten().next() {
+            scope.range.start = first_child.range.start;
+        }
 
         self.start = end;
     }
