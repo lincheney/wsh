@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use super::text::{HighlightedRange, Highlight};
+use super::text::{HighlightedRange, Highlight, TextRenderer, Renderer, NoRendererCallback};
 use bstr::{BString, BStr};
 use std::io::{Write};
 use crate::tui::{Drawer, Canvas};
@@ -20,12 +20,24 @@ pub struct ShellVars {
     prompt_size: (usize, usize),
 }
 
+#[derive(Debug)]
+pub enum PromptMode {
+    ShellVars(ShellVars),
+    Custom(super::widget::Widget),
+}
+
+impl Default for PromptMode {
+    fn default() -> Self {
+        Self::ShellVars(Default::default())
+    }
+}
+
 #[derive(Default, Debug)]
 pub struct CommandLineState {
     pub cursor_coord: (u16, u16),
     pub draw_end_pos: (u16, u16),
 
-    pub shell_vars: ShellVars,
+    pub prompt_mode: PromptMode,
     pub predisplay_dirty: bool,
     pub postdisplay_dirty: bool,
     pub prompt_dirty: bool,
@@ -34,6 +46,10 @@ pub struct CommandLineState {
 }
 
 impl CommandLineState {
+    pub fn is_custom(&self) -> bool {
+        matches!(self.prompt_mode, PromptMode::Custom(_))
+    }
+
     pub fn make_command_line<'a>(
         &'a mut self,
         buffer: &'a mut Buffer,
@@ -109,9 +125,9 @@ impl CommandLine<'_> {
         self.draw_end_pos = (0, 0);
     }
 
-    pub fn refresh_display_string(&mut self, text: Option<BString>, pos: usize, namespace: usize) -> Option<BString> {
+    pub fn refresh_display_string(&mut self, text: Option<BString>, pos: usize, namespace: usize) {
         self.buffer.clear_highlights_in_namespace(namespace);
-        if let Some(text) = &text && !text.is_empty() {
+        if let Some(text) = text && !text.is_empty() {
             self.buffer.add_highlight(HighlightedRange {
                 lineno: 0,
                 start: pos,
@@ -119,29 +135,50 @@ impl CommandLine<'_> {
                 inner: Highlight {
                     style: Default::default(),
                     blend: true,
-                    namespace: PREDISPLAY_NS,
-                    virtual_text: Some(text.clone()),
+                    namespace,
+                    virtual_text: Some(text),
                     conceal: None,
                     priority: 0.,
                 },
             });
         }
-        text
     }
 
     pub fn refresh(&mut self, width: usize) {
-        if self.predisplay_dirty {
-            self.refresh_display_string(self.shell_vars.predisplay.clone(), PREDISPLAY_NS, 0);
-        }
-        if self.postdisplay_dirty {
-            self.refresh_display_string(self.shell_vars.postdisplay.clone(), POSTDISPLAY_NS, usize::MAX);
+        if self.predisplay_dirty || self.postdisplay_dirty {
+            match &self.prompt_mode {
+                PromptMode::ShellVars(vars) => {
+                    let predisplay = vars.predisplay.clone();
+                    let postdisplay = vars.postdisplay.clone();
+                    if self.predisplay_dirty {
+                        self.refresh_display_string(predisplay, PREDISPLAY_NS, 0);
+                    }
+                    if self.postdisplay_dirty {
+                        self.refresh_display_string(postdisplay, POSTDISPLAY_NS, usize::MAX);
+                    }
+                }
+                PromptMode::Custom(_) => {
+                    if self.predisplay_dirty {
+                        self.buffer.clear_highlights_in_namespace(PREDISPLAY_NS);
+                    }
+                    if self.postdisplay_dirty {
+                        self.buffer.clear_highlights_in_namespace(POSTDISPLAY_NS);
+                    }
+                }
+            }
         }
 
-        if self.buffer.dirty || self.prompt_size != self.shell_vars.prompt_size {
-            self.prompt_size = self.shell_vars.prompt_size;
+        let prompt_size = match &self.prompt_mode {
+            PromptMode::ShellVars(vars) => vars.prompt_size,
+            PromptMode::Custom(widget) => widget.inner.get_size(width, 0, widget.cursor_space_hl.iter()),
+        };
+
+        if self.buffer.dirty || self.prompt_size != prompt_size {
+            self.prompt_size = prompt_size;
             let (width, height) = self.buffer.get_size(width, self.prompt_size.0 as _);
             // there is 1 overlapping line
             self.draw_end_pos = (width as _, (height + self.prompt_size.1).saturating_sub(2) as _);
+            self.buffer.dirty = true;
         }
     }
 
@@ -156,7 +193,22 @@ impl CommandLine<'_> {
 
         // redraw the prompt
         if dirty || self.prompt_dirty {
-            drawer.write_raw(&self.shell_vars.prompt, Some(prompt_end))?;
+            match &self.prompt_mode {
+                PromptMode::ShellVars(vars) => {
+                    drawer.write_raw(&vars.prompt, Some(prompt_end))?;
+                }
+                PromptMode::Custom(widget) => {
+                    TextRenderer::new(
+                        &widget.inner,
+                        0,
+                        None,
+                        drawer.term_width() as _,
+                        None,
+                        None,
+                        [].into_iter(),
+                    ).render(drawer, false, false, NoRendererCallback::None)?;
+                }
+            }
         }
 
         // redraw the buffer

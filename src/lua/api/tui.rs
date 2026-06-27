@@ -819,6 +819,29 @@ fn set_status_bar(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<()> {
     Ok(())
 }
 
+fn set_prompt(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<()> {
+    let options: Option<MessageOptions> = lua.from_value(val)?;
+    ui.queue_draw();
+    let mut ui = ui.try_borrow_mut()?;
+    if let Some(options) = options {
+        match options.inner {
+            MessageInner::Widget { style, text } => {
+                let mut widget = tui::widget::Widget::default();
+                if let Some(text) = text {
+                    parse_text_parts(text, &mut widget.inner);
+                }
+                set_widget_options(&mut widget, style);
+                ui.cmdline.prompt_mode = tui::command_line::PromptMode::Custom(widget);
+            },
+            MessageInner::Layout { .. } => anyhow::bail!("prompt only accepts widget options"),
+        }
+    } else {
+        ui.cmdline.prompt_mode = tui::command_line::PromptMode::ShellVars(Default::default());
+    }
+    ui.cmdline.prompt_dirty = true;
+    Ok(())
+}
+
 async fn enable_mouse_mode(ui: Ui, _lua: Lua, enable: Option<bool>) -> Result<()> {
     let locks = (
         ui.has_foreground_process.lock().await,
@@ -920,6 +943,7 @@ pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
     lua.set_fn("get_message_text", get_message_text)?;
     lua.set_fn("message_to_ansi_string", message_to_ansi_string)?;
     lua.set_fn("set_status_bar", set_status_bar)?;
+    lua.set_fn("set_prompt", set_prompt)?;
     lua.set_async_fn("enable_mouse_mode", enable_mouse_mode)?;
     lua.set_fn("get_message_geometry", get_message_geometry)?;
     lua.set_fn("get_status_bar_geometry", get_status_bar_geometry)?;

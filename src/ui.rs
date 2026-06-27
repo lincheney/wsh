@@ -187,7 +187,7 @@ impl Ui {
                     return Ok(vec![])
                 }
 
-                if ui.dirty || ui.cmdline.is_dirty() {
+                if (ui.dirty || ui.cmdline.is_dirty()) && !ui.cmdline.is_custom() && shell_vars.is_none() {
                     shell_vars = Some(crate::tui::command_line::CommandLineState::get_shell_vars(&self.shell, ui.size.0));
                 }
 
@@ -798,8 +798,8 @@ impl UiInner {
 
 
     fn draw(&mut self, shell_vars: Option<crate::tui::command_line::ShellVars>, cursor_y: Option<u32>) -> Result<Vec<usize>> {
-        if let Some(shell_vars) = shell_vars {
-            self.cmdline.shell_vars = shell_vars;
+        if !self.cmdline.is_custom() && let Some(shell_vars) = shell_vars {
+            self.cmdline.prompt_mode = crate::tui::command_line::PromptMode::ShellVars(shell_vars);
         }
         let cmdline = self.cmdline.make_command_line(&mut self.buffer);
         let resized = self.tui.draw(
