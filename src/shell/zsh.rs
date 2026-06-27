@@ -372,30 +372,6 @@ pub fn set_error_verbosity(verbosity: ErrorVerbosity) -> ErrorVerbosity {
     }
 }
 
-pub fn capture_shout<T, F: FnOnce() -> T>(
-    sink: &mut super::file_stream::Sink,
-    passthrough: bool,
-    capture: bool,
-    f: F,
-) -> (BString, T) {
-
-    unsafe {
-        let old_trashedzle = bindings::trashedzle;
-        bindings::trashedzle = 1;
-        let result = {
-            sink.clear();
-            let _file = sink.override_shout(passthrough, capture);
-            f()
-        };
-        bindings::trashedzle = old_trashedzle;
-
-        // read the data out
-        let buffer = sink.read();
-
-        (buffer, result)
-    }
-}
-
 pub fn queue_signal_level() -> i32 {
     unsafe {
         read_volatile(&raw const zsh_sys::queueing_enabled)

@@ -126,8 +126,7 @@ impl ZleWidget {
             // show the question
 
             let opts = opts.unwrap_or_default();
-            let sink = &mut *shell.sink.borrow_mut();
-            let (output, code) = super::capture_shout(sink, opts.passthrough_shout, opts.capture_shout, || {
+            let (output, code) = shell.capture_shout(opts.passthrough_shout, opts.capture_shout, || {
                 let code = Self::exec_with_ptr(self.ptr, opts, args);
 
                 // emulate zrefresh and display any lists
@@ -137,6 +136,7 @@ impl ZleWidget {
                     zsh_sys::runhookdef(hookdef.as_ptr(), null_mut());
 
                     if matches!(ShowingList::get(), Ok(ShowingList::New)) {
+                        // this is incorrect but whatever
                         super::showinglist = super::nlnct;
                     }
                 }

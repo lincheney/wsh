@@ -858,8 +858,8 @@ fn parse_internal(
                 complete = false;
             }
 
-            ::log::debug!("DEBUG(kites) \t{}\t= {:?}", stringify!(complete), complete);
-            ::log::debug!("DEBUG(curved)\t{}\t=\n{}", stringify!(s.debug_dump(cmd.as_ref(), 0)), token.debug_dump(cmd.as_ref(), 0));
+            // ::log::debug!("DEBUG(kites) \t{}\t= {:?}", stringify!(complete), complete);
+            // ::log::debug!("DEBUG(curved)\t{}\t=\n{}", stringify!(s.debug_dump(cmd.as_ref(), 0)), token.debug_dump(cmd.as_ref(), 0));
 
             token.children
         });

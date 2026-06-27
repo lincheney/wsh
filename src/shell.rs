@@ -274,8 +274,7 @@ impl Shell {
         callback: Box<dyn FnMut(std::iter::Peekable<zsh::completion::MatchIter>) -> ControlFlow<()>>,
     ) -> Result<BString> {
         // this may block for a long time
-        let sink = &mut *self.sink.try_borrow_mut()?;
-        let (msg, _) = zsh::capture_shout(sink, false, true, || zsh::completion::get_completions(line, callback));
+        let (msg, _) = self.capture_shout(false, true, || zsh::completion::get_completions(line, callback));
         Ok(msg)
     }
 
@@ -571,6 +570,35 @@ impl Shell {
 
     pub fn winch_unblock(&self) {
         zsh::winch_unblock()
+    }
+
+    pub fn capture_shout<T, F: FnOnce() -> T>(
+        &self,
+        passthrough: bool,
+        capture: bool,
+        f: F,
+    ) -> (BString, T) {
+
+        if let Ok(mut sink) = self.sink.try_borrow_mut() {
+            unsafe {
+                let old_trashedzle = zsh::trashedzle;
+                zsh::trashedzle = 1;
+                sink.clear();
+                let guard = sink.override_shout(passthrough, capture);
+                let result = f();
+                drop(guard);
+                zsh::trashedzle = old_trashedzle;
+
+                // read the data out
+                let buffer = sink.read();
+
+                (buffer, result)
+            }
+        } else {
+            // we are probably already capturing
+            ("".into(), f())
+        }
+
     }
 
 }
