@@ -201,6 +201,21 @@ pub fn wrap<
 ) -> (usize, usize) {
     // TODO performance is terrible if too many lines
 
+    let all_ascii = line.iter().all(|c| matches!(c, 0x20 ..= 0x7e | b'\n'));
+
+    if all_ascii && callback.is_none() && highlights.clone().next().is_none() {
+        // all ascii, no callback, no highlights
+        // can't get any easier
+        let mut last = line.as_bytes();
+        let y: usize = line.split(|&c| c == b'\n').enumerate().map(|(i, l)| {
+            last = l;
+            let len = l.len() + if i == 0 { initial_indent } else { 0 };
+            len.saturating_sub(1) / max_width + 1
+        }).sum();
+        let x = (last.len() + if last.len() == line.len() { initial_indent } else { 0 }) % max_width;
+        return (x, y - 1);
+    }
+
     let mut pos = (initial_indent, 0);
     let mut style = init_style.clone();
 
@@ -255,7 +270,7 @@ pub fn wrap<
         (pos, style, conceal)
     };
 
-    if line.iter().all(|c| matches!(c, 0x20 ..= 0x7e | b'\n')) {
+    if all_ascii {
         // most of the time it is ascii, to optimise for it
 
         if let Some(mut callback) = callback.as_mut() {
