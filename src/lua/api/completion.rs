@@ -38,15 +38,17 @@ async fn get_completions(ui: Ui, _lua: Lua, (val, callback): (Option<String>, Lu
     ui.shell.trampoline_out_callback(move |mut ui, token| {
         let mut ui_clone = ui.clone();
         let result = ui_clone.shell.get_completions(token, val, Box::new(move |matches| {
-            let matches: Vec<_> = matches.into_iter().map(|x| Match{inner: Rc::new(x)}).collect();
 
-            let result = ui.shell_loop(false, crate::lua::call_lua_fn(&callback, matches));
+            let result = (|| {
+                let matches = ui.lua.create_sequence_from(matches.into_iter().map(|x| Match{inner: Rc::new(x)}))?;
+                ui.shell_loop(false, crate::lua::call_lua_fn::<_, LuaValue>(&callback, matches))??;
+                anyhow::Ok(())
+            })();
 
-            if let Some(result) = crate::log_if_err(result) {
-                crate::log_if_err(ui.report_error::<(), _>(result));
-                ControlFlow::Continue(())
-            } else {
+            if crate::log_if_err(ui.report_error::<(), _>(result)).is_some() {
                 ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
             }
         }));
 
@@ -62,7 +64,7 @@ async fn get_completions(ui: Ui, _lua: Lua, (val, callback): (Option<String>, Lu
                 let _ = ui_clone.report_error(err)?;
             },
         }
-        Result::<()>::Ok(())
+        anyhow::Ok(())
     }).await??;
 
     Ok(())

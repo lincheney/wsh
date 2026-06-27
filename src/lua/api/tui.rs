@@ -879,9 +879,12 @@ fn sgr_to_style(lua: &Lua, sgr: String) -> LuaResult<LuaValue> {
     lua.to_value(&options)
 }
 
-fn style_to_sgr(_lua: &Lua, options: StyleOptions) -> LuaResult<BString> {
+fn style_to_sgr(_lua: &Lua, options: StyleOptions) -> LuaResult<Option<BString>> {
     let style: tui::widget::StyleOptions = options.into();
     let style = style.as_style();
+    if style == Style::default() {
+        return Ok(None);
+    }
     let mut cell = Cell::default();
     cell.style = style;
 
@@ -890,7 +893,7 @@ fn style_to_sgr(_lua: &Lua, options: StyleOptions) -> LuaResult<BString> {
     let mut drawer = tui::Drawer::new(&mut canvas, &mut buf, (0, 0));
     drawer.print_style_of_cell(&cell)?;
 
-    Ok(buf.into())
+    Ok(Some(buf.into()))
 }
 
 async fn allocate_height(ui: Ui, _lua: Lua, height: u16) -> Result<()> {
