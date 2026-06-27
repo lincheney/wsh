@@ -2,6 +2,8 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
+    println!("cargo::rerun-if-changed=build.rs");
+
     // The bindgen::Builder is the main entry point
     // to bindgen, and lets you build up options for
     // the resulting bindings.
@@ -22,12 +24,35 @@ fn main() {
         // Unwrap the Result and panic on failure.
         .expect("Unable to generate bindings");
 
-    println!("cargo::rerun-if-changed=build.rs");
     println!("cargo::rerun-if-changed=zsh.h");
+    println!("cargo::rerun-if-changed=fopencookie.h");
 
     // Write the bindings to the $OUT_DIR/bindings.rs file.
     let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
     bindings
         .write_to_file(out_path.join("bindings.rs"))
+        .expect("Couldn't write bindings!");
+
+    let bindings = bindgen::Builder::default()
+        // The input header we would like to generate
+        // bindings for.
+        .header("fopencookie.h")
+        .blocklist_type(r"FILE")
+        .blocklist_type(r"ssize_t")
+        .blocklist_type(r"size_t")
+        // Tell cargo to invalidate the built crate whenever any of the
+        // included header files changed.
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
+        // Finish the builder and generate the bindings.
+        .generate()
+        // Unwrap the Result and panic on failure.
+        .expect("Unable to generate bindings");
+
+    println!("cargo::rerun-if-changed=fopencookie.h");
+
+    // Write the bindings to the $OUT_DIR/bindings.rs file.
+    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
+    bindings
+        .write_to_file(out_path.join("fopencookie.rs"))
         .expect("Couldn't write bindings!");
 }

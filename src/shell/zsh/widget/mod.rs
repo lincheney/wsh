@@ -138,7 +138,7 @@ impl ZleWidget {
                 && let Some(hookdef) = NonNull::new(zsh_sys::gethookdef(c"list_matches".as_ptr().cast_mut()))
             {
                 let sink = &mut *shell.sink.borrow_mut();
-                let (output, _code) = super::capture_shout(sink, || zsh_sys::runhookdef(hookdef.as_ptr(), null_mut()));
+                let (output, _code) = super::capture_shout(sink, false, || zsh_sys::runhookdef(hookdef.as_ptr(), null_mut()));
 
                 if matches!(ShowingList::get(), Ok(ShowingList::New)) {
                     super::showinglist = super::nlnct;
@@ -151,18 +151,6 @@ impl ZleWidget {
 
             (code, refreshed, output)
         }
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn exec_and_get_output<I: Iterator<Item=MetaString> + ExactSizeIterator>(
-        &mut self,
-        _token: crate::shell::TrampolineToken,
-        shell: &crate::shell::Shell,
-        opts: Option<WidgetArgs>,
-        args: I,
-    ) -> (BString, c_int) {
-        let sink = &mut *shell.sink.borrow_mut();
-        super::capture_shout(sink, || Self::exec_with_ptr(self.ptr, opts, args))
     }
 
 }

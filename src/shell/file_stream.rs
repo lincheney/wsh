@@ -1,118 +1,115 @@
-use std::os::raw::c_char;
-use std::ptr::{null_mut, NonNull};
-use bstr::{BString};
+#![allow(non_upper_case_globals)]
+#![allow(non_camel_case_types)]
+#![allow(non_snake_case)]
+#![allow(dead_code)]
+#![allow(clippy::unreadable_literal)]
+
+use nix::libc::{FILE, ssize_t, size_t};
+use std::os::raw::*;
+include!(concat!(env!("OUT_DIR"), "/fopencookie.rs"));
+
+use std::ptr::{NonNull};
+use bstr::{BString, ByteVec};
 use anyhow::Result;
 
-unsafe extern "C" {
-    static mut stdout: *mut nix::libc::FILE;
-    static mut stderr: *mut nix::libc::FILE;
+#[derive(Default)]
+struct Cookie {
+    file: Option<*mut FILE>,
+    buffer: BString,
 }
 
+impl Cookie {
+
+    pub fn new() -> Result<(Box<Self>, NonNull<FILE>)> {
+        let mut cookie = Box::new(Self::default());
+        let funcs = cookie_io_functions_t {
+            read: None,
+            write: Some(cookie_write),
+            seek: None,
+            close: None,
+        };
+        let ptr = &raw mut *cookie;
+        let file = unsafe{ fopencookie(ptr.cast(), c"w".as_ptr(), funcs) };
+
+        if let Some(file) = NonNull::new(file) {
+            Ok((cookie, file))
+        } else {
+            Err(std::io::Error::last_os_error().into())
+        }
+    }
+
+}
+
+unsafe extern "C" fn cookie_write(cookie: *mut c_void, buf: *const c_char, size: size_t) -> ssize_t {
+    unsafe {
+        let cookie = &mut *(cookie as *mut Cookie);
+        let ret = if let Some(file) = cookie.file {
+            nix::libc::fwrite(buf as _, 1, size, file) as _
+        } else {
+            size
+        };
+        if ret > 0 {
+            cookie.buffer.push_str(std::slice::from_raw_parts(buf as *const u8, ret));
+        }
+        ret as _
+    }
+}
+
+
 pub struct Sink {
-    file: NonNull<nix::libc::FILE>,
-    buffer: Box<*mut c_char>,
-    bufsize: Box<nix::libc::size_t>,
+    cookie: Box<Cookie>,
+    file: NonNull<FILE>,
 }
 
 impl Sink {
+
     pub fn new() -> Result<Self> {
-        unsafe {
-            // allocate stable holders on heap and keep raw pointers to them
-            let mut buffer: Box<*mut c_char> = Box::new(null_mut());
-            let mut bufsize = Box::new(0);
-
-            if let Some(file) = NonNull::new(nix::libc::open_memstream(buffer.as_mut() as _, &raw mut *bufsize)) {
-                Ok(Self {
-                    file,
-                    buffer,
-                    bufsize,
-                })
-            } else {
-                Err(std::io::Error::last_os_error().into())
-            }
-        }
+        let (cookie, file) = Cookie::new()?;
+        Ok(Self {
+            cookie,
+            file,
+        })
     }
 
-    fn check_err(error: i32) -> Result<(), std::io::Error> {
-        if error == 0 {
-            Ok(())
-        } else {
-            Err(std::io::Error::from_raw_os_error(error))
-        }
+    pub fn clear(&mut self) {
+        self.cookie.buffer.clear();
     }
 
-    pub fn clear(&mut self) -> Result<(), std::io::Error> {
-        // nothing buffered in-memory; nothing to clear
-        let buffer = *self.buffer.as_ref();
-        if !buffer.is_null() {
-            unsafe {
-                Self::check_err(nix::libc::fseek(self.file.as_ptr(), 0, nix::libc::SEEK_SET))?;
-                Self::check_err(nix::libc::fflush(self.file.as_ptr()))?;
-            }
-        }
-        Ok(())
+    pub fn read(&mut self) -> BString {
+        std::mem::take(&mut self.cookie.buffer)
     }
 
-    pub fn read(&mut self) -> Result<BString, std::io::Error> {
-        unsafe {
-            Self::check_err(nix::libc::fflush(self.file.as_ptr()))?;
-
-            if *self.bufsize == 0 {
-                Ok("".into())
-            } else if self.buffer.is_null() {
-                Err(std::io::Error::other("buffer is null"))
-            } else {
-                // i only need to clear if there was any data
-                let result = std::slice::from_raw_parts(*self.buffer as *const u8, *self.bufsize).into();
-                self.clear()?;
-                Ok(result)
-            }
-        }
-    }
-
-    pub fn override_file(&mut self, file: *mut *mut nix::libc::FILE) -> FileGuard<'_> {
+    pub fn override_file(&mut self, file: *mut *mut FILE, passthrough: bool) -> FileGuard<'_> {
+        self.cookie.file = passthrough.then_some(unsafe{ *file });
         FileGuard::new(self, file)
     }
 
-    pub fn override_stdout(&mut self) -> FileGuard<'_> {
-        self.override_file(&raw mut stdout)
+    pub fn override_stdout(&mut self, passthrough: bool) -> FileGuard<'_> {
+        self.override_file(&raw mut stdout, passthrough)
     }
 
-    pub fn override_stderr(&mut self) -> FileGuard<'_> {
-        self.override_file(&raw mut stderr)
+    pub fn override_stderr(&mut self, passthrough: bool) -> FileGuard<'_> {
+        self.override_file(&raw mut stderr, passthrough)
     }
 
-    pub fn override_shout(&mut self) -> FileGuard<'_> {
-        self.override_file((&raw mut zsh_sys::shout).cast())
-    }
-}
-
-impl Drop for Sink {
-    fn drop(&mut self) {
-        unsafe {
-            nix::libc::fclose(self.file.as_ptr());
-
-            if !self.buffer.is_null() {
-                nix::libc::free(self.buffer.cast());
-            }
-        }
+    pub fn override_shout(&mut self, passthrough: bool) -> FileGuard<'_> {
+        self.override_file((&raw mut zsh_sys::shout).cast(), passthrough)
     }
 }
 
 pub struct FileGuard<'a> {
-    #[allow(dead_code)]
-    pub inner: &'a mut Sink,
-    dest: *mut *mut nix::libc::FILE,
-    old_file: *mut nix::libc::FILE,
+    pub _inner: &'a mut Sink,
+    dest: *mut *mut FILE,
+    old_file: *mut FILE,
 }
 
 impl<'a> FileGuard<'a> {
-    pub fn new(parent: &'a mut Sink, file: *mut *mut nix::libc::FILE) -> FileGuard<'a> {
+    pub fn new(parent: &'a mut Sink, file: *mut *mut FILE) -> FileGuard<'a> {
         unsafe {
             let old_file = *file;
             *file = parent.file.as_ptr();
             FileGuard{
-                inner: parent,
+                _inner: parent,
                 dest: file,
                 old_file,
             }
@@ -123,6 +120,7 @@ impl<'a> FileGuard<'a> {
 impl Drop for FileGuard<'_> {
     fn drop(&mut self) {
         unsafe{
+            nix::libc::fflush(*self.dest);
             *self.dest = self.old_file;
         }
     }

@@ -274,7 +274,7 @@ impl Shell {
     ) -> Result<BString> {
         // this may block for a long time
         let sink = &mut *self.sink.try_borrow_mut()?;
-        let (msg, _) = zsh::capture_shout(sink, || zsh::completion::get_completions(line, callback));
+        let (msg, _) = zsh::capture_shout(sink, false, || zsh::completion::get_completions(line, callback));
         Ok(msg)
     }
 
