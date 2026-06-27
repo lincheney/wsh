@@ -402,39 +402,36 @@ impl Ui {
     pub fn exec_widget(&self, widget: &crate::shell::ZleWidget, token: crate::shell::TrampolineToken) -> Result<i32> {
         // widget may do anything so need to freeze
 
+        // pause events
         self.events.pause();
-        let (fg_lock, mut print_lock) = self.runtime.block_on(async {
-            let fg_lock = self.has_foreground_process.lock().await;
-            let print_lock = self.print_lock.lock().await;
-            (fg_lock, print_lock)
-        })?;
-        // no sync in case widget is fast
-        // we assume that widgets are well behaved wrt rendering
-        // otherwise they would also screw up rendering in normal zsh
-        self.prepare_for_unhandled_output_blocking(Some(&mut print_lock), false)?;
-
-        let (code, output) = widget.exec_and_recover(token, &self.shell, None, [].into_iter());
-
-        self.events.unpause();
-
-        if !output.is_empty() {
-            // ... how many lines were output?
+        // acquire locks
+        let fg_lock = self.runtime.block_on(self.has_foreground_process.lock());
+        // back to cooked mode etc
+        {
             let mut ui = self.try_borrow_mut()?;
-            let size = ui.size;
-            let widget = ui.tui.set_zle_message(output.as_ref());
-            let height = widget.get_height_for_width(size.0 as _, Some(false));
-            // move back up that many lines
-            if height > 0 {
-                crate::log_if_err(queue!(ui.stdout, crate::tui::MoveUp(height - 1)));
+            ui.tui.clear_zle();
+            if !crate::is_forked() {
+                ui.deactivate();
             }
         }
 
-        let recovered = self.runtime.block_on(self.recover_from_unhandled_output(Some(&mut print_lock), true))?;
+        let options = crate::shell::WidgetArgs {
+            capture_shout: false,
+            passthrough_shout: true,
+            ..Default::default()
+        };
+        let (code, _output) = widget.exec(token, &self.shell, Some(options), [].into_iter());
+
+        // unpause events
+        self.events.unpause();
+
+        self.try_borrow()?.activate()?;
+        // let recovered = self.runtime.block_on(self.recover_from_unhandled_output(Some(&mut print_lock), true))?;
+        // release locks
         drop(fg_lock);
-        drop(print_lock);
-        if crate::log_if_err(recovered) == Some(true) || !output.is_empty() {
-            self.queue_draw();
-        }
+        // if crate::log_if_err(recovered) == Some(true) || !output.is_empty() {
+            // self.queue_draw();
+        // }
         Ok(code)
     }
 

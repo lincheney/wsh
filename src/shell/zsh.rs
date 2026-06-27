@@ -375,6 +375,7 @@ pub fn set_error_verbosity(verbosity: ErrorVerbosity) -> ErrorVerbosity {
 pub fn capture_shout<T, F: FnOnce() -> T>(
     sink: &mut super::file_stream::Sink,
     passthrough: bool,
+    capture: bool,
     f: F,
 ) -> (BString, T) {
 
@@ -383,7 +384,7 @@ pub fn capture_shout<T, F: FnOnce() -> T>(
         bindings::trashedzle = 1;
         let result = {
             sink.clear();
-            let _file = sink.override_shout(passthrough);
+            let _file = sink.override_shout(passthrough, capture);
             f()
         };
         bindings::trashedzle = old_trashedzle;

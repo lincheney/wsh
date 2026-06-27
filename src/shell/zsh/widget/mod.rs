@@ -24,8 +24,10 @@ pub struct ZleWidget {
 }
 
 pub struct WidgetArgs {
-    times: u16,
-    insert: bool,
+    pub times: u16,
+    pub insert: bool,
+    pub capture_shout: bool,
+    pub passthrough_shout: bool,
 }
 
 impl Default for WidgetArgs {
@@ -33,6 +35,8 @@ impl Default for WidgetArgs {
         Self {
             times: 1,
             insert: true,
+            capture_shout: false,
+            passthrough_shout: true,
         }
     }
 }
@@ -92,13 +96,12 @@ impl ZleWidget {
         }
     }
 
-    pub(crate) fn exec_with_ptr<I: Iterator<Item=MetaString> + ExactSizeIterator>(
+    fn exec_with_ptr<I: Iterator<Item=MetaString> + ExactSizeIterator>(
         ptr: NonNull<bindings::thingy>,
-        opts: Option<WidgetArgs>,
+        opts: WidgetArgs,
         args: I,
     ) -> c_int {
 
-        let opts = opts.unwrap_or_default();
         let args: MetaArray = args.collect();
 
         unsafe {
@@ -108,7 +111,7 @@ impl ZleWidget {
         }
     }
 
-    pub(crate) fn exec_and_recover<I: Iterator<Item=MetaString> + ExactSizeIterator>(
+    pub(crate) fn exec<I: Iterator<Item=MetaString> + ExactSizeIterator>(
         &self,
         _token: crate::shell::TrampolineToken,
         shell: &crate::shell::Shell,
@@ -122,8 +125,9 @@ impl ZleWidget {
             // we need to passthrough in case zsh prompts the user for something and we need to
             // show the question
 
+            let opts = opts.unwrap_or_default();
             let sink = &mut *shell.sink.borrow_mut();
-            let (output, code) = super::capture_shout(sink, true, || {
+            let (output, code) = super::capture_shout(sink, opts.passthrough_shout, opts.capture_shout, || {
                 let code = Self::exec_with_ptr(self.ptr, opts, args);
 
                 // emulate zrefresh and display any lists

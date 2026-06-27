@@ -10,17 +10,19 @@ include!(concat!(env!("OUT_DIR"), "/fopencookie.rs"));
 
 use std::ptr::{NonNull};
 use bstr::{BString, ByteVec};
+use crate::shell::externs::GlobalState;
 use anyhow::Result;
 
 #[derive(Default)]
-struct Cookie {
-    file: Option<*mut FILE>,
-    buffer: BString,
+pub struct Cookie {
+    pub dirty: bool,
+    passthrough: bool,
+    buffer: Option<BString>,
 }
 
 impl Cookie {
 
-    pub fn new() -> Result<(Box<Self>, NonNull<FILE>)> {
+    fn new() -> Result<(Box<Self>, NonNull<FILE>)> {
         let mut cookie = Box::new(Self::default());
         let funcs = cookie_io_functions_t {
             read: None,
@@ -41,25 +43,32 @@ impl Cookie {
 }
 
 unsafe extern "C" fn cookie_write(cookie: *mut c_void, buf: *const c_char, size: size_t) -> ssize_t {
-    unsafe {
-        let cookie = &mut *(cookie as *mut Cookie);
-        let ret = if let Some(file) = cookie.file {
-            let ret = nix::libc::fwrite(buf as _, 1, size, file) as _;
-            nix::libc::fflush(file);
-            ret
-        } else {
-            size
-        };
-        if ret > 0 {
-            cookie.buffer.push_str(std::slice::from_raw_parts(buf as *const u8, ret));
+    if size > 0 {
+        unsafe {
+            let buf = std::slice::from_raw_parts(buf as *const u8, size);
+            let cookie = &mut *(cookie as *mut Cookie);
+            if let Some(buffer) = &mut cookie.buffer {
+                buffer.push_str(buf);
+            }
+            if cookie.passthrough {
+                // okkkkkkkk
+                let result = GlobalState::with(|ui| {
+                    ui.try_borrow_mut()?.tui.add_zle_message(buf);
+                    // draw immediately bc zsh may be prompting the user with a question
+                    ui.clone().shell_loop(false, ui.draw())??;
+                    anyhow::Ok(())
+                });
+                crate::log_if_err(result);
+            }
         }
-        ret as _
     }
+
+    size as _
 }
 
 
 pub struct Sink {
-    cookie: Box<Cookie>,
+    pub cookie: Box<Cookie>,
     file: NonNull<FILE>,
 }
 
@@ -74,28 +83,35 @@ impl Sink {
     }
 
     pub fn clear(&mut self) {
-        self.cookie.buffer.clear();
+        if let Some(buffer) = &mut self.cookie.buffer {
+            buffer.clear();
+        }
     }
 
     pub fn read(&mut self) -> BString {
-        std::mem::take(&mut self.cookie.buffer)
+        self.cookie.buffer.take().unwrap_or_default()
     }
 
-    pub fn override_file(&mut self, file: *mut *mut FILE, passthrough: bool) -> FileGuard<'_> {
-        self.cookie.file = passthrough.then_some(unsafe{ *file });
+    pub fn override_file(&mut self, file: *mut *mut FILE, passthrough: bool, capture: bool) -> FileGuard<'_> {
+        self.cookie.passthrough = passthrough;
+        if capture {
+            self.cookie.buffer.get_or_insert_default();
+        } else {
+            self.cookie.buffer = None;
+        }
         FileGuard::new(self, file)
     }
 
-    pub fn override_stdout(&mut self, passthrough: bool) -> FileGuard<'_> {
-        self.override_file(&raw mut stdout, passthrough)
+    pub fn override_stdout(&mut self, passthrough: bool, capture: bool) -> FileGuard<'_> {
+        self.override_file(&raw mut stdout, passthrough, capture)
     }
 
-    pub fn override_stderr(&mut self, passthrough: bool) -> FileGuard<'_> {
-        self.override_file(&raw mut stderr, passthrough)
+    pub fn override_stderr(&mut self, passthrough: bool, capture: bool) -> FileGuard<'_> {
+        self.override_file(&raw mut stderr, passthrough, capture)
     }
 
-    pub fn override_shout(&mut self, passthrough: bool) -> FileGuard<'_> {
-        self.override_file((&raw mut zsh_sys::shout).cast(), passthrough)
+    pub fn override_shout(&mut self, passthrough: bool, capture: bool) -> FileGuard<'_> {
+        self.override_file((&raw mut zsh_sys::shout).cast(), passthrough, capture)
     }
 }
 

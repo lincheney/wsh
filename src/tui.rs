@@ -95,21 +95,23 @@ impl Tui {
         error.add_error(message, &mut self.nodes);
     }
 
-    pub fn set_zle_message(&mut self, message: &[u8]) -> &Widget {
+    pub fn add_zle_message(&mut self, message: &[u8]) -> &Widget {
         self.dirty = true;
         let id = *self.zle_msg.get_or_insert_with(|| {
-            self.nodes.add(layout::NodeKind::Widget(Widget::default()), true).id
+            let node = self.nodes.add(layout::NodeKind::Widget(Widget::default()), true);
+            node.persist = true;
+            node.id
         });
-        if let Some(node) = self.nodes.get_node_mut(id)
-            && let layout::NodeKind::Widget(widget) = &mut node.kind
-        {
-            widget.clear();
-            // widget.ansi.ocrnl = true; // treat \r as \n
-            widget.feed_ansi(message.into());
-            widget
-        } else {
-            unreachable!()
+        if let Some(node) = self.nodes.get_node_mut(id) {
+            node.set_hidden(false);
+            if let layout::NodeKind::Widget(widget) = &mut node.kind {
+                // widget.ansi.ocrnl = true; // treat \r as \n
+                widget.feed_ansi(message.into());
+                return widget
+            }
         }
+
+        unreachable!()
     }
 
     pub fn get_node(&self, id: layout::NodeId) -> Option<&layout::Node> {
@@ -175,13 +177,15 @@ impl Tui {
     }
 
     pub fn clear_all(&mut self) {
-        self.clear_error();
         self.nodes.clear_all();
+        self.zle_msg = None;
+        self.error_msg = None;
         self.dirty = true;
     }
 
     pub fn clear_non_persistent(&mut self) {
         self.clear_error();
+        self.clear_zle();
         self.nodes.clear_non_persistent();
         self.dirty = true;
     }
@@ -196,6 +200,16 @@ impl Tui {
     fn clear_error(&mut self) {
         if let Some(error_msg) = &mut self.error_msg {
             error_msg.clear(&mut self.nodes);
+            self.dirty = true;
+        }
+    }
+
+    pub fn clear_zle(&mut self) {
+        if let Some(id) = &mut self.zle_msg && let Some(node) = self.nodes.get_node_mut(*id) {
+            node.set_hidden(true);
+            if let layout::NodeKind::Widget(widget) = &mut node.kind {
+                widget.inner.clear();
+            }
             self.dirty = true;
         }
     }
