@@ -9,7 +9,7 @@ use mlua::{prelude::*};
 use crate::ui::{Ui};
 use crate::tui::{
     self,
-    layout::{self, Node, NodeKind, Layout},
+    layout::{self, Node, NodeKind, Layout, NodeId},
     Style,
     Modifier,
     Hyperlink,
@@ -523,6 +523,7 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
                         layout.children.push(child.id);
                     },
                     LayoutChild::WidgetRef(id) => {
+                        let id = NodeId::Normal(id);
                         tui.nodes.remove_child_from_parent(id);
                         let Some(node) = tui.get_node_mut(id)
                             else { anyhow::bail!("can't find widget with id {id}") };
@@ -533,6 +534,7 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
             }
 
             if let Some(id) = options.id {
+                let id = NodeId::Normal(id);
                 match tui.get_node_mut(id) {
                     Some(node) => {
                         node.kind = NodeKind::Layout(layout);
@@ -541,23 +543,25 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
                     None => anyhow::bail!("can't find node with id {id}"),
                 }
             } else {
-                tui.nodes.add(NodeKind::Layout(layout))
+                tui.nodes.add(NodeKind::Layout(layout), false)
             }
         },
 
         MessageInner::Widget { style, text } if text.is_none() && style.is_none() => {
             if let Some(id) = options.id {
+                let id = NodeId::Normal(id);
                 match tui.get_node_mut(id) {
                     Some(node) => node,
                     None => anyhow::bail!("can't find node with id {id}"),
                 }
             } else {
-                tui.nodes.add(NodeKind::Widget(tui::widget::Widget::default()))
+                tui.nodes.add(NodeKind::Widget(tui::widget::Widget::default()), false)
             }
         },
 
         MessageInner::Widget { style, text } => {
             let node = if let Some(id) = options.id {
+                let id = NodeId::Normal(id);
                 match tui.get_node_mut(id) {
                     Some(node) => {
                         if !matches!(node.kind, NodeKind::Widget(_)) {
@@ -568,7 +572,7 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
                     None => anyhow::bail!("can't find node with id {id}"),
                 }
             } else {
-                tui.nodes.add(NodeKind::Widget(tui::widget::Widget::default()))
+                tui.nodes.add(NodeKind::Widget(tui::widget::Widget::default()), false)
             };
 
             let NodeKind::Widget(widget) = &mut node.kind
@@ -615,7 +619,7 @@ fn set_message(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<usize> {
         tui.nodes.add_child(id);
     }
     ui.queue_draw();
-    Ok(id)
+    Ok(id.into())
 }
 
 fn clear_messages(ui: &Ui, _lua: &Lua, all: bool) -> Result<()> {
@@ -631,11 +635,13 @@ fn clear_messages(ui: &Ui, _lua: &Lua, all: bool) -> Result<()> {
 
 fn check_message(ui: &Ui, _lua: &Lua, id: usize) -> Result<bool> {
     ui.queue_draw();
+    let id = NodeId::Normal(id);
     Ok(ui.try_borrow()?.tui.get_node(id).is_some())
 }
 
 fn remove_message(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
     let tui = &mut ui.try_borrow_mut()?.tui;
+    let id = NodeId::Normal(id);
     if tui.remove(id).is_some() {
         tui.dirty = true;
         ui.queue_draw();
@@ -712,6 +718,7 @@ fn add_buf_highlight_namespace(ui: &Ui, _lua: &Lua, _val: ()) -> Result<usize> {
 
 fn scroll_message(ui: &Ui, _lua: &Lua, (id, delta): (usize, isize)) -> Result<()> {
     let tui = &mut ui.try_borrow_mut()?.tui;
+    let id = NodeId::Normal(id);
     match tui.get_node_mut(id) {
         Some(Node{ kind: NodeKind::Widget(widget), .. }) => {
             if widget.scroll(delta, true) {
@@ -727,6 +734,7 @@ fn scroll_message(ui: &Ui, _lua: &Lua, (id, delta): (usize, isize)) -> Result<()
 
 fn scroll_message_to(ui: &Ui, _lua: &Lua, (id, line): (usize, usize)) -> Result<()> {
     let tui = &mut ui.try_borrow_mut()?.tui;
+    let id = NodeId::Normal(id);
     match tui.get_node_mut(id) {
         Some(Node{ kind: NodeKind::Widget(widget), .. }) => {
             if widget.scroll(line as isize, false) {
@@ -743,6 +751,7 @@ fn scroll_message_to(ui: &Ui, _lua: &Lua, (id, line): (usize, usize)) -> Result<
 fn feed_ansi_message(ui: &Ui, _lua: &Lua, (id, value): (usize, LuaString)) -> Result<()> {
     let tui = &mut ui.try_borrow_mut()?.tui;
 
+    let id = NodeId::Normal(id);
     match tui.get_node_mut(id) {
         Some(Node{ kind: NodeKind::Widget(widget), .. }) => {
             widget.feed_ansi((&*value.as_bytes()).into());
@@ -758,6 +767,7 @@ fn feed_ansi_message(ui: &Ui, _lua: &Lua, (id, value): (usize, LuaString)) -> Re
 fn clear_message(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
     let tui = &mut ui.try_borrow_mut()?.tui;
 
+    let id = NodeId::Normal(id);
     match tui.get_node_mut(id) {
         Some(node) => node.clear(),
         _ => anyhow::bail!("can't find widget with id {id}"),
@@ -769,6 +779,7 @@ fn clear_message(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
 fn get_message_text(ui: &Ui, _lua: &Lua, id: usize) -> Result<Vec<BString>> {
     let tui = &ui.try_borrow()?.tui;
 
+    let id = NodeId::Normal(id);
     match tui.get_node(id) {
         Some(Node{ kind: NodeKind::Widget(widget), .. }) => Ok(widget.inner.get().into()),
         Some(_) => anyhow::bail!("can't get text from layout with id {id}"),
@@ -779,6 +790,7 @@ fn get_message_text(ui: &Ui, _lua: &Lua, id: usize) -> Result<Vec<BString>> {
 fn message_to_ansi_string(ui: &Ui, _lua: &Lua, (id, width): (usize, Option<u16>)) -> Result<mlua::BString> {
     let tui = &mut ui.try_borrow_mut()?.tui;
 
+    let id = NodeId::Normal(id);
     match tui.render_to_string(id, width) {
         None => anyhow::bail!("can't find widget with id {}", id),
         Some(x) => Ok(x),
@@ -827,6 +839,7 @@ async fn enable_mouse_mode(ui: Ui, _lua: Lua, enable: Option<bool>) -> Result<()
 fn get_message_geometry(ui: &Ui, lua: &Lua, id: usize) -> Result<Option<LuaTable>> {
     let tui = &ui.try_borrow()?.tui;
 
+    let id = NodeId::Normal(id);
     if let Some(geom) = tui.get_node_geometry(id) {
         let table = lua.create_table_from([
             ("x", geom.x),

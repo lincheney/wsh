@@ -75,7 +75,7 @@ pub struct Tui {
     pub max_height: u32,
     pub dirty: bool,
     error_msg: Option<ErrorMessage>,
-    zle_msg: Option<usize>,
+    zle_msg: Option<layout::NodeId>,
 }
 
 impl Tui {
@@ -84,26 +84,22 @@ impl Tui {
         (self.buffer.area.width, self.buffer.area.height)
     }
 
-    pub fn add(&mut self, widget: Widget) -> usize {
+    pub fn add(&mut self, widget: Widget, special: bool) -> usize {
         self.dirty = true;
-        self.nodes.add(layout::NodeKind::Widget(widget)).id
+        self.nodes.add(layout::NodeKind::Widget(widget), special).id.into()
     }
 
-    pub fn add_error_message(&mut self, message: &str) -> usize {
+    pub fn add_error_message(&mut self, message: &str) {
         self.dirty = true;
         let error = self.error_msg.get_or_insert_with(|| ErrorMessage::new(&mut self.nodes));
         error.add_error(message, &mut self.nodes);
-        error.id
     }
 
     pub fn set_zle_message(&mut self, message: &[u8]) -> &Widget {
         self.dirty = true;
-        let id = if let Some(id) = self.zle_msg {
-            id
-        } else {
-            let id = self.add(Widget::default());
-            *self.zle_msg.insert(id)
-        };
+        let id = *self.zle_msg.get_or_insert_with(|| {
+            self.nodes.add(layout::NodeKind::Widget(Widget::default()), true).id
+        });
         if let Some(node) = self.nodes.get_node_mut(id)
             && let layout::NodeKind::Widget(widget) = &mut node.kind
         {
@@ -116,16 +112,16 @@ impl Tui {
         }
     }
 
-    pub fn get_node(&self, id: usize) -> Option<&layout::Node> {
+    pub fn get_node(&self, id: layout::NodeId) -> Option<&layout::Node> {
         self.nodes.get_node(id)
     }
 
-    pub fn get_node_mut(&mut self, id: usize) -> Option<&mut layout::Node> {
+    pub fn get_node_mut(&mut self, id: layout::NodeId) -> Option<&mut layout::Node> {
         self.dirty = true;
         self.nodes.get_node_mut(id)
     }
 
-    pub fn get_node_geometry(&self, id: usize) -> Option<rect::Rect> {
+    pub fn get_node_geometry(&self, id: layout::NodeId) -> Option<rect::Rect> {
         let node = self.nodes.get_node(id)?;
         let pos = node.get_draw_pos(&self.nodes.map)?;
         let size = node.get_size(false);
@@ -152,12 +148,12 @@ impl Tui {
         }
     }
 
-    pub fn remove(&mut self, id: usize) -> Option<layout::Node> {
+    pub fn remove(&mut self, id: layout::NodeId) -> Option<layout::Node> {
         self.dirty = true;
         self.nodes.remove(id)
     }
 
-    pub fn render_to_string(&self, id: usize, width: Option<u16>) -> Option<BString> {
+    pub fn render_to_string(&self, id: layout::NodeId, width: Option<u16>) -> Option<BString> {
         let node = self.get_node(id)?;
         let width = width.unwrap_or(self.buffer.area.width);
         let width = std::num::NonZero::new(width).map_or(80, |w| w.get());

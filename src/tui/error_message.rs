@@ -6,7 +6,7 @@ use crossterm::style::Color;
 
 #[derive(Debug)]
 pub struct ErrorMessage {
-    pub id: usize,
+    pub id: super::layout::NodeId,
     pub count: usize,
 }
 
@@ -15,7 +15,7 @@ impl ErrorMessage {
     pub const TEXT_STYLE: Style = Style::new().fg(Color::AnsiValue(15));
 
     pub fn new(nodes: &mut Nodes) -> Self {
-        let node = nodes.add(super::layout::NodeKind::Widget(super::widget::Widget::default()));
+        let node = nodes.add(super::layout::NodeKind::Widget(super::widget::Widget::default()), true);
         node.persist = true;
         // node.constraint = Some(Constraint::Max(7));
         Self{ id: node.id, count: 0 }

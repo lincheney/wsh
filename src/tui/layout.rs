@@ -17,18 +17,18 @@ pub enum Direction {
 #[derive(Default, Debug, Clone)]
 pub struct Layout {
     pub direction: Direction,
-    pub children: Vec<usize>,
+    pub children: Vec<NodeId>,
 }
 
 impl Layout {
 
-    fn is_visible(&self, map: &HashMap<usize, Node>, tmp: bool) -> bool {
+    fn is_visible(&self, map: &HashMap<NodeId, Node>, tmp: bool) -> bool {
         self.children.iter().any(|c| map.get(c).is_some_and(|node| node.is_visible(map, tmp)))
     }
 
     fn refresh<'a>(
         &self,
-        map: &HashMap<usize, Node>,
+        map: &HashMap<NodeId, Node>,
         max_width: u16,
         max_height: Option<u16>,
         tmp: bool,
@@ -93,9 +93,29 @@ pub enum NodeKind {
     Layout(Layout),
 }
 
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub enum NodeId {
+    Normal(usize),
+    Special(usize),
+}
+
+impl From<NodeId> for usize {
+    fn from(value: NodeId) -> Self {
+        match value {
+            NodeId::Normal(id) | NodeId::Special(id) => id
+        }
+    }
+}
+
+impl std::fmt::Display for NodeId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+         write!(f, "{}", usize::from(*self))
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Node {
-    pub id: usize,
+    pub id: NodeId,
     pub has_parent: bool,
     pub kind: NodeKind,
     pub height_spec: sizing::Constraint,
@@ -136,7 +156,7 @@ impl Node {
         }
     }
 
-    fn is_visible(&self, map: &HashMap<usize, Node>, tmp: bool) -> bool {
+    fn is_visible(&self, map: &HashMap<NodeId, Node>, tmp: bool) -> bool {
         if self.is_hidden() || self.get_size(tmp).1 == 0 {
             false
         } else if let NodeKind::Layout(layout) = &self.kind && !layout.is_visible(map, tmp) {
@@ -146,7 +166,7 @@ impl Node {
         }
     }
 
-    pub fn get_draw_pos(&self, map: &HashMap<usize, Node>) -> Option<(u16, u16)> {
+    pub fn get_draw_pos(&self, map: &HashMap<NodeId, Node>) -> Option<(u16, u16)> {
         match &self.kind {
             NodeKind::Widget(widget) => widget.draw_pos.get(),
             NodeKind::Layout(layout) => {
@@ -168,7 +188,7 @@ impl Node {
 
     pub(super) fn refresh<'a>(
         &self,
-        map: &HashMap<usize, Node>,
+        map: &HashMap<NodeId, Node>,
         max_width: u16,
         max_height: Option<u16>,
         tmp: bool,
@@ -197,22 +217,28 @@ impl Node {
 
         if dim != self.get_size(tmp) {
             self.set_size(dim, tmp);
-            if !tmp && let Some(resized) = &mut resized {
-                resized.push(self.id);
+            if !tmp && let NodeId::Normal(id) = self.id && let Some(resized) = &mut resized {
+                resized.push(id);
             }
         }
 
         (dim, resized)
     }
 
-    fn collect_hidden_children(&self, map: &HashMap<usize, Node>, vec: &mut Vec<usize>) {
+    fn collect_hidden_children(&self, map: &HashMap<NodeId, Node>, vec: &mut Vec<usize>) {
         // assume self.is_hidden()
         debug_assert!(self.is_hidden());
 
         if self.get_size(false) != (0, 0) && let NodeKind::Layout(layout) = &self.kind {
             self.set_size((0, 0), false);
-            vec.push(self.id);
-            vec.extend(&layout.children);
+            if let NodeId::Normal(id) = self.id {
+                vec.push(id);
+            }
+            for id in &layout.children {
+                if let NodeId::Normal(id) = id {
+                    vec.push(*id);
+                }
+            }
             for id in &layout.children {
                 if let Some(node) = map.get(id) {
                     node.collect_hidden_children(map, vec);
@@ -225,7 +251,7 @@ impl Node {
 
 #[derive(Default)]
 pub struct Nodes {
-    pub(super) map: HashMap<usize, Node>,
+    pub(super) map: HashMap<NodeId, Node>,
     root: Layout,
     counter: usize,
     pub size: Cell<(u16, u16)>,
@@ -237,8 +263,14 @@ impl Nodes {
         self.counter
     }
 
-    pub fn add(&mut self, kind: NodeKind) -> &mut Node {
+    pub fn add(&mut self, kind: NodeKind, special: bool) -> &mut Node {
         let id = self.next_id();
+        let id = if special {
+            NodeId::Special(id)
+        } else {
+            NodeId::Normal(id)
+        };
+
         self.add_child(id);
         self.map.entry(id).insert_entry(Node {
             id,
@@ -253,11 +285,11 @@ impl Nodes {
         }).into_mut()
     }
 
-    pub fn get_node(&self, id: usize) -> Option<&Node> {
+    pub fn get_node(&self, id: NodeId) -> Option<&Node> {
         self.map.get(&id)
     }
 
-    pub fn get_node_mut(&mut self, id: usize) -> Option<&mut Node> {
+    pub fn get_node_mut(&mut self, id: NodeId) -> Option<&mut Node> {
         self.map.get_mut(&id)
     }
 
@@ -273,7 +305,7 @@ impl Nodes {
     }
 
     /// Remove a node
-    pub fn remove(&mut self, id: usize) -> Option<Node> {
+    pub fn remove(&mut self, id: NodeId) -> Option<Node> {
         self.remove_child_from_parent(id);
         let node = self.map.remove(&id);
         if let Some(Node{ kind: NodeKind::Layout(layout), .. }) = &node {
@@ -289,14 +321,14 @@ impl Nodes {
     }
 
     /// Remove a child ID from all parents' children lists.
-    pub fn remove_child_from_parent(&mut self, child_id: usize) {
+    pub fn remove_child_from_parent(&mut self, child_id: NodeId) {
         for layout in self.get_layouts_mut() {
             layout.children.retain(|&id| id != child_id);
         }
     }
 
     /// Add an existing node as a child of a layout. Removes it from any current parent first.
-    pub fn add_child(&mut self, child_id: usize) {
+    pub fn add_child(&mut self, child_id: NodeId) {
         self.remove_child_from_parent(child_id);
         self.root.children.push(child_id);
     }
@@ -361,7 +393,7 @@ enum NodeRenderer<'a, I> {
     VerticalLayout {
         children: I,
         child: Option<Box<NodeRenderer<'a, I>>>,
-        map: &'a HashMap<usize, Node>,
+        map: &'a HashMap<NodeId, Node>,
         tmp: bool,
     },
     HorizontalLayout {
@@ -375,11 +407,11 @@ enum NodeRenderer<'a, I> {
     },
 }
 
-impl<'a> NodeRenderer<'a, std::slice::Iter<'a, usize>> {
+impl<'a> NodeRenderer<'a, std::slice::Iter<'a, NodeId>> {
 
     fn new_for_layout(
         layout: &'a Layout,
-        map: &'a HashMap<usize, Node>,
+        map: &'a HashMap<NodeId, Node>,
         tmp: bool,
     ) -> Self {
 
@@ -405,7 +437,7 @@ impl<'a> NodeRenderer<'a, std::slice::Iter<'a, usize>> {
 
     fn new(
         node: &'a Node,
-        map: &'a HashMap<usize, Node>,
+        map: &'a HashMap<NodeId, Node>,
         tmp: bool,
     ) -> Self {
 
@@ -433,7 +465,7 @@ impl<'a> NodeRenderer<'a, std::slice::Iter<'a, usize>> {
     }
 }
 
-impl<'a> Renderer for NodeRenderer<'a, std::slice::Iter<'a, usize>> {
+impl<'a> Renderer for NodeRenderer<'a, std::slice::Iter<'a, NodeId>> {
     fn finished(&mut self) -> bool {
         match self {
             NodeRenderer::VerticalLayout{children, child, map, tmp} => {
