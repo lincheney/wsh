@@ -75,6 +75,7 @@ pub struct Tui {
     pub max_height: u32,
     pub dirty: bool,
     error_msg: Option<ErrorMessage>,
+    zle_msg: Option<usize>,
 }
 
 impl Tui {
@@ -95,11 +96,24 @@ impl Tui {
         error.id
     }
 
-    pub fn add_zle_message(&mut self, message: &[u8]) -> usize {
-        let mut widget = widget::Widget::default();
-        widget.ansi.ocrnl = true; // treat \r as \n
-        widget.feed_ansi(message.into());
-        self.add(widget)
+    pub fn set_zle_message(&mut self, message: &[u8]) -> &Widget {
+        self.dirty = true;
+        let id = if let Some(id) = self.zle_msg {
+            id
+        } else {
+            let id = self.add(Widget::default());
+            *self.zle_msg.insert(id)
+        };
+        if let Some(node) = self.nodes.get_node_mut(id)
+            && let layout::NodeKind::Widget(widget) = &mut node.kind
+        {
+            widget.clear();
+            // widget.ansi.ocrnl = true; // treat \r as \n
+            widget.feed_ansi(message.into());
+            widget
+        } else {
+            unreachable!()
+        }
     }
 
     pub fn get_node(&self, id: usize) -> Option<&layout::Node> {

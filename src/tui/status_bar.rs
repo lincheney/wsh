@@ -19,7 +19,7 @@ impl StatusBar {
 
     pub fn refresh(&mut self, width: u16) {
         if let Some(widget) = &mut self.inner {
-            widget.line_count = widget.get_height_for_width(width);
+            widget.line_count = widget.get_height_for_width(width, None);
         }
     }
 

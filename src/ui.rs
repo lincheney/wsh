@@ -399,7 +399,7 @@ impl Ui {
         Ok(print_lock.get_value() == 0)
     }
 
-    pub fn exec_widget(&self, widget: &crate::shell::ZleWidget, token: crate::shell::TrampolineToken) -> Result<()> {
+    pub fn exec_widget(&self, widget: &crate::shell::ZleWidget, token: crate::shell::TrampolineToken) -> Result<i32> {
         // widget may do anything so need to freeze
 
         self.events.pause();
@@ -413,20 +413,29 @@ impl Ui {
         // otherwise they would also screw up rendering in normal zsh
         self.prepare_for_unhandled_output_blocking(Some(&mut print_lock), false)?;
 
-        let (_code, refreshed, output) = widget.exec_and_recover(token, &mut self.try_borrow_mut()?.stdout, &self.shell, None, [].into_iter());
+        let (code, output) = widget.exec_and_recover(token, &self.shell, None, [].into_iter());
 
         self.events.unpause();
-        let recovered = self.runtime.block_on(self.recover_from_unhandled_output(Some(&mut print_lock), !refreshed))?;
+
+        if !output.is_empty() {
+            // ... how many lines were output?
+            let mut ui = self.try_borrow_mut()?;
+            let size = ui.size;
+            let widget = ui.tui.set_zle_message(output.as_ref());
+            let height = widget.get_height_for_width(size.0 as _, Some(false));
+            // move back up that many lines
+            if height > 0 {
+                crate::log_if_err(queue!(ui.stdout, crate::tui::MoveUp(height - 1)));
+            }
+        }
+
+        let recovered = self.runtime.block_on(self.recover_from_unhandled_output(Some(&mut print_lock), true))?;
         drop(fg_lock);
         drop(print_lock);
-        if crate::log_if_err(recovered) == Some(true) {
+        if crate::log_if_err(recovered) == Some(true) || !output.is_empty() {
             self.queue_draw();
         }
-        if !output.is_empty() {
-            self.queue_draw();
-            self.try_borrow_mut()?.tui.add_zle_message(&output);
-        }
-        Ok(())
+        Ok(code)
     }
 
     async fn post_accept_line<'a>(&'a self, lock: &mut PrintLockGuard<'a>) -> Result<()> {

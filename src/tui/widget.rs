@@ -146,9 +146,10 @@ impl Widget {
         }
     }
 
-    pub(super) fn get_height_for_width(
+    pub fn get_height_for_width(
         &self,
         mut max_width: u16,
+        show_scrollbar: Option<bool>,
     ) -> u16 {
 
         // border
@@ -157,7 +158,7 @@ impl Widget {
         let border_height = top + bottom;
         max_width = max_width.saturating_sub(left + right);
 
-        if self.scroll.show_scrollbar {
+        if show_scrollbar.unwrap_or(self.scroll.show_scrollbar) {
             max_width = max_width.saturating_sub(1);
         }
 

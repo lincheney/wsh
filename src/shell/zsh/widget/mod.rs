@@ -5,7 +5,6 @@ use std::os::raw::{c_int};
 use std::ptr::{null_mut, NonNull};
 use super::bindings;
 use super::{MetaStr, MetaString, MetaArray, ShowingList};
-use crossterm::execute;
 
 #[derive(Eq, PartialEq, Clone, Copy)]
 struct Widget(NonNull<bindings::widget>);
@@ -112,11 +111,10 @@ impl ZleWidget {
     pub(crate) fn exec_and_recover<I: Iterator<Item=MetaString> + ExactSizeIterator>(
         &self,
         _token: crate::shell::TrampolineToken,
-        stdout: &mut std::io::Stdout,
         shell: &crate::shell::Shell,
         opts: Option<WidgetArgs>,
         args: I,
-    ) -> (c_int, bool, BString) {
+    ) -> (c_int, BString) {
         unsafe {
             // we detect if it is refreshed by setting trashedzle to 1 then checking if it is reset to 0
 
@@ -142,18 +140,7 @@ impl ZleWidget {
                 code
             });
 
-            let refreshed = !output.is_empty();
-            if refreshed {
-                // move back up $BUFFERLINES
-                super::start_zle_scope();
-                let lines = super::Variable::get(meta_str!(c"BUFFERLINES")).unwrap().try_as_int().unwrap_or(Some(0)).unwrap_or(0);
-                super::end_zle_scope();
-                if lines > 0 {
-                    crate::log_if_err(execute!(stdout, crate::tui::MoveUp(lines as u16 - 1)));
-                }
-            }
-
-            (code, refreshed, output)
+            (code, output)
         }
     }
 

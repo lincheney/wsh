@@ -184,7 +184,7 @@ impl Node {
         }
 
         let height = match &self.kind {
-            NodeKind::Widget(widget) => widget.get_height_for_width(max_width),
+            NodeKind::Widget(widget) => widget.get_height_for_width(max_width, None),
             NodeKind::Layout(layout) => {
                 let dim;
                 (dim, resized) = layout.refresh(map, max_width, max_height, tmp, resized);
