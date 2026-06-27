@@ -298,6 +298,44 @@ impl Parser {
                     self.buffer.clear();
                     State::None
                 },
+                (State::Csi | State::CsiParams, b'J') => {
+                    let param = self.buffer.split(|c| *c == b';' || *c == b':').next().unwrap_or(b"");
+                    let param = if param.is_empty() { b"0" } else { param };
+                    let param = std::str::from_utf8(param).unwrap().parse::<usize>().unwrap();
+
+                    match param {
+                        0 => {
+                            // clear from cursor to end of screen
+                            if let Some(_last_line) = text.get().last() {
+                                let cursor_x = Self::to_byte_pos(text, self.cursor_x);
+                                let range = cursor_x .. _last_line.len();
+                                self.splice(text, Some(range), None, Some(self.style.clone()));
+                            }
+                        },
+                        1 => {
+                            // clear from beginning of screen to cursor
+                            for i in 0..text.len() - 1 {
+                                text.delete_str(i, 0, text.get()[i].len());
+                            }
+                            if let Some(_last_line) = text.get().last() {
+                                let cursor_x = Self::to_byte_pos(text, self.cursor_x);
+                                let range = 0 .. cursor_x;
+                                let replace_with = " ".repeat(self.cursor_x);
+                                self.splice(text, Some(range), Some(replace_with), Some(self.style.clone()));
+                            }
+                        },
+                        2 => {
+                            // clear entire screen
+                            let lines = text.len();
+                            for i in 0..lines {
+                                text.delete_str(i, 0, text.get()[i].len());
+                            }
+                        },
+                        _ => (),
+                    }
+                    self.buffer.clear();
+                    State::None
+                },
                 (State::CsiParams, _) => {
                     self.buffer.clear();
                     State::None
