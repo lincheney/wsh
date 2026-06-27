@@ -2,7 +2,7 @@ pub mod overrides;
 use std::cell::Cell;
 use bstr::{BString};
 use std::os::raw::{c_int};
-use std::ptr::NonNull;
+use std::ptr::{null_mut, NonNull};
 use super::bindings;
 use super::{MetaStr, MetaString, MetaArray};
 use crossterm::execute;
@@ -113,9 +113,10 @@ impl ZleWidget {
         &self,
         _token: crate::shell::TrampolineToken,
         stdout: &mut std::io::Stdout,
+        shell: &crate::shell::Shell,
         opts: Option<WidgetArgs>,
         args: I,
-    ) -> (c_int, bool) {
+    ) -> (c_int, bool, Option<BString>) {
         unsafe {
             // we detect if it is refreshed by setting trashedzle to 1 then checking if it is reset to 0
             super::trashedzle = 1;
@@ -132,7 +133,16 @@ impl ZleWidget {
                 }
             }
 
-            (code, refreshed)
+            // match lists are output in zrefresh() not inside the widget, so we have to grab it separately
+            let output = if let Some(hookdef) = NonNull::new(zsh_sys::gethookdef(c"list_matches".as_ptr().cast_mut())) {
+                let sink = &mut *shell.sink.borrow_mut();
+                let (output, _code) = super::capture_shout(sink, || zsh_sys::runhookdef(hookdef.as_ptr(), null_mut()));
+                Some(output)
+            } else {
+                None
+            };
+
+            (code, refreshed, output)
         }
     }
 

@@ -413,14 +413,17 @@ impl Ui {
         // otherwise they would also screw up rendering in normal zsh
         self.prepare_for_unhandled_output_blocking(Some(&mut print_lock), false)?;
 
-        let (_code, refreshed) = widget.exec_and_recover(token, &mut self.try_borrow_mut()?.stdout, None, [].into_iter());
+        let (_code, refreshed, output) = widget.exec_and_recover(token, &mut self.try_borrow_mut()?.stdout, &self.shell, None, [].into_iter());
 
         self.events.unpause();
         let recovered = self.runtime.block_on(self.recover_from_unhandled_output(Some(&mut print_lock), !refreshed))?;
         drop(fg_lock);
         drop(print_lock);
-        if crate::log_if_err(recovered) == Some(true) {
+        if crate::log_if_err(recovered) == Some(true) || output.is_some() {
             self.queue_draw();
+        }
+        if let Some(output) = output {
+            self.try_borrow_mut()?.tui.add_zle_message(&output);
         }
         Ok(())
     }
