@@ -6,7 +6,8 @@ use std::os::fd::{RawFd};
 use std::os::raw::*;
 use std::default::Default;
 use std::ptr::{null_mut, read_volatile, write_volatile};
-use bstr::{BString, ByteSlice};
+use std::borrow::Borrow;
+use bstr::{BStr, BString, ByteSlice};
 
 mod bindings;
 mod alloc;
@@ -322,10 +323,21 @@ pub fn end_zle_scope() {
     }
 }
 
-pub fn set_zle_buffer(buffer: BString, cursor: i64) {
+pub fn set_zle_buffer<B: Into<BString> + Borrow<BStr>>(buffer: B, cursor: i64) {
     start_zle_scope();
-    Variable::set(meta_str!(c"BUFFER"), buffer.into(), true).unwrap();
-    Variable::set(meta_str!(c"CURSOR"), cursor.into(), true).unwrap();
+    // try to avoid actually setting the values otherwise zsh resets some zle stuff
+
+    const BUFFER: &MetaStr = meta_str!(c"BUFFER");
+    if Variable::get(BUFFER).unwrap().as_meta_bytes().is_none_or(|x| x.unmetafy() != buffer.borrow()) {
+        let buffer: BString = buffer.into();
+        Variable::set(BUFFER, buffer.into(), true).unwrap();
+    }
+
+    const CURSOR: &MetaStr = meta_str!(c"CURSOR");
+    if Variable::get(CURSOR).unwrap().try_as_int().ok().is_none_or(|x| x != Some(cursor)) {
+        Variable::set(CURSOR, cursor.into(), true).unwrap();
+    }
+
     end_zle_scope();
 }
 

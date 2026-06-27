@@ -41,7 +41,7 @@ async fn goto_history_internal(ui: Ui, index: HistoryIndex) -> Result<()> {
             (ui.buffer.get_contents().clone(), ui.buffer.get_cursor())
         };
 
-        ui.shell.set_zle_buffer(buffer.clone(), cursor as _);
+        ui.shell.set_zle_buffer(buffer.as_ref(), cursor as _);
         ui.shell.goto_history(index, false);
 
         let (new_buffer, new_cursor) = ui.shell.get_zle_buffer();

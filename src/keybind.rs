@@ -99,7 +99,7 @@ impl KeyHandler<'_> {
                             let ui = ui.try_borrow()?;
                             (ui.buffer.get_contents().clone(), ui.buffer.get_cursor())
                         };
-                        ui.shell.set_zle_buffer(old_buffer.clone(), old_cursor as _);
+                        ui.shell.set_zle_buffer(old_buffer.as_ref(), old_cursor as _);
                         ui.shell.set_lastchar(lastchar);
 
                         ui.exec_widget(&widget, token)?;

@@ -457,8 +457,8 @@ impl Shell {
         history::History::append_words(words)
     }
 
-    pub fn expandhistory(&self, buffer: BString) -> Option<BString> {
-        let cursor = buffer.len() as i64 + 1;
+    pub fn expandhistory<B: Into<BString> + std::borrow::Borrow<BStr>>(&self, buffer: B) -> Option<BString> {
+        let cursor = buffer.borrow().len() as i64 + 1;
         self.set_zle_buffer(buffer, cursor);
         if unsafe{ zsh::expandhistory() } == 0 {
             Some(self.get_zle_buffer().0)
@@ -473,7 +473,7 @@ impl Shell {
         }
     }
 
-    pub fn set_zle_buffer(&self, buffer: BString, cursor: i64) {
+    pub fn set_zle_buffer<B: Into<BString> + std::borrow::Borrow<BStr>>(&self, buffer: B, cursor: i64) {
         zsh::set_zle_buffer(buffer, cursor);
     }
 
