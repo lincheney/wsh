@@ -161,8 +161,7 @@ pub async fn subshell_run_with_args(ui: Ui, lua: Lua, args: FullShellRunArgs) ->
                         if let Some(result_sender) = result_sender {
                             let _ = result_sender.send(Err(err));
                         } else {
-                            let err: Result<()> = Err(err);
-                            crate::log_if_err(ui.report_error(err));
+                            crate::log_if_err(ui.report_error::<(), _>(Err(err)));
                         }
                     },
                     _ => (),

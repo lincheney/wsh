@@ -94,10 +94,10 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
     let mut iter = iter.map(|s| s.to_bytes());
     match iter.next() {
         Some(b"lua") => {
-            let result: Result<_> = (|| {
+            let result = (|| {
                 let ui = GlobalState::get()?;
                 ui.clone().shell_loop(false, ui.lua.load(iter.next().unwrap_or(b"" as _)).exec_async())??;
-                Ok(())
+                anyhow::Ok(())
             })();
 
             if let Err(e) = result {

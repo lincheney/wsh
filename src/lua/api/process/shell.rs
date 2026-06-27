@@ -169,7 +169,7 @@ pub async fn shell_run_with_args(
     let result = ui.clone().shell.trampoline_out_callback(move |ui, token| {
         ui.clone().shell_loop(false, async {
 
-            let result: Result<_> = ui.freeze_if(foreground, true, async {
+            let result = ui.freeze_if(foreground, true, async {
 
                 let stdin = FdOverride::new(Stream::Stdin(stdin.as_ref().map(|x| x.as_ref())))?;
                 let stdout = FdOverride::new(Stream::Stdout(stdout))?;
@@ -197,7 +197,7 @@ pub async fn shell_run_with_args(
                     None
                 };
 
-                Ok((code, stdout, stderr))
+                anyhow::Ok((code, stdout, stderr))
 
             }).await?;
 

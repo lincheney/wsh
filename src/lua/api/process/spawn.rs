@@ -186,7 +186,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
 
         let mut result_sender = Some(result_sender);
         let mut proc = None;
-        let result: Result<Result<_>> = ui.freeze_if(foreground, true, async {
+        let result = ui.freeze_if(foreground, true, async {
 
             let (result, queue_result) = ui.shell.with_queued_signals(|| {
                 command.spawn().map(|child| {
@@ -263,8 +263,7 @@ async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
                 if let Some(result_sender) = result_sender {
                     let _ = result_sender.send(Err(err));
                 } else {
-                    let err: Result<()> = Err(err);
-                    crate::log_if_err(ui.report_error(err));
+                    crate::log_if_err(ui.report_error::<(), _>(Err(err)));
                 }
             },
             _ => (),
