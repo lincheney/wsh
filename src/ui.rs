@@ -167,11 +167,14 @@ impl Ui {
         let mut cursor_y = None;
 
         loop {
-            let mut ui = self.try_borrow_mut()?;
+            {
+                let mut ui = self.try_borrow_mut()?;
 
-            // if the size has changed, recompute everything
-            if size != Some(ui.size) {
+                if size == Some(ui.size) {
+                    return ui.draw(shell_vars, cursor_y);
+                }
 
+                // if the size has changed, recompute everything
                 size = Some(ui.size);
                 let (width, height) = ui.size;
                 // redraw all if dimensions have changed
@@ -180,24 +183,23 @@ impl Ui {
                     ui.dirty = true;
                 }
 
-                if ui.dirty || ui.cmdline.is_dirty() {
-                    shell_vars = Some(crate::tui::command_line::CommandLineState::get_shell_vars(&self.shell, ui.size.0));
-
-                    if ui.dirty {
-                        // get the cursor y then reacquire the ui next loop
-                        drop(ui);
-                        let cursor = self.events.get_cursor_position();
-                        cursor_y = Some(tokio::time::timeout(crate::DEFAULT_DURATION, cursor).await.unwrap()?.1 as _);
-                        continue;
-                    }
-
-                } else if !(ui.dirty || ui.buffer.dirty || ui.tui.dirty || ui.status_bar.dirty) {
+                if !(ui.dirty || ui.buffer.dirty || ui.tui.dirty || ui.status_bar.dirty || ui.cmdline.is_dirty()) {
                     return Ok(vec![])
                 }
 
+                if ui.dirty || ui.cmdline.is_dirty() {
+                    shell_vars = Some(crate::tui::command_line::CommandLineState::get_shell_vars(&self.shell, ui.size.0));
+                }
+
+                if !ui.dirty {
+                    return ui.draw(shell_vars, cursor_y);
+                }
             }
 
-            return ui.draw(shell_vars, cursor_y);
+            // dirty: get the cursor y then reacquire the ui next loop
+            let cursor = self.events.get_cursor_position();
+            cursor_y = Some(tokio::time::timeout(crate::DEFAULT_DURATION, cursor).await.unwrap()?.1 as _);
+
         }
     }
 

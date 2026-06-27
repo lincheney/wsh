@@ -48,7 +48,7 @@ pub enum WrapToken<'a> {
 impl WrapToken<'_> {
     pub fn as_str(&self) -> Option<&str> {
         match self {
-            Self::String(s) => Some(&s),
+            Self::String(s) => Some(s),
             Self::AsciiChar(c) => Some(std::str::from_utf8(c).unwrap()),
             _ => None,
         }
@@ -283,7 +283,7 @@ pub fn wrap<
                 let conceal;
                 (pos, style, conceal) = handle_highlights(s, e, pos, style, Some(&mut callback));
                 if !conceal {
-                    pos = wrap_grapheme_with_callback(grapheme, grapheme.width(), max_width, pos, line.as_ref(), (s..e).into(), style.clone(), &mut callback);
+                    pos = wrap_grapheme_with_callback(grapheme, grapheme.width(), max_width, pos, line, (s..e).into(), style.clone(), &mut callback);
                 }
             }
         } else {
@@ -291,7 +291,7 @@ pub fn wrap<
                 let conceal;
                 (pos, style, conceal) = handle_highlights(s, e, pos, style, callback.as_mut());
                 if !conceal {
-                    pos = wrap_grapheme(grapheme, grapheme.width(), max_width, pos, line.as_ref(), (s..e).into());
+                    pos = wrap_grapheme(grapheme, grapheme.width(), max_width, pos, line, (s..e).into());
                 }
             }
         }
