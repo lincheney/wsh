@@ -111,31 +111,26 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
             continue
         }
 
-        super::wrap::wrap(
+        let may_be_in_range = min_lineno <= i && i <= max_lineno;
+
+        let (_, y) = super::wrap::wrap(
             line,
             highlights.clone(),
             init_style.clone(),
             max_width,
             initial_indent,
-            Some(|range, token, style| {
-                let is_line_break = matches!(token, WrapToken::LineBreak);
-                if min_lineno <= i && i <= max_lineno {
-                    tokens.push(ScrollWrapToken {
-                        lineno: i,
-                        visual_lineno: total_line_count,
-                        range,
-                        inner: token,
-                        style,
-                    });
-                }
-                if is_line_break {
-                    total_line_count += 1;
-                }
+            // don't bother with the callback for lines out of range
+            may_be_in_range.then_some(|range, token, style| {
+                tokens.push(ScrollWrapToken {
+                    lineno: i,
+                    visual_lineno: total_line_count,
+                    range,
+                    inner: token,
+                    style,
+                });
             }),
         );
-        initial_indent = 0;
-
-        if min_lineno <= i && i <= max_lineno {
+        if may_be_in_range {
             tokens.push(ScrollWrapToken {
                 lineno: i,
                 visual_lineno: total_line_count,
@@ -144,7 +139,8 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
                 style: None,
             });
         }
-        total_line_count += 1;
+        total_line_count += y + 1;
+        initial_indent = 0;
     }
 
     // pop the trailing line break
