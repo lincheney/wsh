@@ -419,10 +419,11 @@ impl Ui {
         let recovered = self.runtime.block_on(self.recover_from_unhandled_output(Some(&mut print_lock), !refreshed))?;
         drop(fg_lock);
         drop(print_lock);
-        if crate::log_if_err(recovered) == Some(true) || output.is_some() {
+        if crate::log_if_err(recovered) == Some(true) {
             self.queue_draw();
         }
-        if let Some(output) = output {
+        if !output.is_empty() {
+            self.queue_draw();
             self.try_borrow_mut()?.tui.add_zle_message(&output);
         }
         Ok(())

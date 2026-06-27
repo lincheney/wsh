@@ -44,7 +44,9 @@ unsafe extern "C" fn cookie_write(cookie: *mut c_void, buf: *const c_char, size:
     unsafe {
         let cookie = &mut *(cookie as *mut Cookie);
         let ret = if let Some(file) = cookie.file {
-            nix::libc::fwrite(buf as _, 1, size, file) as _
+            let ret = nix::libc::fwrite(buf as _, 1, size, file) as _;
+            nix::libc::fflush(file);
+            ret
         } else {
             size
         };

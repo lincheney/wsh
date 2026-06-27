@@ -116,13 +116,33 @@ impl ZleWidget {
         shell: &crate::shell::Shell,
         opts: Option<WidgetArgs>,
         args: I,
-    ) -> (c_int, bool, Option<BString>) {
+    ) -> (c_int, bool, BString) {
         unsafe {
             // we detect if it is refreshed by setting trashedzle to 1 then checking if it is reset to 0
-            super::trashedzle = 1;
-            let code = Self::exec_with_ptr(self.ptr, opts, args);
 
-            let refreshed = super::trashedzle == 0;
+            // capture AND passthrough
+            // we need to passthrough in case zsh prompts the user for something and we need to
+            // show the question
+
+            let sink = &mut *shell.sink.borrow_mut();
+            let (output, code) = super::capture_shout(sink, true, || {
+                let code = Self::exec_with_ptr(self.ptr, opts, args);
+
+                // emulate zrefresh and display any lists
+                if ShowingList::get().is_ok_and(|x| x.need_to_update_list())
+                && let Some(hookdef) = NonNull::new(zsh_sys::gethookdef(c"list_matches".as_ptr().cast_mut()))
+                {
+                    zsh_sys::runhookdef(hookdef.as_ptr(), null_mut());
+
+                    if matches!(ShowingList::get(), Ok(ShowingList::New)) {
+                        super::showinglist = super::nlnct;
+                    }
+                }
+
+                code
+            });
+
+            let refreshed = !output.is_empty();
             if refreshed {
                 // move back up $BUFFERLINES
                 super::start_zle_scope();
@@ -132,22 +152,6 @@ impl ZleWidget {
                     crate::log_if_err(execute!(stdout, crate::tui::MoveUp(lines as u16 - 1)));
                 }
             }
-
-            // match lists are output in zrefresh() not inside the widget, so we have to grab it separately
-            let output = if ShowingList::get().is_ok_and(|x| x.need_to_update_list())
-                && let Some(hookdef) = NonNull::new(zsh_sys::gethookdef(c"list_matches".as_ptr().cast_mut()))
-            {
-                let sink = &mut *shell.sink.borrow_mut();
-                let (output, _code) = super::capture_shout(sink, false, || zsh_sys::runhookdef(hookdef.as_ptr(), null_mut()));
-
-                if matches!(ShowingList::get(), Ok(ShowingList::New)) {
-                    super::showinglist = super::nlnct;
-                }
-
-                Some(output)
-            } else {
-                None
-            };
 
             (code, refreshed, output)
         }
