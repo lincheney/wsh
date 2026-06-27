@@ -504,3 +504,39 @@ pub fn call_hook_func<'a, T: 'a + AsRef<MetaStr>, I: Iterator<Item=&'a T>>(
         Some(retval)
     }
 }
+
+#[derive(Debug)]
+enum ShowingList {
+    None,
+    New,
+    Pending,
+    Showing(c_int),
+}
+
+impl ShowingList {
+    fn get() -> Result<Self, ()> {
+        unsafe{ showinglist.try_into() }
+    }
+
+    fn need_to_update_list(&self) -> bool {
+        match self {
+            Self::Pending => true,
+            Self::Showing(x) => unsafe{ *x < nlnct },
+            _ => false,
+        }
+    }
+
+}
+
+impl TryFrom<c_int> for ShowingList {
+    type Error = ();
+    fn try_from(value: c_int) -> Result<Self, Self::Error> {
+        match value {
+            -2 => Ok(Self::Pending),
+            -1 => Ok(Self::New),
+            0 => Ok(Self::None),
+            x if x > 0 => Ok(Self::Showing(x)),
+            _ => Err(())
+        }
+    }
+}

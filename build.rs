@@ -12,6 +12,7 @@ fn main() {
         .blocklist_type(r"LinkList")
         .blocklist_type(r"Eprog")
         .blocklist_type(r"HashTable")
+        .blocklist_type(r"Hookdef")
         .no_debug("cmatch")
         // Tell cargo to invalidate the built crate whenever any of the
         // included header files changed.

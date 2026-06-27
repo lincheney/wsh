@@ -4,7 +4,7 @@ use bstr::{BString};
 use std::os::raw::{c_int};
 use std::ptr::{null_mut, NonNull};
 use super::bindings;
-use super::{MetaStr, MetaString, MetaArray};
+use super::{MetaStr, MetaString, MetaArray, ShowingList};
 use crossterm::execute;
 
 #[derive(Eq, PartialEq, Clone, Copy)]
@@ -134,9 +134,16 @@ impl ZleWidget {
             }
 
             // match lists are output in zrefresh() not inside the widget, so we have to grab it separately
-            let output = if let Some(hookdef) = NonNull::new(zsh_sys::gethookdef(c"list_matches".as_ptr().cast_mut())) {
+            let output = if ShowingList::get().is_ok_and(|x| x.need_to_update_list())
+                && let Some(hookdef) = NonNull::new(zsh_sys::gethookdef(c"list_matches".as_ptr().cast_mut()))
+            {
                 let sink = &mut *shell.sink.borrow_mut();
                 let (output, _code) = super::capture_shout(sink, || zsh_sys::runhookdef(hookdef.as_ptr(), null_mut()));
+
+                if matches!(ShowingList::get(), Ok(ShowingList::New)) {
+                    super::showinglist = super::nlnct;
+                }
+
                 Some(output)
             } else {
                 None

@@ -37,6 +37,7 @@
 typedef void* LinkList;
 typedef void* Eprog;
 typedef void* HashTable;
+typedef void* Hookdef;
 typedef uint32_t mode_t;
 
 mod_export static unsigned char Meta = ((char) 0x83);
@@ -161,6 +162,7 @@ struct menuinfo {
 mod_export struct menuinfo minfo;
 mod_export int invalidate_list(void);
 mod_export int showinglist;
+mod_export int nlnct;
 
 int expandhistory();
 int zle_goto_hist(int ev, int n, int skipdups);
@@ -220,6 +222,7 @@ struct modifier {
 };
 mod_export struct modifier zmod;
 
+mod_export char *zlenoargs[1];
 int execzlefunc(Thingy func, char **args, int set_bindk, int set_lbindk);
 
 /* != 0 if we're done editing */
@@ -268,3 +271,6 @@ free_prepostdisplay(void);
 // because zsh_sys defines this as an array but i need a pointer
 mod_export int *sigtrapped;
 mod_export Eprog *siglists;
+static struct context_stack *cstack;
+
+mod_export Hookdef zlehooks;
