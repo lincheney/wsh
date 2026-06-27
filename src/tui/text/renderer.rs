@@ -1,13 +1,13 @@
 use std::range::Range;
-use unicode_width::UnicodeWidthStr;
 use std::io::Write;
 use crate::tui::{Drawer, Canvas, Cell, text::Alignment, border::Border};
 
 use super::{Text, Scroll, HighlightedRange};
-use crate::tui::wrap::WrapToken;
 use crate::tui::scroll::{ScrollPosition, ScrolledLinesIter};
 
 const SCROLLBAR_CHAR: &str = "▕";
+
+pub type NoCallback<'a, W, C> = Option<fn(&mut Drawer<W, C>, usize, Range<usize>)>;
 
 pub trait Renderer {
     fn finished(&mut self) -> bool;
@@ -225,11 +225,8 @@ impl Renderer for TextRenderer<'_> {
             }
 
             let line_width = line.iter()
-                .map(|token| if let WrapToken::String(str) = &token.inner {
-                    str.width()
-                } else {
-                    0
-                }).sum();
+                .map(|token| token.inner.width())
+                .sum();
 
             // draw the indent
             let indent = self.get_alignment_indent(self.content_width, line_width);
@@ -238,7 +235,7 @@ impl Renderer for TextRenderer<'_> {
             // draw the line
             let mut cell = Cell::EMPTY;
             for token in line {
-                if let WrapToken::String(symbol) = &token.inner {
+                if let Some(symbol) = token.inner.as_str() {
                     cell.reset();
                     cell.set_text(symbol);
                     if let Some(style) = &token.style {

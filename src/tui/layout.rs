@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use super::widget::Widget;
 use super::drawer::{Drawer, Canvas};
-use super::text::{Renderer, TextRenderer};
+use super::text::{Renderer, TextRenderer, NoRendererCallback};
 use super::sizing;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -371,8 +371,7 @@ impl Nodes {
         tmp: bool,
     ) -> std::io::Result<()> {
         let mut renderer = NodeRenderer::new_for_layout(&self.root, &self.map, tmp);
-        let callback: Option<fn(&mut Drawer<W, C>, usize, Range<usize>)> = None;
-        renderer.render(drawer, false, true, callback)?;
+        renderer.render(drawer, false, true, NoRendererCallback::None)?;
         drawer.clear_to_end_of_line(None)
     }
 
@@ -383,8 +382,7 @@ impl Nodes {
         tmp: bool,
     ) -> std::io::Result<()> {
         let mut renderer = NodeRenderer::new(node, &self.map, tmp);
-        let callback: Option<fn(&mut Drawer<W, C>, usize, Range<usize>)> = None;
-        renderer.render(drawer, false, true, callback)?;
+        renderer.render(drawer, false, true, NoRendererCallback::None)?;
         drawer.clear_to_end_of_line(None)
     }
 }

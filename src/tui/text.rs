@@ -1,10 +1,8 @@
 use std::ops::Range;
 use bstr::{BStr, BString, ByteVec};
-use unicode_width::UnicodeWidthStr;
 use crate::tui::{Style, Cell};
-use super::wrap::WrapToken;
 mod renderer;
-pub use renderer::{Renderer, TextRenderer};
+pub use renderer::{Renderer, TextRenderer, NoCallback as NoRendererCallback};
 
 pub(super) const TAB_WIDTH: usize = 4;
 
@@ -262,7 +260,7 @@ impl<T> Text<T> {
         I: Clone + Iterator<Item=&'a HighlightedRange<T>>,
     {
 
-        let mut pos = (initial_indent, 0);
+        let mut pos = (0, 0);
         let mut start = 0;
 
         // add a dummy line at the end
@@ -281,16 +279,9 @@ impl<T> Text<T> {
                 continue
             }
 
-            super::wrap::wrap(line, highlights, None, width, initial_indent, |_, token, _| {
-                match token {
-                    WrapToken::LineBreak => {
-                        pos = (0, pos.1 + 1);
-                    },
-                    WrapToken::String(s) => {
-                        pos.0 += s.width();
-                    },
-                }
-            });
+            let (x, y) = super::wrap::wrap(line, highlights, None, width, initial_indent, super::wrap::NoCallback::None);
+            pos.0 = x;
+            pos.1 += y;
             initial_indent = 0;
 
             if i + 1 != self.lines.len() {

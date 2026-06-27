@@ -93,6 +93,9 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
     let mut tokens = vec![];
     let mut start = 0;
 
+    let min_lineno = max_height.map_or(0, |h| lineno.saturating_sub(h));
+    let max_lineno = max_height.map_or(lines.len(), |h| lineno + h);
+
     // add a dummy line at the end
     for (i, line) in lines.iter().map(|l| l.as_ref()).chain(std::iter::once(BStr::new(b""))).enumerate() {
 
@@ -114,29 +117,33 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
             init_style.clone(),
             max_width,
             initial_indent,
-            |range, token, style| {
+            Some(|range, token, style| {
                 let is_line_break = matches!(token, WrapToken::LineBreak);
-                tokens.push(ScrollWrapToken {
-                    lineno: i,
-                    visual_lineno: total_line_count,
-                    range,
-                    inner: token,
-                    style,
-                });
+                if min_lineno <= i && i <= max_lineno {
+                    tokens.push(ScrollWrapToken {
+                        lineno: i,
+                        visual_lineno: total_line_count,
+                        range,
+                        inner: token,
+                        style,
+                    });
+                }
                 if is_line_break {
                     total_line_count += 1;
                 }
-            },
+            }),
         );
         initial_indent = 0;
 
-        tokens.push(ScrollWrapToken {
-            lineno: i,
-            visual_lineno: total_line_count,
-            range: (line.len() .. line.len()).into(),
-            inner: WrapToken::LineBreak,
-            style: None,
-        });
+        if min_lineno <= i && i <= max_lineno {
+            tokens.push(ScrollWrapToken {
+                lineno: i,
+                visual_lineno: total_line_count,
+                range: (line.len() .. line.len()).into(),
+                inner: WrapToken::LineBreak,
+                style: None,
+            });
+        }
         total_line_count += 1;
     }
 
