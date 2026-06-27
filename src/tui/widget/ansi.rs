@@ -52,8 +52,10 @@ pub fn parse_ansi_col(mut style: Style, string: &BStr) -> Style {
                 };
                 if part.is_empty() {
                     (0, false)
+                } else if let Ok(part) = std::str::from_utf8(part) && let Ok(part) = part.parse() {
+                    (part, colon)
                 } else {
-                    (std::str::from_utf8(part).unwrap().parse::<usize>().unwrap(), colon)
+                    (0, colon)
                 }
             }
         });
@@ -271,11 +273,13 @@ impl Parser {
                     State::None
                 },
                 (State::Csi | State::CsiParams, b'K') => {
-                    let param = self.buffer.split(|c| *c == b';' || *c == b':').next().unwrap_or(b"");
+                    let param = self.buffer.split(|c| *c == b';').next().unwrap_or(b"");
                     let param = if param.is_empty() { b"0" } else { param };
-                    let param = std::str::from_utf8(param).unwrap().parse::<usize>().unwrap();
 
-                    if let Some(last_line) = text.get().last() {
+                    if let Ok(param) = std::str::from_utf8(param)
+                        && let Ok(param) = param.parse()
+                        && let Some(last_line) = text.get().last()
+                    {
                         let cursor_x = Self::to_byte_pos(text, self.cursor_x);
                         match param {
                             0 => {
@@ -301,18 +305,19 @@ impl Parser {
                 (State::Csi | State::CsiParams, b'J') => {
                     let param = self.buffer.split(|c| *c == b';' || *c == b':').next().unwrap_or(b"");
                     let param = if param.is_empty() { b"0" } else { param };
-                    let param = std::str::from_utf8(param).unwrap().parse::<usize>().unwrap();
+
+                    let param = std::str::from_utf8(param).ok().and_then(|p| p.parse().ok());
 
                     match param {
-                        0 => {
+                        Some(0) => {
                             // clear from cursor to end of screen
-                            if let Some(_last_line) = text.get().last() {
+                            if let Some(last_line) = text.get().last() {
                                 let cursor_x = Self::to_byte_pos(text, self.cursor_x);
-                                let range = cursor_x .. _last_line.len();
+                                let range = cursor_x .. last_line.len();
                                 self.splice(text, Some(range), None, Some(self.style.clone()));
                             }
                         },
-                        1 => {
+                        Some(1) => {
                             // clear from beginning of screen to cursor
                             for i in 0..text.len() - 1 {
                                 text.delete_str(i, 0, text.get()[i].len());
@@ -324,7 +329,7 @@ impl Parser {
                                 self.splice(text, Some(range), Some(replace_with), Some(self.style.clone()));
                             }
                         },
-                        2 => {
+                        Some(2) => {
                             // clear entire screen
                             let lines = text.len();
                             for i in 0..lines {
