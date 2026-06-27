@@ -53,7 +53,9 @@ async fn get_completions(ui: Ui, _lua: Lua, (val, callback): (Option<String>, Lu
         match result {
             Ok(msg) => {
                 if !msg.is_empty() {
-                    ui_clone.try_borrow_mut()?.tui.add_zle_message(msg.as_ref());
+                    let tui = &mut ui_clone.try_borrow_mut()?.tui;
+                    tui.clear_zle();
+                    tui.add_zle_message(msg.as_ref());
                 }
             },
             err => {
