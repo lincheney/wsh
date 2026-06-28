@@ -9,21 +9,29 @@ use std::os::raw::*;
 include!(concat!(env!("OUT_DIR"), "/fopencookie.rs"));
 
 use std::ptr::{NonNull};
+use std::time::{Instant, Duration};
 use bstr::{BString, ByteVec};
 use crate::shell::externs::GlobalState;
 use anyhow::Result;
 
-#[derive(Default)]
+const MAX_DRAW_DURATION: Duration = Duration::from_millis(50);
+
 pub struct Cookie {
     pub dirty: bool,
     passthrough: bool,
     buffer: Option<BString>,
+    last_draw: Instant,
 }
 
 impl Cookie {
 
     fn new() -> Result<(Box<Self>, NonNull<FILE>)> {
-        let mut cookie = Box::new(Self::default());
+        let mut cookie = Box::new(Self {
+            dirty: false,
+            passthrough: false,
+            buffer: None,
+            last_draw: Instant::now() - MAX_DRAW_DURATION,
+        });
         let funcs = cookie_io_functions_t {
             read: None,
             write: Some(cookie_write),
@@ -42,23 +50,38 @@ impl Cookie {
 
 }
 
-unsafe extern "C" fn cookie_write(cookie: *mut c_void, buf: *const c_char, size: size_t) -> ssize_t {
+unsafe extern "C" fn cookie_write(cookie: *mut c_void, buf: *const c_char, mut size: size_t) -> ssize_t {
     if size > 0 {
         unsafe {
-            let buf = std::slice::from_raw_parts(buf as *const u8, size);
             let cookie = &mut *(cookie as *mut Cookie);
+
+            // we're going to cheat a bit to throttle the drawing
+            // the max buf size is 8192
+            // if we get that much data, chances are there is more coming
+            // and we should delay drawing until then
+            // but it could be there isn't
+            // so we consume 1 byte less and essentially force
+            // the caller to resend that 1 byte immediately
+            // so there should always be a follow up call
+            let draw = if cookie.passthrough && size == 8192 {
+                size -= 1;
+                cookie.last_draw.elapsed() >= MAX_DRAW_DURATION
+            } else {
+                cookie.passthrough
+            };
+
+            let buf = std::slice::from_raw_parts(buf as *const u8, size);
             if let Some(buffer) = &mut cookie.buffer {
                 buffer.push_str(buf);
             }
-            if cookie.passthrough {
+            if draw {
+                cookie.last_draw = Instant::now();
                 // okkkkkkkk
                 let result = GlobalState::with(|ui| {
                     ui.try_borrow_mut()?.tui.add_zle_message(buf);
                     // draw immediately bc zsh may be prompting the user with a question
-                    // but skip if the user as ctrl c bc it could be slow
-                    if !super::is_interrupted() {
-                        ui.clone().shell_loop(false, ui.draw())??;
-                    }
+                    // faster non blocking draw with no cursor checking
+                    ui.draw_blocking(true)?;
                     anyhow::Ok(())
                 });
                 crate::log_if_err(result);
