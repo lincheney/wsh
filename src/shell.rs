@@ -99,6 +99,10 @@ pub fn control_c() -> nix::Result<()> {
     nix::sys::signal::kill(nix::unistd::Pid::from_raw(0), nix::sys::signal::Signal::SIGINT)
 }
 
+pub fn is_interrupted() -> bool {
+    unsafe{ (zsh_sys::errflag & (zsh_sys::errflag_bits_ERRFLAG_INT as i32)) > 0 }
+}
+
 pub enum FdAction {
     RedirectFrom(RawFd, Option<RawFd>),
     RedirectTo(RawFd, Option<RawFd>),

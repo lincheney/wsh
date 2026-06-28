@@ -55,7 +55,10 @@ unsafe extern "C" fn cookie_write(cookie: *mut c_void, buf: *const c_char, size:
                 let result = GlobalState::with(|ui| {
                     ui.try_borrow_mut()?.tui.add_zle_message(buf);
                     // draw immediately bc zsh may be prompting the user with a question
-                    ui.clone().shell_loop(false, ui.draw())??;
+                    // but skip if the user as ctrl c bc it could be slow
+                    if !super::is_interrupted() {
+                        ui.clone().shell_loop(false, ui.draw())??;
+                    }
                     anyhow::Ok(())
                 });
                 crate::log_if_err(result);
