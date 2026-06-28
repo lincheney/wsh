@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::os::raw::{c_int};
 use nix::sys::signal;
-use anyhow::Result;
 use tokio::sync::{watch};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -55,11 +54,11 @@ pub(super) fn cleanup() {
     });
 }
 
-pub(super) fn init(_ui: &crate::ui::Ui) -> Result<watch::Sender<(u32, u32)>> {
+pub(super) fn init(_ui: &crate::ui::Ui) -> watch::Sender<(u32, u32)> {
     fetch_term_size_from_zsh();
     let (sender, receiver) = watch::channel(get_term_size_from_zsh());
     RECEIVER.with_borrow_mut(|r| {
         *r = Some(receiver);
     });
-    Ok(sender)
+    sender
 }

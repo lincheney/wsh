@@ -102,7 +102,7 @@ impl<'a> History<'a> {
 
     fn append_internal(value: super::variables::Value, name: &MetaStr, cmd: &MetaStr) -> Result<()> {
         unsafe {
-            let is_cur_hist = zsh_sys::curhist == super::histline as _;
+            let is_cur_hist = zsh_sys::curhist == super::histline.into();
 
             zsh_sys::startparamscope();
             Variable::set(name, value, true).unwrap();

@@ -324,16 +324,17 @@ pub fn end_zle_scope() {
 }
 
 pub fn set_zle_buffer<B: Into<BString> + Borrow<BStr>>(buffer: B, cursor: i64) {
+    const BUFFER: &MetaStr = meta_str!(c"BUFFER");
+    const CURSOR: &MetaStr = meta_str!(c"CURSOR");
+
     start_zle_scope();
     // try to avoid actually setting the values otherwise zsh resets some zle stuff
 
-    const BUFFER: &MetaStr = meta_str!(c"BUFFER");
     if Variable::get(BUFFER).unwrap().as_meta_bytes().is_none_or(|x| x.unmetafy() != buffer.borrow()) {
         let buffer: BString = buffer.into();
         Variable::set(BUFFER, buffer.into(), true).unwrap();
     }
 
-    const CURSOR: &MetaStr = meta_str!(c"CURSOR");
     if Variable::get(CURSOR).unwrap().try_as_int().ok().is_none_or(|x| x != Some(cursor)) {
         Variable::set(CURSOR, cursor.into(), true).unwrap();
     }

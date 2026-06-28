@@ -16,7 +16,7 @@ fn untokenize(mut c: u8) -> u8 {
             // search for the token bc sometimes it is len > 1
             #[allow(static_mut_refs)]
             let ztokens = zsh_sys::ztokens.as_ptr();
-            c = *ztokens.add((c - token::Pound as u8) as usize) as u8
+            c = *ztokens.add((c - token::Pound as u8) as usize) as u8;
         }
     }
     c
@@ -484,7 +484,7 @@ pub fn parse(mut cmd: BString, options: ParserOptions) -> (bool, Vec<Token>) {
     let len = cmd.len();
     // add newline at the end
     cmd.push_str(b"\n\n");
-    parse_internal(cmd, options, len)
+    parse_internal(cmd.as_ref(), options, len)
 }
 
 #[derive(Default)]
@@ -784,12 +784,12 @@ unsafe extern "C" fn hungetc_override(c: c_int) {
 }
 
 fn parse_internal(
-    cmd: BString,
+    cmd: &BStr,
     options: ParserOptions,
     len: usize,
 ) -> (bool, Vec<Token>) {
 
-    let metafied = MetaString::from(cmd.clone());
+    let metafied = MetaString::from(cmd.to_owned());
     let metalen = metafied.count_bytes();
     let mut complete = true;
 

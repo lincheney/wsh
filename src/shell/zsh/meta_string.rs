@@ -215,7 +215,7 @@ impl MetaStr {
         let mut meta = false;
         for &c in self.inner.to_bytes().iter().take(num_bytes) {
             if meta {
-                meta = false
+                meta = false;
             } else if c == Meta {
                 meta = true;
             } else {
@@ -227,14 +227,13 @@ impl MetaStr {
 
     pub fn last(&self) -> Option<u8> {
         match &self.inner[self.inner.count_bytes().saturating_sub(2) .. ].to_bytes() {
+            [a] if *a == Meta => None,
             [a, c] if *a == Meta => {
                 let mut buf = [Meta, *c];
                 unmetafy_in_place(&mut buf);
                 Some(buf[0])
             },
-            [_, c] => Some(*c),
-            [a] if *a == Meta => None,
-            [c] => Some(*c),
+            [_, c] | [c] => Some(*c),
             _ => None,
         }
     }

@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use std::ops::ControlFlow;
 use regex::bytes::Regex;
 use anyhow::Result;
-use std::os::raw::*;
+use std::os::raw::{c_char, c_int};
 use std::ptr::{null_mut};
 use std::default::Default;
 use bstr::{BString, ByteSlice};

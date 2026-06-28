@@ -30,7 +30,7 @@ impl Cookie {
             dirty: false,
             passthrough: false,
             buffer: None,
-            last_draw: Instant::now() - MAX_DRAW_DURATION,
+            last_draw: Instant::now().checked_sub(MAX_DRAW_DURATION).unwrap(),
         });
         let funcs = cookie_io_functions_t {
             read: None,
@@ -53,7 +53,7 @@ impl Cookie {
 unsafe extern "C" fn cookie_write(cookie: *mut c_void, buf: *const c_char, mut size: size_t) -> ssize_t {
     if size > 0 {
         unsafe {
-            let cookie = &mut *(cookie as *mut Cookie);
+            let cookie: &mut Cookie = &mut *cookie.cast();
 
             // we're going to cheat a bit to throttle the drawing
             // the max buf size is 8192
@@ -70,7 +70,7 @@ unsafe extern "C" fn cookie_write(cookie: *mut c_void, buf: *const c_char, mut s
                 cookie.passthrough
             };
 
-            let buf = std::slice::from_raw_parts(buf as *const u8, size);
+            let buf = std::slice::from_raw_parts(buf.cast(), size);
             if let Some(buffer) = &mut cookie.buffer {
                 buffer.push_str(buf);
             }

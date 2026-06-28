@@ -1,6 +1,6 @@
 use crate::lua::{HasEventCallbacks};
 use std::cell::Cell;
-use std::os::raw::*;
+use std::os::raw::{c_char, c_int};
 use anyhow::{Result};
 use super::super::bindings;
 use super::super::MetaStr;

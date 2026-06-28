@@ -68,7 +68,7 @@ unsafe extern "C" fn zle_handlerfunc(nam: *mut c_char, argv: *mut *mut c_char, o
 
                 // dropping the canceller will cause it to trigger
                 drop(zle.fd_mapping.remove(&fd));
-            };
+            }
         }
 
         result

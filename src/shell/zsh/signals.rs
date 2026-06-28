@@ -145,7 +145,7 @@ fn hook_signal(signal: signal::Signal) -> Result<()> {
     Ok(())
 }
 
-fn spawn_self_pipe_reader(ui: crate::ui::Ui) -> Result<()> {
+fn spawn_self_pipe_reader(ui: &crate::ui::Ui) -> Result<()> {
     let (reader, writer) = std::io::pipe()?;
     let reader = crate::utils::move_fd(reader)?;
     let writer = crate::utils::move_fd(writer)?;
@@ -154,9 +154,9 @@ fn spawn_self_pipe_reader(ui: crate::ui::Ui) -> Result<()> {
 
     SELF_PIPE.store(writer.into_raw_fd(), Ordering::Release);
 
-    let sigchld_data = sigchld::init(&ui)?;
-    let sigwinch_data = sigwinch::init(&ui)?;
-    let sigint_data = sigint::init(&ui)?;
+    let sigchld_data = sigchld::init(&ui);
+    let sigwinch_data = sigwinch::init(&ui);
+    let sigint_data = sigint::init(&ui);
 
     crate::spawn_and_log::<_, (), anyhow::Error>(&ui.clone(), async move {
         let mut reader = tokio::net::unix::pipe::Receiver::from_owned_fd(reader.into())?;
@@ -199,7 +199,7 @@ pub fn init(ui: crate::ui::Ui) -> Result<()> {
             resize_array(&mut super::siglists, trapcount, SIGTRAPPED_COUNT as usize);
         }
 
-        spawn_self_pipe_reader(ui)?;
+        spawn_self_pipe_reader(&ui)?;
         hook_signal(signal::Signal::SIGCHLD)?;
         hook_signal(signal::Signal::SIGINT)?;
         hook_signal(signal::Signal::SIGWINCH)?;

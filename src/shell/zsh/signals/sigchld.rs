@@ -216,9 +216,9 @@ pub(super) fn cleanup() {
     });
 }
 
-pub(super) fn init(ui: &crate::ui::Ui) -> Result<crate::ui::Ui> {
+pub(super) fn init(ui: &crate::ui::Ui) -> crate::ui::Ui {
     unsafe {
         zsh_sys::addhookfunc(c"before_trap".as_ptr().cast_mut(), Some(before_trap_hook));
     }
-    Ok(ui.clone())
+    ui.clone()
 }

@@ -8,7 +8,7 @@ pub struct QueuedSignalToken{
 impl Drop for QueuedSignalToken {
     fn drop(&mut self) {
         if !self.used {
-            let _ = _unqueue_signals(self);
+            let _ = unqueue_signals_with_token(self);
         }
     }
 }
@@ -26,7 +26,7 @@ pub fn queue_signals() -> QueuedSignalToken {
     }
 }
 
-fn _unqueue_signals(token: &mut QueuedSignalToken) -> nix::Result<()> {
+fn unqueue_signals_with_token(token: &mut QueuedSignalToken) -> nix::Result<()> {
     token.used = true;
     unsafe {
         let level = queue_signal_level() - 1;
@@ -39,7 +39,7 @@ fn _unqueue_signals(token: &mut QueuedSignalToken) -> nix::Result<()> {
 }
 
 pub fn unqueue_signals(mut token: QueuedSignalToken) -> nix::Result<()> {
-    _unqueue_signals(&mut token)
+    unqueue_signals_with_token(&mut token)
 }
 
 fn run_queued_signals() -> nix::Result<()> {

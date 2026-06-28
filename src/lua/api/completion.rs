@@ -36,7 +36,7 @@ async fn get_completions(ui: Ui, _lua: Lua, (val, callback): (Option<String>, Lu
     };
 
     ui.shell.trampoline_out_callback(move |mut ui, token| {
-        let mut ui_clone = ui.clone();
+        let ui_clone = ui.clone();
         let result = ui_clone.shell.get_completions(token, val, Box::new(move |matches| {
 
             let result = (|| {
@@ -52,15 +52,10 @@ async fn get_completions(ui: Ui, _lua: Lua, (val, callback): (Option<String>, Lu
             }
         }));
 
-        match result {
-            Ok(Some(msg)) if !msg.is_empty() => {
-                let tui = &mut ui_clone.try_borrow_mut()?.tui;
-                tui.clear_zle();
-                tui.add_zle_message(msg.as_ref());
-            },
-            err => {
-                let _ = ui_clone.report_error(err)?;
-            },
+        if let Some(msg) = result && !msg.is_empty() {
+            let tui = &mut ui_clone.try_borrow_mut()?.tui;
+            tui.clear_zle();
+            tui.add_zle_message(msg.as_ref());
         }
         anyhow::Ok(())
     }).await??;

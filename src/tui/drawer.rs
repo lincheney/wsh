@@ -357,7 +357,7 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
         let cell_uc = cell.style.underline_color.unwrap_or(Color::Reset);
 
         if cell.style.hyperlink != self.hyperlink {
-            self.hyperlink = cell.style.hyperlink.clone();
+            self.hyperlink.clone_from(&cell.style.hyperlink);
             queue!(self.writer, SetHyperlink(self.hyperlink.clone()))?;
         }
 

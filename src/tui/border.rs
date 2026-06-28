@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::io::Write;
 use bstr::{ByteSlice};
 use super::cell::Cell;
@@ -137,12 +138,22 @@ impl Border {
 
         let chars = Chars::from(self.kind);
         let cell = Cell::new_with_style(chars.horizontal, self.style.clone());
+        let left = if self.has_left() {
+            Cow::Owned(Cell::new_with_style(chars.bottom_left, self.style.clone()))
+        } else {
+            Cow::Borrowed(&cell)
+        };
+        let right = if self.has_right() {
+            Cow::Owned(Cell::new_with_style(chars.bottom_right, self.style.clone()))
+        } else {
+            Cow::Borrowed(&cell)
+        };
         render_row(
             drawer,
             width,
-            if self.has_left() { Cell::new_with_style(chars.top_left, self.style.clone()) } else { cell.clone() },
-            if self.has_right() { Cell::new_with_style(chars.top_right, self.style.clone()) } else { cell.clone() },
-            cell,
+            &left,
+            &right,
+            &cell,
             self.title_top.as_ref(),
         )
     }
@@ -158,12 +169,22 @@ impl Border {
 
         let chars = Chars::from(self.kind);
         let cell = Cell::new_with_style(chars.horizontal, self.style.clone());
+        let left = if self.has_left() {
+            Cow::Owned(Cell::new_with_style(chars.bottom_left, self.style.clone()))
+        } else {
+            Cow::Borrowed(&cell)
+        };
+        let right = if self.has_right() {
+            Cow::Owned(Cell::new_with_style(chars.bottom_right, self.style.clone()))
+        } else {
+            Cow::Borrowed(&cell)
+        };
         render_row(
             drawer,
             width,
-            if self.has_left() { Cell::new_with_style(chars.bottom_left, self.style.clone()) } else { cell.clone() },
-            if self.has_right() { Cell::new_with_style(chars.bottom_right, self.style.clone()) } else { cell.clone() },
-            cell,
+            &left,
+            &right,
+            &cell,
             self.title_bottom.as_ref(),
         )
     }
@@ -192,9 +213,9 @@ impl Border {
 fn render_row<W: Write, C: Canvas>(
     drawer: &mut Drawer<W, C>,
     width:  u16,
-    left:   Cell,
-    right:  Cell,
-    fill:   Cell,
+    left:   &Cell,
+    right:  &Cell,
+    fill:   &Cell,
     title:  Option<&Title>,
 ) -> std::io::Result<()> {
 

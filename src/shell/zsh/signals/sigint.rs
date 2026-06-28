@@ -37,10 +37,10 @@ pub(in crate::shell) fn install_signal_handler() -> Result<()> {
     super::install_signal_handler(signal::Signal::SIGINT, false, Some(sighandler))
 }
 
-pub(super) fn init(_ui: &crate::ui::Ui) -> Result<Rc<Notify>> {
+pub(super) fn init(_ui: &crate::ui::Ui) -> Rc<Notify> {
     let notify = Rc::new(Notify::new());
     NOTIFY.with_borrow_mut(|r| {
         *r = Some(notify.clone());
     });
-    Ok(notify)
+    notify
 }

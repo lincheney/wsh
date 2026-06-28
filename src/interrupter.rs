@@ -8,7 +8,7 @@ impl Interruptable {
     pub async fn run<T, F: Future<Output=T>>(&mut self, f: F) -> Option<T> {
         tokio::select!(
             result = f => Some(result),
-            _ = self.0.notified() => None,
+            () = self.0.notified() => None,
         )
     }
 }

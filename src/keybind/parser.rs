@@ -122,7 +122,7 @@ impl Parser {
             Mouse::Button{button: mouse, release}
         };
 
-        Some((Event::Mouse(MouseEvent{ x, y, mouse, modifiers }), len))
+        Some((Event::Mouse(MouseEvent{ mouse, modifiers, x, y }), len))
     }
 
     fn parse_csi(&self) -> Option<(Event, usize)> {

@@ -23,6 +23,7 @@ pub struct ZleWidget {
     ptr: NonNull<bindings::thingy>,
 }
 
+#[derive(Clone, Copy)]
 pub struct WidgetArgs {
     pub times: u16,
     pub insert: bool,

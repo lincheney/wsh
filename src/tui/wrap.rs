@@ -50,7 +50,7 @@ impl WrapToken<'_> {
         match self {
             Self::String(s) => Some(s),
             Self::AsciiChar(c) => Some(std::str::from_utf8(c).unwrap()),
-            _ => None,
+            Self::LineBreak => None,
         }
     }
 
@@ -58,7 +58,7 @@ impl WrapToken<'_> {
         match self {
             Self::String(s) => s.width(),
             Self::AsciiChar(_) => 1,
-            _ => 0,
+            Self::LineBreak => 0,
         }
     }
 }

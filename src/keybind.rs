@@ -32,7 +32,7 @@ pub enum Action {
 
 pub struct KeyHandler<'a>( pub &'a mut Ui );
 crate::impl_deref_helper!(self: KeyHandler<'a>, &self.0 => Ui);
-crate::impl_deref_helper!(mut self: KeyHandler<'a>, &mut self.0 => Ui);
+crate::impl_deref_helper!(mut self: KeyHandler<'a>, &mut *self.0 => Ui);
 
 impl KeyHandler<'_> {
 

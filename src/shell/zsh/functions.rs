@@ -68,6 +68,7 @@ impl Function {
 
     pub fn execute<'a, T: 'a + AsRef<MetaStr>, I: Iterator<Item=&'a T>>(
         &self,
+        _token: crate::shell::TrampolineToken,
         arg0: Option<&'a MetaStr>,
         args: I,
     ) -> c_int {
@@ -75,6 +76,7 @@ impl Function {
     }
 
     pub fn execute_by_name<'a, T: 'a + AsRef<MetaStr>, I: Iterator<Item=&'a T>>(
+        _token: crate::shell::TrampolineToken,
         name: &'a MetaStr,
         args: I,
     ) -> Option<c_int> {

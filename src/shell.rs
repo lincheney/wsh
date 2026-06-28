@@ -212,8 +212,8 @@ impl Shell {
         }
     }
 
-    pub fn exec(&self, _token: TrampolineToken, string: MetaString) -> c_long {
-        zsh::execstring(string.as_ref(), Default::default())
+    pub fn exec(&self, _token: TrampolineToken, string: &MetaStr) -> c_long {
+        zsh::execstring(string, Default::default())
     }
 
     pub fn exec_subshell<I: Iterator<Item=FdAction>>(
@@ -276,10 +276,9 @@ impl Shell {
         _token: TrampolineToken,
         line: BString,
         callback: Box<dyn FnMut(std::iter::Peekable<zsh::completion::MatchIter>) -> ControlFlow<()>>,
-    ) -> Result<Option<BString>> {
+    ) -> Option<BString> {
         // this may block for a long time
-        let (msg, _) = self.capture_shout(false, true, || zsh::completion::get_completions(line, callback));
-        Ok(msg)
+        self.capture_shout(false, true, || zsh::completion::get_completions(line, callback)).0
     }
 
     pub fn insert_completion(&self, string: BString, m: &completion::Match) -> (BString, usize) {
@@ -355,7 +354,7 @@ impl Shell {
         results
     }
 
-    pub fn get_var_as_string(&self, name: &MetaStr, zle: bool) -> anyhow::Result<Option<BString>> {
+    pub fn get_var_as_string(&self, name: &MetaStr, zle: bool) -> Option<BString> {
         if zle {
             self.start_zle_scope();
         }
@@ -363,7 +362,7 @@ impl Shell {
         if zle {
             self.end_zle_scope();
         }
-        Ok(result)
+        result
     }
 
     pub fn startparamscope(&self) {
@@ -520,29 +519,6 @@ impl Shell {
         Ok(Rc::new(func))
     }
 
-    pub fn exec_function<'a, T: 'a + AsRef<MetaStr>, I: Iterator<Item=&'a T>>(
-        &self,
-        _token: TrampolineToken,
-        function: Rc<zsh::functions::Function>,
-        arg0: Option<&'a MetaStr>,
-        args: I,
-    ) -> c_int {
-        function.execute(arg0, args)
-    }
-
-    pub fn exec_function_by_name<'a, T: 'a + AsRef<MetaStr>, I: Iterator<Item=&'a T>>(
-        &self,
-        _token: TrampolineToken,
-        function: &'a MetaStr,
-        args: I,
-    ) -> Option<c_int> {
-        zsh::functions::Function::execute_by_name(function, args)
-    }
-
-    pub fn get_function_source(&self, function: Rc<zsh::functions::Function>) -> BString {
-        function.get_source()
-    }
-
     pub fn queue_signal_level(&self) -> i32 {
         zsh::signals::queue_signal_level()
     }
@@ -569,11 +545,11 @@ impl Shell {
     }
 
     pub fn winch_block(&self) {
-        zsh::winch_block()
+        zsh::winch_block();
     }
 
     pub fn winch_unblock(&self) {
-        zsh::winch_unblock()
+        zsh::winch_unblock();
     }
 
     pub fn capture_shout<T, F: FnOnce() -> T>(

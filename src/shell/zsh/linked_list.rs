@@ -8,7 +8,7 @@ pub struct LinkedList<'a, T: ?Sized> {
     _phantom: PhantomData<&'a T>,
 }
 
-impl<'a, T: ?Sized> LinkedList<'a, T> {
+impl<T: ?Sized> LinkedList<'_, T> {
 
     pub fn new_from_ptrs<I: Iterator<Item=*const T>>(iter: I) -> Self {
 

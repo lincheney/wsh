@@ -203,7 +203,7 @@ impl Ui {
             *size = Some(ui.size);
             let (width, height) = ui.size;
             // redraw all if dimensions have changed
-            if height != ui.tui.max_height || width != ui.tui.get_size().0 as _ {
+            if height != ui.tui.max_height || width != ui.tui.get_size().0.into() {
                 ui.tui.max_height = height;
                 ui.dirty = true;
             }
@@ -298,10 +298,8 @@ impl Ui {
         // cancel the current command line?
 
         if !self.events.is_paused() {
-            if let Some(result) = self.shell.accept_line(Some(b"".into())) {
-                if result.await.is_err() {
-                    return Ok(())
-                }
+            if let Some(result) = self.shell.accept_line(Some(b"".into())) && result.await.is_err() {
+                return Ok(())
             }
             self.try_borrow_mut()?.reset();
             self.trigger_buffer_change_callbacks().await?;
@@ -595,9 +593,9 @@ impl Ui {
         // a func may run subprocesses so lock the ui
         let lock = self.has_foreground_process.lock().await;
         self.shell.set_zle_buffer(old_buffer, old_cursor as _);
-        let _ = self.clone().shell.trampoline_out_callback(move |ui, token| {
+        let _ = self.clone().shell.trampoline_out_callback(move |_ui, token| {
             let num_chars: crate::shell::MetaString = num_chars.to_string().into();
-            ui.shell.exec_function_by_name(token, func.as_ref(), [num_chars].iter());
+            crate::shell::Function::execute_by_name(token, func.as_ref(), [num_chars].iter());
         }).await;
         let zle = self.shell.get_zle_buffer();
         drop(lock);

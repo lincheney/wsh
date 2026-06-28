@@ -67,7 +67,7 @@ impl Canvas for Buffer {
         let len = self.content.len();
         if cfg!(debug_assertions) {
             if start >= len || end > len {
-                log::error!("Trying to draw outside of bounds: len={len}, start={start:?}, end={end:?}");
+                // log::error!("Trying to draw outside of bounds: len={len}, start={start:?}, end={end:?}");
             }
         }
         &self.content[start.min(len)..end.min(len)]
@@ -79,7 +79,7 @@ impl Canvas for Buffer {
         let len = self.content.len();
         if cfg!(debug_assertions) {
             if start >= len || end > len {
-                log::error!("Trying to draw outside of bounds: len={len}, start={start:?}, end={end:?}");
+                // log::error!("Trying to draw outside of bounds: len={len}, start={start:?}, end={end:?}");
             }
         }
         &mut self.content[start..end]

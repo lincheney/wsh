@@ -176,12 +176,12 @@ pub async fn shell_run_with_args(
                 let stderr = FdOverride::new(Stream::Stderr(stderr))?;
 
                 let code = match cmd {
-                    ShellRunCmd::Simple(command) => ui.shell.exec(token, command.into()),
+                    ShellRunCmd::Simple(command) => ui.shell.exec(token, MetaString::from(command).as_ref()),
                     ShellRunCmd::Function { func, args, arg0, .. } => {
                         let arg0: Option<MetaString> = arg0.map(|x| x.into());
                         let arg0 = arg0.as_ref().map(|x| x.as_ref());
                         let args: Vec<_> = args.into_iter().map(MetaString::from).collect();
-                        ui.shell.exec_function(token, func.clone(), arg0, args.iter()).into()
+                        func.execute(token, arg0, args.iter()).into()
                     },
                 };
 

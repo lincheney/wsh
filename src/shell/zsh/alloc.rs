@@ -14,7 +14,7 @@ unsafe impl GlobalAlloc for Zalloc {
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         unsafe {
-            System.dealloc(ptr, layout)
+            System.dealloc(ptr, layout);
         }
     }
 }
