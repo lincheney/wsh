@@ -171,6 +171,12 @@ impl Ui {
                 let mut ui = self.try_borrow_mut()?;
 
                 if size == Some(ui.size) {
+
+                    // grab shell vars as late as possible
+                    if (ui.dirty || ui.cmdline.is_dirty()) && !ui.cmdline.is_custom() && shell_vars.is_none() {
+                        shell_vars = Some(crate::tui::command_line::CommandLineState::get_shell_vars(&self.shell, ui.size.0));
+                    }
+
                     return ui.draw(shell_vars, cursor_y);
                 }
 
@@ -187,12 +193,8 @@ impl Ui {
                     return Ok(vec![])
                 }
 
-                if (ui.dirty || ui.cmdline.is_dirty()) && !ui.cmdline.is_custom() && shell_vars.is_none() {
-                    shell_vars = Some(crate::tui::command_line::CommandLineState::get_shell_vars(&self.shell, ui.size.0));
-                }
-
                 if !ui.dirty {
-                    return ui.draw(shell_vars, cursor_y);
+                    continue;
                 }
             }
 
