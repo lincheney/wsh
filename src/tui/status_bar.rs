@@ -49,7 +49,7 @@ impl StatusBar {
             None,
             [].iter(),
         ).render(drawer, false, true, callback)?;
-        drawer.clear_to_end_of_line(None)?;
+        drawer.clear_to_end_of_line(None, false)?;
         Ok(())
     }
 }

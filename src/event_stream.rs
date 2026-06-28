@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::rc::Rc;
 use bstr::BString;
 use anyhow::Result;
@@ -19,17 +20,23 @@ enum Message {
 #[derive(Clone)]
 pub struct EventController {
     queue: mpsc::UnboundedSender<Message>,
-    pauser: Rc<pauser::Pauser>,
+    pauser: Rc<(pauser::Pauser, Cell<bool>)>,
     position_queue: mpsc::UnboundedSender<oneshot::Sender<(usize, usize)>>,
 }
 
 impl EventController {
     pub fn pause(&self) {
-        self.pauser.pause();
+        self.pauser.1.set(true);
+        self.pauser.0.pause();
     }
 
     pub fn unpause(&self) {
-        self.pauser.unpause();
+        self.pauser.1.set(false);
+        self.pauser.0.unpause();
+    }
+
+    pub fn is_paused(&self) -> bool {
+        self.pauser.1.get()
     }
 
     pub fn get_cursor_position(&self) -> impl Future<Output=Result<(usize, usize)>> + use<> {
@@ -77,7 +84,7 @@ impl EventStream {
         };
         let controller = EventController {
             queue: sender,
-            pauser: Rc::new(pauser),
+            pauser: Rc::new((pauser, Cell::new(false))),
             position_queue: position_sender,
         };
         (stream, controller)

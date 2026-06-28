@@ -1,6 +1,5 @@
 use tokio::sync::{watch};
 
-#[allow(dead_code)]
 pub struct Pauser(watch::Sender<bool>);
 #[derive(Clone)]
 pub struct Pausable(watch::Receiver<bool>, bool);

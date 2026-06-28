@@ -219,7 +219,7 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
     }
 
     pub fn goto_newline(&mut self, cell: Option<&Cell>) -> Result<()> {
-        self.clear_to_end_of_line(cell)?;
+        self.clear_to_end_of_line(cell, false)?;
         self.pos = (0, self.pos.1 + 1);
         Ok(())
     }
@@ -232,7 +232,7 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
         }
     }
 
-    pub fn clear_to_end_of_line(&mut self, cell: Option<&Cell>) -> Result<()> {
+    pub fn clear_to_end_of_line(&mut self, cell: Option<&Cell>, force: bool) -> Result<()> {
         // clear the rest of this line
         let width = self.term_width();
         if self.pos.0 < width {
@@ -240,13 +240,16 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
             let cells = self.canvas.get_cell_range_mut(self.pos, (width, self.pos.1));
 
             let style = cell.as_ref().map(|c| c.style.clone());
-            if !Self::cells_are_cleared(cells, style.clone()) {
-                for c in cells.iter_mut() {
-                    c.reset();
-                }
-                if let Some(style) = style {
+            let already_cleared = Self::cells_are_cleared(cells, style.clone());
+            if force || !already_cleared {
+                if !already_cleared {
                     for c in cells.iter_mut() {
-                        c.style = style.clone();
+                        c.reset();
+                    }
+                    if let Some(style) = style {
+                        for c in cells.iter_mut() {
+                            c.style = style.clone();
+                        }
                     }
                 }
                 self.move_to_cur_pos(true)?;
@@ -298,7 +301,7 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
     pub fn draw_cell_n_times(&mut self, cell: &Cell, force: bool, n: u16) -> Result<()> {
         if self.pos.0 + n == self.term_width() {
             // just clear
-            self.clear_to_end_of_line(Some(cell))?;
+            self.clear_to_end_of_line(Some(cell), false)?;
             self.move_to((self.pos.0 + n, self.pos.1));
         } else {
             for _ in 0 .. n {

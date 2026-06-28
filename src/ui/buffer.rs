@@ -261,7 +261,7 @@ impl Buffer {
             None,
             [].iter(),
         ).render(drawer, false, false, callback)?;
-        drawer.clear_to_end_of_line(None)?;
+        drawer.clear_to_end_of_line(None, crate::shell::is_interrupted())?;
         Ok(())
     }
 

@@ -324,7 +324,7 @@ impl Tui {
                 for _ in drawer.get_pos().1 + 1 .. status_bar_y {
                     drawer.goto_newline(None)?;
                 }
-                drawer.clear_to_end_of_line(None)?;
+                drawer.clear_to_end_of_line(None, false)?;
             } else {
                 drawer.clear_to_end_of_screen(None)?;
             }

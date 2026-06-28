@@ -9,7 +9,7 @@ pub mod sigwinch;
 pub mod sigint;
 pub mod sigchld;
 
-pub static GLOBAL_SELF_PIPE: AtomicI32 = AtomicI32::new(-1);
+static SELF_PIPE: AtomicI32 = AtomicI32::new(-1);
 
 pub const SIGCHLD_BYTE: u8 = b'c';
 pub const SIGWINCH_BYTE: u8 = b'w';
@@ -152,7 +152,7 @@ fn spawn_self_pipe_reader(ui: crate::ui::Ui) -> Result<()> {
     crate::utils::set_fd_nonblocking(&writer)?;
     crate::utils::set_fd_nonblocking(&reader)?;
 
-    GLOBAL_SELF_PIPE.store(writer.into_raw_fd(), Ordering::Release);
+    SELF_PIPE.store(writer.into_raw_fd(), Ordering::Release);
 
     let sigchld_data = sigchld::init(&ui)?;
     let sigwinch_data = sigwinch::init(&ui)?;
@@ -177,7 +177,7 @@ fn spawn_self_pipe_reader(ui: crate::ui::Ui) -> Result<()> {
 }
 
 pub fn write_to_self_pipe(byte: u8) -> bool {
-    let pipe = GLOBAL_SELF_PIPE.load(Ordering::Acquire);
+    let pipe = SELF_PIPE.load(Ordering::Acquire);
     if pipe != -1 {
         let pipe = unsafe{ BorrowedFd::borrow_raw(pipe) };
         nix::unistd::write(pipe, &[byte]).unwrap();
@@ -218,7 +218,7 @@ pub fn cleanup() {
         }
     });
 
-    let fd = GLOBAL_SELF_PIPE.swap(-1, Ordering::AcqRel);
+    let fd = SELF_PIPE.swap(-1, Ordering::AcqRel);
     if fd != -1 {
         let _ = nix::unistd::close(fd);
     }

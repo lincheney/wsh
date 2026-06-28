@@ -372,7 +372,7 @@ impl Nodes {
     ) -> std::io::Result<()> {
         let mut renderer = NodeRenderer::new_for_layout(&self.root, &self.map, tmp);
         renderer.render(drawer, false, true, NoRendererCallback::None)?;
-        drawer.clear_to_end_of_line(None)
+        drawer.clear_to_end_of_line(None, false)
     }
 
     pub fn render_node<W: Write, C: Canvas>(
@@ -383,7 +383,7 @@ impl Nodes {
     ) -> std::io::Result<()> {
         let mut renderer = NodeRenderer::new(node, &self.map, tmp);
         renderer.render(drawer, false, true, NoRendererCallback::None)?;
-        drawer.clear_to_end_of_line(None)
+        drawer.clear_to_end_of_line(None, false)
     }
 }
 

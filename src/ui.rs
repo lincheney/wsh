@@ -161,48 +161,73 @@ impl Ui {
         }
     }
 
-    async fn draw_with_lock(&self, _lock: &mut PrintLockGuard<'_>) -> Result<Vec<usize>> {
+    pub fn draw_blocking(&self, force: bool) -> Result<()> {
+        self.is_drawing.set(false);
+        if let Ok(mut lock) = self.print_lock.try_lock() && lock.get_value() == 0 {
+            let mut size = None;
+            self.draw_with_lock_blocking(&mut lock, &mut size, None, force)?;
+            Ok(())
+        } else {
+            // the shell will draw it later
+            Ok(())
+        }
+    }
+
+    async fn draw_with_lock(&self, lock: &mut PrintLockGuard<'_>) -> Result<Vec<usize>> {
         let mut size = None;
-        let mut shell_vars = None;
         let mut cursor_y = None;
 
         loop {
-            {
-                let mut ui = self.try_borrow_mut()?;
+            if let Some(result) = self.draw_with_lock_blocking(lock, &mut size, cursor_y, false)? {
+                return Ok(result)
+            } else {
+                // get the cursor y then reacquire the ui next loop
+                let cursor = self.events.get_cursor_position();
+                cursor_y = Some(tokio::time::timeout(crate::DEFAULT_DURATION, cursor).await.unwrap()?.1 as _);
+            }
+        }
+    }
 
-                if size == Some(ui.size) {
+    fn draw_with_lock_blocking(
+        &self,
+        _lock: &mut PrintLockGuard<'_>,
+        size: &mut Option<(u32, u32)>,
+        cursor_y: Option<u32>,
+        force: bool,
+    ) -> Result<Option<Vec<usize>>> {
 
-                    // grab shell vars as late as possible
-                    if (ui.dirty || ui.cmdline.is_dirty()) && !ui.cmdline.is_custom() && shell_vars.is_none() {
-                        shell_vars = Some(crate::tui::command_line::CommandLineState::get_shell_vars(&self.shell, ui.size.0));
-                    }
+        let mut ui = self.try_borrow_mut()?;
 
-                    return ui.draw(shell_vars, cursor_y);
-                }
+        if *size != Some(ui.size) {
 
-                // if the size has changed, recompute everything
-                size = Some(ui.size);
-                let (width, height) = ui.size;
-                // redraw all if dimensions have changed
-                if height != ui.tui.max_height || width != ui.tui.get_size().0 as _ {
-                    ui.tui.max_height = height;
-                    ui.dirty = true;
-                }
-
-                if !(ui.dirty || ui.buffer.dirty || ui.tui.dirty || ui.status_bar.dirty || ui.cmdline.is_dirty()) {
-                    return Ok(vec![])
-                }
-
-                if !ui.dirty {
-                    continue;
-                }
+            // if the size has changed, recompute everything
+            *size = Some(ui.size);
+            let (width, height) = ui.size;
+            // redraw all if dimensions have changed
+            if height != ui.tui.max_height || width != ui.tui.get_size().0 as _ {
+                ui.tui.max_height = height;
+                ui.dirty = true;
             }
 
-            // dirty: get the cursor y then reacquire the ui next loop
-            let cursor = self.events.get_cursor_position();
-            cursor_y = Some(tokio::time::timeout(crate::DEFAULT_DURATION, cursor).await.unwrap()?.1 as _);
+            if !(ui.dirty || ui.buffer.dirty || ui.tui.dirty || ui.status_bar.dirty || ui.cmdline.is_dirty()) {
+                return Ok(Some(vec![]))
+            }
+
+            if ui.dirty && !force {
+                // TOO dirty, need the cursor position
+                return Ok(None);
+            }
 
         }
+
+        // grab shell vars as late as possible
+        let shell_vars = if (ui.dirty || ui.cmdline.is_dirty()) && !ui.cmdline.is_custom() {
+            Some(crate::tui::command_line::CommandLineState::get_shell_vars(&self.shell, ui.size.0))
+        } else {
+            None
+        };
+
+        Ok(Some(ui.draw(shell_vars, cursor_y)?))
     }
 
     pub async fn call_lua_fn<T: IntoLuaMulti + 'static>(&self, draw: bool, callback: mlua::Function, arg: T) -> Result<Option<LuaValue>> {
@@ -273,15 +298,17 @@ impl Ui {
         // sigint
         // cancel the current command line?
 
-        let Some(result) = self.shell.accept_line(Some(b"".into())) else {
-            return Ok(())
-        };
-        if result.await.is_err() {
-            return Ok(())
+        if !self.events.is_paused() {
+            ::log::debug!("DEBUG(spores)\t{}\t= {:?}", stringify!(123), 123);
+            if let Some(result) = self.shell.accept_line(Some(b"".into())) {
+                if result.await.is_err() {
+                    return Ok(())
+                }
+            }
+            self.try_borrow_mut()?.reset();
+            self.trigger_buffer_change_callbacks().await?;
+            self.start_cmd(Some(&"".into())).await?;
         }
-        self.try_borrow_mut()?.reset();
-        self.trigger_buffer_change_callbacks().await?;
-        self.start_cmd(Some(&"".into())).await?;
         Ok(())
     }
 
@@ -429,13 +456,14 @@ impl Ui {
         // unpause events
         self.events.unpause();
 
-        self.try_borrow()?.activate()?;
-        // let recovered = self.runtime.block_on(self.recover_from_unhandled_output(Some(&mut print_lock), true))?;
+        {
+            let mut ui = self.try_borrow_mut()?;
+            ui.activate()?;
+            ui.dirty = true;
+        }
+        self.queue_draw();
         // release locks
         drop(fg_lock);
-        // if crate::log_if_err(recovered) == Some(true) || !output.is_empty() {
-            // self.queue_draw();
-        // }
         Ok(code)
     }
 
@@ -646,7 +674,9 @@ impl Ui {
         }
 
         let result = loop {
+
             let trampoline = self.shell.trampoline_in();
+            self.shell.install_sigint_handler()?;
             let result = self.runtime.block_on(async {
                 tokio::select!(
                     result = &mut future => ControlFlow::Break(result),

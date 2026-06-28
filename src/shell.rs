@@ -605,4 +605,8 @@ impl Shell {
 
     }
 
+    pub fn install_sigint_handler(&self) -> Result<()> {
+        zsh::signals::sigint::install_signal_handler()
+    }
+
 }
