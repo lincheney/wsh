@@ -11,7 +11,7 @@ thread_local! {
 static SIZE: AtomicU64 = AtomicU64::new(0);
 
 pub(in crate::shell) fn fetch_term_size_from_zsh() {
-    let _ = super::super::with_queued_signals(|| unsafe {
+    let _ = super::with_queued_signals(|_| unsafe {
         let cols = zsh_sys::zterm_columns.max(1).min(u32::MAX as _) as u64;
         let lines = zsh_sys::zterm_lines.max(1).min(u32::MAX as _) as u64;
         SIZE.store((cols << 16) | lines, Ordering::Release);

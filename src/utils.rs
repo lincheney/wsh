@@ -1,8 +1,8 @@
 use anyhow::Result;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 
-mod const_hash_map;
-pub use const_hash_map::ConstHashMap;
+mod const_hash;
+pub use const_hash::{ConstHashMap};
 #[macro_use]
 pub mod strong_weak_wrapper;
 #[macro_use]

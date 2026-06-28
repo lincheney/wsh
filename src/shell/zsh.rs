@@ -5,7 +5,7 @@ use nix::libc;
 use std::os::fd::{RawFd};
 use std::os::raw::*;
 use std::default::Default;
-use std::ptr::{null_mut, read_volatile, write_volatile};
+use std::ptr::{null_mut, read_volatile};
 use std::borrow::Borrow;
 use bstr::{BStr, BString, ByteSlice};
 
@@ -370,70 +370,6 @@ pub fn set_error_verbosity(verbosity: ErrorVerbosity) -> ErrorVerbosity {
             ErrorVerbosity::Quiet
         }
     }
-}
-
-pub fn queue_signal_level() -> i32 {
-    unsafe {
-        read_volatile(&raw const zsh_sys::queueing_enabled)
-    }
-}
-
-fn queue_signals() {
-    unsafe {
-        write_volatile(&raw mut zsh_sys::queueing_enabled, queue_signal_level() + 1);
-    }
-}
-
-fn unqueue_signals() -> nix::Result<()> {
-    unsafe {
-        let level = queue_signal_level() - 1;
-        write_volatile(&raw mut zsh_sys::queueing_enabled, level);
-        if level == 0 {
-            run_queued_signals()?;
-        }
-    }
-    Ok(())
-}
-
-fn run_queued_signals() -> nix::Result<()> {
-    const MAX_QUEUE_SIZE: i32 = 128;
-
-    unsafe {
-        loop {
-            let queue_front = read_volatile(&raw const zsh_sys::queue_front);
-            if queue_front == read_volatile(&raw const zsh_sys::queue_rear) { /* while signals in queue */
-                break
-            }
-            let queue_front = queue_front + 1;
-            write_volatile(&raw mut zsh_sys::queue_front, queue_front % MAX_QUEUE_SIZE);
-            let sigset = zsh_sys::signal_mask_queue[queue_front as usize];
-            let sigset = signal::SigSet::from_sigset_t_unchecked(std::mem::transmute::<zsh_sys::__sigset_t, nix::libc::sigset_t>(sigset));
-            let mut oset = signal::SigSet::empty();
-            signal::sigprocmask(signal::SigmaskHow::SIG_SETMASK, Some(&sigset), Some(&mut oset))?;
-            zsh_sys::zhandler(zsh_sys::signal_queue[queue_front as usize]);
-            signal::sigprocmask(signal::SigmaskHow::SIG_SETMASK, Some(&oset), None)?;
-        }
-    }
-    Ok(())
-}
-
-pub fn dont_queue_signals() -> nix::Result<()> {
-    unsafe {
-        write_volatile(&raw mut zsh_sys::queueing_enabled, 0);
-        run_queued_signals()
-    }
-}
-
-pub fn restore_queue_signals(level: i32) {
-    unsafe {
-        write_volatile(&raw mut zsh_sys::queueing_enabled, level);
-    }
-}
-
-pub fn with_queued_signals<T, F: FnOnce() -> T>(func: F) -> (T, nix::Result<()>) {
-    queue_signals();
-    let result = func();
-    (result, unqueue_signals())
 }
 
 pub fn exit(code: i32) {

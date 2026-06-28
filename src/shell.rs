@@ -276,7 +276,7 @@ impl Shell {
         _token: TrampolineToken,
         line: BString,
         callback: Box<dyn FnMut(std::iter::Peekable<zsh::completion::MatchIter>) -> ControlFlow<()>>,
-    ) -> Result<BString> {
+    ) -> Result<Option<BString>> {
         // this may block for a long time
         let (msg, _) = self.capture_shout(false, true, || zsh::completion::get_completions(line, callback));
         Ok(msg)
@@ -544,19 +544,19 @@ impl Shell {
     }
 
     pub fn queue_signal_level(&self) -> i32 {
-        zsh::queue_signal_level()
+        zsh::signals::queue_signal_level()
     }
 
     pub fn with_queued_signals<T, F: FnOnce() -> T>(&self, func: F) -> (T, nix::Result<()>) {
-        zsh::with_queued_signals(func)
+        zsh::signals::with_queued_signals(|_| func())
     }
 
     pub fn dont_queue_signals(&self) -> nix::Result<()> {
-        zsh::dont_queue_signals()
+        zsh::signals::dont_queue_signals()
     }
 
     pub fn restore_queue_signals(&self, level: i32) {
-        zsh::restore_queue_signals(level);
+        zsh::signals::restore_queue_signals(level);
     }
 
     pub fn call_hook_func<'a, T: 'a + AsRef<MetaStr>, I: Iterator<Item=&'a T>>(
@@ -581,7 +581,7 @@ impl Shell {
         passthrough: bool,
         capture: bool,
         f: F,
-    ) -> (BString, T) {
+    ) -> (Option<BString>, T) {
 
         if let Ok(mut sink) = self.sink.try_borrow_mut() {
             unsafe {
@@ -600,7 +600,7 @@ impl Shell {
             }
         } else {
             // we are probably already capturing
-            ("".into(), f())
+            (None, f())
         }
 
     }

@@ -23,7 +23,6 @@ use crossterm::{
 };
 use crate::tui::{
     MoveDown,
-    MoveUp,
 };
 
 const ENABLE_SGR_MOUSE: style::Print<&str> = style::Print("\x1b[?1000;1006h");
@@ -299,7 +298,6 @@ impl Ui {
         // cancel the current command line?
 
         if !self.events.is_paused() {
-            ::log::debug!("DEBUG(spores)\t{}\t= {:?}", stringify!(123), 123);
             if let Some(result) = self.shell.accept_line(Some(b"".into())) {
                 if result.await.is_err() {
                     return Ok(())
@@ -309,6 +307,11 @@ impl Ui {
             self.trigger_buffer_change_callbacks().await?;
             self.start_cmd(Some(&"".into())).await?;
         }
+        Ok(())
+    }
+
+    pub fn handle_sigchld_shout(&self, shout: BString) -> Result<()> {
+        ::log::debug!("DEBUG(whines)\t{}\t= {:?}", stringify!(shout), shout);
         Ok(())
     }
 
@@ -367,7 +370,7 @@ impl Ui {
 
     pub async fn zle_cmd_refresh(&self) -> Result<bool> {
         if self.print_lock.zle_cmd_refresh() {
-            self.recover_from_unhandled_output(None, false).await
+            self.recover_from_unhandled_output(None).await
         } else {
             Ok(false)
         }
@@ -376,7 +379,6 @@ impl Ui {
     pub async fn recover_from_unhandled_output<'a>(
         &'a self,
         lock: Option<&mut PrintLockGuard<'a>>,
-        allow_dirty: bool,
     ) -> Result<bool> {
 
         let mut print_lock;
@@ -394,36 +396,18 @@ impl Ui {
                 self.try_borrow()?.activate()?;
             }
 
-            if allow_dirty {
-                let ui = &mut *self.try_borrow_mut()?;
-                ui.cmdline.make_command_line(&mut ui.buffer).reset();
+            // move down one line if not at start of line
+            let cursor = self.events.get_cursor_position();
+            let cursor = tokio::time::timeout(crate::DEFAULT_DURATION, cursor).await.unwrap().unwrap_or((0, 0));
 
-                let y_offset = ui.cmdline.y_offset_to_end();
-                ui.dirty = true;
-
-                // move back up
-                queue!(ui.stdout, BeginSynchronizedUpdate, MoveUp(y_offset))?;
-                if ui.cmdline.cursor_coord.0 != 0 {
-                    queue!(
-                        ui.stdout,
-                        MoveUp(1),
-                        MoveToColumn(ui.cmdline.cursor_coord.0),
-                    )?;
-                }
-
-            } else {
-                // move down one line if not at start of line
-                let cursor = self.events.get_cursor_position();
-                let cursor = tokio::time::timeout(crate::DEFAULT_DURATION, cursor).await.unwrap().unwrap_or((0, 0));
-
-                let ui = &mut *self.try_borrow_mut()?;
-                if cursor.0 != 0 {
-                    queue!(ui.stdout, style::Print("\r\n"))?;
-                }
-                execute!(ui.stdout, style::ResetColor)?;
-                ui.dirty = true;
-                ui.cmdline.make_command_line(&mut ui.buffer).hard_reset();
+            let ui = &mut *self.try_borrow_mut()?;
+            if cursor.0 != 0 {
+                queue!(ui.stdout, style::Print("\r\n"))?;
             }
+            execute!(ui.stdout, style::ResetColor)?;
+            ui.dirty = true;
+            ui.cmdline.make_command_line(&mut ui.buffer).hard_reset();
+            self.queue_draw();
         }
 
         print_lock.release();
@@ -456,12 +440,18 @@ impl Ui {
         // unpause events
         self.events.unpause();
 
+        let redraw = crate::shell::is_interrupted();
         {
             let mut ui = self.try_borrow_mut()?;
             ui.activate()?;
-            ui.dirty = true;
+            if redraw {
+                ui.dirty = true;
+            }
         }
-        self.queue_draw();
+        if redraw {
+            self.queue_draw();
+        }
+
         // release locks
         drop(fg_lock);
         Ok(code)
@@ -472,7 +462,7 @@ impl Ui {
             self.try_borrow_mut()?.reset();
         }
         self.events.unpause();
-        self.recover_from_unhandled_output(Some(lock), false).await?;
+        self.recover_from_unhandled_output(Some(lock)).await?;
         Ok(())
     }
 
@@ -643,7 +633,7 @@ impl Ui {
             if freeze_events {
                 self.events.unpause();
             }
-            let recovered = self.recover_from_unhandled_output(None, false).await;
+            let recovered = self.recover_from_unhandled_output(None).await;
             drop(lock);
             if crate::log_if_err(recovered) == Some(true) {
                 self.queue_draw();

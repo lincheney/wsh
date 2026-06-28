@@ -114,8 +114,8 @@ impl Sink {
         }
     }
 
-    pub fn read(&mut self) -> BString {
-        self.cookie.buffer.take().unwrap_or_default()
+    pub fn read(&mut self) -> Option<BString> {
+        self.cookie.buffer.take_if(|b| !b.is_empty())
     }
 
     pub fn override_file(&mut self, file: *mut *mut FILE, passthrough: bool, capture: bool) -> FileGuard<'_> {

@@ -1,3 +1,4 @@
+use std::ptr::{read_volatile, write_volatile};
 use anyhow::Result;
 use nix::sys::signal;
 use std::os::raw::{c_int};
@@ -8,6 +9,8 @@ use std::os::fd::{IntoRawFd, BorrowedFd};
 pub mod sigwinch;
 pub mod sigint;
 pub mod sigchld;
+mod queue;
+pub use queue::*;
 
 static SELF_PIPE: AtomicI32 = AtomicI32::new(-1);
 
@@ -30,12 +33,10 @@ thread_local! {
 // what does this do
 // we extend the signal trap array to accommodate some fake signals
 // we install a trap on a fake signal
-// we install a sigchld handler that redirects it to our fake signal
+// we install a sig handler that redirects it to our fake signal
 // zhandler() has no special handling for the fake signal so all it does is run our trap
 // either immediately or even later when it is queued
 // either way we know when our trap is run, it is being run for real (not queued)
-// before zhandler() we stick any additional pids into the jobtab that we need
-// and after zhandler() we loop over the jobtab for any statuses that have updated
 
 const SIGTRAPPED_COUNT: c_int = 1024;
 static TRAP_QUEUING_ENABLED: AtomicI32 = AtomicI32::new(0);
@@ -54,7 +55,7 @@ extern "C" fn sighandler(sig: c_int) {
         zsh_sys::last_signal = sig;
 
         // bypass traps if possible
-        if zsh_sys::queueing_enabled == 0 {
+        if queue_signal_level() == 0 {
             invoke_signal_handler(sig, false);
             return;
         }
@@ -63,10 +64,10 @@ extern "C" fn sighandler(sig: c_int) {
         // is this safe? trap queuing is only used for pid waiting
         // we just run a builtin so should be ok
 
-        let trap_queueing_enabled = zsh_sys::trap_queueing_enabled;
+        let trap_queueing_enabled = read_volatile(&raw const zsh_sys::trap_queueing_enabled);
         if trap_queueing_enabled > 0 {
             TRAP_QUEUING_ENABLED.store(trap_queueing_enabled, Ordering::Release);
-            zsh_sys::trap_queueing_enabled = 0;
+            write_volatile(&raw mut zsh_sys::trap_queueing_enabled, 0);
         }
         // this should call our trap
         let converted = convert_to_custom_signal(sig);
@@ -75,7 +76,7 @@ extern "C" fn sighandler(sig: c_int) {
             zsh_sys::last_signal = sig;
         }
         TRAP_QUEUING_ENABLED.store(0, Ordering::Release);
-        zsh_sys::trap_queueing_enabled = trap_queueing_enabled;
+        write_volatile(&raw mut zsh_sys::trap_queueing_enabled, trap_queueing_enabled);
     }
 }
 
@@ -88,10 +89,9 @@ pub fn invoke_signal_handler_entrypoint(arg: Option<&[u8]>) -> c_int {
         else { return 1 };
     let signal = convert_from_custom_signal(signal);
 
-    #[allow(static_mut_refs)]
     unsafe {
-        debug_assert_eq!(zsh_sys::queueing_enabled, 0);
-        zsh_sys::trap_queueing_enabled = TRAP_QUEUING_ENABLED.load(Ordering::Acquire);
+        debug_assert_eq!(queue_signal_level(), 0);
+        write_volatile(&raw mut zsh_sys::trap_queueing_enabled, TRAP_QUEUING_ENABLED.load(Ordering::Acquire));
     }
     invoke_signal_handler(signal, true)
 }
@@ -186,7 +186,7 @@ pub fn write_to_self_pipe(byte: u8) -> bool {
 }
 
 pub fn init(ui: crate::ui::Ui) -> Result<()> {
-    let (err1, err2) = super::with_queued_signals(|| {
+    let (err1, err2) = with_queued_signals(|_| {
 
         #[allow(static_mut_refs)]
         unsafe {

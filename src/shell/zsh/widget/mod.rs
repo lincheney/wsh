@@ -117,7 +117,7 @@ impl ZleWidget {
         shell: &crate::shell::Shell,
         opts: Option<WidgetArgs>,
         args: I,
-    ) -> (c_int, BString) {
+    ) -> (c_int, Option<BString>) {
         unsafe {
             // we detect if it is refreshed by setting trashedzle to 1 then checking if it is reset to 0
 

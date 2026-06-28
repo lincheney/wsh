@@ -6,9 +6,9 @@ unsafe impl GlobalAlloc for Zalloc {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         // if i don't do this i could end up with deadlock
         // if a signal handler triggers in the middle
-        super::queue_signals();
+        let token = super::signals::queue_signals();
         let ptr = unsafe{ System.alloc(layout) };
-        let _ = super::unqueue_signals();
+        let _ = super::signals::unqueue_signals(token);
         ptr
     }
 
