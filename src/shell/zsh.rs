@@ -461,6 +461,12 @@ pub fn zistype(x: c_uchar, y: c_uint) -> bool {
     }
 }
 
+pub fn get_errflag() -> c_int {
+    unsafe {
+        read_volatile(&raw const zsh_sys::errflag)
+    }
+}
+
 fn is_token(c: u8) -> bool {
     c >= token::Pound as _ && c < token::Nularg as _
 }

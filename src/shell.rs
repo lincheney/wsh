@@ -100,7 +100,7 @@ pub fn control_c() -> nix::Result<()> {
 }
 
 pub fn is_interrupted() -> bool {
-    unsafe{ (zsh_sys::errflag & (zsh_sys::errflag_bits_ERRFLAG_INT as i32)) > 0 }
+    (zsh::get_errflag() & (zsh_sys::errflag_bits_ERRFLAG_INT as i32)) > 0
 }
 
 pub enum FdAction {
