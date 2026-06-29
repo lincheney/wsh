@@ -146,20 +146,6 @@ impl EventStream {
             }
         });
 
-        // sigint
-        {
-            let ui = ui.clone();
-            crate::spawn_and_log::<_, _, anyhow::Error>(&ui.clone(), async move {
-                let Some(sigint) = crate::shell::signals::sigint::get_subscriber()
-                    else { anyhow::bail!("cannot subscribe to sigint events"); };
-                while let Some(sigint) = sigint.upgrade() {
-                    sigint.notified().await;
-                    crate::log_if_err(ui.handle_interrupt().await);
-                }
-                Ok(())
-            });
-        }
-
         // process events
         loop {
             let Some(msg) = self.pausable.run(self.queue.recv()).await

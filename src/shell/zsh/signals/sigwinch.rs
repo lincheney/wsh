@@ -57,8 +57,6 @@ pub(super) fn cleanup() {
 pub(super) fn init(_ui: &crate::ui::Ui) -> watch::Sender<(u32, u32)> {
     fetch_term_size_from_zsh();
     let (sender, receiver) = watch::channel(get_term_size_from_zsh());
-    RECEIVER.with_borrow_mut(|r| {
-        *r = Some(receiver);
-    });
+    RECEIVER.replace(Some(receiver));
     sender
 }

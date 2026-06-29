@@ -9,8 +9,8 @@ thread_local! {
     static NOTIFY: RefCell<Option<Rc<Notify>>> = const{ RefCell::new(None) };
 }
 
-pub fn handle_sigint(notify: &Rc<Notify>) {
-    notify.notify_waiters();
+pub fn handle_sigint((ui, notify): &(crate::ui::Ui, Rc<Notify>)) {
+    ui.handle_interrupt(notify);
 }
 
 pub fn get_subscriber() -> Option<Weak<Notify>> {
@@ -20,7 +20,6 @@ pub fn get_subscriber() -> Option<Weak<Notify>> {
 extern "C" fn sighandler(sig: c_int) {
     #[allow(static_mut_refs)]
     unsafe {
-
         // interrupt lua
         crate::lua::set_sigint_hook();
 
@@ -37,10 +36,8 @@ pub(in crate::shell) fn install_signal_handler() -> Result<()> {
     super::install_signal_handler(signal::Signal::SIGINT, false, Some(sighandler))
 }
 
-pub(super) fn init(_ui: &crate::ui::Ui) -> Rc<Notify> {
+pub(super) fn init(ui: &crate::ui::Ui) -> (crate::ui::Ui, Rc<Notify>) {
     let notify = Rc::new(Notify::new());
-    NOTIFY.with_borrow_mut(|r| {
-        *r = Some(notify.clone());
-    });
-    notify
+    NOTIFY.replace(Some(notify.clone()));
+    (ui.clone(), notify)
 }

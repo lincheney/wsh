@@ -293,19 +293,26 @@ impl Ui {
         Ok(())
     }
 
-    pub async fn handle_interrupt(&self) -> Result<()> {
+    pub fn handle_interrupt(&self, notify: &tokio::sync::Notify) {
         // sigint
         // cancel the current command line?
 
         if !self.events.is_paused() {
-            if let Some(result) = self.shell.accept_line(Some(b"".into())) && result.await.is_err() {
-                return Ok(())
-            }
-            self.try_borrow_mut()?.reset();
-            self.trigger_buffer_change_callbacks().await?;
-            self.start_cmd(Some(&"".into())).await?;
+
+            let ui = self.clone();
+            crate::spawn_and_log::<_, _, anyhow::Error>(self, async move {
+                if let Some(result) = ui.shell.accept_line(Some(b"".into())) && result.await.is_err() {
+                    return Ok(())
+                }
+                ui.try_borrow_mut()?.reset();
+                ui.trigger_buffer_change_callbacks().await?;
+                ui.start_cmd(Some(&"".into())).await?;
+                Ok(())
+            });
+
+            notify.notify_waiters();
+
         }
-        Ok(())
     }
 
     pub fn handle_sigchld_shout(&self, shout: BString) -> Result<()> {
