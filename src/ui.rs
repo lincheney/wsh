@@ -293,31 +293,25 @@ impl Ui {
         Ok(())
     }
 
-    pub fn handle_interrupt(&self, notify: &tokio::sync::Notify) {
+    pub fn handle_interrupt(&self) {
         // sigint
         // cancel the current command line?
 
-        if !self.events.is_paused() {
+        let ui = self.clone();
+        crate::spawn_and_log::<_, _, anyhow::Error>(self, async move {
+            if let Some(result) = ui.shell.accept_line(Some(b"".into())) && result.await.is_err() {
+                return Ok(())
+            }
+            ui.try_borrow_mut()?.reset();
+            ui.trigger_buffer_change_callbacks().await?;
+            ui.start_cmd(Some(&"".into())).await?;
+            Ok(())
+        });
 
-            let ui = self.clone();
-            crate::spawn_and_log::<_, _, anyhow::Error>(self, async move {
-                if let Some(result) = ui.shell.accept_line(Some(b"".into())) && result.await.is_err() {
-                    return Ok(())
-                }
-                ui.try_borrow_mut()?.reset();
-                ui.trigger_buffer_change_callbacks().await?;
-                ui.start_cmd(Some(&"".into())).await?;
-                Ok(())
-            });
-
-            notify.notify_waiters();
-
-        }
     }
 
-    pub fn handle_sigchld_shout(&self, shout: BString) -> Result<()> {
+    pub fn handle_sigchld_shout(&self, shout: BString) {
         ::log::debug!("DEBUG(whines)\t{}\t= {:?}", stringify!(shout), shout);
-        Ok(())
     }
 
     fn pre_accept_line<'a>(&'a self, lock: &mut PrintLockGuard<'a>) -> Result<()> {

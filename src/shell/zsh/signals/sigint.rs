@@ -10,7 +10,10 @@ thread_local! {
 }
 
 pub fn handle_sigint((ui, notify): &(crate::ui::Ui, Rc<Notify>)) {
-    ui.handle_interrupt(notify);
+    if !ui.events.is_paused() {
+        notify.notify_waiters();
+        ui.handle_interrupt();
+    }
 }
 
 pub fn get_subscriber() -> Option<Weak<Notify>> {
