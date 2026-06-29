@@ -9,12 +9,14 @@ thread_local! {
 }
 static SIZE: AtomicU64 = AtomicU64::new(0);
 
-pub(in crate::shell) fn fetch_term_size_from_zsh() {
-    let _ = super::with_queued_signals(|_| unsafe {
+pub(in crate::shell) fn fetch_term_size_from_zsh() -> (u32, u32) {
+    let result = super::with_queued_signals(|_| unsafe {
         let cols = zsh_sys::zterm_columns.max(1).min(u32::MAX as _) as u64;
         let lines = zsh_sys::zterm_lines.max(1).min(u32::MAX as _) as u64;
         SIZE.store((cols << 16) | lines, Ordering::Release);
+        (cols as _, lines as _)
     });
+    result.0
 }
 
 fn get_term_size_from_zsh() -> (u32, u32) {
@@ -49,14 +51,12 @@ pub(super) fn sighandler(_trapped: bool) -> c_int {
 }
 
 pub(super) fn cleanup() {
-    RECEIVER.with_borrow_mut(|r| {
-        *r = None;
-    });
+    RECEIVER.replace(None);
 }
 
 pub(super) fn init(_ui: &crate::ui::Ui) -> watch::Sender<(u32, u32)> {
-    fetch_term_size_from_zsh();
-    let (sender, receiver) = watch::channel(get_term_size_from_zsh());
+    let size = fetch_term_size_from_zsh();
+    let (sender, receiver) = watch::channel(size);
     RECEIVER.replace(Some(receiver));
     sender
 }

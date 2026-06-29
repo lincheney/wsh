@@ -337,9 +337,7 @@ thread_local! {
 pub extern "C" fn setup_() -> c_int {
     match GlobalState::init() {
         Ok(ui) => {
-            STATE.with_borrow_mut(|state| {
-                *state = Some((ui, GlobalState));
-            });
+            STATE.replace(Some((ui, GlobalState)));
             0
         },
         Err(err) => {
