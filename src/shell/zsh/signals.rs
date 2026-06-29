@@ -154,9 +154,9 @@ fn spawn_self_pipe_reader(ui: &crate::ui::Ui) -> Result<()> {
 
     SELF_PIPE.store(writer.into_raw_fd(), Ordering::Release);
 
-    let sigchld_data = sigchld::init(&ui);
-    let sigwinch_data = sigwinch::init(&ui);
-    let sigint_data = sigint::init(&ui);
+    let sigchld_data = sigchld::init(ui);
+    let sigwinch_data = sigwinch::init(ui);
+    let sigint_data = sigint::init(ui);
 
     crate::spawn_and_log::<_, (), anyhow::Error>(&ui.clone(), async move {
         let mut reader = tokio::net::unix::pipe::Receiver::from_owned_fd(reader.into())?;

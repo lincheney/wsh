@@ -1,5 +1,4 @@
-use std::range::Range;
-use crate::tui::text::{TextRenderer, Renderer};
+use crate::tui::text::{TextRenderer, Renderer, NoRendererCallback};
 use crate::tui::{Drawer, Canvas};
 use std::io::{Write};
 
@@ -39,7 +38,6 @@ impl StatusBar {
         let Some(inner) = &self.inner
             else { return Ok(()) };
 
-        let callback: Option<fn(&mut Drawer<W, C>, usize, Range<usize>)> = None;
         TextRenderer::new(
             &inner.inner,
             0,
@@ -48,7 +46,7 @@ impl StatusBar {
             None,
             None,
             [].iter(),
-        ).render(drawer, false, true, callback)?;
+        ).render(drawer, false, true, NoRendererCallback::None)?;
         drawer.clear_to_end_of_line(None, false)?;
         Ok(())
     }

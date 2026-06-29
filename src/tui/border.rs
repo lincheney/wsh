@@ -139,12 +139,12 @@ impl Border {
         let chars = Chars::from(self.kind);
         let cell = Cell::new_with_style(chars.horizontal, self.style.clone());
         let left = if self.has_left() {
-            Cow::Owned(Cell::new_with_style(chars.bottom_left, self.style.clone()))
+            Cow::Owned(Cell::new_with_style(chars.top_left, self.style.clone()))
         } else {
             Cow::Borrowed(&cell)
         };
         let right = if self.has_right() {
-            Cow::Owned(Cell::new_with_style(chars.bottom_right, self.style.clone()))
+            Cow::Owned(Cell::new_with_style(chars.top_right, self.style.clone()))
         } else {
             Cow::Borrowed(&cell)
         };
@@ -223,7 +223,7 @@ fn render_row<W: Write, C: Canvas>(
         return Ok(());
     }
 
-    drawer.draw_cell(&left, false)?;
+    drawer.draw_cell(left, false)?;
 
     // title overlay
     if width >= 3
@@ -232,22 +232,22 @@ fn render_row<W: Write, C: Canvas>(
     {
         let (title_width, x_offset) = title.get_sizes(&title_cells, width as usize - 2);
         for _ in 0..x_offset {
-            drawer.draw_cell(&fill, false)?;
+            drawer.draw_cell(fill, false)?;
         }
         for c in &title_cells {
             drawer.draw_cell(c, false)?;
         }
         for _ in 1 + x_offset + title_width .. width as usize - 1 {
-            drawer.draw_cell(&fill, false)?;
+            drawer.draw_cell(fill, false)?;
         }
     } else {
         for _ in 1 .. width - 1 {
-            drawer.draw_cell(&fill, false)?;
+            drawer.draw_cell(fill, false)?;
         }
     }
 
     if width > 1 {
-        drawer.draw_cell(&right, false)?;
+        drawer.draw_cell(right, false)?;
     }
     Ok(())
 }
