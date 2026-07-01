@@ -2,6 +2,7 @@ use mlua::prelude::*;
 
 pub struct MaxNumber;
 
+#[derive(Clone, Copy)]
 pub enum PossiblyMaxNumber<T> {
     Raw(T),
     Max,

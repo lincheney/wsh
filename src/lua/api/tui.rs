@@ -1,4 +1,4 @@
-use crate::lua::{LuaWrapper, auto_from_lua, FromLuaStr, FromLuaSerde};
+use crate::lua::{LuaWrapper, auto_from_lua, FromLuaStr, FromLuaSerde, api::number::PossiblyMaxUsize};
 use bstr::{BString, ByteSlice};
 use std::default::Default;
 use std::rc::Rc;
@@ -133,6 +133,14 @@ auto_from_lua! {
 }
 
 auto_from_lua! {
+    #[derive(Debug, Clone, Copy)]
+    struct LineRange {
+        start_line: usize,
+        end_line: Option<PossiblyMaxUsize>,
+    }
+}
+
+auto_from_lua! {
     #[derive(Debug)]
     enum MessageInner {
         Layout{
@@ -143,6 +151,8 @@ auto_from_lua! {
             #[flatten]
             style: MessageStyleOptions,
             text: Option<TextParts>,
+            #[flatten]
+            line_range: Option<LineRange>,
         },
     }
 }
@@ -349,7 +359,7 @@ impl From<StyleOptions> for tui::widget::StyleOptions {
     }
 }
 
-fn parse_text_parts<T: Default+Clone>(parts: TextParts, text: &mut tui::text::Text<T>) {
+fn parse_text_parts<T: Default+Clone>(parts: TextParts, text: &mut tui::text::Text<T>, line_range: Option<LineRange>) {
     match parts {
         TextParts::Single(part) => {
             text.clear();
@@ -362,11 +372,20 @@ fn parse_text_parts<T: Default+Clone>(parts: TextParts, text: &mut tui::text::Te
                 Some(tui::widget::StyleOptions::from(part.style).as_style().into())
             };
 
+            let start_line = line_range.map(|x| x.start_line.min(text.len())).unwrap_or_default();
+            let end_line = line_range.map(|x| x.end_line).flatten().map_or(0, |x| usize::from(x).min(text.len())).max(start_line);
+
             if let Some(string) = part.text {
-                text.clear();
-                text.push_lines(string.as_bytes().split_str(b"\n").map(|s| s.into()),hl);
+                text.delete_lines(start_line .. end_line);
+                text.insert_lines(
+                    string.as_bytes().split_str(b"\n").map(|s| s.into()),
+                    start_line,
+                    hl.clone(),
+                );
+
             } else if let Some(hl) = hl {
-                for lineno in 0 .. text.get().len() {
+                text.retain_highlights(|hl| !(start_line .. end_line).contains(&hl.lineno));
+                for lineno in start_line..end_line {
                     text.add_highlight(tui::text::HighlightedRange{
                         lineno,
                         start: 0,
@@ -433,7 +452,7 @@ fn set_widget_options(
                 if let Some(text) = options.title_top {
                     let title = widget.border.title_top.get_or_insert_default();
                     title.text.style = widget.border.style.clone();
-                    parse_text_parts(text.text, &mut title.text);
+                    parse_text_parts(text.text, &mut title.text, None);
                     if let Some(align) = text.align {
                         title.alignment = align.0;
                     }
@@ -442,7 +461,7 @@ fn set_widget_options(
                 if let Some(text) = options.title_bottom {
                     let title = widget.border.title_bottom.get_or_insert_default();
                     title.text.style = widget.border.style.clone();
-                    parse_text_parts(text.text, &mut title.text);
+                    parse_text_parts(text.text, &mut title.text, None);
                     if let Some(align) = text.align {
                         title.alignment = align.0;
                     }
@@ -507,7 +526,7 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
             }
         },
 
-        MessageInner::Widget { style, text } if text.is_none() && style.is_none() => {
+        MessageInner::Widget { style, text, .. } if text.is_none() && style.is_none() => {
             if let Some(id) = options.id {
                 let id = NodeId::Normal(id);
                 match tui.get_node_mut(id) {
@@ -519,7 +538,7 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
             }
         },
 
-        MessageInner::Widget { style, text } => {
+        MessageInner::Widget { style, text, line_range } => {
             let node = if let Some(id) = options.id {
                 let id = NodeId::Normal(id);
                 match tui.get_node_mut(id) {
@@ -539,7 +558,7 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
                 else { unreachable!() };
 
             if let Some(text) = text {
-                parse_text_parts(text, &mut widget.inner);
+                parse_text_parts(text, &mut widget.inner, line_range);
             }
             set_widget_options(widget, style);
 
@@ -749,11 +768,11 @@ fn set_status_bar(ui: &Ui, _lua: &Lua, val: Option<MessageOptions>) -> Result<()
     let mut ui = ui.try_borrow_mut()?;
     if let Some(options) = val {
         match options.inner {
-            MessageInner::Widget { style, text } => {
+            MessageInner::Widget { style, text, line_range } => {
                 let widget = ui.status_bar.inner.get_or_insert_default();
                 if let Some(text) = text {
                     widget.inner.clear();
-                    parse_text_parts(text, &mut widget.inner);
+                    parse_text_parts(text, &mut widget.inner, line_range);
                 }
                 // StatusBar is standalone, node options (persist/hidden/constraint) are ignored
                 set_widget_options(widget, style);
@@ -770,10 +789,10 @@ fn set_prompt(ui: &Ui, __lua: &Lua, val: Option<MessageOptions>) -> Result<()> {
     let mut ui = ui.try_borrow_mut()?;
     if let Some(options) = val {
         match options.inner {
-            MessageInner::Widget { style, text } => {
+            MessageInner::Widget { style, text, line_range } => {
                 let mut widget = tui::widget::Widget::default();
                 if let Some(text) = text {
-                    parse_text_parts(text, &mut widget.inner);
+                    parse_text_parts(text, &mut widget.inner, line_range);
                 }
                 set_widget_options(&mut widget, style);
                 ui.cmdline.prompt_mode = tui::command_line::PromptMode::Custom(widget);

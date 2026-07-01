@@ -234,6 +234,22 @@ impl<T> Text<T> {
         line
     }
 
+    pub fn delete_lines(&mut self, range: Range<usize>) {
+        let start = range.start;
+        let end = range.end;
+        drop(self.lines.drain(range));
+        self.highlights.retain_mut(|hl| {
+            if (start..end).contains(&hl.lineno) {
+                false
+            } else {
+                if hl.lineno >= end {
+                    hl.lineno -= 1;
+                }
+                true
+            }
+        });
+    }
+
     pub fn delete_str(&mut self, lineno: usize, offset: usize, length: usize) {
         self.lines[lineno].drain(offset .. offset + length);
         self.highlights.retain_mut(|h| {
@@ -309,6 +325,21 @@ impl<T: Clone> Text<T> {
     pub fn push_lines<I: IntoIterator<Item=BString>>(&mut self, lines: I, hl: Option<Highlight<T>>) {
         let old_len = self.lines.len();
         self.lines.extend(lines);
+        if let Some(hl) = hl {
+            for (i, line) in self.lines[old_len..].iter().enumerate() {
+                add_highlight(&mut self.highlights, HighlightedRange{
+                    lineno: old_len + i,
+                    start: 0,
+                    end: line.len(),
+                    inner: hl.clone(),
+                });
+            }
+        }
+    }
+
+    pub fn insert_lines<I: IntoIterator<Item=BString>>(&mut self, lines: I, lineno: usize, hl: Option<Highlight<T>>) {
+        let old_len = self.lines.len();
+        self.lines.splice(lineno..lineno, lines);
         if let Some(hl) = hl {
             for (i, line) in self.lines[old_len..].iter().enumerate() {
                 add_highlight(&mut self.highlights, HighlightedRange{
