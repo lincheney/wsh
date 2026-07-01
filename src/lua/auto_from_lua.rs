@@ -25,18 +25,18 @@ macro_rules! auto_from_lua {
 
     (
         $(#[$meta:meta])*
-        $vis:vis struct $name:ident { $(
+        $vis:vis struct $name:ident $(<$($generics:tt),*>)? { $(
             $(#[flatten $($dummy:ident)? ])?
             $field_vis:vis $field:ident: $type:ty,
         )* }
     ) => (
 
         $(#[$meta])*
-        $vis struct $name { $(
+        $vis struct $name $(<$($generics),*>)? { $(
             $field_vis $field: $type,
         )* }
 
-        impl $name {
+        impl $(<$($generics),*>)? $name $(<$($generics),*>)? {
             fn from_lua_ref(value: &::mlua::Value, lua: &::mlua::Lua) -> ::mlua::Result<Self> {
                 #[allow(unused_imports)]
                 use crate::lua::auto_from_lua::{FromLuaRef};
@@ -60,7 +60,7 @@ macro_rules! auto_from_lua {
             }
         }
 
-        impl ::mlua::FromLua for $name {
+        impl $(<$($generics),*>)? ::mlua::FromLua for $name $(<$($generics),*>)? {
             fn from_lua(value: ::mlua::Value, lua: &::mlua::Lua) -> ::mlua::Result<Self> {
                 Self::from_lua_ref(&value, lua)
             }
@@ -71,7 +71,7 @@ macro_rules! auto_from_lua {
 
     (
         $(#[$meta:meta])*
-        $vis:vis enum $name:ident { $(
+        $vis:vis enum $name:ident $(<$($generics:tt),*>)? { $(
             $(#[$variant_meta:meta])?
             $variant:ident
                 $(($tuple_ty:ty))?
@@ -84,7 +84,7 @@ macro_rules! auto_from_lua {
     ) => (
 
         $(#[$meta])*
-        $vis enum $name { $(
+        $vis enum $name $(<$($generics),*>)? { $(
             $(#[$variant_meta])?
             $variant
                 $(($tuple_ty))?
@@ -93,7 +93,7 @@ macro_rules! auto_from_lua {
                 ),* })?
         ),+ }
 
-        impl $name {
+        impl $(<$($generics),*>)? $name $(<$($generics),*>)? {
             #[allow(unused_variables)]
             fn from_lua_ref(value: &::mlua::Value, lua: &::mlua::Lua) -> ::mlua::Result<Self> {
                 #[allow(unused_imports)]
@@ -131,7 +131,7 @@ macro_rules! auto_from_lua {
             }
         }
 
-        impl ::mlua::FromLua for $name {
+        impl $(<$($generics),*>)? ::mlua::FromLua for $name $(<$($generics),*>)? {
             fn from_lua(value: ::mlua::Value, lua: &::mlua::Lua) -> ::mlua::Result<Self> {
                 Self::from_lua_ref(&value, lua)
             }
