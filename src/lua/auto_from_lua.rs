@@ -1,10 +1,20 @@
 use mlua::{prelude::*};
 
-pub fn make_error(mut err: String, path: &str) -> LuaError {
-    if err.starts_with("runtime error: ") {
-        err.replace_range(.."runtime error: ".len(), "");
+thread_local! {
+    pub static FIELD_SEP_REGEX: regex::Regex = regex::Regex::new(r"\s+:\s+").unwrap();
+}
+
+pub fn strip_runtime_error(mut err: String) -> String {
+    const RUNTIME_ERROR: &str = "runtime error: ";
+    if err.starts_with(RUNTIME_ERROR) {
+        err.replace_range(..RUNTIME_ERROR.len(), "");
     }
-    if err.starts_with(".") {
+    err
+}
+
+pub fn make_error(err: String, path: &str) -> LuaError {
+    let mut err = strip_runtime_error(err);
+    if !err.starts_with(".") {
         err.insert_str(0, ": ");
     }
     err.insert_str(0, path);
@@ -40,7 +50,12 @@ macro_rules! auto_from_lua {
             fn from_lua_ref(value: &::mlua::Value, lua: &::mlua::Lua) -> ::mlua::Result<Self> {
                 #[allow(unused_imports)]
                 use crate::lua::auto_from_lua::{FromLuaRef};
-                if let ::mlua::Value::Table(table) = &value && table.raw_len() == 0 {
+                if let ::mlua::Value::Table(table) = &value {
+
+                    if table.raw_len() != 0 {
+                        return Err(crate::lua::lua_error("expected a non-array-like table"));
+                    }
+
                     $(
                     let flatten = $($($dummy:ident)? true || )? false;
                     let $field: $type = if flatten {
@@ -120,12 +135,18 @@ macro_rules! auto_from_lua {
 
                 let msg = format!(
                     concat!(
-                        "did not match any of:\n",
+                        "did not match any of:",
                         $(
-                        "\t", stringify!($variant$(($tuple_ty))?$({{$($field: $struct_ty),*}})? ), ": {}", "\n",
+                        "\n\t{} : {", stringify!($variant), "}",
                         )+
                     ),
-                    $($variant.to_string().replace("\n\t", "\n\t\t"),)+
+                    $( {
+                    let label = stringify!($variant$(($tuple_ty))?$({$($field: $struct_ty),*})? ).replace('\n', "");
+                    crate::lua::auto_from_lua::FIELD_SEP_REGEX.with(|re| re.replace_all(&label, ": ").into_owned())
+                    }, )+
+                    $(
+                    $variant = crate::lua::auto_from_lua::strip_runtime_error($variant.to_string().replace("\n\t", "\n\t\t")),
+                    )+
                 );
                 return Err(crate::lua::lua_error(msg));
             }
