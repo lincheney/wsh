@@ -116,7 +116,7 @@ pub struct Text<T=()> {
 
 fn add_highlight<T>(highlights: &mut Vec<HighlightedRange<T>>, hl: HighlightedRange<T>) {
     // sort in reverse order of priority so higher priority comes first
-    let index = match highlights.binary_search_by(|x| hl.lineno.cmp(&x.lineno).then(hl.inner.priority.total_cmp(&x.inner.priority).reverse())) {
+    let index = match highlights.binary_search_by(|x| x.lineno.cmp(&hl.lineno).then(x.inner.priority.total_cmp(&hl.inner.priority).reverse())) {
         Ok(index) | Err(index) => index,
     };
     highlights.insert(index, hl);
