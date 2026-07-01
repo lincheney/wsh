@@ -7,7 +7,9 @@ use anyhow::Result;
 use mlua::prelude::*;
 mod api;
 mod auto_from_lua;
+mod array;
 use auto_from_lua::auto_from_lua;
+use array::Array;
 pub use api::{
     init_lua,
     keybind::invoke_keybind_callback,
@@ -171,14 +173,14 @@ extern "C-unwind" fn lua_sigint_hook(lua: *mut mlua::ffi::lua_State, _ar: *mut m
 pub struct FromLuaStr<T>(T);
 
 impl<T: std::str::FromStr> FromLua for FromLuaStr<T>
-    where T::Err: std::fmt::Display
+    where T::Err: ToString
 {
     fn from_lua(value: LuaValue, _lua: &Lua) -> LuaResult<Self> {
         if let Some(value) = value.as_string() {
             let value = value.to_str()?;
             Ok(Self(T::from_str(&value).map_err(crate::lua::lua_error)?))
         } else {
-            Err(crate::lua::lua_error("expected string"))
+            Err(crate::lua::lua_error(format!("expected a string, got a {}", value.type_name())))
         }
     }
 }

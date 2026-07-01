@@ -70,7 +70,7 @@ macro_rules! auto_from_lua {
                         $field,
                     )* })
                 } else {
-                    Err(crate::lua::lua_error("expected a table"))
+                    Err(crate::lua::lua_error(format!("expected a table, got a {}", value.type_name())))
                 }
             }
         }

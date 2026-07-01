@@ -1,5 +1,5 @@
 use std::os::fd::AsRawFd;
-use crate::lua::{LuaWrapper, auto_from_lua, lua_error};
+use crate::lua::{LuaWrapper, auto_from_lua, lua_error, Array};
 use bstr::BString;
 use std::str::FromStr;
 use std::collections::HashMap;
@@ -123,7 +123,7 @@ impl From<Stdio> for std::process::Stdio {
 auto_from_lua! {
     #[derive(Debug, Default)]
     struct FullSpawnArgs {
-        args: Vec<String>,
+        args: Array<String>,
         stdin: Option<Stdio>,
         stdout: Option<Stdio>,
         stderr: Option<Stdio>,
@@ -138,7 +138,7 @@ auto_from_lua! {
     #[derive(Debug)]
     enum SpawnArgs {
         Shell(BString),
-        Simple(Vec<String>),
+        Simple(Array<String>),
         Full(FullSpawnArgs),
     }
 }
@@ -149,11 +149,11 @@ async fn spawn(mut ui: Ui, lua: Lua, val: SpawnArgs) -> Result<LuaMultiValue> {
         SpawnArgs::Full(args) => args,
         SpawnArgs::Simple(args) => FullSpawnArgs{args, ..Default::default()},
     };
-    let first_arg = args.args.first().ok_or_else(|| LuaError::RuntimeError("no args given".to_owned()))?;
+    let first_arg = args.args.0.first().ok_or_else(|| LuaError::RuntimeError("no args given".to_owned()))?;
 
     let mut command = Command::new(first_arg);
-    if args.args.len() > 1 {
-        command.args(&args.args[1..]);
+    if args.args.0.len() > 1 {
+        command.args(&args.args.0[1..]);
     }
     if args.clear_env {
         command.env_clear();

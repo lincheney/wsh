@@ -1,4 +1,4 @@
-use crate::lua::{LuaWrapper, auto_from_lua, FromLuaStr, FromLuaSerde, api::number::PossiblyMaxUsize};
+use crate::lua::{LuaWrapper, auto_from_lua, Array, FromLuaStr, FromLuaSerde, api::number::PossiblyMaxUsize};
 use bstr::{BString, ByteSlice};
 use std::default::Default;
 use std::rc::Rc;
@@ -90,7 +90,7 @@ auto_from_lua! {
     enum TextParts {
         Single(BString),
         Detailed(TextOptions),
-        Many(Vec<TextOptions>),
+        Many(Array<TextOptions>),
     }
 }
 
@@ -166,7 +166,7 @@ auto_from_lua! {
     enum MessageInner {
         Layout{
             direction: Direction,
-            children: Vec<LayoutChild>,
+            children: Array<LayoutChild>,
         },
         Widget{
             #[flatten]
@@ -221,7 +221,7 @@ auto_from_lua! {
     #[derive(Debug)]
     enum BorderSides {
         Single(FromLuaStr<BorderSide>),
-        Multiple(Vec<FromLuaStr<BorderSide>>),
+        Multiple(Array<FromLuaStr<BorderSide>>),
     }
 }
 
@@ -421,7 +421,7 @@ fn parse_text_parts<T: Default+Clone>(parts: TextParts, text: &mut tui::text::Te
         TextParts::Many(parts) => {
             text.clear();
             text.push_line(b"".into(), None);
-            for part in parts {
+            for part in parts.0 {
                 if let Some(string) = part.text {
                     let hl = if part.style.is_none() {
                         None
@@ -462,7 +462,7 @@ fn set_widget_options(
 
             let sides = match &options.sides {
                 Some(BorderSides::Single(b)) => Some(b.0.into()),
-                Some(BorderSides::Multiple(b)) => b.iter().map(|x| border::Sides::from(x.0)).reduce(|x, y| x.union(y)),
+                Some(BorderSides::Multiple(b)) => b.0.iter().map(|x| border::Sides::from(x.0)).reduce(|x, y| x.union(y)),
                 None => Some(border::Sides::ALL),
             };
 
@@ -517,7 +517,7 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
                 children: vec![],
             };
 
-            for child in children {
+            for child in children.0 {
                 match child {
                     LayoutChild::Message(child_options) => {
                         let child = process_message(tui, child_options)?;

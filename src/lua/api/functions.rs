@@ -1,4 +1,4 @@
-use crate::lua::{LuaWrapper};
+use crate::lua::{LuaWrapper, Array, auto_from_lua};
 use crate::shell::{MetaString};
 use std::rc::Rc;
 use bstr::BString;
@@ -12,10 +12,10 @@ pub struct Function {
     ui: WeakUi,
 }
 
-crate::lua::auto_from_lua! {
+auto_from_lua! {
     #[derive(Debug)]
     struct FullFunctionArgs {
-        args: Vec<BString>,
+        args: Array<BString>,
         foreground: Option<bool>,
         stdin: Option<BString>,
         stdout: Stdio,
@@ -23,10 +23,10 @@ crate::lua::auto_from_lua! {
     }
 }
 
-crate::lua::auto_from_lua! {
+auto_from_lua! {
     #[derive(Debug)]
     enum FunctionArgs {
-        Simple(Vec<BString>),
+        Simple(Array<BString>),
         Full(FullFunctionArgs),
     }
 }
@@ -41,8 +41,8 @@ impl UserData for Function {
             } else if args.len() == 1 {
                 let arg = args.pop_front().unwrap();
                 match FunctionArgs::from_lua(arg, &lua)? {
-                    FunctionArgs::Simple(args) => (args, None, None, Stdio::inherit, Stdio::inherit),
-                    FunctionArgs::Full(f) => (f.args, f.foreground, f.stdin, f.stdout, f.stderr),
+                    FunctionArgs::Simple(args) => (args.0, None, None, Stdio::inherit, Stdio::inherit),
+                    FunctionArgs::Full(f) => (f.args.0, f.foreground, f.stdin, f.stdout, f.stderr),
                 }
 
             } else {
