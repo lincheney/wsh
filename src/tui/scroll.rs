@@ -120,10 +120,10 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
             max_width,
             initial_indent,
             // don't bother with the callback for lines out of range
-            may_be_in_range.then_some(|range, token, style| {
+            may_be_in_range.then_some(|range, token, lineno, style| {
                 tokens.push(ScrollWrapToken {
                     lineno: i,
-                    visual_lineno: total_line_count,
+                    visual_lineno: total_line_count + lineno,
                     range,
                     inner: token,
                     style,
@@ -133,7 +133,7 @@ pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
         if may_be_in_range {
             tokens.push(ScrollWrapToken {
                 lineno: i,
-                visual_lineno: total_line_count,
+                visual_lineno: tokens.last().map_or(total_line_count, |t| t.visual_lineno),
                 range: (line.len() .. line.len()).into(),
                 inner: WrapToken::LineBreak,
                 style: None,

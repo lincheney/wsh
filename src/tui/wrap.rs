@@ -7,7 +7,7 @@ use super::text::{HighlightedRange, Highlight};
 
 const ESCAPE_STYLE: Style = Style::new().fg(Color::AnsiValue(7));
 
-pub type NoCallback<'a> = Option<fn(Range<usize>, WrapToken<'a>, Option<Style>)>;
+pub type NoCallback<'a> = Option<fn(Range<usize>, WrapToken<'a>, usize, Option<Style>)>;
 
 pub fn merge_highlights<'a, T: 'a, I: Iterator<Item=&'a Highlight<T>>>(init: Style, iter: I) -> Style {
     let mut style = init;
@@ -69,7 +69,7 @@ macro_rules! define_wrap_ascii {
         fn $name $(<
             'a,
             #[allow(non_camel_case_types)]
-            $callback: FnMut(Range<usize>, WrapToken<'a>, Option<Style>)
+            $callback: FnMut(Range<usize>, WrapToken<'a>, usize, Option<Style>)
         >)? (
             grapheme: u8,
             max_width: usize,
@@ -83,14 +83,14 @@ macro_rules! define_wrap_ascii {
 
             if grapheme == b'\n' {
                 // newline
-                $($callback(range, WrapToken::LineBreak, None);)?
+                $($callback(range, WrapToken::LineBreak, y, None);)?
                 (0, y + 1)
 
             } else if grapheme == b'\t' {
                 let width = if x >= max_width {
+                    $($callback((range.start..range.start).into(), WrapToken::LineBreak, y, None);)?
                     x = 0;
                     y += 1;
-                    $($callback((range.start..range.start).into(), WrapToken::LineBreak, None);)?
                     max_width
                 } else {
                     max_width - x
@@ -98,18 +98,18 @@ macro_rules! define_wrap_ascii {
 
                 $(
                     for _ in 0 .. width {
-                        $callback(range, WrapToken::AsciiChar([b' ']), style.clone())
+                        $callback(range, WrapToken::AsciiChar([b' ']), y, style.clone())
                     }
                 )?
                 (x + width, y)
 
             } else {
                 if x + 1 > max_width {
+                    $($callback((range.start..range.start).into(), WrapToken::LineBreak, y, None);)?
                     x = 0;
                     y += 1;
-                    $($callback((range.start..range.start).into(), WrapToken::LineBreak, None);)?
                 }
-                $($callback(range, WrapToken::AsciiChar([grapheme]), style);)?
+                $($callback(range, WrapToken::AsciiChar([grapheme]), y, style);)?
                 (x + 1, y)
             }
         }
@@ -127,7 +127,7 @@ macro_rules! define_wrap_grapheme {
             'a,
             $(
             #[allow(non_camel_case_types)]
-            $callback: FnMut(Range<usize>, WrapToken<'a>, Option<Style>)
+            $callback: FnMut(Range<usize>, WrapToken<'a>, usize, Option<Style>)
             )?
         > (
             grapheme: &'a str,
@@ -150,9 +150,9 @@ macro_rules! define_wrap_grapheme {
                 if x + grapheme.width() > max_width {
                     x = 0;
                     y += 1;
-                    $($callback((range.start..range.start).into(), WrapToken::LineBreak, None);)?
+                    $($callback((range.start..range.start).into(), WrapToken::LineBreak, y, None);)?
                 }
-                $($callback(range, WrapToken::String(Cow::Borrowed(grapheme)), style);)?
+                $($callback(range, WrapToken::String(Cow::Borrowed(grapheme)), y, style);)?
                 (x + grapheme.width(), y)
 
             } else {
@@ -167,12 +167,12 @@ macro_rules! define_wrap_grapheme {
                     if x + width > max_width {
                         x = 0;
                         y += 1;
-                        $($callback((range.start..range.start).into(), WrapToken::LineBreak, None);)?
+                        $($callback((range.start..range.start).into(), WrapToken::LineBreak, y, None);)?
                     }
                     let string = format!("<u{c:04x}>");
                     debug_assert_eq!(string.width(), width);
                     $(
-                    $callback((range.start + i .. range.start + i + 1).into(), WrapToken::String(Cow::Owned(string)), style.clone());
+                    $callback((range.start + i .. range.start + i + 1).into(), WrapToken::String(Cow::Owned(string)), y, style.clone());
                     i += 1;
                     )?
                     x += width;
@@ -190,7 +190,7 @@ pub fn wrap<
     'a,
     T: 'a,
     I: Clone + Iterator<Item=&'a HighlightedRange<T>>,
-    F: FnMut(Range<usize>, WrapToken<'a>, Option<Style>)
+    F: FnMut(Range<usize>, WrapToken<'a>, usize, Option<Style>)
 >(
     line: &'a BStr,
     highlights: I,
@@ -224,8 +224,8 @@ pub fn wrap<
             if let Some(callback) = callback {
                 let style = init_style.as_ref().map(|s| merge_highlights(s.clone(), [&hl.inner].into_iter()));
                 for (s, e, grapheme) in text.grapheme_indices() {
-                    pos = wrap_grapheme_with_callback(grapheme, grapheme.width(), max_width, pos, text.as_ref(), (s..e).into(), style.clone(), |_, token, style| {
-                        callback((start .. start).into(), token, style);
+                    pos = wrap_grapheme_with_callback(grapheme, grapheme.width(), max_width, pos, text.as_ref(), (s..e).into(), style.clone(), |_, token, lineno, style| {
+                        callback((start .. start).into(), token, lineno, style);
                     });
                 }
             } else {
