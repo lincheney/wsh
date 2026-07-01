@@ -1,8 +1,8 @@
-use crate::lua::LuaWrapper;
-use bstr::BString;
+use crate::lua::{LuaWrapper, auto_from_lua, FromLuaStr, FromLuaSerde};
+use bstr::{BString, ByteSlice};
 use std::default::Default;
 use std::rc::Rc;
-use serde::{Deserialize, Serialize};
+use serde::{Serialize};
 use anyhow::Result;
 use crossterm::style::Color;
 use mlua::{prelude::*};
@@ -18,191 +18,150 @@ use crate::tui::{
     sizing,
 };
 use crate::tui::border;
-use super::SerdeWrap;
 
 #[derive(Debug, Clone, Copy)]
 struct LuaColor(Color);
 
-impl<'de> serde::Deserialize<'de> for LuaColor {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let string = String::deserialize(deserializer)?.to_lowercase();
-        let color = match string.as_str() {
-            "reset"             => Color::Reset,
-            "default"           => Color::Reset,
-            "black"             => Color::Black,
-            "red"               => Color::DarkRed,
-            "green"             => Color::DarkGreen,
-            "yellow"            => Color::DarkYellow,
-            "blue"              => Color::DarkBlue,
-            "magenta"           => Color::DarkMagenta,
-            "cyan"              => Color::DarkCyan,
-            "gray"              => Color::Grey,
-            "grey"              => Color::Grey,
-            "darkgrey"          => Color::DarkGrey,
-            "darkgray"          => Color::DarkGrey,
-            "lightred"          => Color::Red,
-            "lightgreen"        => Color::Green,
-            "lightyellow"       => Color::Yellow,
-            "lightblue"         => Color::Blue,
-            "lightmagenta"      => Color::Magenta,
-            "lightcyan"         => Color::Cyan,
-            "white"             => Color::White,
-            _ if string.starts_with('#') && string.len() == 7 => {
-                let rgb = u32::from_str_radix(&string[1..7], 16).map_err(|e| serde::de::Error::custom(e.to_string()))?;
-                let r = (rgb >> 16) as _;
-                let g = ((rgb >> 8) & 0xff) as _;
-                let b = (rgb & 0xff) as _;
-                Color::Rgb{r, g, b}
-            },
-            _ => {
-                // try numeric ANSI index
-                if let Ok(n) = string.parse::<u8>() {
-                    Color::AnsiValue(n)
-                } else {
-                    return Err(serde::de::Error::custom(format!("unknown color: {string}")))
+impl FromLua for LuaColor {
+    fn from_lua(value: LuaValue, _lua: &Lua) -> LuaResult<Self> {
+        if let Some(string) = value.as_string() {
+            if let Ok(string) = std::str::from_utf8(&string.as_bytes()) {
+                if let Ok(color) = Color::try_from(string) {
+                    return Ok(LuaColor(color))
+                } else if string.starts_with("#") && string.len() == 7 {
+                    let rgb = u32::from_str_radix(&string[1..7], 16)
+                        .map_err(|e| crate::lua::lua_error(e.to_string()))?;
+                    let r = (rgb >> 16) as _;
+                    let g = ((rgb >> 8) & 0xff) as _;
+                    let b = (rgb & 0xff) as _;
+                    return Ok(LuaColor(Color::Rgb{r, g, b}));
+                } else if let Ok(n) = string.parse::<u8>() {
+                    // try numeric ANSI index
+                    return Ok(LuaColor(Color::AnsiValue(n)));
                 }
-            },
-        };
-        Ok(LuaColor(color))
+            }
+
+            Err(crate::lua::lua_error(format!("unknown color: {string:?}")))
+        } else {
+            Err(crate::lua::lua_error("expected string"))
+        }
     }
 }
 
 impl serde::Serialize for LuaColor {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let string = match self.0 {
-            Color::Reset              => "reset",
-            Color::Black              => "black",
-            Color::DarkRed            => "red",
-            Color::DarkGreen          => "green",
-            Color::DarkYellow         => "yellow",
-            Color::DarkBlue           => "blue",
-            Color::DarkMagenta        => "magenta",
-            Color::DarkCyan           => "cyan",
-            Color::Grey               => "gray",
-            Color::DarkGrey           => "darkgray",
-            Color::Red                => "lightred",
-            Color::Green              => "lightgreen",
-            Color::Yellow             => "lightyellow",
-            Color::Blue               => "lightblue",
-            Color::Magenta            => "lightmagenta",
-            Color::Cyan               => "lightcyan",
-            Color::White              => "white",
-            Color::AnsiValue(n)       => &n.to_string(),
-            Color::Rgb{r, g, b}       => &format!("#{r:02x}{g:02x}{b:02x}"),
-        };
-        serializer.serialize_str(string)
+        match self.0 {
+            Color::Rgb{r, g, b} => format!("#{r:02x}{g:02x}{b:02x}").serialize(serializer),
+            Color::AnsiValue(n) => n.serialize(serializer),
+            color => color.serialize(serializer),
+        }
     }
 }
 
 #[derive(Debug, Clone)]
 struct LuaSizeMetric(sizing::Metric);
 
-impl<'de> serde::Deserialize<'de> for LuaSizeMetric {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Debug, Clone, Deserialize)]
-        #[serde(untagged)]
-        enum Metric {
-            Fixed(u16),
-            Percent(String),
-        }
-
-        match Metric::deserialize(deserializer)? {
-            Metric::Fixed(x) => Ok(LuaSizeMetric(sizing::Metric::Fixed(x))),
-            Metric::Percent(x) => {
+impl FromLua for LuaSizeMetric {
+    fn from_lua(value: LuaValue, lua: &Lua) -> LuaResult<Self> {
+        match mlua::Either::<u16, String>::from_lua(value, lua)? {
+            mlua::Either::Left(x) => Ok(Self(sizing::Metric::Fixed(x))),
+            mlua::Either::Right(x) => {
                 if x.ends_with('%') && let Ok(x) = x.parse::<u16>() {
                     Ok(Self(sizing::Metric::Percent(x)))
                 } else {
-                    Err(serde::de::Error::custom(format!("invalid metric: {x}")))
+                    Err(crate::lua::lua_error(format!("invalid metric: {x}")))
                 }
             },
         }
     }
 }
 
-#[derive(Debug, Default, Clone, Deserialize)]
-#[serde(default)]
-struct TextStyleOptions {
-    #[serde(flatten)]
-    style: StyleOptions,
+auto_from_lua! {
+    #[derive(Debug, Default, Clone)]
+    struct TextOptions {
+        text: Option<LuaString>,
+        #[flatten]
+        style: StyleOptions,
+    }
 }
 
-#[derive(Debug, Default, Clone, Deserialize)]
-#[serde(default)]
-struct TextOptions {
-    text: Option<String>,
-    #[serde(flatten)]
-    style: TextStyleOptions,
+auto_from_lua! {
+    #[derive(Debug, Clone)]
+    enum TextParts {
+        Single(LuaString),
+        Detailed(TextOptions),
+        Many(Vec<TextOptions>),
+    }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(untagged)]
-enum TextParts {
-    Single(String),
-    Detailed(TextOptions),
-    Many(Vec<TextOptions>),
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-struct MessageStyleOptions {
-    align: Option<SerdeWrap<Alignment>>,
-    #[serde(flatten)]
-    style: TextStyleOptions,
-    border: Option<BorderOptions>,
-    // ansi options
-    show_cursor: Option<bool>,
+auto_from_lua! {
+    #[derive(Debug, Default)]
+    struct MessageStyleOptions {
+        align: Option<FromLuaStr<Alignment>>,
+        #[flatten]
+        style: StyleOptions,
+        border: Option<BorderOptions>,
+        // ansi options
+        show_cursor: Option<bool>,
+    }
 }
 
 impl MessageStyleOptions {
     fn is_none(&self) -> bool {
         self.align.is_none()
-            && self.style.style.is_none()
+            && self.style.is_none()
             && self.border.is_none()
             && self.show_cursor.is_none()
     }
 }
 
-#[derive(Debug, Deserialize)]
-#[allow(nonstandard_style)]
-enum Direction {
-    vertical,
-    horizontal,
+auto_from_lua! {
+    #[derive(Debug)]
+    #[allow(nonstandard_style)]
+    enum Direction {
+        vertical,
+        horizontal,
+    }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum LayoutChild {
-    Message(MessageOptions),
-    WidgetRef(usize),
+auto_from_lua! {
+    #[derive(Debug)]
+    enum LayoutChild {
+        Message(MessageOptions),
+        WidgetRef(usize),
+    }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum MessageInner {
-    Layout{
-        direction: Direction,
-        children: Vec<LayoutChild>,
-    },
-    Widget{
-        #[serde(flatten)]
-        style: MessageStyleOptions,
-        text: Option<TextParts>,
-    },
+auto_from_lua! {
+    #[derive(Debug)]
+    enum MessageInner {
+        Layout{
+            direction: Direction,
+            children: Vec<LayoutChild>,
+        },
+        Widget{
+            #[flatten]
+            style: MessageStyleOptions,
+            text: Option<TextParts>,
+        },
+    }
 }
 
-#[derive(Debug, Deserialize)]
-struct MessageOptions {
-    id: Option<usize>,
-    persist: Option<bool>,
-    hidden: Option<bool>,
-    min_width:  Option<LuaSizeMetric>,
-    max_width:  Option<LuaSizeMetric>,
-    flex_width: Option<sizing::Flex>,
-    min_height: Option<LuaSizeMetric>,
-    max_height: Option<LuaSizeMetric>,
-    flex_height: Option<sizing::Flex>,
-    #[serde(flatten)]
-    inner: MessageInner,
+auto_from_lua! {
+    #[derive(Debug)]
+    struct MessageOptions {
+        id: Option<usize>,
+        persist: Option<bool>,
+        hidden: Option<bool>,
+        min_width:  Option<LuaSizeMetric>,
+        max_width:  Option<LuaSizeMetric>,
+        flex_width: Option<FromLuaSerde<sizing::Flex>>,
+        min_height: Option<LuaSizeMetric>,
+        max_height: Option<LuaSizeMetric>,
+        flex_height: Option<FromLuaSerde<sizing::Flex>>,
+        #[flatten]
+        inner: MessageInner,
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, strum::EnumString)]
@@ -227,71 +186,73 @@ impl From<BorderSide> for border::Sides {
     }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum BorderSides {
-    Single(SerdeWrap<BorderSide>),
-    Multiple(Vec<SerdeWrap<BorderSide>>),
+auto_from_lua! {
+    #[derive(Debug)]
+    enum BorderSides {
+        Single(FromLuaStr<BorderSide>),
+        Multiple(Vec<FromLuaStr<BorderSide>>),
+    }
 }
 
-#[derive(Debug, Deserialize)]
-struct BorderTitleOptions {
-    align: Option<SerdeWrap<Alignment>>,
-    #[serde(flatten)]
-    text: TextParts,
+auto_from_lua! {
+    #[derive(Debug)]
+    struct BorderTitleOptions {
+        align: Option<FromLuaStr<Alignment>>,
+        #[flatten]
+        text: TextParts,
+    }
 }
 
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-struct BorderOptions {
-    enabled: Option<bool>,
-    sides: Option<BorderSides>,
-    r#type: Option<SerdeWrap<border::Kind>>,
-    title_top: Option<BorderTitleOptions>,
-    title_bottom: Option<BorderTitleOptions>,
-    show_empty: Option<bool>,
-    #[serde(flatten)]
-    style: StyleOptions,
+auto_from_lua! {
+    #[derive(Debug, Default)]
+    struct BorderOptions {
+        enabled: Option<bool>,
+        sides: Option<BorderSides>,
+        r#type: Option<FromLuaStr<border::Kind>>,
+        title_top: Option<BorderTitleOptions>,
+        title_bottom: Option<BorderTitleOptions>,
+        show_empty: Option<bool>,
+        #[flatten]
+        style: StyleOptions,
+    }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-struct UnderlineStyleOptions {
-    color: LuaColor,
+auto_from_lua! {
+    #[derive(Debug, Clone, Serialize)]
+    struct UnderlineStyleOptions {
+        color: LuaColor,
+    }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(untagged)]
-enum UnderlineOption {
-    Bool(bool),
-    Options(UnderlineStyleOptions),
+auto_from_lua! {
+    #[derive(Debug, Clone, Serialize)]
+    enum UnderlineOption {
+        Bool(bool),
+        Options(UnderlineStyleOptions),
+    }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
-#[serde(untagged)]
-enum HyperlinkOption {
-    Url(String),
-    Detailed { url: String, id: Option<String> },
+auto_from_lua! {
+    #[derive(Debug, Clone, Serialize)]
+    enum HyperlinkOption {
+        Url(String),
+        Detailed { url: String, id: Option<String>, },
+    }
 }
 
-#[derive(Debug, Default, Clone, Deserialize, Serialize)]
-#[serde(default)]
-struct StyleOptions {
-    fg: Option<LuaColor>,
-    bg: Option<LuaColor>,
-    bold: Option<bool>,
-    dim: Option<bool>,
-    italic: Option<bool>,
-    underline: Option<UnderlineOption>,
-    strikethrough: Option<bool>,
-    reversed: Option<bool>,
-    blink: Option<bool>,
-    hyperlink: Option<HyperlinkOption>,
-}
-
-impl FromLua for StyleOptions {
-    fn from_lua(value: LuaValue, lua: &Lua) -> LuaResult<Self> {
-        lua.from_value(value)
+auto_from_lua! {
+    #[derive(Debug, Default, Clone, Serialize)]
+    struct StyleOptions {
+        fg: Option<LuaColor>,
+        bg: Option<LuaColor>,
+        bold: Option<bool>,
+        dim: Option<bool>,
+        italic: Option<bool>,
+        underline: Option<UnderlineOption>,
+        strikethrough: Option<bool>,
+        reversed: Option<bool>,
+        blink: Option<bool>,
+        hyperlink: Option<HyperlinkOption>,
     }
 }
 
@@ -346,12 +307,13 @@ impl From<Style> for StyleOptions {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-struct BufferStyleOptions {
-    #[serde(flatten)]
-    inner: StyleOptions,
-    no_blend: bool,
+auto_from_lua! {
+    #[derive(Debug, Default)]
+    struct BufferStyleOptions {
+        #[flatten]
+        inner: StyleOptions,
+        no_blend: bool,
+    }
 }
 
 impl From<StyleOptions> for tui::widget::StyleOptions {
@@ -391,19 +353,18 @@ fn parse_text_parts<T: Default+Clone>(parts: TextParts, text: &mut tui::text::Te
     match parts {
         TextParts::Single(part) => {
             text.clear();
-            text.push_lines(part.split('\n').map(|s| s.into()), None);
+            text.push_lines(part.as_bytes().split_str(b"\n").map(|s| s.into()), None);
         },
         TextParts::Detailed(part) => {
-            let hl = if part.style.style.is_none() {
+            let hl = if part.style.is_none() {
                 None
             } else {
-                let style: tui::widget::StyleOptions = part.style.style.into();
-                Some(style.as_style().into())
+                Some(tui::widget::StyleOptions::from(part.style).as_style().into())
             };
 
             if let Some(string) = part.text {
                 text.clear();
-                text.push_lines(string.split('\n').map(|s| s.into()),hl);
+                text.push_lines(string.as_bytes().split_str(b"\n").map(|s| s.into()),hl);
             } else if let Some(hl) = hl {
                 for lineno in 0 .. text.get().len() {
                     text.add_highlight(tui::text::HighlightedRange{
@@ -420,14 +381,13 @@ fn parse_text_parts<T: Default+Clone>(parts: TextParts, text: &mut tui::text::Te
             text.push_line(b"".into(), None);
             for part in parts {
                 if let Some(string) = part.text {
-                    let hl = if part.style.style.is_none() {
+                    let hl = if part.style.is_none() {
                         None
                     } else {
-                        let style: tui::widget::StyleOptions = part.style.style.into();
-                        Some(style.as_style().into())
+                        Some(tui::widget::StyleOptions::from(part.style).as_style().into())
                     };
 
-                    for (i, string) in string.split('\n').enumerate() {
+                    for (i, string) in string.as_bytes().split_str(b"\n").enumerate() {
                         if i > 0 {
                             text.push_line(b"".into(), None);
                         }
@@ -467,7 +427,7 @@ fn set_widget_options(
             if let Some(sides) = sides {
                 let style: tui::widget::StyleOptions = options.style.clone().into();
                 widget.border.sides = sides;
-                widget.border.kind = options.r#type.unwrap_or(SerdeWrap(widget.border.kind)).0;
+                widget.border.kind = options.r#type.unwrap_or(FromLuaStr(widget.border.kind)).0;
                 widget.border.style = widget.border.style.clone().patch(style.as_style());
 
                 if let Some(text) = options.title_top {
@@ -498,7 +458,7 @@ fn set_widget_options(
         None => {},
     }
 
-    widget.style = widget.style.merge(&style.style.style.clone().into());
+    widget.style = widget.style.merge(&style.style.clone().into());
     widget.inner.style = widget.style.as_style();
 }
 
@@ -597,21 +557,19 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
 
     node.height_spec.min = options.min_height.map(|x| x.0).or(node.height_spec.min);
     node.height_spec.max = options.max_height.map(|x| x.0).or(node.height_spec.max);
-    node.height_spec.flex = options.flex_height.or(node.height_spec.flex);
+    node.height_spec.flex = options.flex_height.map(|x| x.0).or(node.height_spec.flex);
     node.width_spec.min = options.min_width.map(|x| x.0).or(node.width_spec.min);
     node.width_spec.max = options.max_width.map(|x| x.0).or(node.width_spec.max);
-    node.width_spec.flex = options.flex_width.or(node.width_spec.flex);
+    node.width_spec.flex = options.flex_width.map(|x| x.0).or(node.width_spec.flex);
 
     Ok(node)
 }
 
-fn set_message(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<usize> {
-    let options: MessageOptions = lua.from_value(val)?;
-
+fn set_message(ui: &Ui, _lua: &Lua, val: MessageOptions) -> Result<usize> {
     let tui = &mut ui.try_borrow_mut()?.tui;
     tui.dirty = true;
 
-    let node = process_message(tui, options)?;
+    let node = process_message(tui, val)?;
     let id = node.id;
     // Only add newly created top-level nodes to root; existing nodes keep their position
     if !node.has_parent {
@@ -651,45 +609,34 @@ fn remove_message(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-struct PartialBufferHighlight {
-    // start: super::number::PossiblyMaxUsize,
-    // finish: super::number::PossiblyMaxUsize,
-    #[serde(flatten)]
-    style: BufferStyleOptions,
-    virtual_text: Option<BString>,
-    conceal: Option<bool>,
-    namespace: Option<usize>,
-    priority: Option<f64>,
+auto_from_lua! {
+    #[derive(Debug, Default)]
+    struct BufferHighlight {
+        start: super::number::PossiblyMaxUsize,
+        finish: super::number::PossiblyMaxUsize,
+        #[flatten]
+        style: BufferStyleOptions,
+        virtual_text: Option<BString>,
+        conceal: Option<bool>,
+        namespace: Option<usize>,
+        priority: Option<f64>,
+    }
 }
 
-fn add_buf_highlight(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<()> {
-    let span = if let Some(table) = val.as_table() {
-        let start: super::number::PossiblyMaxUsize = table.raw_get("start")?;
-        let finish: super::number::PossiblyMaxUsize = table.raw_get("finish")?;
-        table.raw_remove("start")?;
-        table.raw_remove("finish")?;
-        Some((start, finish))
-    } else {
-        None
-    };
-    let hl: PartialBufferHighlight = lua.from_value(val)?;
-    let (start, finish) = span.unwrap();
-
-    let blend = !hl.style.no_blend;
-    let priority = hl.priority.unwrap_or_default();
-    let style: tui::widget::StyleOptions = hl.style.inner.into();
+fn add_buf_highlight(ui: &Ui, _lua: &Lua, val: BufferHighlight) -> Result<()> {
+    let blend = !val.style.no_blend;
+    let priority = val.priority.unwrap_or_default();
+    let style: tui::widget::StyleOptions = val.style.inner.into();
 
     ui.try_borrow_mut()?.buffer.add_highlight(tui::text::HighlightedRange{
         lineno: 0,
-        start: usize::from(start).saturating_sub(1),
-        end: finish.into(),
+        start: usize::from(val.start).saturating_sub(1),
+        end: val.finish.into(),
         inner: tui::text::Highlight{
             style: style.as_style(),
-            namespace: hl.namespace.unwrap_or(0),
-            virtual_text: hl.virtual_text,
-            conceal: hl.conceal,
+            namespace: val.namespace.unwrap_or(0),
+            virtual_text: val.virtual_text,
+            conceal: val.conceal,
             blend,
             priority,
         },
@@ -792,16 +739,15 @@ fn message_to_ansi_string(ui: &Ui, _lua: &Lua, (id, width): (usize, Option<u16>)
 
     let id = NodeId::Normal(id);
     match tui.render_to_string(id, width) {
-        None => anyhow::bail!("can't find widget with id {}", id),
+        None => anyhow::bail!("can't find widget with id {id}"),
         Some(x) => Ok(x),
     }
 }
 
-fn set_status_bar(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<()> {
-    let options: Option<MessageOptions> = lua.from_value(val)?;
+fn set_status_bar(ui: &Ui, _lua: &Lua, val: Option<MessageOptions>) -> Result<()> {
     ui.queue_draw();
     let mut ui = ui.try_borrow_mut()?;
-    if let Some(options) = options {
+    if let Some(options) = val {
         match options.inner {
             MessageInner::Widget { style, text } => {
                 let widget = ui.status_bar.inner.get_or_insert_default();
@@ -819,11 +765,10 @@ fn set_status_bar(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<()> {
     Ok(())
 }
 
-fn set_prompt(ui: &Ui, lua: &Lua, val: LuaValue) -> Result<()> {
-    let options: Option<MessageOptions> = lua.from_value(val)?;
+fn set_prompt(ui: &Ui, __lua: &Lua, val: Option<MessageOptions>) -> Result<()> {
     ui.queue_draw();
     let mut ui = ui.try_borrow_mut()?;
-    if let Some(options) = options {
+    if let Some(options) = val {
         match options.inner {
             MessageInner::Widget { style, text } => {
                 let mut widget = tui::widget::Widget::default();

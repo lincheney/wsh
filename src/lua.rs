@@ -6,6 +6,8 @@ use std::cell::RefCell;
 use anyhow::Result;
 use mlua::prelude::*;
 mod api;
+mod auto_from_lua;
+use auto_from_lua::auto_from_lua;
 pub use api::{
     init_lua,
     keybind::invoke_keybind_callback,
@@ -162,5 +164,30 @@ extern "C-unwind" fn lua_sigint_hook(lua: *mut mlua::ffi::lua_State, _ar: *mut m
         }
         mlua::ffi::lua_pushliteral(lua, c"interrupted");
         mlua::ffi::lua_error(lua);
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct FromLuaStr<T>(T);
+
+impl<T: std::str::FromStr> FromLua for FromLuaStr<T>
+    where T::Err: std::fmt::Display
+{
+    fn from_lua(value: LuaValue, _lua: &Lua) -> LuaResult<Self> {
+        if let Some(value) = value.as_string() {
+            let value = value.to_str()?;
+            Ok(Self(T::from_str(&value).map_err(crate::lua::lua_error)?))
+        } else {
+            Err(crate::lua::lua_error("expected string"))
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct FromLuaSerde<T>(T);
+
+impl<T: serde::de::DeserializeOwned> FromLua for FromLuaSerde<T> {
+    fn from_lua(value: LuaValue, lua: &Lua) -> LuaResult<Self> {
+        Ok(Self(lua.from_value(value)?))
     }
 }

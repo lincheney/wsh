@@ -1,5 +1,5 @@
 use std::os::fd::AsRawFd;
-use crate::lua::LuaWrapper;
+use crate::lua::{LuaWrapper, auto_from_lua, lua_error};
 use bstr::BString;
 use std::str::FromStr;
 use std::collections::HashMap;
@@ -12,25 +12,18 @@ use tokio::io::{
 };
 use tokio::process::Command;
 use tokio::sync::{oneshot, watch, RwLock};
-use serde::{Deserialize, Deserializer, de};
 use crate::ui::{Ui};
 use crate::lua::api::asyncio::{ReadableFile, WriteableFile};
 use super::subshell;
 
 #[derive(Debug, Copy, Clone)]
 struct Signal(nix::sys::signal::Signal);
-#[derive(Debug, Deserialize, Clone)]
-#[serde(untagged)]
-enum RawSignal {
-    Number(i32),
-    String(String),
-}
 
-impl<'de> Deserialize<'de> for Signal {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let signal = match RawSignal::deserialize(deserializer)? {
-            RawSignal::Number(x) => nix::sys::signal::Signal::try_from(x).map_err(de::Error::custom)?,
-            RawSignal::String(x) => nix::sys::signal::Signal::from_str(x.as_ref()).map_err(de::Error::custom)?,
+impl FromLua for Signal {
+    fn from_lua(value: LuaValue, lua: &Lua) -> LuaResult<Self> {
+        let signal = match mlua::Either::<i32, String>::from_lua(value, lua)? {
+            mlua::Either::Left(x) => nix::sys::signal::Signal::try_from(x).map_err(lua_error)?,
+            mlua::Either::Right(x) => nix::sys::signal::Signal::from_str(x.as_ref()).map_err(lua_error)?,
         };
         Ok(Signal(signal))
     }
@@ -91,9 +84,8 @@ impl UserData for Process {
             Ok(proc.result.inner.borrow().is_some())
         });
 
-        methods.add_method("kill", |lua, proc, signal: LuaValue| {
+        methods.add_method("kill", |_lua, proc, signal: Signal| {
             if proc.result.inner.borrow().is_none() {
-                let signal: Signal = lua.from_value(signal)?;
                 let pid = nix::unistd::Pid::from_raw(proc.pid as _);
                 if let Err(err) = nix::sys::signal::kill(pid, signal.0)
                     && err != nix::errno::Errno::ESRCH
@@ -107,13 +99,15 @@ impl UserData for Process {
     }
 }
 
-#[derive(Debug, Default, Deserialize, Copy, Clone)]
-#[allow(non_camel_case_types)]
-pub enum Stdio {
-    #[default]
-    inherit,
-    piped,
-    null,
+auto_from_lua! {
+    #[derive(Debug, Default, Copy, Clone)]
+    #[allow(non_camel_case_types)]
+    pub enum Stdio {
+        #[default]
+        inherit,
+        piped,
+        null,
+    }
 }
 
 impl From<Stdio> for std::process::Stdio {
@@ -126,29 +120,31 @@ impl From<Stdio> for std::process::Stdio {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-struct FullSpawnArgs {
-    args: Vec<String>,
-    stdin: Stdio,
-    stdout: Stdio,
-    stderr: Stdio,
-    env: Option<HashMap<String, String>>,
-    clear_env: bool,
-    cwd: Option<String>,
-    foreground: Option<bool>,
+auto_from_lua! {
+    #[derive(Debug, Default)]
+    struct FullSpawnArgs {
+        args: Vec<String>,
+        stdin: Stdio,
+        stdout: Stdio,
+        stderr: Stdio,
+        env: Option<HashMap<String, String>>,
+        clear_env: bool,
+        cwd: Option<String>,
+        foreground: Option<bool>,
+    }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum SpawnArgs {
-    Shell(BString),
-    Simple(Vec<String>),
-    Full(FullSpawnArgs),
+auto_from_lua! {
+    #[derive(Debug)]
+    enum SpawnArgs {
+        Shell(BString),
+        Simple(Vec<String>),
+        Full(FullSpawnArgs),
+    }
 }
 
-async fn spawn(mut ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
-    let args = match lua.from_value(val)? {
+async fn spawn(mut ui: Ui, lua: Lua, val: SpawnArgs) -> Result<LuaMultiValue> {
+    let args = match val {
         SpawnArgs::Shell(command) => return subshell::subshell_run_with_args(ui, lua, subshell::FullShellRunArgs{command, ..Default::default()}).await,
         SpawnArgs::Full(args) => args,
         SpawnArgs::Simple(args) => FullSpawnArgs{args, ..Default::default()},

@@ -1,11 +1,10 @@
-use crate::lua::LuaWrapper;
+use crate::lua::{LuaWrapper};
 use crate::shell::{MetaString};
 use std::rc::Rc;
 use bstr::BString;
 use crate::ui::{Ui, WeakUi};
 use anyhow::Result;
 use mlua::{prelude::*, UserData, UserDataMethods};
-use serde::{Deserialize};
 use super::process::{shell_run_with_args, ShellRunCmd, Stdio};
 
 pub struct Function {
@@ -13,21 +12,23 @@ pub struct Function {
     ui: WeakUi,
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-struct FullFunctionArgs {
-    args: Vec<BString>,
-    foreground: Option<bool>,
-    stdin: Option<BString>,
-    stdout: Stdio,
-    stderr: Stdio,
+crate::lua::auto_from_lua! {
+    #[derive(Debug)]
+    struct FullFunctionArgs {
+        args: Vec<BString>,
+        foreground: Option<bool>,
+        stdin: Option<BString>,
+        stdout: Stdio,
+        stderr: Stdio,
+    }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum FunctionArgs {
-    Simple(Vec<BString>),
-    Full(FullFunctionArgs),
+crate::lua::auto_from_lua! {
+    #[derive(Debug)]
+    enum FunctionArgs {
+        Simple(Vec<BString>),
+        Full(FullFunctionArgs),
+    }
 }
 
 impl UserData for Function {
@@ -39,7 +40,7 @@ impl UserData for Function {
 
             } else if args.len() == 1 {
                 let arg = args.pop_front().unwrap();
-                match lua.from_value(arg)? {
+                match FunctionArgs::from_lua(arg, &lua)? {
                     FunctionArgs::Simple(args) => (args, None, None, Stdio::inherit, Stdio::inherit),
                     FunctionArgs::Full(f) => (f.args, f.foreground, f.stdin, f.stdout, f.stderr),
                 }

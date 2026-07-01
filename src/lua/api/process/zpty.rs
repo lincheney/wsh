@@ -1,5 +1,5 @@
 use std::os::fd::AsRawFd;
-use crate::lua::LuaWrapper;
+use crate::lua::{LuaWrapper, auto_from_lua, FromLuaSerde};
 use crate::shell::{MetaString};
 use std::rc::Rc;
 use crate::meta_str;
@@ -14,25 +14,26 @@ use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use tokio::io::{unix::AsyncFd, ReadBuf, AsyncRead, AsyncWrite, BufWriter, BufReader};
 use tokio::sync::{watch, RwLock};
-use serde::{Deserialize};
 use crate::ui::{Ui};
 use crate::lua::api::asyncio::{ReadableFile, WriteableFile};
 
-#[derive(Default, Debug, Deserialize)]
-#[serde(default)]
-struct FullZptyArgs {
-    args: BString,
-    height: Option<NonZeroU16>,
-    width: Option<NonZeroU16>,
-    no_echo_input: bool,
+auto_from_lua! {
+    #[derive(Default, Debug)]
+    pub struct FullZptyArgs {
+        args: BString,
+        height: Option<FromLuaSerde<NonZeroU16>>,
+        width: Option<FromLuaSerde<NonZeroU16>>,
+        no_echo_input: bool,
+    }
 }
 
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum ZptyArgs {
-    Simple(BString),
-    Full(FullZptyArgs),
+auto_from_lua! {
+    #[derive(Debug)]
+    pub enum ZptyArgs {
+        Simple(BString),
+        Full(FullZptyArgs),
+    }
 }
 
 struct AsyncZpty {
@@ -84,8 +85,8 @@ impl AsyncWrite for AsyncZpty {
     }
 }
 
-pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
-    let args = match lua.from_value(val)? {
+pub async fn zpty(ui: Ui, lua: Lua, val: ZptyArgs) -> Result<LuaMultiValue> {
+    let args = match val {
         ZptyArgs::Full(args) => args,
         ZptyArgs::Simple(args) => FullZptyArgs{args, ..Default::default()},
     };
@@ -101,8 +102,8 @@ pub async fn zpty(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
     let opts = crate::shell::ZptyOpts{
         echo_input: !args.no_echo_input,
         non_blocking: true,
-        height: args.height,
-        width: args.width,
+        height: args.height.map(|x| x.0),
+        width: args.width.map(|x| x.0),
     };
     // TODO capture shout
 

@@ -1,4 +1,4 @@
-use crate::lua::LuaWrapper;
+use crate::lua::{LuaWrapper, auto_from_lua};
 use bstr::BString;
 use std::default::Default;
 use std::os::fd::{AsRawFd, OwnedFd};
@@ -10,28 +10,29 @@ use tokio::io::{
 };
 use tokio::net::unix::pipe::{Sender, Receiver};
 use tokio::sync::{oneshot, watch, RwLock};
-use serde::{Deserialize};
 use crate::ui::{Ui};
 use crate::lua::api::asyncio::{ReadableFile, WriteableFile};
 use super::spawn::{Stdio, Process, CommandResult};
 use super::shell::Stream;
 use crate::shell::FdAction;
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-pub struct FullShellRunArgs {
-    pub command: BString,
-    pub stdin: Stdio,
-    pub stdout: Stdio,
-    pub stderr: Stdio,
-    pub foreground: Option<bool>,
+auto_from_lua! {
+    #[derive(Debug, Default)]
+    pub struct FullShellRunArgs {
+        pub command: BString,
+        pub stdin: Stdio,
+        pub stdout: Stdio,
+        pub stderr: Stdio,
+        pub foreground: Option<bool>,
+    }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum SubshellRunArgs {
-    Simple(BString),
-    Full(FullShellRunArgs),
+auto_from_lua! {
+    #[derive(Debug)]
+    enum SubshellRunArgs {
+        Simple(BString),
+        Full(FullShellRunArgs),
+    }
 }
 
 struct FdOverride {
@@ -81,8 +82,8 @@ impl FdOverride {
     }
 }
 
-async fn subshell_run(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
-    let args = match lua.from_value(val)? {
+async fn subshell_run(ui: Ui, lua: Lua, val: SubshellRunArgs) -> Result<LuaMultiValue> {
+    let args = match val {
         SubshellRunArgs::Simple(command) => FullShellRunArgs{command, ..Default::default()},
         SubshellRunArgs::Full(args) => args
     };

@@ -1,7 +1,5 @@
-use crate::lua::LuaWrapper;
+use crate::lua::{LuaWrapper, auto_from_lua};
 use crate::shell::{MetaString};
-use std::str::FromStr;
-use serde::{Deserialize, Deserializer, de};
 use bstr::BString;
 use std::io::Write;
 use mlua::prelude::*;
@@ -27,37 +25,18 @@ use crate::keybind::EventIndex;
 pub use keybind::KeybindMapping;
 pub use events::{EventCallbacks, HasEventCallbacks};
 
-#[derive(Debug, Copy, Clone)]
-pub struct SerdeWrap<T>(T);
-impl<'de, T: FromStr> Deserialize<'de> for SerdeWrap<T>
-    where <T as FromStr>::Err: std::fmt::Display
-{
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let data = String::deserialize(deserializer)?;
-        Ok(Self(T::from_str(&data).map_err(de::Error::custom)?))
+auto_from_lua! {
+    #[derive(Debug, Default)]
+    struct RedrawOptions {
+        prompt: bool,
+        postdisplay: bool,
+        predisplay: bool,
+        buffer: bool,
+        messages: bool,
+        status_bar: bool,
+        all: bool,
+        now: bool,
     }
-}
-
-impl<T: ToString> serde::Serialize for SerdeWrap<T> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&self.0.to_string())
-    }
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-struct RedrawOptions {
-    prompt: bool,
-    postdisplay: bool,
-    predisplay: bool,
-    buffer: bool,
-    messages: bool,
-    status_bar: bool,
-    all: bool,
-    now: bool,
 }
 
 fn get_cursor(ui: &Ui, _lua: &Lua, (): ()) -> Result<usize> {
@@ -118,9 +97,8 @@ async fn accept_line(mut ui: Ui, _lua: Lua, (): ()) -> Result<bool> {
     ui.accept_line().await
 }
 
-async fn redraw(ui: Ui, lua: Lua, val: Option<LuaValue>) -> Result<()> {
+async fn redraw(ui: Ui, _lua: Lua, val: Option<RedrawOptions>) -> Result<()> {
     if let Some(val) = val {
-        let val: RedrawOptions = lua.from_value(val)?;
         {
             let mut ui = ui.try_borrow_mut()?;
             if val.all { ui.dirty = true; }

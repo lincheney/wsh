@@ -1,4 +1,4 @@
-use crate::lua::LuaWrapper;
+use crate::lua::{LuaWrapper, FromLuaStr};
 use crate::shell::{MetaString};
 use std::collections::HashMap;
 use bstr::BString;
@@ -102,8 +102,8 @@ enum VarType {
 
 async fn create_dynamic_var(
     ui: Ui,
-    lua: Lua,
-    (name, typ, get, set, unset): (BString, LuaValue, LuaFunction, Option<LuaFunction>, Option<LuaFunction>),
+    _lua: Lua,
+    (name, typ, get, set, unset): (BString, FromLuaStr<VarType>, LuaFunction, Option<LuaFunction>, Option<LuaFunction>),
 ) -> Result<()> {
 
     let weak = ui.downgrade();
@@ -147,7 +147,6 @@ async fn create_dynamic_var(
         )
     }
 
-    let typ: super::SerdeWrap<VarType> = lua.from_value(typ)?;
     match typ.0 {
         VarType::string => make_dynamic_var!(create_dynamic_string_var),
         VarType::integer => make_dynamic_var!(create_dynamic_integer_var),

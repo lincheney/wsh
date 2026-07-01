@@ -1,5 +1,5 @@
 use bstr::{BString, BStr};
-use crate::lua::LuaWrapper;
+use crate::lua::{LuaWrapper, auto_from_lua};
 use crate::shell::MetaString;
 use std::rc::Rc;
 use std::os::fd::{OwnedFd, AsFd, RawFd, AsRawFd, BorrowedFd};
@@ -7,7 +7,6 @@ use std::io::{Read, Seek, Write};
 use std::fs::OpenOptions;
 use anyhow::Result;
 use mlua::prelude::*;
-use serde::Deserialize;
 use nix::sys::memfd::{memfd_create, MFdFlags};
 use crate::ui::Ui;
 use super::spawn::Stdio;
@@ -116,25 +115,27 @@ impl Drop for FdOverride {
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-struct FullShellRunArgs {
-    command:    BString,
-    foreground: Option<bool>,
-    stdin:      Option<BString>,
-    stdout:     Stdio,
-    stderr:     Stdio,
+auto_from_lua! {
+    #[derive(Debug, Default)]
+    struct FullShellRunArgs {
+        command:    BString,
+        foreground: Option<bool>,
+        stdin:      Option<BString>,
+        stdout:     Stdio,
+        stderr:     Stdio,
+    }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum ShellRunArgs {
-    Simple(BString),
-    Full(FullShellRunArgs),
+auto_from_lua! {
+    #[derive(Debug)]
+    enum ShellRunArgs {
+        Simple(BString),
+        Full(FullShellRunArgs),
+    }
 }
 
-async fn shell_run(ui: Ui, lua: Lua, val: LuaValue) -> Result<LuaMultiValue> {
-    let args = match lua.from_value(val)? {
+async fn shell_run(ui: Ui, lua: Lua, val: ShellRunArgs) -> Result<LuaMultiValue> {
+    let args = match val {
         ShellRunArgs::Simple(command) => FullShellRunArgs { command, ..Default::default() },
         ShellRunArgs::Full(args) => args,
     };

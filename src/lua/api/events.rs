@@ -1,8 +1,8 @@
-use crate::lua::LuaWrapper;
+use crate::lua::{LuaWrapper, auto_from_lua};
 use bstr::BString;
 use anyhow::Result;
 use mlua::{prelude::*, Function};
-use serde::{Deserialize, Serialize};
+use serde::{Serialize};
 use crate::ui::Ui;
 use crate::keybind;
 
@@ -25,12 +25,14 @@ async fn trigger_callbacks_multi_value(ui: &Ui, callbacks: Vec<(usize, Function)
 macro_rules! event_types {
     ($( $name:ident($($arg:ident : $type:ty),*), )*) => (
 
-        #[derive(Debug, Deserialize, Clone, Copy)]
-        pub enum EventType {
-        $(
-            #[allow(non_camel_case_types)]
-            $name,
-        )*
+        auto_from_lua! {
+            #[derive(Debug, Clone, Copy)]
+            pub enum EventType {
+            $(
+                #[allow(non_camel_case_types)]
+                $name,
+            )*
+            }
         }
 
     paste::paste!{
@@ -118,12 +120,14 @@ macro_rules! event_types {
 }
 
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct KeyEvent {
-    key: String,
-    control: bool,
-    shift: bool,
-    alt: bool,
+auto_from_lua! {
+    #[derive(Debug, Serialize, Clone)]
+    pub struct KeyEvent {
+        key: String,
+        control: bool,
+        shift: bool,
+        alt: bool,
+    }
 }
 
 impl From<keybind::KeyEvent> for KeyEvent {
@@ -137,14 +141,16 @@ impl From<keybind::KeyEvent> for KeyEvent {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MouseEvent {
-    pub key: String,
-    pub control: bool,
-    pub shift: bool,
-    pub alt: bool,
-    pub x: usize,
-    pub y: usize,
+auto_from_lua! {
+    #[derive(Debug, Serialize, Clone)]
+    pub struct MouseEvent {
+        pub key: String,
+        pub control: bool,
+        pub shift: bool,
+        pub alt: bool,
+        pub x: usize,
+        pub y: usize,
+    }
 }
 
 impl From<keybind::MouseEvent> for MouseEvent {
@@ -174,8 +180,7 @@ event_types!(
 );
 
 
-fn add_event_callback(ui: &Ui, lua: &Lua, (typ, callback): (LuaValue, Function)) -> Result<usize> {
-    let typ: EventType = lua.from_value(typ)?;
+fn add_event_callback(ui: &Ui, _lua: &Lua, (typ, callback): (EventType, Function)) -> Result<usize> {
     Ok(ui.try_borrow_mut()?.event_callbacks.add_event_callback(typ, callback))
 }
 
