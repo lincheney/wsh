@@ -20,9 +20,9 @@ auto_from_lua! {
     #[derive(Debug, Default)]
     pub struct FullShellRunArgs {
         pub command: BString,
-        pub stdin: Stdio,
-        pub stdout: Stdio,
-        pub stderr: Stdio,
+        pub stdin: Option<Stdio>,
+        pub stdout: Option<Stdio>,
+        pub stderr: Option<Stdio>,
         pub foreground: Option<bool>,
     }
 }
@@ -96,9 +96,9 @@ pub async fn subshell_run_with_args(ui: Ui, lua: Lua, args: FullShellRunArgs) ->
     let (sender, receiver) = watch::channel(None);
 
     let foreground = args.foreground.unwrap_or(
-        matches!(args.stdin, Stdio::inherit)
-        || matches!(args.stdout, Stdio::inherit)
-        || matches!(args.stderr, Stdio::inherit)
+        matches!(args.stdin.unwrap_or_default(), Stdio::inherit)
+        || matches!(args.stdout.unwrap_or_default(), Stdio::inherit)
+        || matches!(args.stderr.unwrap_or_default(), Stdio::inherit)
     );
 
     ui.clone().runtime.spawn_local(async move {
@@ -109,9 +109,9 @@ pub async fn subshell_run_with_args(ui: Ui, lua: Lua, args: FullShellRunArgs) ->
 
                 let result = ui.freeze_if(foreground, true, async {
 
-                    let (stdin, stdin_pipe)   = FdOverride::new_stdin(args.stdin)?;
-                    let (stdout, stdout_pipe) = FdOverride::new_out(Stream::Stdout(args.stdout))?;
-                    let (stderr, stderr_pipe) = FdOverride::new_out(Stream::Stderr(args.stderr))?;
+                    let (stdin, stdin_pipe)   = FdOverride::new_stdin(args.stdin.unwrap_or_default())?;
+                    let (stdout, stdout_pipe) = FdOverride::new_out(Stream::Stdout(args.stdout.unwrap_or_default()))?;
+                    let (stderr, stderr_pipe) = FdOverride::new_out(Stream::Stderr(args.stderr.unwrap_or_default()))?;
                     let streams = [stdin, stdout, stderr];
 
                     let redirections = streams.iter().flatten().map(|s| s.fd_action());

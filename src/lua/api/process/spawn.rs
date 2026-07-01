@@ -124,9 +124,9 @@ auto_from_lua! {
     #[derive(Debug, Default)]
     struct FullSpawnArgs {
         args: Vec<String>,
-        stdin: Stdio,
-        stdout: Stdio,
-        stderr: Stdio,
+        stdin: Option<Stdio>,
+        stdout: Option<Stdio>,
+        stderr: Option<Stdio>,
         env: Option<HashMap<String, String>>,
         clear_env: bool,
         cwd: Option<String>,
@@ -166,13 +166,13 @@ async fn spawn(mut ui: Ui, lua: Lua, val: SpawnArgs) -> Result<LuaMultiValue> {
     if let Some(cwd) = args.cwd {
         command.current_dir(cwd);
     }
-    command.stdin(args.stdin);
-    command.stdout(args.stdout);
-    command.stderr(args.stderr);
+    command.stdin(args.stdin.unwrap_or_default());
+    command.stdout(args.stdout.unwrap_or_default());
+    command.stderr(args.stderr.unwrap_or_default());
     let foreground = args.foreground.unwrap_or(
-        matches!(args.stdin, Stdio::inherit)
-        || matches!(args.stdout, Stdio::inherit)
-        || matches!(args.stderr, Stdio::inherit)
+        matches!(args.stdin.unwrap_or_default(), Stdio::inherit)
+        || matches!(args.stdout.unwrap_or_default(), Stdio::inherit)
+        || matches!(args.stderr.unwrap_or_default(), Stdio::inherit)
     );
 
     let (result_sender, result_receiver) = oneshot::channel();

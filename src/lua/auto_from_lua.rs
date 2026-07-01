@@ -11,6 +11,16 @@ pub fn make_error(mut err: String, path: &str) -> LuaError {
     crate::lua::lua_error(err)
 }
 
+pub trait FromLuaRef: Sized {
+    fn from_lua_ref(value: &LuaValue, lua: &Lua) -> LuaResult<Self>;
+}
+
+impl<T: FromLua> FromLuaRef for T {
+    fn from_lua_ref(value: &LuaValue, lua: &Lua) -> LuaResult<Self> {
+        Self::from_lua(value.clone(), lua)
+    }
+}
+
 macro_rules! auto_from_lua {
 
     (
@@ -26,13 +36,15 @@ macro_rules! auto_from_lua {
             $field_vis $field: $type,
         )* }
 
-        impl ::mlua::FromLua for $name {
-            fn from_lua(value: ::mlua::Value, lua: &::mlua::Lua) -> ::mlua::Result<Self> {
-                if let ::mlua::Value::Table(table) = value.clone() && table.raw_len() == 0 {
+        impl $name {
+            fn from_lua_ref(value: &::mlua::Value, lua: &::mlua::Lua) -> ::mlua::Result<Self> {
+                #[allow(unused_imports)]
+                use crate::lua::auto_from_lua::{FromLuaRef};
+                if let ::mlua::Value::Table(table) = &value && table.raw_len() == 0 {
                     $(
                     let flatten = $($($dummy:ident)? true || )? false;
                     let $field: $type = if flatten {
-                        <$type>::from_lua(value.clone(), lua)?
+                            <$type>::from_lua_ref(&value, lua)?
                     } else {
                         table.raw_get(stringify!($field))
                             .map_err(|err| crate::lua::auto_from_lua::make_error(err.to_string(), concat!(".", stringify!($field))) )?
@@ -47,6 +59,13 @@ macro_rules! auto_from_lua {
                 }
             }
         }
+
+        impl ::mlua::FromLua for $name {
+            fn from_lua(value: ::mlua::Value, lua: &::mlua::Lua) -> ::mlua::Result<Self> {
+                Self::from_lua_ref(&value, lua)
+            }
+        }
+
 
     );
 
@@ -74,14 +93,16 @@ macro_rules! auto_from_lua {
                 ),* })?
         ),+ }
 
-        impl ::mlua::FromLua for $name {
+        impl $name {
             #[allow(unused_variables)]
-            fn from_lua(value: ::mlua::Value, lua: &::mlua::Lua) -> ::mlua::Result<Self> {
+            fn from_lua_ref(value: &::mlua::Value, lua: &::mlua::Lua) -> ::mlua::Result<Self> {
+                #[allow(unused_imports)]
+                use crate::lua::auto_from_lua::FromLuaRef;
                 $(
                     #[allow(non_snake_case)]
                     let $variant = (|| {
                         return crate::lua::auto_from_lua::auto_from_lua_enum_variant!(
-                            value.clone(), lua,
+                            value, lua,
                             $variant
                                 $(($tuple_ty))?
                                 $({ $(
@@ -109,6 +130,13 @@ macro_rules! auto_from_lua {
                 return Err(crate::lua::lua_error(msg));
             }
         }
+
+        impl ::mlua::FromLua for $name {
+            fn from_lua(value: ::mlua::Value, lua: &::mlua::Lua) -> ::mlua::Result<Self> {
+                Self::from_lua_ref(&value, lua)
+            }
+        }
+
     );
 
 }
@@ -122,7 +150,7 @@ macro_rules! auto_from_lua_enum_variant {
         }
     );
     ($value:expr, $lua:expr, $variant:ident ($tuple_ty:ty)) => (
-        Ok(Self::$variant(<$tuple_ty>::from_lua($value, $lua)?))
+        Ok(Self::$variant(<$tuple_ty>::from_lua_ref($value, $lua)?))
     );
     (
         $value:expr,
@@ -140,7 +168,7 @@ macro_rules! auto_from_lua_enum_variant {
                     $field: $struct_ty,
                 )* }
             }
-            let value = Temp::from_lua($value, $lua)?;
+            let value = Temp::from_lua_ref($value, $lua)?;
             Ok(Self::$variant{ $(
                 $field: value.$field,
             )* })

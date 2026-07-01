@@ -121,8 +121,8 @@ auto_from_lua! {
         command:    BString,
         foreground: Option<bool>,
         stdin:      Option<BString>,
-        stdout:     Stdio,
-        stderr:     Stdio,
+        stdout:     Option<Stdio>,
+        stderr:     Option<Stdio>,
     }
 }
 
@@ -145,8 +145,8 @@ async fn shell_run(ui: Ui, lua: Lua, val: ShellRunArgs) -> Result<LuaMultiValue>
         ShellRunCmd::Simple(args.command),
         args.foreground,
         args.stdin,
-        args.stdout,
-        args.stderr,
+        args.stdout.unwrap_or_default(),
+        args.stderr.unwrap_or_default(),
     ).await?;
     Ok(lua.pack_multi((code, stdout, stderr))?)
 }

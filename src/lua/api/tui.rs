@@ -79,7 +79,7 @@ impl FromLua for LuaSizeMetric {
 auto_from_lua! {
     #[derive(Debug, Default, Clone)]
     struct TextOptions {
-        text: Option<LuaString>,
+        text: Option<BString>,
         #[flatten]
         style: StyleOptions,
     }
@@ -88,7 +88,7 @@ auto_from_lua! {
 auto_from_lua! {
     #[derive(Debug, Clone)]
     enum TextParts {
-        Single(LuaString),
+        Single(BString),
         Detailed(TextOptions),
         Many(Vec<TextOptions>),
     }
@@ -322,7 +322,7 @@ auto_from_lua! {
     struct BufferStyleOptions {
         #[flatten]
         inner: StyleOptions,
-        no_blend: bool,
+        no_blend: Option<bool>,
     }
 }
 
@@ -643,7 +643,7 @@ auto_from_lua! {
 }
 
 fn add_buf_highlight(ui: &Ui, _lua: &Lua, val: BufferHighlight) -> Result<()> {
-    let blend = !val.style.no_blend;
+    let blend = !val.style.no_blend.unwrap_or_default();
     let priority = val.priority.unwrap_or_default();
     let style: tui::widget::StyleOptions = val.style.inner.into();
 
