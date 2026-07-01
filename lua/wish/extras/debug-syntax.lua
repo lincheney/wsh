@@ -8,6 +8,6 @@ return wish.plugin(function(wish, opts, plugin)
             return true
         end
         local output = QUERY.debug_tokens(tokens, str), true
-        wish.set_message{id=msg, text=output}
+        wish.set_message{id=msg, contents=output}
     end)
 end)

@@ -25,21 +25,22 @@ local function score(haystack, needle)
     local start = 0
     local text = {}
     for i = 1, wish.str.len(needle) do
-        local ix = string.find(haystack, wish.str.get(needle, i-1), last, true)
+        local a, b = wish.str.to_byte_pos(needle, i)
+        local ix = string.find(haystack, string.sub(needle, a, b), last, true)
         if not ix then
             return
         elseif ix > last then
             if last > 1 then
-                table.insert(text, {text = haystack:sub(start, last-1), fg = match_fg})
+                table.insert(text, {text = string.sub(haystack, start, last-1), fg = match_fg})
             end
-            table.insert(text, {text = haystack:sub(last, ix-1)})
+            table.insert(text, {text = string.sub(haystack, last, ix-1)})
             start = ix
         end
         last = ix + 1
     end
-    table.insert(text, {text = haystack:sub(start, last-1), fg = match_fg})
+    table.insert(text, {text = string.sub(haystack, start, last-1), fg = match_fg})
     if last <= #haystack then
-        table.insert(text, {text = haystack:sub(last)})
+        table.insert(text, {text = string.sub(haystack, last)})
     end
     return text
 end
@@ -86,23 +87,24 @@ local function recalc_filter()
     state.selected = math.max(0, math.min(state.selected, #state.filtered + 1))
 
     -- center around the selected item
-    local bottom = math.min(#state.filtered, state.selected + math.ceil(SIZE / 2) - 1)
-    local top = math.max(1, bottom - SIZE + 1)
-    bottom = math.min(#state.filtered, top + SIZE - 1)
-    local step = 1
+    -- local bottom = math.min(#state.filtered, state.selected + math.ceil(SIZE / 2) - 1)
+    -- local top = math.max(1, bottom - SIZE + 1)
+    -- bottom = math.min(#state.filtered, top + SIZE - 1)
+    -- local step = 1
 
+    local top, bottom, step = 1, #state.filtered, 1
     if state.reverse then
         top, bottom = bottom, top
         step = -1
     end
 
-    local text = {}
+    local contents = {}
     for i = top, bottom, step do
-        local bg = i == state.selected and 'darkgrey' or nil
+        local bg = i == state.selected and 'dark_grey' or nil
 
         if state.filtered[i].text then
             -- unhighlighted text
-            table.insert(text, state.filtered[i])
+            table.insert(contents, state.filtered[i])
             state.filtered[i].bg = bg
             if i == state.selected then
                 state.real_selected = i
@@ -111,7 +113,7 @@ local function recalc_filter()
         else
             -- highlighted text
             for j = 1, #state.filtered[i][1] do
-                table.insert(text, state.filtered[i][1][j])
+                table.insert(contents, state.filtered[i][1][j])
                 state.filtered[i][1][j].bg = bg
             end
             if i == state.selected then
@@ -119,12 +121,22 @@ local function recalc_filter()
             end
         end
 
-        table.insert(text, {text = '\n'})
+        table.insert(contents, {text = '\n'})
     end
 
     if selection_widget and wish.check_message(selection_widget) then
-        wish.set_message{id = selection_widget, text = #text > 0 and text or ''}
+        wish.set_message{id = selection_widget, contents = #contents > 0 and contents or ''}
+        wish.scroll_message_to(selection_widget, state.selected)
     end
+end
+
+local function move_cursor(selected)
+    local old = state.selected
+    state.selected = math.max(1, math.min(selected, #state.filtered))
+    wish.set_message{ id = selection_widget, start_line = old - 1, contents = {} }
+    wish.set_message{ id = selection_widget, start_line = state.selected - 1, contents = { bg = 'dark_grey' } }
+    wish.scroll_message_to(selection_widget, state.selected - 1)
+    wish.redraw()
 end
 
 -- opts:
@@ -150,7 +162,7 @@ function M.start(opts)
                 end
             end),
             keymap_layer = wish.add_keymap_layer(),
-            selected = 1,
+            selected = 0,
             real_selected = nil,
         }
 
@@ -187,17 +199,15 @@ function M.start(opts)
     selection_widget = wish.set_message(opts)
 
     if type(source) == 'function' then
-        wish.schedule(function()
-            for lines in source() do
-                M.add_lines(lines)
-                if not M.is_active() then
-                    break
-                end
+        for lines in source() do
+            M.add_lines(lines)
+            if not M.is_active() then
+                break
             end
-            if M.is_active() and #state.lines == 0 then
-                state.resume()
-            end
-        end)
+        end
+        if M.is_active() and #state.lines == 0 then
+            state.resume()
+        end
     elseif type(source) == 'table' then
         M.add_lines(source)
     end
@@ -254,15 +264,13 @@ end
 
 function M.up()
     if M.is_active() then
-        state.selected = math.max(1, state.selected - 1)
-        recalc_filter()
+        move_cursor(state.selected - 1)
     end
 end
 
 function M.down()
     if M.is_active() then
-        state.selected = state.selected + 1
-        recalc_filter()
+        move_cursor(state.selected + 1)
     end
 end
 

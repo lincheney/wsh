@@ -4,7 +4,7 @@ return wish.plugin(function(wish, opts, plugin)
     wish.add_event_callback('init', function()
         -- Create a message widget with a border
         msg_id = wish.set_message{
-            text = 'Click me! Mouse demo widget.\nHover over this area.',
+            contents = 'Click me! Mouse demo widget.\nHover over this area.',
             border = { enabled = true, title = 'Mouse Demo' },
             persist = true,
         }

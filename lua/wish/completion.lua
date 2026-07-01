@@ -46,7 +46,7 @@ function M.complete()
     end)
 
     -- loading message
-    wish.set_message{id = msg, hidden = false, text = 'Loading matches ...', fg = 'grey'}
+    wish.set_message{id = msg, hidden = false, contents = 'Loading matches ...', fg = 'grey'}
 
     local result = SELECTION.start()
     loaded = true
@@ -60,7 +60,7 @@ function M.complete()
     elseif cancelled then
         wish.set_message{id = msg, hidden = true}
     elseif not all_matches or #all_matches == 0 then
-        wish.set_message{id = msg, hidden = false, text='No completion matches', fg='lightred'}
+        wish.set_message{id = msg, hidden = false, contents='No completion matches', fg='lightred'}
     end
 
 end
