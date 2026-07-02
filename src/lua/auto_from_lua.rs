@@ -164,7 +164,7 @@ macro_rules! auto_from_lua {
 
 macro_rules! auto_from_lua_enum_variant {
     ($value:expr, $lua:expr, $variant:ident) => (
-        if $value.as_string().is_some_and(|x| x == stringify!($variant)) {
+        if $value.as_string().is_some_and(|x| x.as_bytes().eq_ignore_ascii_case(stringify!($variant).as_bytes())) {
             Ok(Self::$variant)
         } else {
             Err(crate::lua::lua_error(concat!("does not match: ", stringify!($variant))))
