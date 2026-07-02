@@ -47,7 +47,7 @@ impl Buffer {
     }
 
     pub fn clear_highlights(&mut self) {
-        self.contents.clear_highlights();
+        self.contents.clear_highlights(None);
         self.dirty = true;
     }
 
@@ -214,7 +214,7 @@ impl Buffer {
     }
 
     pub fn restore(&mut self) {
-        self.contents.swap_line(&mut self.saved_contents, 0);
+        self.contents.swap_line(&mut self.saved_contents, 0, None);
         std::mem::swap(&mut self.cursor, &mut self.saved_cursor);
         self.len = None;
         self.fix_cursor();

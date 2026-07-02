@@ -136,8 +136,12 @@ impl<T> Text<T> {
         add_highlight(&mut self.highlights, hl);
     }
 
-    pub fn clear_highlights(&mut self) {
-        self.highlights.clear();
+    pub fn clear_highlights(&mut self, range: Option<Range<usize>>) {
+        if let Some(range) = range {
+            self.retain_highlights(|hl| !range.contains(&hl.lineno));
+        } else {
+            self.highlights.clear();
+        }
     }
 
     pub fn retain_highlights<F: Fn(&HighlightedRange<T>) -> bool>(&mut self, func: F) {
@@ -146,7 +150,7 @@ impl<T> Text<T> {
 
     pub fn clear(&mut self) {
         self.lines.clear();
-        self.clear_highlights();
+        self.clear_highlights(None);
     }
 
     pub fn push_line(&mut self, line: BString, hl: Option<Highlight<T>>) {
@@ -154,7 +158,7 @@ impl<T> Text<T> {
             add_highlight(&mut self.highlights, HighlightedRange{
                 lineno: self.lines.len(),
                 start: 0,
-                end: line.len(),
+                end: usize::MAX,
                 inner: hl,
             });
         }
@@ -189,7 +193,7 @@ impl<T> Text<T> {
             self.add_highlight(HighlightedRange{
                 lineno,
                 start: 0,
-                end: line.len(),
+                end: usize::MAX,
                 inner: hl,
             });
         }
@@ -214,9 +218,31 @@ impl<T> Text<T> {
         self.lines[lineno].insert_str(offset, str);
     }
 
-    pub fn swap_line(&mut self, line: &mut BString, lineno: usize) {
+    pub fn push_str_to_line(&mut self, str: &BStr, lineno: usize, hl: Option<Highlight<T>>) {
+        // shift highlights
+        if let Some(hl) = hl && !hl.is_empty() {
+            let offset = self.lines[lineno].len();
+            add_highlight(&mut self.highlights, HighlightedRange{
+                lineno,
+                start: offset,
+                end: offset + str.len(),
+                inner: hl,
+            });
+        }
+        self.lines[lineno].push_str(str);
+    }
+
+    pub fn swap_line(&mut self, line: &mut BString, lineno: usize, hl: Option<Highlight<T>>) {
         std::mem::swap(&mut self.lines[lineno], line);
         self.highlights.retain_mut(|h| h.lineno != lineno);
+        if let Some(hl) = hl && !hl.is_empty() {
+            add_highlight(&mut self.highlights, HighlightedRange{
+                lineno,
+                start: 0,
+                end: usize::MAX,
+                inner: hl,
+            });
+        }
     }
 
     pub fn delete_line(&mut self, lineno: usize) -> BString {

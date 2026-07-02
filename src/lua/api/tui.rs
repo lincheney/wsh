@@ -1,5 +1,5 @@
 use crate::lua::{LuaWrapper, auto_from_lua, Array, FromLuaStr, FromLuaSerde, api::number::PossiblyMaxUsize};
-use bstr::{BString, ByteSlice};
+use bstr::{BString};
 use std::default::Default;
 use std::rc::Rc;
 use serde::{Serialize};
@@ -78,8 +78,8 @@ impl FromLua for LuaSizeMetric {
 
 auto_from_lua! {
     #[derive(Debug, Default, Clone)]
-    struct TextOptions {
-        text: Option<BString>,
+    struct Text {
+        text: BString,
         #[flatten]
         style: StyleOptions,
     }
@@ -87,10 +87,29 @@ auto_from_lua! {
 
 auto_from_lua! {
     #[derive(Debug, Clone)]
-    enum TextParts {
+    enum TextOptions {
         Single(BString),
-        Detailed(TextOptions),
-        Many(Array<TextOptions>),
+        Many(Array<Text>),
+    }
+}
+
+auto_from_lua! {
+    #[derive(Debug, Clone)]
+    enum LineOptions {
+        Unstyled(BString),
+        Styled{
+            text: Option<TextOptions>,
+            #[flatten]
+            style: StyleOptions,
+        },
+    }
+}
+
+auto_from_lua! {
+    #[derive(Debug, Clone)]
+    enum Contents {
+        Single(LineOptions),
+        Lines(Array<LineOptions>),
     }
 }
 
@@ -171,7 +190,7 @@ auto_from_lua! {
         Widget{
             #[flatten]
             style: MessageStyleOptions,
-            contents: Option<TextParts>,
+            contents: Option<Contents>,
             #[flatten]
             line_range: LineRange,
         },
@@ -230,7 +249,7 @@ auto_from_lua! {
     struct BorderTitleOptions {
         align: Option<FromLuaStr<Alignment>>,
         #[flatten]
-        contents: TextParts,
+        contents: LineOptions,
     }
 }
 
@@ -380,62 +399,84 @@ impl From<StyleOptions> for tui::widget::StyleOptions {
     }
 }
 
-fn parse_text_parts<T: Default+Clone>(parts: TextParts, text: &mut tui::text::Text<T>, line_range: LineRange) {
-    match parts {
-        TextParts::Single(part) => {
-            text.clear();
-            text.push_lines(part.as_bytes().split_str(b"\n").map(|s| s.into()), None);
+fn parse_line<T: Default+Clone>(line: LineOptions, text: &mut tui::text::Text<T>, lineno: usize) {
+    match line {
+        LineOptions::Unstyled(mut string) => {
+            text.swap_line(&mut string, lineno, None);
         },
-        TextParts::Detailed(part) => {
-            let hl = if part.style.is_none() {
+        LineOptions::Styled{text: string, style} => {
+
+            let mut line_hl = if style.is_none() {
                 None
             } else {
-                Some(tui::widget::StyleOptions::from(part.style).as_style().into())
+                Some(tui::widget::StyleOptions::from(style).as_style().into())
             };
 
-            let start_line = line_range.start_line().map(|x| x.min(text.len())).unwrap_or_default();
-            let end_line = line_range.end_line().map_or(0, |x| usize::from(x).min(text.len())).max(start_line + 1);
+            match string {
+                None => (),
+                Some(TextOptions::Single(mut string)) => {
+                    text.swap_line(&mut string, lineno, line_hl);
+                },
+                Some(TextOptions::Many(parts)) if parts.0.is_empty() => {
+                    text.delete_line(lineno);
+                },
+                Some(TextOptions::Many(parts)) => {
 
-            if let Some(string) = part.text {
-                text.delete_lines(start_line .. end_line);
-                text.insert_lines(
-                    string.as_bytes().split_str(b"\n").map(|s| s.into()),
-                    start_line,
-                    hl.clone(),
-                );
-
-            } else {
-                text.retain_highlights(|hl| !(start_line .. end_line).contains(&hl.lineno));
-                if let Some(hl) = hl {
-                    for lineno in start_line..end_line {
-                        text.add_highlight(tui::text::HighlightedRange{
-                            lineno,
-                            start: 0,
-                            end: text.get()[lineno].len(),
-                            inner: hl.clone(),
-                        });
+                    for (i, mut part) in parts.0.into_iter().enumerate() {
+                        let hl = if part.style.is_none() {
+                            None
+                        } else {
+                            Some(tui::widget::StyleOptions::from(part.style).as_style().into())
+                        };
+                        if i == 0 {
+                            text.swap_line(&mut part.text, lineno, hl);
+                            if let Some(line_hl) = line_hl.take() {
+                                text.add_highlight(tui::text::HighlightedRange{
+                                    lineno,
+                                    start: 0,
+                                    end: usize::MAX,
+                                    inner: line_hl,
+                                });
+                            }
+                        } else {
+                            text.push_str_to_line(part.text.as_ref(), lineno, hl);
+                        }
                     }
-                }
+                },
+            }
+
+        },
+    }
+}
+
+fn parse_text_parts<T: Default+Clone>(parts: Contents, text: &mut tui::text::Text<T>, line_range: LineRange) {
+    let mut start_line = line_range.start_line().map(|x| x.min(text.len())).unwrap_or_default();
+    let end_line = line_range.end_line().map_or(0, |x| usize::from(x).min(text.len())).max(start_line + 1);
+    text.clear_highlights(Some(start_line .. end_line));
+
+    match parts {
+        Contents::Single(line) => {
+            if start_line >= text.len() {
+                start_line = text.len();
+                text.push_line(b"".into(), None);
+            }
+            parse_line(line, text, start_line);
+            if end_line > start_line + 1 {
+                text.delete_lines(start_line + 1 .. end_line);
             }
         },
-        TextParts::Many(parts) => {
-            text.clear();
-            text.push_line(b"".into(), None);
-            for part in parts.0 {
-                if let Some(string) = part.text {
-                    let hl = if part.style.is_none() {
-                        None
-                    } else {
-                        Some(tui::widget::StyleOptions::from(part.style).as_style().into())
-                    };
-
-                    for (i, string) in string.as_bytes().split_str(b"\n").enumerate() {
-                        if i > 0 {
-                            text.push_line(b"".into(), None);
-                        }
-                        text.push_str(string.into(), hl.clone());
-                    }
-                }
+        Contents::Lines(lines) => {
+            text.clear_highlights(Some(start_line .. end_line));
+            let numlines = lines.0.len();
+            if end_line > text.len() {
+                start_line = start_line.min(text.len());
+                text.push_lines((text.len() .. numlines).map(|_| b"".into()), None);
+            }
+            for (lineno, line) in lines.0.into_iter().enumerate() {
+                parse_line(line, text, lineno + start_line);
+            }
+            if end_line > start_line + numlines {
+                text.delete_lines(start_line + numlines .. end_line);
             }
         },
     }
@@ -475,7 +516,7 @@ fn set_widget_options(
                 if let Some(text) = options.title_top {
                     let title = widget.border.title_top.get_or_insert_default();
                     title.text.style = widget.border.style.clone();
-                    parse_text_parts(text.contents, &mut title.text, LineRange::default());
+                    parse_text_parts(Contents::Single(text.contents), &mut title.text, LineRange::default());
                     if let Some(align) = text.align {
                         title.alignment = align.0;
                     }
@@ -484,7 +525,7 @@ fn set_widget_options(
                 if let Some(text) = options.title_bottom {
                     let title = widget.border.title_bottom.get_or_insert_default();
                     title.text.style = widget.border.style.clone();
-                    parse_text_parts(text.contents, &mut title.text, LineRange::default());
+                    parse_text_parts(Contents::Single(text.contents), &mut title.text, LineRange::default());
                     if let Some(align) = text.align {
                         title.alignment = align.0;
                     }
