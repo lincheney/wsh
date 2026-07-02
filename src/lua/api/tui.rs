@@ -406,7 +406,7 @@ fn parse_line<T: Default+Clone>(line: LineOptions, text: &mut tui::text::Text<T>
         },
         LineOptions::Styled{text: string, style} => {
 
-            let mut line_hl = if style.is_none() {
+            let line_hl = if style.is_none() {
                 None
             } else {
                 Some(tui::widget::StyleOptions::from(style).as_style().into())
@@ -417,30 +417,16 @@ fn parse_line<T: Default+Clone>(line: LineOptions, text: &mut tui::text::Text<T>
                 Some(TextOptions::Single(mut string)) => {
                     text.swap_line(&mut string, lineno, line_hl);
                 },
-                Some(TextOptions::Many(parts)) if parts.0.is_empty() => {
-                    text.delete_line(lineno);
-                },
                 Some(TextOptions::Many(parts)) => {
+                    text.swap_line(&mut b"".into(), lineno, line_hl);
 
-                    for (i, mut part) in parts.0.into_iter().enumerate() {
+                    for part in parts.0 {
                         let hl = if part.style.is_none() {
                             None
                         } else {
                             Some(tui::widget::StyleOptions::from(part.style).as_style().into())
                         };
-                        if i == 0 {
-                            text.swap_line(&mut part.text, lineno, hl);
-                            if let Some(line_hl) = line_hl.take() {
-                                text.add_highlight(tui::text::HighlightedRange{
-                                    lineno,
-                                    start: 0,
-                                    end: usize::MAX,
-                                    inner: line_hl,
-                                });
-                            }
-                        } else {
-                            text.push_str_to_line(part.text.as_ref(), lineno, hl);
-                        }
+                        text.push_str_to_line(part.text.as_ref(), lineno, hl);
                     }
                 },
             }
@@ -451,7 +437,7 @@ fn parse_line<T: Default+Clone>(line: LineOptions, text: &mut tui::text::Text<T>
 
 fn parse_text_parts<T: Default+Clone>(parts: Contents, text: &mut tui::text::Text<T>, line_range: LineRange) {
     let mut start_line = line_range.start_line().map(|x| x.min(text.len())).unwrap_or_default();
-    let end_line = line_range.end_line().map_or(0, |x| usize::from(x).min(text.len())).max(start_line + 1);
+    let mut end_line = line_range.end_line().map_or(0, |x| usize::from(x).min(text.len())).max(start_line + 1);
     text.clear_highlights(Some(start_line .. end_line));
 
     match parts {
@@ -468,8 +454,10 @@ fn parse_text_parts<T: Default+Clone>(parts: Contents, text: &mut tui::text::Tex
         Contents::Lines(lines) => {
             text.clear_highlights(Some(start_line .. end_line));
             let numlines = lines.0.len();
-            if end_line > text.len() {
+            if end_line > text.len() || start_line >= text.len() {
+                let l = end_line - start_line;
                 start_line = start_line.min(text.len());
+                end_line = start_line + l;
                 text.push_lines((text.len() .. numlines).map(|_| b"".into()), None);
             }
             for (lineno, line) in lines.0.into_iter().enumerate() {
