@@ -122,6 +122,19 @@ fn add_highlight<T>(highlights: &mut Vec<HighlightedRange<T>>, hl: HighlightedRa
     highlights.insert(index, hl);
 }
 
+fn index_highlight_by_lineno<T>(highlights: &Vec<HighlightedRange<T>>, lineno: usize) -> usize {
+    match highlights.binary_search_by(|x| x.lineno.cmp(&lineno)) {
+        Ok(mut index) => {
+            // find the start by searching backwards
+            while index > 0 && highlights.get(index).is_some_and(|x| x.lineno == lineno) {
+                index -= 1;
+            }
+            index
+        },
+        Err(index) => index,
+    }
+}
+
 impl<T> Text<T> {
 
     pub fn get(&self) -> &[BString] {
@@ -136,9 +149,15 @@ impl<T> Text<T> {
         add_highlight(&mut self.highlights, hl);
     }
 
+    fn get_highlight_range_for_lines(&self, range: Range<usize>) -> Range<usize> {
+        let start = index_highlight_by_lineno(&self.highlights, range.start);
+        let end = start + self.highlights[start..].partition_point(|x| x.lineno < range.end);
+        start .. end
+    }
+
     pub fn clear_highlights(&mut self, range: Option<Range<usize>>) {
         if let Some(range) = range {
-            self.retain_highlights(|hl| !range.contains(&hl.lineno));
+            self.highlights.drain(self.get_highlight_range_for_lines(range));
         } else {
             self.highlights.clear();
         }
@@ -234,7 +253,7 @@ impl<T> Text<T> {
 
     pub fn swap_line(&mut self, line: &mut BString, lineno: usize, hl: Option<Highlight<T>>) {
         std::mem::swap(&mut self.lines[lineno], line);
-        self.highlights.retain_mut(|h| h.lineno != lineno);
+        self.clear_highlights(Some(lineno .. lineno + 1));
         if let Some(hl) = hl && !hl.is_empty() {
             add_highlight(&mut self.highlights, HighlightedRange{
                 lineno,
@@ -247,16 +266,11 @@ impl<T> Text<T> {
 
     pub fn delete_line(&mut self, lineno: usize) -> BString {
         let line = self.lines.remove(lineno);
-        self.highlights.retain_mut(|hl| {
-            if hl.lineno == lineno {
-                false
-            } else {
-                if hl.lineno > lineno {
-                    hl.lineno -= 1;
-                }
-                true
-            }
-        });
+        let range = self.get_highlight_range_for_lines(lineno .. lineno + 1);
+        for hl in &mut self.highlights[range.end..] {
+            hl.lineno -= 1;
+        }
+        self.highlights.drain(range);
         line
     }
 
@@ -264,26 +278,19 @@ impl<T> Text<T> {
         let start = range.start;
         let end = range.end;
         drop(self.lines.drain(range));
-        self.highlights.retain_mut(|hl| {
-            if (start..end).contains(&hl.lineno) {
-                false
-            } else {
-                if hl.lineno >= end {
-                    hl.lineno -= 1;
-                }
-                true
-            }
-        });
+        let range = self.get_highlight_range_for_lines(start .. end);
+        for hl in &mut self.highlights[range.end..] {
+            hl.lineno -= 1;
+        }
+        self.highlights.drain(range);
     }
 
     pub fn delete_str(&mut self, lineno: usize, offset: usize, length: usize) {
         self.lines[lineno].drain(offset .. offset + length);
-        self.highlights.retain_mut(|h| {
-            if h.lineno == lineno {
-                h.shift(offset .. offset + length, offset);
-            }
-            !h.is_empty()
-        });
+        let range = self.get_highlight_range_for_lines(lineno .. lineno + 1);
+        for hl in &mut self.highlights[range] {
+            hl.shift(offset .. offset + length, offset);
+        }
     }
 
     pub fn reset(&mut self) {
