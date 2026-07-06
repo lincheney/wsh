@@ -100,6 +100,7 @@ impl StyleOptions {
 pub struct Widget {
     pub inner: super::text::Text,
     pub style: StyleOptions,
+    pub ephemeral: super::text::HighlightedRangeSet<()>,
     pub border_show_empty: bool,
     pub border: Border,
     // line_count is used by StatusBar for standalone rendering
@@ -153,10 +154,9 @@ impl Widget {
     ) -> u16 {
 
         // border
-        let (top, bottom) = self.border.inner_height();
-        let (left, right) = self.border.inner_width(max_width);
-        let border_height = top + bottom;
-        max_width = max_width.saturating_sub(left + right);
+        let border_height = self.border.inner_height();
+        let border_width = self.border.inner_width(max_width);
+        max_width = max_width.saturating_sub(border_width);
 
         if show_scrollbar.unwrap_or(self.scroll.show_scrollbar) {
             max_width = max_width.saturating_sub(1);

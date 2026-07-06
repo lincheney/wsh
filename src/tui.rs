@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use mlua::prelude::*;
 use bstr::BString;
 use std::default::Default;
 use std::io::{Write, Cursor};
@@ -76,6 +78,8 @@ pub struct Tui {
     pub dirty: bool,
     error_msg: Option<ErrorMessage>,
     zle_msg: Option<layout::NodeId>,
+    render_callbacks_counter: usize,
+    render_callbacks: HashMap<usize, LuaFunction>,
 }
 
 impl Tui {
@@ -214,6 +218,17 @@ impl Tui {
         }
     }
 
+    pub fn add_render_callback(&mut self, cb: LuaFunction) -> usize {
+        let counter = self.render_callbacks_counter;
+        self.render_callbacks.insert(counter, cb);
+        self.render_callbacks_counter += 1;
+        counter
+    }
+
+    pub fn remove_render_callback(&mut self, key: usize) -> bool {
+        self.render_callbacks.remove(&key).is_some()
+    }
+
     pub fn draw<W: Write>(
         &mut self,
         writer: &mut W,
@@ -235,20 +250,11 @@ impl Tui {
             self.reset();
             cmdline.hard_reset();
             status_bar.reset();
-            queue!(
-                writer,
-                cursor::MoveToColumn(0),
-                Clear(ClearType::FromCursorDown),
-            )?;
         }
 
         // resize buffers
         let area = rect::Rect{x: 0, y: 0, width: width as _, height: height as _};
         self.buffer.resize(area);
-
-        let mut drawer = drawer::Drawer::new(&mut self.buffer, writer, cmdline.cursor_coord);
-        queue!(drawer.writer, crossterm::terminal::BeginSynchronizedUpdate)?;
-        drawer.reset_colours()?;
 
         // old heights
         let mut old_cmdline_height = cmdline.get_height();
@@ -285,6 +291,53 @@ impl Tui {
         let new_widgets_height = self.nodes.get_height() as usize;
         let new_status_bar_height = status_bar.get_height() as usize;
         let new_height = (new_cmdline_height + new_widgets_height + new_status_bar_height).min(self.max_height as _);
+
+        // render callbacks
+        if new_widgets_height > 0 && !self.render_callbacks.is_empty() {
+            self.nodes.trigger_ephemeral_callbacks(false, |id, widget, lineno| {
+                let id = if let layout::NodeId::Normal(id) = id {
+                    Some(id)
+                } else {
+                    None
+                };
+
+                let mut added = false;
+                for cb in self.render_callbacks.values() {
+                    let result: LuaResult<Option<Vec<crate::lua::EphemeralStyleOptions>>> = cb.call((id, lineno+1));
+                    let result = crate::log_if_err(result);
+                    for style in result.into_iter().flatten().flatten() {
+                        added = true;
+                        widget.ephemeral.push(text::HighlightedRange {
+                            lineno,
+                            start: style.start_column,
+                            end: style.end_column.into(),
+                            inner: widget::StyleOptions::from(style.inner).as_style().into(),
+                        });
+                    }
+                }
+
+                if !added {
+                    // add a dummy one
+                    widget.ephemeral.push(text::HighlightedRange {
+                        lineno,
+                        start: 0,
+                        end: 0,
+                        inner: Default::default(),
+                    });
+                }
+            });
+        }
+
+        let mut drawer = drawer::Drawer::new(&mut self.buffer, writer, cmdline.cursor_coord);
+        queue!(drawer.writer, crossterm::terminal::BeginSynchronizedUpdate)?;
+        if clear {
+            queue!(
+                drawer.writer,
+                cursor::MoveToColumn(0),
+                Clear(ClearType::FromCursorDown),
+            )?;
+        }
+        drawer.reset_colours()?;
 
         // allocate more height
         if new_height > old_height {

@@ -1,5 +1,12 @@
 local M = {}
 
+function M.clear(tbl)
+    for k, _ in pairs(tbl) do
+        tbl[k] = nil
+    end
+    return tbl
+end
+
 function M.copy(tbl, deep)
     local new = {}
     for k, v in pairs(tbl) do
@@ -61,6 +68,14 @@ function M.filter(tbl, condition)
             tbl[i] = nil
         end
     end
+    return tbl
+end
+
+function M.map(tbl, func)
+    for i = 1, #tbl do
+        tbl[i] = func(tbl[i], i)
+    end
+    return tbl
 end
 
 return M

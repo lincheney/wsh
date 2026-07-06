@@ -102,20 +102,18 @@ pub struct Border {
 
 impl Border {
     /// Returns the number of columns consumed by left and right borders.
-    pub fn inner_width(&self, width: u16) -> (u16, u16) {
+    pub fn inner_width(&self, width: u16) -> u16 {
         let left  = if self.has_left()  { 1 } else { 0 };
         let right = if self.has_right() { 1 } else { 0 };
         let left  = left.min(width);
         let right = right.min(width.saturating_sub(left));
-        (left, right)
+        left + right
     }
 
     /// Returns how many rows the top and bottom borders consume.
-    pub fn inner_height(&self) -> (u16, u16) {
-        (
-            if self.has_top()    { 1 } else { 0 },
-            if self.has_bottom() { 1 } else { 0 },
-        )
+    pub fn inner_height(&self) -> u16 {
+          (if self.has_top()    { 1 } else { 0 })
+        + (if self.has_bottom() { 1 } else { 0 })
     }
 
     pub fn has_top(&self)    -> bool { self.sides.contains(Sides::TOP) }

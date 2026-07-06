@@ -13,6 +13,7 @@ use array::Array;
 pub use api::{
     init_lua,
     keybind::invoke_keybind_callback,
+    tui::EphemeralStyleOptions,
     KeybindMapping,
     EventCallbacks,
     HasEventCallbacks,

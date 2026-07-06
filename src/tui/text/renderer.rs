@@ -64,44 +64,43 @@ pub struct TextRenderer<'a> {
 
 impl<'a> TextRenderer<'a> {
 
-    pub fn new<T, H>(
+    pub fn new<T, I, F>(
         text: &'a Text<T>,
         initial_indent: usize,
         border: Option<&'a Border>,
         width: usize,
         height: Option<usize>,
         scroll: Option<Scroll>,
-        extra_highlights: H,
+        highlight_getter: F,
     ) -> Self
     where
         T: 'a,
-        H: Clone + Iterator<Item=&'a HighlightedRange<T>>,
+        I: 'a + Clone + Iterator<Item=&'a HighlightedRange<T>>,
+        F: Fn(usize) -> I,
     {
 
         // how many rows do top/bottom borders consume
-        let (top_rows, bottom_rows) = border.map(|b| b.inner_height()).unwrap_or_default();
+        let border_height = border.map(|b| b.inner_height()).unwrap_or_default();
         // how many cols do left/right borders consume
-        let (left_cols, right_cols) = border.map(|b| b.inner_width(width as u16)).unwrap_or_default();
-        let border_h = (top_rows + bottom_rows) as usize;
-        let border_w = (left_cols + right_cols) as usize;
+        let border_width = border.map(|b| b.inner_width(width as u16)).unwrap_or_default();
 
-        let content_width = width.saturating_sub(border_w);
+        let content_width = width.saturating_sub(border_width as _);
 
         let scroll = scroll.unwrap_or(Scroll{ show_scrollbar: false, position: ScrollPosition::Line(0) });
 
         let mut indent_cell = Cell::EMPTY;
         indent_cell.style = text.style.clone();
+        let clear_cell = text.make_default_style_cell().unwrap_or_default();
 
-        let text_height = height.map(|h| h.saturating_sub(border_h));
+        let text_height = height.map(|h| h.saturating_sub(border_height as _));
         let scrolled = crate::tui::scroll::wrap(
             &text.lines,
-            &text.highlights,
-            extra_highlights,
             Some(text.style.clone()),
             content_width - if scroll.show_scrollbar { 1 } else { 0 },
             text_height,
             initial_indent,
             scroll.position,
+            highlight_getter,
         );
 
         let scrollbar_range = if scroll.show_scrollbar && !(scrolled.range.start == 0 && scrolled.range.end >= scrolled.total_line_count.max(1)) {
@@ -127,7 +126,7 @@ impl<'a> TextRenderer<'a> {
             lines: scrolled.into_lines(),
             alignment: text.alignment,
             newline: None,
-            clear_cell: text.make_default_style_cell().unwrap_or_default(),
+            clear_cell,
             initial_indent: Some(initial_indent),
             indent_cell,
             scrollbar_range,

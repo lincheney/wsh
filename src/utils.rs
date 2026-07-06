@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 
+pub mod merge_sort_iter;
 mod const_hash;
 pub use const_hash::{ConstHashMap};
 #[macro_use]

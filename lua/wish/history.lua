@@ -1,11 +1,13 @@
 local M = {}
 
-local SELECTION = require('wish/selection-widget')
+local SELECTION = require('wish.selection-widget')
 local HISTORY_MENU = {}
 local HISTORY_SEARCH = {}
 
+local selector = SELECTION.default.new().enable()
+
 local show_history
-function show_history(widget, filter, data)
+function show_history(filter, data)
     local current, history = wish.get_history()
     local reverse = not filter
 
@@ -18,32 +20,34 @@ function show_history(widget, filter, data)
         end
     end
 
-    wish.schedule(function()
-        local result = widget.start{
-            data = data,
-            selected = filter and math.max(1, ix) or ix,
-            source = lines,
-            reverse = reverse,
-            filter = filter,
-            no_keymaps = not filter,
-            reload_callback = filter and function()
-                show_history(widget, filter, data)
-            end,
-
-            align = 'Left',
-            border = {
-                fg = 'green',
-                type = 'Rounded',
-                title = {
-                    text = 'history',
-                },
-            },
-        }
-
-        if filter and result then
-            wish.goto_history(history[result].histnum)
-        end
+    selector.start(lines, function(line)
+        wish.pprint(line)
     end)
+    -- wish.schedule(function()
+        -- -- )
+            -- -- data = data,
+            -- -- selected = filter and math.max(1, ix) or ix,
+            -- -- reverse = reverse,
+            -- -- filter = filter,
+            -- -- no_keymaps = not filter,
+            -- -- reload_callback = filter and function()
+                -- -- show_history(widget, filter, data)
+            -- -- end,
+-- --
+            -- -- align = 'Left',
+            -- -- border = {
+                -- -- fg = 'green',
+                -- -- type = 'Rounded',
+                -- -- title = {
+                    -- -- text = 'history',
+                -- -- },
+            -- -- },
+        -- -- }
+--
+        -- if filter and result then
+            -- wish.goto_history(history[result].histnum)
+        -- end
+    -- end)
 end
 
 function M.history_up()

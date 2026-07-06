@@ -152,35 +152,6 @@ auto_from_lua! {
 }
 
 auto_from_lua! {
-    #[derive(Debug, Clone, Copy)]
-    enum LineRange {
-        OneLine{start_line: Option<usize>,},
-        Range{start_line: usize, end_line: Option<PossiblyMaxUsize>,},
-    }
-}
-
-impl Default for LineRange {
-    fn default() -> Self {
-        Self::OneLine{start_line: None}
-    }
-}
-
-impl LineRange {
-    fn start_line(self) -> Option<usize> {
-        match self {
-            Self::OneLine{start_line} => start_line,
-            Self::Range{start_line, ..} => Some(start_line),
-        }
-    }
-    fn end_line(self) -> Option<PossiblyMaxUsize> {
-        match self {
-            Self::OneLine{..} => None,
-            Self::Range{end_line, ..} => end_line,
-        }
-    }
-}
-
-auto_from_lua! {
     #[derive(Debug)]
     enum MessageInner {
         Layout{
@@ -191,8 +162,6 @@ auto_from_lua! {
             #[flatten]
             style: MessageStyleOptions,
             contents: Option<Contents>,
-            #[flatten]
-            line_range: LineRange,
         },
     }
 }
@@ -292,7 +261,7 @@ auto_from_lua! {
 
 auto_from_lua! {
     #[derive(Debug, Default, Clone, Serialize)]
-    struct StyleOptions {
+    pub struct StyleOptions {
         fg: Option<LuaColor>,
         bg: Option<LuaColor>,
         bold: Option<bool>,
@@ -303,6 +272,16 @@ auto_from_lua! {
         reversed: Option<bool>,
         blink: Option<bool>,
         hyperlink: Option<HyperlinkOption>,
+    }
+}
+
+auto_from_lua! {
+    #[derive(Debug, Default, Clone)]
+    pub struct EphemeralStyleOptions {
+        #[flatten]
+        pub inner: StyleOptions,
+        pub start_column: usize,
+        pub end_column: PossiblyMaxUsize,
     }
 }
 
@@ -399,72 +378,53 @@ impl From<StyleOptions> for tui::widget::StyleOptions {
     }
 }
 
-fn parse_line<T: Default+Clone>(line: LineOptions, text: &mut tui::text::Text<T>, lineno: usize) {
+fn parse_line<T: Default+Clone>(line: LineOptions, text: &mut tui::text::Text<T>) {
     match line {
-        LineOptions::Unstyled(mut string) => {
-            text.swap_line(&mut string, lineno, None);
+        LineOptions::Unstyled(string) => {
+            text.push_line(string, None);
         },
         LineOptions::Styled{text: string, style} => {
 
-            let line_hl = if style.is_none() {
-                None
-            } else {
-                Some(tui::widget::StyleOptions::from(style).as_style().into())
-            };
-
             match string {
                 None => (),
-                Some(TextOptions::Single(mut string)) => {
-                    text.swap_line(&mut string, lineno, line_hl);
+                Some(TextOptions::Single(string)) => {
+                    text.push_line(string, None);
                 },
                 Some(TextOptions::Many(parts)) => {
-                    text.swap_line(&mut b"".into(), lineno, line_hl);
-
                     for part in parts.0 {
                         let hl = if part.style.is_none() {
                             None
                         } else {
                             Some(tui::widget::StyleOptions::from(part.style).as_style().into())
                         };
-                        text.push_str_to_line(part.text.as_ref(), lineno, hl);
+                        text.push_str(part.text.as_ref(), hl);
                     }
                 },
+            }
+
+            if !style.is_none() {
+                let inner = tui::widget::StyleOptions::from(style).as_style().into();
+                text.add_highlight(tui::text::HighlightedRange{
+                    lineno: text.len() - 1,
+                    start: 0,
+                    end: usize::MAX,
+                    inner,
+                });
             }
 
         },
     }
 }
 
-fn parse_text_parts<T: Default+Clone>(parts: Contents, text: &mut tui::text::Text<T>, line_range: LineRange) {
-    let mut start_line = line_range.start_line().map(|x| x.min(text.len())).unwrap_or_default();
-    let mut end_line = line_range.end_line().map_or(0, |x| usize::from(x).min(text.len())).max(start_line + 1);
-    text.clear_highlights(Some(start_line .. end_line));
-
+fn parse_text_parts<T: Default+Clone>(parts: Contents, text: &mut tui::text::Text<T>) {
+    text.clear();
     match parts {
         Contents::Single(line) => {
-            if start_line >= text.len() {
-                start_line = text.len();
-                text.push_line(b"".into(), None);
-            }
-            parse_line(line, text, start_line);
-            if end_line > start_line + 1 {
-                text.delete_lines(start_line + 1 .. end_line);
-            }
+            parse_line(line, text);
         },
         Contents::Lines(lines) => {
-            text.clear_highlights(Some(start_line .. end_line));
-            let numlines = lines.0.len();
-            if end_line > text.len() || start_line >= text.len() {
-                let l = end_line - start_line;
-                start_line = start_line.min(text.len());
-                end_line = start_line + l;
-                text.push_lines((text.len() .. numlines).map(|_| b"".into()), None);
-            }
-            for (lineno, line) in lines.0.into_iter().enumerate() {
-                parse_line(line, text, lineno + start_line);
-            }
-            if end_line > start_line + numlines {
-                text.delete_lines(start_line + numlines .. end_line);
+            for line in lines.0.into_iter() {
+                parse_line(line, text);
             }
         },
     }
@@ -504,7 +464,7 @@ fn set_widget_options(
                 if let Some(text) = options.title_top {
                     let title = widget.border.title_top.get_or_insert_default();
                     title.text.style = widget.border.style.clone();
-                    parse_text_parts(Contents::Single(text.contents), &mut title.text, LineRange::default());
+                    parse_text_parts(Contents::Single(text.contents), &mut title.text);
                     if let Some(align) = text.align {
                         title.alignment = align.0;
                     }
@@ -513,7 +473,7 @@ fn set_widget_options(
                 if let Some(text) = options.title_bottom {
                     let title = widget.border.title_bottom.get_or_insert_default();
                     title.text.style = widget.border.style.clone();
-                    parse_text_parts(Contents::Single(text.contents), &mut title.text, LineRange::default());
+                    parse_text_parts(Contents::Single(text.contents), &mut title.text);
                     if let Some(align) = text.align {
                         title.alignment = align.0;
                     }
@@ -590,7 +550,7 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
             }
         },
 
-        MessageInner::Widget { style, contents, line_range } => {
+        MessageInner::Widget { style, contents } => {
             let node = if let Some(id) = options.id {
                 let id = NodeId::Normal(id);
                 match tui.get_node_mut(id) {
@@ -610,7 +570,8 @@ fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut N
                 else { unreachable!() };
 
             if let Some(contents) = contents {
-                parse_text_parts(contents, &mut widget.inner, line_range);
+                widget.ephemeral.clear();
+                parse_text_parts(contents, &mut widget.inner);
             }
             set_widget_options(widget, style);
 
@@ -651,6 +612,16 @@ fn set_message(ui: &Ui, _lua: &Lua, val: MessageOptions) -> Result<usize> {
     Ok(id.into())
 }
 
+fn redraw_message(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
+    let id = NodeId::Normal(id);
+    if ui.try_borrow_mut()?.tui.nodes.invalidate_ephemeral(id) {
+        ui.queue_draw();
+    } else {
+        anyhow::bail!("can't find widget with id {}", id)
+    }
+    Ok(())
+}
+
 fn clear_messages(ui: &Ui, _lua: &Lua, all: bool) -> Result<()> {
     let tui = &mut ui.try_borrow_mut()?.tui;
     if all {
@@ -663,7 +634,6 @@ fn clear_messages(ui: &Ui, _lua: &Lua, all: bool) -> Result<()> {
 }
 
 fn check_message(ui: &Ui, _lua: &Lua, id: usize) -> Result<bool> {
-    ui.queue_draw();
     let id = NodeId::Normal(id);
     Ok(ui.try_borrow()?.tui.get_node(id).is_some())
 }
@@ -820,11 +790,11 @@ fn set_status_bar(ui: &Ui, _lua: &Lua, val: Option<MessageOptions>) -> Result<()
     let mut ui = ui.try_borrow_mut()?;
     if let Some(options) = val {
         match options.inner {
-            MessageInner::Widget { style, contents, line_range } => {
+            MessageInner::Widget { style, contents } => {
                 let widget = ui.status_bar.inner.get_or_insert_default();
                 if let Some(contents) = contents {
                     widget.inner.clear();
-                    parse_text_parts(contents, &mut widget.inner, line_range);
+                    parse_text_parts(contents, &mut widget.inner);
                 }
                 // StatusBar is standalone, node options (persist/hidden/constraint) are ignored
                 set_widget_options(widget, style);
@@ -841,10 +811,10 @@ fn set_prompt(ui: &Ui, __lua: &Lua, val: Option<MessageOptions>) -> Result<()> {
     let mut ui = ui.try_borrow_mut()?;
     if let Some(options) = val {
         match options.inner {
-            MessageInner::Widget { style, contents, line_range } => {
+            MessageInner::Widget { style, contents } => {
                 let mut widget = tui::widget::Widget::default();
                 if let Some(contents) = contents {
-                    parse_text_parts(contents, &mut widget.inner, line_range);
+                    parse_text_parts(contents, &mut widget.inner);
                 }
                 set_widget_options(&mut widget, style);
                 ui.cmdline.prompt_mode = tui::command_line::PromptMode::Custom(widget);
@@ -940,12 +910,22 @@ async fn allocate_height(ui: Ui, _lua: Lua, height: u16) -> Result<()> {
     ui.allocate_height(height).await
 }
 
+fn add_render_callback(ui: &Ui, _lua: &Lua, func: LuaFunction) -> Result<usize> {
+    Ok(ui.try_borrow_mut()?.tui.add_render_callback(func))
+}
+
+fn remove_render_callback(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
+    ui.try_borrow_mut()?.tui.remove_render_callback(id);
+    Ok(())
+}
+
 pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
 
     lua.api.set("sgr_to_style", lua.create_function(sgr_to_style)?)?;
     lua.api.set("style_to_sgr", lua.create_function(style_to_sgr)?)?;
     lua.set_async_fn("allocate_height", allocate_height)?;
     lua.set_fn("set_message", set_message)?;
+    lua.set_fn("redraw_message", redraw_message)?;
     lua.set_fn("check_message", check_message)?;
     lua.set_fn("remove_message", remove_message)?;
     lua.set_fn("clear_messages", clear_messages)?;
@@ -963,6 +943,8 @@ pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
     lua.set_async_fn("enable_mouse_mode", enable_mouse_mode)?;
     lua.set_fn("get_message_geometry", get_message_geometry)?;
     lua.set_fn("get_status_bar_geometry", get_status_bar_geometry)?;
+    lua.set_fn("add_render_callback", add_render_callback)?;
+    lua.set_fn("remove_render_callback", remove_render_callback)?;
 
     Ok(())
 }

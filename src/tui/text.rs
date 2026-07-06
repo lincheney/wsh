@@ -3,83 +3,10 @@ use bstr::{BStr, BString, ByteVec};
 use crate::tui::{Style, Cell};
 mod renderer;
 pub use renderer::{Renderer, TextRenderer, NoCallback as NoRendererCallback};
+mod highlight;
+pub use highlight::{Highlight, HighlightedRange, HighlightedRangeSet};
 
 pub(super) const TAB_WIDTH: usize = 4;
-
-#[derive(Debug, Clone)]
-pub struct Highlight<T> {
-    pub style: Style,
-    pub blend: bool,
-    pub namespace: T,
-    pub virtual_text: Option<BString>,
-    pub conceal: Option<bool>,
-    pub priority: f64,
-}
-
-impl<T> Highlight<T> {
-    fn is_empty(&self) -> bool {
-        self.style == Style::default()
-        && self.virtual_text.as_ref().is_none_or(|s| s.is_empty())
-        && !self.conceal.unwrap_or_default()
-    }
-
-    pub fn may_cause_resize(&self) -> bool {
-        // only conceal and virtual text affect sizing
-        self.conceal.unwrap_or_default() || self.has_virtual_text()
-    }
-
-    pub fn has_virtual_text(&self) -> bool {
-        self.virtual_text.as_ref().is_some_and(|x| !x.is_empty())
-    }
-}
-
-impl<T: Default> From<Style> for Highlight<T> {
-    fn from(style: Style) -> Self {
-        Self {
-            style,
-            blend: true,
-            namespace: T::default(),
-            virtual_text: None,
-            conceal: None,
-            priority: 0.,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct HighlightedRange<T> {
-    pub lineno: usize,
-    pub start: usize,
-    pub end: usize,
-    pub inner: Highlight<T>,
-}
-
-impl<T> HighlightedRange<T> {
-    fn shift(&mut self, range: Range<usize>, new_end: usize) {
-        if range.end <= self.start {
-            self.start = self.start.saturating_add(new_end) - range.end;
-        } else if range.start <= self.start {
-            self.start = new_end;
-        }
-
-        if range.end < self.end {
-            self.end = self.end.saturating_add(new_end) - range.end;
-        } else if range.start < self.end {
-            self.end = new_end;
-        }
-
-        self.start = self.start.min(self.end);
-    }
-
-    fn is_empty(&self) -> bool {
-        self.start == self.end && self.inner.virtual_text.is_none()
-    }
-
-    pub fn namespace(&self) -> &T {
-        &self.inner.namespace
-    }
-}
-
 
 #[derive(Debug, Clone, Copy)]
 pub struct Scroll {
@@ -107,32 +34,11 @@ pub enum Alignment {
 
 #[derive(Debug, Default, Clone)]
 pub struct Text<T=()> {
-    lines: Vec<BString>,
+    pub(in crate::tui) lines: Vec<BString>,
     pub alignment: Alignment,
-    pub highlights: Vec<HighlightedRange<T>>,
+    pub highlights: highlight::HighlightedRangeSet<T>,
     pub style: Style,
     pub dirty: bool,
-}
-
-fn add_highlight<T>(highlights: &mut Vec<HighlightedRange<T>>, hl: HighlightedRange<T>) {
-    // sort in reverse order of priority so higher priority comes first
-    let index = match highlights.binary_search_by(|x| x.lineno.cmp(&hl.lineno).then(x.inner.priority.total_cmp(&hl.inner.priority).reverse())) {
-        Ok(index) | Err(index) => index,
-    };
-    highlights.insert(index, hl);
-}
-
-fn index_highlight_by_lineno<T>(highlights: &Vec<HighlightedRange<T>>, lineno: usize) -> usize {
-    match highlights.binary_search_by(|x| x.lineno.cmp(&lineno)) {
-        Ok(mut index) => {
-            // find the start by searching backwards
-            while index > 0 && highlights.get(index).is_some_and(|x| x.lineno == lineno) {
-                index -= 1;
-            }
-            index
-        },
-        Err(index) => index,
-    }
 }
 
 impl<T> Text<T> {
@@ -146,18 +52,13 @@ impl<T> Text<T> {
     }
 
     pub fn add_highlight(&mut self, hl: HighlightedRange<T>) {
-        add_highlight(&mut self.highlights, hl);
-    }
-
-    fn get_highlight_range_for_lines(&self, range: Range<usize>) -> Range<usize> {
-        let start = index_highlight_by_lineno(&self.highlights, range.start);
-        let end = start + self.highlights[start..].partition_point(|x| x.lineno < range.end);
-        start .. end
+        self.highlights.push(hl);
     }
 
     pub fn clear_highlights(&mut self, range: Option<Range<usize>>) {
         if let Some(range) = range {
-            self.highlights.drain(self.get_highlight_range_for_lines(range));
+            let range = self.highlights.get_range_for_lines(range);
+            self.highlights.drain(range);
         } else {
             self.highlights.clear();
         }
@@ -174,7 +75,7 @@ impl<T> Text<T> {
 
     pub fn push_line(&mut self, line: BString, hl: Option<Highlight<T>>) {
         if let Some(hl) = hl {
-            add_highlight(&mut self.highlights, HighlightedRange{
+            self.highlights.push(HighlightedRange{
                 lineno: self.lines.len(),
                 start: 0,
                 end: usize::MAX,
@@ -191,7 +92,7 @@ impl<T> Text<T> {
         let lineno = self.lines.len() - 1;
         let line = self.lines.last_mut().unwrap();
         if let Some(hl) = hl {
-            add_highlight(&mut self.highlights, HighlightedRange{
+            self.highlights.push(HighlightedRange{
                 lineno,
                 start: line.len(),
                 end: line.len() + str.len(),
@@ -203,7 +104,7 @@ impl<T> Text<T> {
 
     pub fn insert_line(&mut self, line: BString, lineno: usize, hl: Option<Highlight<T>>) {
         // shift highlights
-        for h in &mut self.highlights {
+        for h in self.highlights.iter_mut() {
             if h.lineno >= lineno {
                 h.lineno += 1;
             }
@@ -219,43 +120,11 @@ impl<T> Text<T> {
         self.lines.insert(lineno, line);
     }
 
-    pub fn insert_str(&mut self, str: &BStr, lineno: usize, offset: usize, hl: Option<Highlight<T>>) {
-        // shift highlights
-        for h in &mut self.highlights {
-            if h.lineno == lineno {
-                h.shift(offset .. offset, str.len());
-            }
-        }
-        if let Some(hl) = hl && !hl.is_empty() {
-            add_highlight(&mut self.highlights, HighlightedRange{
-                lineno,
-                start: offset,
-                end: offset + str.len(),
-                inner: hl,
-            });
-        }
-        self.lines[lineno].insert_str(offset, str);
-    }
-
-    pub fn push_str_to_line(&mut self, str: &BStr, lineno: usize, hl: Option<Highlight<T>>) {
-        // shift highlights
-        if let Some(hl) = hl && !hl.is_empty() {
-            let offset = self.lines[lineno].len();
-            add_highlight(&mut self.highlights, HighlightedRange{
-                lineno,
-                start: offset,
-                end: offset + str.len(),
-                inner: hl,
-            });
-        }
-        self.lines[lineno].push_str(str);
-    }
-
     pub fn swap_line(&mut self, line: &mut BString, lineno: usize, hl: Option<Highlight<T>>) {
         std::mem::swap(&mut self.lines[lineno], line);
         self.clear_highlights(Some(lineno .. lineno + 1));
         if let Some(hl) = hl && !hl.is_empty() {
-            add_highlight(&mut self.highlights, HighlightedRange{
+            self.highlights.push(HighlightedRange{
                 lineno,
                 start: 0,
                 end: usize::MAX,
@@ -264,21 +133,11 @@ impl<T> Text<T> {
         }
     }
 
-    pub fn delete_line(&mut self, lineno: usize) -> BString {
-        let line = self.lines.remove(lineno);
-        let range = self.get_highlight_range_for_lines(lineno .. lineno + 1);
-        for hl in &mut self.highlights[range.end..] {
-            hl.lineno -= 1;
-        }
-        self.highlights.drain(range);
-        line
-    }
-
     pub fn delete_lines(&mut self, range: Range<usize>) {
         let start = range.start;
         let end = range.end;
         drop(self.lines.drain(range));
-        let range = self.get_highlight_range_for_lines(start .. end);
+        let range = self.highlights.get_range_for_lines(start .. end);
         for hl in &mut self.highlights[range.end..] {
             hl.lineno -= 1;
         }
@@ -287,7 +146,7 @@ impl<T> Text<T> {
 
     pub fn delete_str(&mut self, lineno: usize, offset: usize, length: usize) {
         self.lines[lineno].drain(offset .. offset + length);
-        let range = self.get_highlight_range_for_lines(lineno .. lineno + 1);
+        let range = self.highlights.get_range_for_lines(lineno .. lineno + 1);
         for hl in &mut self.highlights[range] {
             hl.shift(offset .. offset + length, offset);
         }
@@ -360,7 +219,7 @@ impl<T: Clone> Text<T> {
         self.lines.extend(lines);
         if let Some(hl) = hl {
             for (i, line) in self.lines[old_len..].iter().enumerate() {
-                add_highlight(&mut self.highlights, HighlightedRange{
+                self.highlights.push(HighlightedRange{
                     lineno: old_len + i,
                     start: 0,
                     end: line.len(),
@@ -375,7 +234,7 @@ impl<T: Clone> Text<T> {
         self.lines.splice(lineno..lineno, lines);
         if let Some(hl) = hl {
             for (i, line) in self.lines[old_len..].iter().enumerate() {
-                add_highlight(&mut self.highlights, HighlightedRange{
+                self.highlights.push(HighlightedRange{
                     lineno: old_len + i,
                     start: 0,
                     end: line.len(),
@@ -384,4 +243,34 @@ impl<T: Clone> Text<T> {
             }
         }
     }
+
+    pub fn insert_str(&mut self, str: &BStr, lineno: usize, offset: usize, retain_highlights: bool, hl: Option<Highlight<T>>) {
+        // shift highlights
+        let range = self.highlights.get_range_for_lines(lineno .. lineno + 1);
+        if retain_highlights {
+            for h in &mut self.highlights[range] {
+                h.shift(offset .. offset, str.len());
+            }
+        } else {
+            let split: Vec<_> = self.highlights[range].iter_mut()
+                .filter_map(|hl| hl.split(offset))
+                .filter(|hl| !hl.is_empty())
+                .collect();
+            for mut hl in split {
+                hl.start += str.len();
+                self.add_highlight(hl);
+            }
+        }
+
+        if let Some(hl) = hl && !hl.is_empty() {
+            self.highlights.push(HighlightedRange{
+                lineno,
+                start: offset,
+                end: offset + str.len(),
+                inner: hl,
+            });
+        }
+        self.lines[lineno].insert_str(offset, str);
+    }
+
 }

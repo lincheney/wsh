@@ -45,7 +45,7 @@ impl StatusBar {
             drawer.term_width() as _,
             None,
             None,
-            [].iter(),
+            |lineno| inner.inner.highlights.get_for_lineno(lineno).iter(),
         ).render(drawer, false, true, NoRendererCallback::None)?;
         drawer.clear_to_end_of_line(None, false)?;
         Ok(())

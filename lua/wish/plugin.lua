@@ -7,6 +7,7 @@ return function(plugin_fn)
     local state = {
         enabled = false,
         event_callbacks = {},
+        render_callbacks = {},
         keymap_layers = {},
         plugin_keymap_layer = nil,
         messages = {},
@@ -46,6 +47,12 @@ return function(plugin_fn)
         for i = #state.event_callbacks, 1, -1 do
             wish.remove_event_callback(state.event_callbacks[i])
             state.event_callbacks[i] = nil
+        end
+
+        -- remove render callbacks
+        for i = #state.render_callbacks, 1, -1 do
+            wish.remove_render_callback(state.render_callbacks[i])
+            state.render_callbacks[i] = nil
         end
 
         -- delete keymap layers
@@ -110,6 +117,12 @@ return function(plugin_fn)
                 return id
             end,
 
+            add_render_callback = function(callback)
+                local id = wish.add_render_callback(callback)
+                table.insert(state.render_callbacks, id)
+                return id
+            end,
+
             set_keymap = function(key, cb, layer)
                 if not layer then
                     if not state.plugin_keymap_layer then
@@ -168,6 +181,8 @@ return function(plugin_fn)
                 end
             end,
         }
+
+        return plugin_obj
     end
 
     return plugin_obj

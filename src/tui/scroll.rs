@@ -12,6 +12,19 @@ pub enum ScrollPosition {
     StickyBottom,
 }
 
+impl ScrollPosition {
+    pub fn get_approx_line_range(&self, max_height: Option<usize>, len: usize) -> (usize, std::ops::Range<usize>) {
+        let lineno = match *self {
+            ScrollPosition::Line(lineno) => lineno.min(len.saturating_sub(1)),
+            ScrollPosition::StickyBottom => len.saturating_sub(1),
+        };
+
+        let min_lineno = max_height.map_or(0, |h| lineno.saturating_sub(h));
+        let max_lineno = max_height.map_or(len, |h| lineno + h);
+        (lineno, min_lineno .. max_lineno + 1)
+    }
+}
+
 #[derive(Debug)]
 pub struct ScrollWrapToken<'a> {
     pub lineno: usize,
@@ -73,63 +86,70 @@ impl<'a> Scrolled<'a> {
     }
 }
 
-pub fn wrap<'a, T: 'a, I: Clone + Iterator<Item=&'a HighlightedRange<T>> >(
+pub fn wrap<'a, T, I, F>(
     lines: &'a [BString],
-    highlights: &'a [HighlightedRange<T>],
-    extra_highlights: I,
     init_style: Option<Style>,
     max_width: usize,
     max_height: Option<usize>,
     mut initial_indent: usize,
     scroll: ScrollPosition,
-) -> Scrolled<'a> {
+    highlight_getter: F,
+) -> Scrolled<'a>
+where
+    T: 'a,
+    I: Clone + Iterator<Item=&'a HighlightedRange<T>>,
+    F: Fn(usize) -> I,
+{
 
-    let lineno = match scroll {
-        ScrollPosition::Line(lineno) => lineno.min(lines.len().saturating_sub(1)),
-        ScrollPosition::StickyBottom => lines.len().saturating_sub(1),
-    };
+    let (lineno, line_range) = scroll.get_approx_line_range(max_height, lines.len());
 
     let mut total_line_count = 0;
     let mut tokens = vec![];
-    let mut start = 0;
-
-    let min_lineno = max_height.map_or(0, |h| lineno.saturating_sub(h));
-    let max_lineno = max_height.map_or(lines.len(), |h| lineno + h);
+    // let mut start = 0;
 
     // add a dummy line at the end
     for (i, line) in lines.iter().map(|l| l.as_ref()).chain(std::iter::once(BStr::new(b""))).enumerate() {
 
         let past_end = i >= lines.len();
 
-        let line_filter = |h: &HighlightedRange<T>| h.lineno == i || (past_end && h.lineno > i);
-        let end = start + highlights[start..].partition_point(line_filter);
-        let highlights = highlights[start..end].iter()
-            .chain(extra_highlights.clone().filter(|h| line_filter(h)));
-        start = end;
+        let highlights = highlight_getter(i);
+        // start = end;
 
         if past_end && !highlights.clone().any(|hl| hl.inner.has_virtual_text()) {
             continue
         }
 
-        let may_be_in_range = min_lineno <= i && i <= max_lineno;
+        let may_be_in_range = line_range.contains(&i);
 
-        let (_, y) = super::wrap::wrap(
-            line,
-            highlights.clone(),
-            init_style.clone(),
-            max_width,
-            initial_indent,
-            // don't bother with the callback for lines out of range
-            may_be_in_range.then_some(|range, token, lineno, style| {
-                tokens.push(ScrollWrapToken {
-                    lineno: i,
-                    visual_lineno: total_line_count + lineno,
-                    range,
-                    inner: token,
-                    style,
-                });
-            }),
-        );
+        let (_, y) = if may_be_in_range {
+            super::wrap::wrap(
+                line,
+                highlights,
+                init_style.clone(),
+                max_width,
+                initial_indent,
+                Some(|range, token, lineno, style| {
+                    tokens.push(ScrollWrapToken {
+                        lineno: i,
+                        visual_lineno: total_line_count + lineno,
+                        range,
+                        inner: token,
+                        style,
+                    });
+                }),
+            )
+        } else {
+            super::wrap::wrap(
+                line,
+                highlights.clone().filter(|hl| hl.inner.may_cause_resize()),
+                init_style.clone(),
+                max_width,
+                initial_indent,
+                // don't bother with the callback for lines out of range
+                super::wrap::NoCallback::None,
+            )
+        };
+
         if may_be_in_range {
             tokens.push(ScrollWrapToken {
                 lineno: i,

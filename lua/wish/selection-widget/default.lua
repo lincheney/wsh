@@ -1,19 +1,16 @@
 local M = {}
 
-local SIZE = 9
-local selection_widget = nil
-local state = nil
-local match_fg = 'yellow'
-
-function M.stop()
-    if M.is_active() then
-        wish.remove_event_callback(state.event_id)
-        wish.del_keymap_layer(state.keymap_layer)
-        state = nil
-
-        if selection_widget and wish.check_message(selection_widget) then
-            wish.set_message{id = selection_widget, hidden = true}
+local function extract_text(line)
+    if type(line) == 'string' then
+        return line
+    elseif type(line.text) == 'string' then
+        return line.text
+    else
+        local parts = {}
+        for i = 1, #line do
+            table.insert(parts, line[i].text)
         end
+        return table.concat(parts)
     end
 end
 
@@ -21,267 +18,254 @@ end
 -- it basically just looks for contiguous matches of chars in needle in haystack
 -- does not find optimal match
 local function score(haystack, needle)
-    local last = 1
+    local last = 0
     local start = 0
     local text = {}
-    for i = 1, wish.str.len(needle) do
-        local a, b = wish.str.to_byte_pos(needle, i)
-        local ix = string.find(haystack, string.sub(needle, a, b), last, true)
+    for i = 1, #needle do
+        local ix = string.find(haystack, needle[i], last + 1, true)
         if not ix then
             return
-        elseif ix > last then
-            if last > 1 then
-                table.insert(text, {text = string.sub(haystack, start, last-1), fg = match_fg})
+        elseif ix > last + 1 then
+            if last > 0 then
+                table.insert(text, start)
+                table.insert(text, last)
             end
-            table.insert(text, {text = string.sub(haystack, last, ix-1)})
-            start = ix
+            start = ix - 1
         end
-        last = ix + 1
+        last = ix
     end
-    table.insert(text, {text = string.sub(haystack, start, last-1), fg = match_fg})
-    if last <= #haystack then
-        table.insert(text, {text = string.sub(haystack, last)})
+    if last > 0 then
+        table.insert(text, start)
+        table.insert(text, last)
     end
     return text
 end
 
-local function recalc_filter()
-    if not state then
-        return
+local function clamp_cursor(plugin)
+    plugin.selected = math.max(0, math.min(plugin.selected, #plugin.filtered))
+end
+
+local function redraw_cursor(plugin)
+    wish.scroll_message_to(plugin.widget, math.max(0, plugin.selected - 1))
+end
+
+local function move_cursor(plugin, new)
+    local old = plugin.selected
+    plugin.selected = new
+    clamp_cursor(plugin)
+    if plugin.selected ~= old then
+        wish.redraw_message(plugin.widget)
+        redraw_cursor(plugin)
     end
+end
 
-    local buffer = wish.get_buffer()
-    local filter = buffer:sub(#state.buffer + 1)
+local function recalc_filter(plugin)
+    local matches = nil
 
-    if state.filter and (not wish.str.startswith(buffer, state.buffer) or filter:find('%s$')) then
-        state.resume()
-        return
-    end
+    if plugin.menu_only then
+        plugin.filtered = plugin.lines
+    else
+        local buffer = wish.get_buffer()
+        local filter = string.sub(buffer, #plugin.starting_text + 1)
 
-    if #filter == 0 or not state.filter then
-        -- no filtering
-        state.filter_text = nil
-        state.filtered = state.lines
-
-    elseif filter ~= state.filter_text then
-        -- text filtering
-        state.filter_text = filter
-        state.filtered = {}
-        for i = 1, #state.lines do
-            local s = score(state.lines[i].text, filter)
-            if s then
-                table.insert(state.filtered, {s, i})
-            end
+        if not wish.str.startswith(buffer, plugin.starting_text) or string.find(filter, '%s$') then
+            plugin.stop()
+            return
         end
-        -- sort by score, otherwise index (stable sort)
-        table.sort(state.filtered, function(a, b)
-            if #a[1] ~= #b[1] then
-                return #a[1] < #b[1]
+
+        if filter ~= plugin.filter_text then
+            wish.table.clear(plugin.match_ranges)
+
+            -- text filtering
+            plugin.filter_text = filter
+            if filter == '' then
+                -- no filter
+                plugin.filtered = plugin.lines
             else
-                return a[2] < b[2]
-            end
-        end)
-    end
+                local needle = wish.str.graphemes(filter)
 
-    -- clamp it
-    state.selected = math.max(0, math.min(state.selected, #state.filtered + 1))
-
-    -- center around the selected item
-    -- local bottom = math.min(#state.filtered, state.selected + math.ceil(SIZE / 2) - 1)
-    -- local top = math.max(1, bottom - SIZE + 1)
-    -- bottom = math.min(#state.filtered, top + SIZE - 1)
-    -- local step = 1
-
-    local top, bottom, step = 1, #state.filtered, 1
-    if state.reverse then
-        top, bottom = bottom, top
-        step = -1
-    end
-
-    local contents = {}
-    for i = top, bottom, step do
-        local bg = i == state.selected and 'dark_grey' or nil
-
-        if state.filtered[i].text then
-            -- unhighlighted text
-            table.insert(contents, state.filtered[i])
-            state.filtered[i].bg = bg
-            if i == state.selected then
-                state.real_selected = i
-            end
-
-        else
-            -- highlighted text
-            for j = 1, #state.filtered[i][1] do
-                table.insert(contents, state.filtered[i][1][j])
-                state.filtered[i][1][j].bg = bg
-            end
-            if i == state.selected then
-                state.real_selected = state.filtered[i][2]
+                plugin.filtered = {}
+                for i = 1, #plugin.lines do
+                    local s = score(plugin.text[i], needle)
+                    if s then
+                        table.insert(plugin.filtered, {s, i})
+                    end
+                end
+                -- sort by score, otherwise index (stable sort)
+                table.sort(plugin.filtered, function(a, b)
+                    if #a[1] ~= #b[1] then
+                        return #a[1] < #b[1]
+                    else
+                        return a[2] < b[2]
+                    end
+                end)
+                for i = 1, #plugin.filtered do
+                    plugin.match_ranges[i] = plugin.filtered[i][1]
+                    plugin.filtered[i] = plugin.lines[plugin.filtered[i][2]]
+                end
             end
         end
 
-        table.insert(contents, {text = '\n'})
+        clamp_cursor(plugin)
     end
 
-    if selection_widget and wish.check_message(selection_widget) then
-        wish.set_message{id = selection_widget, contents = #contents > 0 and contents or ''}
-        wish.scroll_message_to(selection_widget, state.selected)
+    wish.clear_message(plugin.widget)
+    wish.set_message{id = plugin.widget, hidden = false, contents = #plugin.filtered > 0 and plugin.filtered or ''}
+    redraw_cursor(plugin)
+end
+
+local function add_lines(plugin, lines)
+    if plugin.inner.is_enabled() and lines then
+        for i = 1, #lines do
+            table.insert(plugin.lines, lines[i])
+            table.insert(plugin.text, extract_text(lines[i]))
+        end
+        recalc_filter(plugin)
     end
 end
 
-local function move_cursor(selected)
-    local old = state.selected
-    state.selected = math.max(1, math.min(selected, #state.filtered))
-    wish.set_message{ id = selection_widget, start_line = old - 1, contents = {} }
-    wish.set_message{ id = selection_widget, start_line = state.selected - 1, contents = { bg = 'dark_grey' } }
-    wish.scroll_message_to(selection_widget, state.selected - 1)
-    wish.redraw()
-end
+function M.new()
+    return wish.plugin(function(wish, opts, plugin)
 
--- opts:
---      filter: bool: whether to do text filtering
---      reverse: bool: show in reverse
---      reload_callback: function: function to call on reload
---      selected: int: selected index
---      lines: string[]: lines fot text to select
---      keymaps: bool: set keymaps
---      data: any
-function M.start(opts)
-    opts = opts or {}
-
-    if not M.is_active() or opts.data ~= state.data then
-        state = {
-            data = opts.data,
-            buffer = wish.get_buffer(),
-            filter = true,
-            lines = {},
-            event_id = wish.add_event_callback('buffer_change', function()
-                if state and state.filter then
-                    recalc_filter()
-                end
-            end),
-            keymap_layer = wish.add_keymap_layer(),
-            selected = 0,
-            real_selected = nil,
+        local style = opts.style or {
+            border = {
+                fg = 'green',
+                type = 'rounded',
+            }
         }
 
-        if not opts.no_keymaps then
-            wish.set_keymap('<up>', M.up, state.keymap_layer)
-            wish.set_keymap('<down>', M.down, state.keymap_layer)
-            wish.set_keymap('<tab>', M.accept, state.keymap_layer)
-            wish.set_keymap('<esc>', M.cancel, state.keymap_layer)
-            wish.set_keymap('<c-r>', M.reload, state.keymap_layer)
-        end
-    end
+        plugin.match_style = opts.match_style or {
+            fg = 'yellow',
+            underline = true,
+        }
 
-    state.reload_callback = opts.reload_callback or state.reload_callback
-    opts.reload_callback = nil
+        plugin.cursor_style = opts.cursor_style or {
+            bg = 'dark_grey'
+        }
 
-    if opts.filter ~= nil then
-        state.filter = opts.filter
-    end
-    if opts.reverse ~= nil then
-        state.reverse = opts.reverse
-    end
-    state.selected = opts.selected or state.selected
+        plugin.menu_only = opts.menu_only
 
-    opts.max_height = SIZE + 2
-    opts.hidden = false
+        plugin.widget = wish.set_message(wish.table.deep_merge({
+            hidden = true,
+            persist = true,
+            max_height = 11,
+        }, style))
 
-    if selection_widget and not wish.check_message(selection_widget) then
-        selection_widget = nil
-    end
-    opts.id = selection_widget
+        wish.add_render_callback(function(widget, lineno)
+            if widget == plugin.widget and (plugin.selected == lineno or plugin.match_ranges[lineno]) then
+                local tbl = {}
+                local ranges = plugin.match_ranges[lineno]
+                if ranges then
+                    for i = 1, #ranges, 2 do
+                        local hl = wish.table.copy(plugin.match_style)
+                        hl.start_column = ranges[i]
+                        hl.end_column = ranges[i+1]
+                        table.insert(tbl, hl)
+                    end
+                end
+                if plugin.selected == lineno then
+                    local hl = wish.table.copy(plugin.cursor_style)
+                    hl.start_column = 0
+                    hl.end_column = wish.MAXNUM
+                    table.insert(tbl, hl)
+                end
+                return tbl
+            end
+        end)
 
-    local source = opts.source
-    opts.source = nil
-    selection_widget = wish.set_message(opts)
+        plugin.inner = wish.plugin(function(wish, opts, inner)
+            plugin.selected = 0
+            plugin.lines = {}
+            plugin.text = {}
+            plugin.filtered = {}
+            plugin.match_ranges = {}
+            plugin.starting_text = not opts.menu_only and wish.get_buffer()
+            wish.clear_message(plugin.widget)
 
-    if type(source) == 'function' then
-        for lines in source() do
-            M.add_lines(lines)
-            if not M.is_active() then
-                break
+            if not plugin.menu_only then
+                wish.add_event_callback('buffer_change', function()
+                    recalc_filter(plugin)
+                end)
+            end
+        end)
+
+        function plugin.start(source, on_accept)
+            plugin.on_accept = opts.on_accept
+            plugin.inner.enable()
+            if type(source) == 'table' then
+                add_lines(plugin, source)
+            elseif type(source) == 'function' then
+                wish.schedule(function()
+                    for lines in source() do
+                        if not plugin.inner.is_enabled() then
+                            break
+                        end
+                        add_lines(plugin, lines)
+                    end
+                end)
+            elseif source then
+                error('expected source to be array of lines or function, got: ' .. type(source))
             end
         end
-        if M.is_active() and #state.lines == 0 then
-            state.resume()
+
+        function plugin.stop()
+            plugin.inner.disable()
+            wish.set_message{id = plugin.widget, hidden = true}
         end
-    elseif type(source) == 'table' then
-        M.add_lines(source)
-    end
 
-    recalc_filter()
+        -- function plugin.clear()
+            -- if plugin.inner.is_enabled() then
+                -- for i = #state.lines, 1, -1 do
+                    -- state.lines[i] = nil
+                -- end
+                -- recalc_filter()
+            -- end
+        -- end
 
-    local resume, yield = wish.async.promise()
-    state.resume = resume
-    local result = yield()
-    wish.pprint(result)
-    M.stop()
-    return result
-end
-
-function M.add_lines(lines)
-    if M.is_active() and lines then
-        for i = 1, #lines do
-            table.insert(state.lines, lines[i])
+        function plugin.accept()
+            if plugin.inner.is_enabled() then
+                if plugin.on_accept and plugin.selected > 0 then
+                    local selected = plugin.filtered[plugin.selected]
+                    if type(selected) == 'table' then
+                        selected = table.concat(wish.table.map(selected, function(x) return x.text end))
+                    end
+                    plugin.on_accept(selected)
+                end
+                plugin.stop()
+            end
         end
-        recalc_filter()
-    end
-end
 
-function M.clear()
-    if M.is_active() then
-        for i = #state.lines, 1, -1 do
-            state.lines[i] = nil
+        -- function M.reload()
+            -- if M.is_enabled() then
+                -- local callback = state.reload_callback
+                -- M.stop()
+                -- if callback then
+                    -- callback()
+                -- end
+            -- end
+        -- end
+
+        function plugin.up()
+            move_cursor(plugin, plugin.selected - 1)
         end
-        recalc_filter()
-    end
-end
 
-function M.accept()
-    if M.is_active() then
-        state.resume(state.real_selected)
-    end
-end
-
-function M.cancel()
-    if M.is_active() then
-        state.resume()
-    end
-end
-
-function M.reload()
-    if M.is_active() then
-        local callback = state.reload_callback
-        M.stop()
-        if callback then
-            callback()
+        function plugin.down()
+            move_cursor(plugin, plugin.selected + 1)
         end
-    end
-end
 
-function M.up()
-    if M.is_active() then
-        move_cursor(state.selected - 1)
-    end
-end
+        wish.set_keymap('<up>', function()
+            plugin.up()
+        end)
 
-function M.down()
-    if M.is_active() then
-        move_cursor(state.selected + 1)
-    end
-end
+        wish.set_keymap('<down>', function()
+            plugin.down()
+        end)
 
-function M.is_active()
-    return state ~= nil
-end
+        wish.add_event_callback('accept_line', function()
+            plugin.stop()
+        end)
 
-wish.add_event_callback('accept_line', function()
-    if M.is_active() then
-        M.stop()
-    end
-end)
+    end)
+end
 
 return M

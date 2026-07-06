@@ -165,7 +165,7 @@ impl Buffer {
         };
 
         self.contents.delete_str(0, edit.position, old.len());
-        self.contents.insert_str(new.as_bytes().into(), 0, edit.position, None);
+        self.contents.insert_str(new.as_bytes().into(), 0, edit.position, true, None);
         self.len = None;
 
         // calculate the new cursor
@@ -259,7 +259,7 @@ impl Buffer {
             drawer.term_width() as _,
             None,
             None,
-            [].iter(),
+            |lineno| self.contents.highlights.get_for_lineno(lineno).iter(),
         ).render(drawer, false, false, callback)?;
         drawer.clear_to_end_of_line(None, crate::shell::is_interrupted())?;
         Ok(())

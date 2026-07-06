@@ -2,6 +2,7 @@ use std::range::Range;
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
+use crate::utils::merge_sort_iter::SortedMergeable;
 use super::widget::Widget;
 use super::drawer::{Drawer, Canvas};
 use super::text::{Renderer, TextRenderer, NoRendererCallback};
@@ -84,6 +85,24 @@ impl Layout {
             },
         };
         (dim, resized)
+    }
+
+    pub fn iter_widgets<F: FnMut(&Node, &Widget)>(
+        &self,
+        map: &HashMap<NodeId, Node>,
+        func: &mut F,
+    ) {
+        for id in &self.children {
+            match map.get(id) {
+                Some(Node{kind: NodeKind::Layout(layout), ..}) => {
+                    layout.iter_widgets(map, func);
+                },
+                Some(node @ Node{kind: NodeKind::Widget(widget), ..}) => {
+                    func(node, widget);
+                },
+                None => (),
+            }
+        }
     }
 }
 
@@ -304,6 +323,31 @@ impl Nodes {
             }).chain(std::iter::once(&mut self.root))
     }
 
+    pub fn invalidate_ephemeral(&mut self, id: NodeId) -> bool {
+        match self.map.get(&id) {
+            Some(Node{kind: NodeKind::Layout(layout), ..}) => {
+                let mut ids = vec![];
+                layout.iter_widgets(&self.map, &mut |node, _widget| {
+                    ids.push(node.id);
+                });
+                for id in ids {
+                    if let Some(Node{kind: NodeKind::Widget(widget), ..}) = self.map.get_mut(&id) {
+                        widget.ephemeral.clear();
+                    }
+                }
+                true
+            },
+            Some(_) => {
+                let Some(Node{kind: NodeKind::Widget(widget), ..}) = self.map.get_mut(&id)
+                    else { unreachable!() };
+                widget.ephemeral.clear();
+                true
+            },
+            None => false,
+        }
+    }
+
+
     /// Remove a node
     pub fn remove(&mut self, id: NodeId) -> Option<Node> {
         self.remove_child_from_parent(id);
@@ -363,6 +407,33 @@ impl Nodes {
         let mut resized = vec![];
         self.size.set(self.root.refresh(&self.map, max_width, max_height, false, Some(&mut resized)).0);
         resized
+    }
+
+    fn iter_widgets<F: FnMut(&Node, &Widget)>(&self, mut func: F) {
+        self.root.iter_widgets(&self.map, &mut func)
+    }
+
+    pub fn trigger_ephemeral_callbacks<F: FnMut(NodeId, &mut Widget, usize)>(&mut self, tmp: bool, mut func: F) {
+        let mut data = vec![];
+
+        self.iter_widgets(|node, widget| {
+            let size = node.get_size(tmp);
+            let border_height = widget.border.inner_height();
+            let height = size.1.saturating_sub(border_height);
+            let (_, line_range) = widget.scroll.position.get_approx_line_range(Some(height as _), widget.inner.len());
+
+            for lineno in line_range {
+                if widget.ephemeral.index_for_lineno(lineno).is_err() {
+                    data.push((node.id, lineno));
+                }
+            }
+        });
+
+        for (id, lineno) in data {
+            if let Some(Node{kind: NodeKind::Widget(widget), ..}) = self.map.get_mut(&id) {
+                func(id, widget, lineno);
+            }
+        }
     }
 
     pub fn render<W: Write, C: Canvas>(
@@ -439,10 +510,10 @@ impl<'a> NodeRenderer<'a, std::slice::Iter<'a, NodeId>> {
         tmp: bool,
     ) -> Self {
 
+        let size = node.get_size(tmp);
         match &node.kind {
             NodeKind::Layout(layout) => Self::new_for_layout(layout, map, tmp),
             NodeKind::Widget(widget) => {
-                let size = node.get_size(tmp);
                 let renderer = TextRenderer::new(
                     &widget.inner, // text
                     0, // initial_indent
@@ -450,7 +521,11 @@ impl<'a> NodeRenderer<'a, std::slice::Iter<'a, NodeId>> {
                     size.0 as _, // width
                     Some(size.1 as _), // height
                     Some(widget.scroll), // scroll
-                    widget.cursor_space_hl.iter(), // extra_highlights
+                    |lineno| {
+                        widget.inner.highlights.get_for_lineno(lineno).iter()
+                            .sorted_merge_with(widget.ephemeral.get_for_lineno(lineno).iter())
+                            .sorted_merge_with(widget.cursor_space_hl.iter().filter(move |hl| hl.lineno == lineno))
+                    },
                 );
                 NodeRenderer::Widget {
                     renderer,

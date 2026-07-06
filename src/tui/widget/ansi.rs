@@ -3,7 +3,7 @@ use std::ops::Range;
 use unicode_width::{UnicodeWidthStr};
 use bstr::{BStr, BString, ByteSlice};
 use crate::tui::style::{Style, Color, Modifier};
-use crate::tui::text::Text;
+use crate::tui::text::{Text};
 
 const TAB_SIZE: usize = 8;
 
@@ -152,7 +152,7 @@ impl Parser {
         self.need_newline = false;
     }
 
-    fn add_buffer<T: Default>(&mut self, text: &mut Text<T>) {
+    fn add_buffer<T: Default+Clone>(&mut self, text: &mut Text<T>) {
         if !self.buffer.is_empty() {
             self.add_str(text, self.buffer.to_string());
             self.buffer.clear();
@@ -174,9 +174,7 @@ impl Parser {
         byte_pos
     }
 
-    fn splice<T: Default>(&mut self, text: &mut Text<T>, range: Option<Range<usize>>, replace_with: Option<String>, style: Option<Style>) {
-        let style = style.map(|s| s.into());
-
+    fn splice<T: Default+Clone>(&mut self, text: &mut Text<T>, range: Option<Range<usize>>, replace_with: Option<String>, style: Style) {
         let lineno = text.len() - 1;
         let len = text.get()[lineno].len();
 
@@ -191,11 +189,11 @@ impl Parser {
 
         text.delete_str(lineno, range.start, range.end - range.start);
         if let Some(replace_with) = replace_with {
-            text.insert_str(replace_with.as_str().into(), lineno, range.start, style);
+            text.insert_str(replace_with.as_str().into(), lineno, range.start, false, Some(style.into()));
         }
     }
 
-    fn add_str<T: Default>(&mut self, text: &mut Text<T>, string: String) {
+    fn add_str<T: Default+Clone>(&mut self, text: &mut Text<T>, string: String) {
         if string.is_empty() {
             return
         }
@@ -205,11 +203,11 @@ impl Parser {
         }
 
         let width = string.width();
-        self.splice(text, None, Some(string), Some(self.style.clone()));
+        self.splice(text, None, Some(string), self.style.clone());
         self.cursor_x += width;
     }
 
-    pub fn feed<T: Default>(&mut self, text: &mut Text<T>, string: &BStr) {
+    pub fn feed<T: Default+Clone>(&mut self, text: &mut Text<T>, string: &BStr) {
         // we support some csi styling, newlines, tabs and normal text and that's about it
 
         for c in string.iter() {
@@ -284,17 +282,17 @@ impl Parser {
                         match param {
                             0 => {
                                 let range = cursor_x .. last_line.len();
-                                self.splice(text, Some(range), None, Some(self.style.clone()));
+                                self.splice(text, Some(range), None, self.style.clone());
                             },
                             1 => {
                                 let range = 0 .. cursor_x;
                                 let replace_with = " ".repeat(self.cursor_x);
-                                self.splice(text, Some(range), Some(replace_with), Some(self.style.clone()));
+                                self.splice(text, Some(range), Some(replace_with), self.style.clone());
                             },
                             2 => {
                                 let range = 0 .. last_line.len();
                                 let replace_with = " ".repeat(self.cursor_x);
-                                self.splice(text, Some(range), Some(replace_with), Some(self.style.clone()));
+                                self.splice(text, Some(range), Some(replace_with), self.style.clone());
                             },
                             _ => (),
                         }
@@ -314,7 +312,7 @@ impl Parser {
                             if let Some(last_line) = text.get().last() {
                                 let cursor_x = Self::to_byte_pos(text, self.cursor_x);
                                 let range = cursor_x .. last_line.len();
-                                self.splice(text, Some(range), None, Some(self.style.clone()));
+                                self.splice(text, Some(range), None, self.style.clone());
                             }
                         },
                         Some(1) => {
@@ -326,7 +324,7 @@ impl Parser {
                                 let cursor_x = Self::to_byte_pos(text, self.cursor_x);
                                 let range = 0 .. cursor_x;
                                 let replace_with = " ".repeat(self.cursor_x);
-                                self.splice(text, Some(range), Some(replace_with), Some(self.style.clone()));
+                                self.splice(text, Some(range), Some(replace_with), self.style.clone());
                             }
                         },
                         Some(2) => {

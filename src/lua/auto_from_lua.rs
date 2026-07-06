@@ -59,7 +59,7 @@ macro_rules! auto_from_lua {
                     $(
                     let flatten = $($($dummy:ident)? true || )? false;
                     let $field: $type = if flatten {
-                            <$type>::from_lua_ref(&value, lua)?
+                        <$type>::from_lua_ref(&value, lua)?
                     } else {
                         table.raw_get(stringify!($field))
                             .map_err(|err| crate::lua::auto_from_lua::make_error(err.to_string(), concat!(".", stringify!($field))) )?

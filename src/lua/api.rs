@@ -13,7 +13,7 @@ mod string;
 mod completion;
 mod history;
 mod events;
-mod tui;
+pub mod tui;
 mod log;
 mod process;
 mod asyncio;

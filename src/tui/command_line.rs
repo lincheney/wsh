@@ -205,7 +205,7 @@ impl CommandLine<'_> {
                         drawer.term_width() as _,
                         None,
                         None,
-                        [].into_iter(),
+                        |lineno| widget.inner.highlights.get_for_lineno(lineno).iter(),
                     ).render(drawer, false, false, NoRendererCallback::None)?;
                 }
             }
