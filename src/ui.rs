@@ -235,16 +235,15 @@ impl Ui {
         match result {
             Ok(result) => Ok(Some(result)),
             err => {
-                let mut ui = self.clone();
-                if !ui.report_error(err)? && draw {
-                    ui.queue_draw();
+                if !self.report_error(err)? && draw {
+                    self.queue_draw();
                 }
                 Ok(None)
             },
         }
     }
 
-    pub fn report_error<T, E: std::fmt::Display>(&mut self, result: std::result::Result<T, E>) -> Result<bool> {
+    pub fn report_error<T, E: std::fmt::Display>(&self, result: std::result::Result<T, E>) -> Result<bool> {
         if let Err(err) = result {
             log::error!("{err}");
             self.show_error_message(&format!("ERROR: {err}"))?;
@@ -254,7 +253,7 @@ impl Ui {
         }
     }
 
-    pub fn show_error_message(&mut self, msg: &str) -> Result<()> {
+    pub fn show_error_message(&self, msg: &str) -> Result<()> {
         let mut ui = self.try_borrow_mut()?;
         ui.tui.add_error_message(msg);
         self.queue_draw();
@@ -676,13 +675,13 @@ impl Ui {
             match result {
                 ControlFlow::Break(x) => break Ok(x),
                 ControlFlow::Continue(Err(err)) => break Err(anyhow::anyhow!(err)),
-                ControlFlow::Continue(Ok((callback, token))) => {
+                ControlFlow::Continue(Ok(callback)) => {
                     if winch_unblock {
                         self.shell.winch_block();
                     }
                     self.shell.restore_queue_signals(queueing_enabled);
                     self.shell.trampoline_push();
-                    callback(self.clone(), token);
+                    callback.call(self);
                     self.shell.trampoline_pop();
                     queueing_enabled = self.shell.queue_signal_level();
                     if let Err(err) = self.shell.dont_queue_signals() {
@@ -835,10 +834,14 @@ impl UiInner {
         Ok(resized)
     }
 
+    pub fn destroy(&mut self) {
+        self.deactivate();
+    }
+
 }
 
 impl Drop for UiInner {
     fn drop(&mut self) {
-        self.deactivate();
+        self.destroy();
     }
 }

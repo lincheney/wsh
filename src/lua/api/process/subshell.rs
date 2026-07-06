@@ -102,9 +102,9 @@ pub async fn subshell_run_with_args(ui: Ui, lua: Lua, args: FullShellRunArgs) ->
     );
 
     ui.clone().runtime.spawn_local(async move {
-        let result = ui.clone().shell.trampoline_out_callback(move |mut ui, token| {
+        let result = ui.clone().shell.trampoline_out_callback(move |ui, token| {
 
-            ui.clone().shell_loop(false, async {
+            ui.shell_loop(false, async {
                 let mut result_sender = Some(result_sender);
 
                 let result = ui.freeze_if(foreground, true, async {

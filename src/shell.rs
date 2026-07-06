@@ -37,7 +37,24 @@ pub use zsh::{
 pub use variables::Variable;
 
 pub struct TrampolineToken(());
-type TrampolinePayload = (Box<dyn FnOnce(Ui, TrampolineToken)>, TrampolineToken);
+
+struct TrampolinePayloadInner<T, F> {
+    callback: F,
+    sender: oneshot::Sender<T>,
+    token: TrampolineToken,
+}
+
+pub trait TrampolinePayloadTrait {
+    fn call(self: Box<Self>, ui: &Ui);
+}
+
+impl<T, F: FnOnce(&Ui, TrampolineToken) -> T> TrampolinePayloadTrait for TrampolinePayloadInner<T, F> {
+    fn call(self: Box<Self>, ui: &Ui) {
+        let _ = self.sender.send((self.callback)(ui, self.token));
+    }
+}
+
+type TrampolinePayload = Box<dyn TrampolinePayloadTrait>;
 enum Trampoline<T=TrampolinePayload> {
     Resumed(oneshot::Sender<T>),
     Paused(oneshot::Sender<()>),
@@ -158,15 +175,13 @@ impl Shell {
         receiver.await
     }
 
-    pub async fn trampoline_out_callback<F: 'static + FnOnce(Ui, TrampolineToken) -> T, T: 'static>(
+    pub async fn trampoline_out_callback<F: 'static + FnOnce(&Ui, TrampolineToken) -> T, T: 'static>(
         &self,
         callback: F,
     ) -> Result<T, oneshot::error::RecvError> {
         let (sender, receiver) = oneshot::channel();
-        let callback = Box::new(move |ui, token| {
-            let _ = sender.send(callback(ui, token));
-        });
-        self.trampoline_out((callback, TrampolineToken(()))).await?;
+        let payload = Box::new(TrampolinePayloadInner{ callback, sender, token: TrampolineToken(()) });
+        self.trampoline_out(payload).await?;
         receiver.await
     }
 

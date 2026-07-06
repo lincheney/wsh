@@ -185,7 +185,7 @@ pub fn write_to_self_pipe(byte: u8) -> bool {
     pipe != -1
 }
 
-pub fn init(ui: crate::ui::Ui) -> Result<()> {
+pub fn init(ui: &crate::ui::Ui) -> Result<()> {
     let (err1, err2) = with_queued_signals(|_| {
 
         #[allow(static_mut_refs)]

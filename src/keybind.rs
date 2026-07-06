@@ -93,7 +93,7 @@ impl KeyHandler<'_> {
                 if !accept_line {
                     // execute the widget
 
-                    let result = self.shell.trampoline_out_callback(Box::new(move |ui: Ui, token| {
+                    let result = self.shell.trampoline_out_callback(move |ui, token| {
 
                         let (old_buffer, old_cursor) = {
                             let ui = ui.try_borrow()?;
@@ -112,7 +112,7 @@ impl KeyHandler<'_> {
                             (old_cursor != cursor).then_some(cursor),
                             ui.shell.has_accepted_line(),
                         ))
-                    })).await;
+                    }).await;
 
                     (new_buffer, new_cursor, accept_line) = result??;
                 }

@@ -5,11 +5,11 @@ use crate::lua::HasEventCallbacks;
 pub extern "C" fn exit_hook(_hook: zsh_sys::Hookdef, _arg: *mut c_void) -> c_int {
     let exit_val = unsafe{ zsh_sys::exit_val };
     let _ = GlobalState::with(|ui| {
-        crate::log_if_err(ui.clone().shell_loop(false, async {
+        crate::log_if_err(ui.shell_loop(false, async {
             crate::log_if_err(ui.trigger_exit_callbacks(exit_val).await);
         }));
     });
-    crate::shell::externs::teardown();
+    crate::shell::externs::teardown(true);
     0
 }
 

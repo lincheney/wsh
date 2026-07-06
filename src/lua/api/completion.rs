@@ -35,9 +35,10 @@ async fn get_completions(ui: Ui, _lua: Lua, (val, callback): (Option<String>, Lu
         ui.try_borrow()?.buffer.get_contents().clone()
     };
 
-    ui.shell.trampoline_out_callback(move |mut ui, token| {
-        let ui_clone = ui.clone();
-        let result = ui_clone.shell.get_completions(token, val, Box::new(move |matches| {
+    ui.shell.trampoline_out_callback(move |ui, token| {
+        let ui = ui.clone();
+        let ui2 = ui.clone();
+        let result = ui2.shell.get_completions(token, val, Box::new(move |matches| {
 
             let result = (|| {
                 let matches = ui.lua.create_sequence_from(matches.into_iter().map(|x| Match{inner: Rc::new(x)}))?;
@@ -53,7 +54,7 @@ async fn get_completions(ui: Ui, _lua: Lua, (val, callback): (Option<String>, Lu
         }));
 
         if let Some(msg) = result && !msg.is_empty() {
-            let tui = &mut ui_clone.try_borrow_mut()?.tui;
+            let tui = &mut ui2.try_borrow_mut()?.tui;
             tui.clear_zle();
             tui.add_zle_message(msg.as_ref());
         }

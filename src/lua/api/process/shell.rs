@@ -167,8 +167,8 @@ pub async fn shell_run_with_args(
         || matches!(stderr, Stdio::inherit)
     );
 
-    let result = ui.clone().shell.trampoline_out_callback(move |ui, token| {
-        ui.clone().shell_loop(false, async {
+    let result = ui.shell.trampoline_out_callback(move |ui, token| {
+        ui.shell_loop(false, async {
 
             let result = ui.freeze_if(foreground, true, async {
 

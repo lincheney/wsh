@@ -15,12 +15,16 @@ thread_local! {
     static FIRST_DRAWN: Cell<bool> = const{ Cell::new(false) };
 }
 
-pub(in crate::shell) fn teardown() {
+pub(in crate::shell) fn teardown(exiting: bool) {
     if let Some((ui, _)) = STATE.take() {
         // do this otherwise runtime will hold strong refs to ui and keep it alive
         crate::log_if_err(ui.runtime.shutdown());
         // this should be the last strong ref
-        debug_assert_eq!(std::rc::Rc::strong_count(&ui.0), 1);
+        let is_running = IS_RUNNING.get();
+        debug_assert_eq!(std::rc::Rc::strong_count(&ui.0), 1 + usize::from(is_running));
+        if exiting && is_running && let Some(mut ui) = crate::log_if_err(ui.try_borrow_mut()) {
+            ui.destroy();
+        }
     }
 }
 
@@ -37,12 +41,12 @@ impl GlobalState {
         // runtime.enter();
         let (events, event_ctrl) = crate::event_stream::EventStream::new();
         let shell = Shell::new();
-        let mut ui = Ui::new(event_ctrl, shell, runtime)?;
+        let ui = Ui::new(event_ctrl, shell, runtime)?;
 
-        ui.clone().shell_loop(false, async {
+        ui.shell_loop(false, async {
             zsh::completion::override_compadd()?;
             zsh::widget::overrides::override_all()?;
-            zsh::signals::init(ui.clone())?;
+            zsh::signals::init(&ui)?;
 
             if !crate::is_forked() {
                 events.spawn(&ui, |ui, result| {
@@ -57,8 +61,9 @@ impl GlobalState {
                     zsh_sys::zle_entry_ptr = Some(zle_entry_ptr_override);
                 }
             }
-            Ok(ui)
-        })?
+            anyhow::Ok(())
+        })??;
+        Ok(ui)
     }
 
     pub fn with<T, F: FnOnce(&Ui) -> T>(f: F) -> Result<T> {
@@ -96,7 +101,7 @@ unsafe extern "C" fn handlerfunc(_nam: *mut c_char, argv: *mut *mut c_char, _opt
         Some(b"lua") => {
             let result = (|| {
                 let ui = GlobalState::get()?;
-                ui.clone().shell_loop(false, ui.lua.load(iter.next().unwrap_or(b"" as _)).exec_async())??;
+                ui.shell_loop(false, ui.lua.load(iter.next().unwrap_or(b"" as _)).exec_async())??;
                 anyhow::Ok(())
             })();
 
@@ -162,8 +167,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                 zsh::signals::sigwinch::fetch_term_size_from_zsh();
 
                 {
-                    let ui = ui.clone();
-                    let result = ui.clone().shell_loop(false, async {
+                    let result = ui.shell_loop(false, async {
                         // sometimes zsh will trash zle without refreshing
                         // redraw the ui
                         let drawn = FIRST_DRAWN.replace(true);
@@ -276,7 +280,7 @@ fn teardown_if_err<T, E: std::fmt::Debug>(ui: &Ui, result: Result<T, E>) -> Opti
         Err(e) => {
             // something failed really really bad
             // unload the module
-            teardown();
+            teardown(false);
             // restore the shell settings
             if let Ok(mut ui) = ui.try_borrow_mut() {
                 ui.deactivate();
@@ -382,6 +386,6 @@ pub unsafe extern "C" fn cleanup_(module: zsh_sys::Module) -> c_int {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn finish_() -> c_int {
-    teardown();
+    teardown(false);
     0
 }

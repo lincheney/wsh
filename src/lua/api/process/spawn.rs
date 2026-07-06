@@ -143,7 +143,7 @@ auto_from_lua! {
     }
 }
 
-async fn spawn(mut ui: Ui, lua: Lua, val: SpawnArgs) -> Result<LuaMultiValue> {
+async fn spawn(ui: Ui, lua: Lua, val: SpawnArgs) -> Result<LuaMultiValue> {
     let args = match val {
         SpawnArgs::Shell(command) => return subshell::subshell_run_with_args(ui, lua, subshell::FullShellRunArgs{command, ..Default::default()}).await,
         SpawnArgs::Full(args) => args,
