@@ -223,13 +223,30 @@ auto_from_lua! {
 }
 
 auto_from_lua! {
+    #[derive(Debug)]
+    enum BorderTitle {
+        Plain(BString),
+        Detailed(BorderTitleOptions),
+    }
+}
+
+impl From<BorderTitle> for BorderTitleOptions {
+    fn from(val: BorderTitle) -> Self {
+        match val {
+            BorderTitle::Detailed(val) => val,
+            BorderTitle::Plain(string) => Self { align: None, contents: LineOptions::Unstyled(string) },
+        }
+    }
+}
+
+auto_from_lua! {
     #[derive(Debug, Default)]
     struct BorderOptions {
         enabled: Option<bool>,
         sides: Option<BorderSides>,
         r#type: Option<FromLuaStr<border::Kind>>,
-        title_top: Option<BorderTitleOptions>,
-        title_bottom: Option<BorderTitleOptions>,
+        title_top: Option<BorderTitle>,
+        title_bottom: Option<BorderTitle>,
         show_empty: Option<bool>,
         #[flatten]
         style: StyleOptions,
@@ -462,6 +479,7 @@ fn set_widget_options(
                 widget.border.style = widget.border.style.clone().patch(style.as_style());
 
                 if let Some(text) = options.title_top {
+                    let text: BorderTitleOptions = text.into();
                     let title = widget.border.title_top.get_or_insert_default();
                     title.text.style = widget.border.style.clone();
                     parse_text_parts(Contents::Single(text.contents), &mut title.text);
@@ -471,6 +489,7 @@ fn set_widget_options(
                 }
 
                 if let Some(text) = options.title_bottom {
+                    let text: BorderTitleOptions = text.into();
                     let title = widget.border.title_bottom.get_or_insert_default();
                     title.text.style = widget.border.style.clone();
                     parse_text_parts(Contents::Single(text.contents), &mut title.text);
