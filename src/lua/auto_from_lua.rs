@@ -14,7 +14,7 @@ pub fn strip_runtime_error(mut err: String) -> String {
 
 pub fn make_error(err: String, path: &str) -> LuaError {
     let mut err = strip_runtime_error(err);
-    if !err.starts_with(".") {
+    if !err.starts_with('.') {
         err.insert_str(0, ": ");
     }
     err.insert_str(0, path);

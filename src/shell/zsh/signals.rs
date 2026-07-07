@@ -199,7 +199,7 @@ pub fn init(ui: &crate::ui::Ui) -> Result<()> {
             resize_array(&mut super::siglists, trapcount, SIGTRAPPED_COUNT as usize);
         }
 
-        spawn_self_pipe_reader(&ui)?;
+        spawn_self_pipe_reader(ui)?;
         hook_signal(signal::Signal::SIGCHLD)?;
         hook_signal(signal::Signal::SIGINT)?;
         hook_signal(signal::Signal::SIGWINCH)?;

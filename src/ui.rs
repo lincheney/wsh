@@ -179,11 +179,11 @@ impl Ui {
         loop {
             if let Some(result) = self.draw_with_lock_blocking(lock, &mut size, cursor_y, false)? {
                 return Ok(result)
-            } else {
-                // get the cursor y then reacquire the ui next loop
-                let cursor = self.events.get_cursor_position();
-                cursor_y = Some(tokio::time::timeout(crate::DEFAULT_DURATION, cursor).await.unwrap()?.1 as _);
             }
+
+            // get the cursor y then reacquire the ui next loop
+            let cursor = self.events.get_cursor_position();
+            cursor_y = Some(tokio::time::timeout(crate::DEFAULT_DURATION, cursor).await.unwrap()?.1 as _);
         }
     }
 

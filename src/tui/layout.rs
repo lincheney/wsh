@@ -410,7 +410,7 @@ impl Nodes {
     }
 
     fn iter_widgets<F: FnMut(&Node, &Widget)>(&self, mut func: F) {
-        self.root.iter_widgets(&self.map, &mut func)
+        self.root.iter_widgets(&self.map, &mut func);
     }
 
     pub fn trigger_ephemeral_callbacks<F: FnMut(NodeId, &mut Widget, usize)>(&mut self, tmp: bool, mut func: F) {

@@ -20,7 +20,7 @@ enum Output {
 }
 
 struct State {
-    sink: Option<Option<Sink>>,
+    sink: Option<Result<Sink, ()>>,
     pids: ConstHashMap<Pid, bool>,
     output: VecDeque<Output>,
 }
@@ -122,7 +122,7 @@ pub(super) fn sighandler(trapped: bool) -> c_int {
                 }
             }
 
-            let sink = state.sink.get_or_insert_with(|| Sink::new().ok());
+            let sink = state.sink.get_or_insert_with(|| Sink::new().or(Err(())));
             let guard = sink.as_mut().map(|sink| {
                 sink.clear();
                 sink.override_shout(false, true)
@@ -144,7 +144,7 @@ pub(super) fn sighandler(trapped: bool) -> c_int {
             }
             zsh_sys::zle_entry_ptr = old_zle_entry_ptr;
             drop(guard);
-            let output = sink.as_mut().and_then(|sink| sink.read());
+            let output = sink.as_mut().ok().and_then(|sink| sink.read());
 
             if let Some(output) = output {
                 notify = true;

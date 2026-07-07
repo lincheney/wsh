@@ -28,7 +28,7 @@ impl FromLua for LuaColor {
             if let Ok(string) = std::str::from_utf8(&string.as_bytes()) {
                 if let Ok(color) = Color::try_from(string) {
                     return Ok(LuaColor(color))
-                } else if string.starts_with("#") && string.len() == 7 {
+                } else if string.starts_with('#') && string.len() == 7 {
                     let rgb = u32::from_str_radix(&string[1..7], 16)
                         .map_err(|e| crate::lua::lua_error(e.to_string()))?;
                     let r = (rgb >> 16) as _;
@@ -440,7 +440,7 @@ fn parse_text_parts<T: Default+Clone>(parts: Contents, text: &mut tui::text::Tex
             parse_line(line, text);
         },
         Contents::Lines(lines) => {
-            for line in lines.0.into_iter() {
+            for line in lines.0 {
                 parse_line(line, text);
             }
         },

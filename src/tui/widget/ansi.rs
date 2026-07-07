@@ -99,39 +99,63 @@ pub fn parse_ansi_col(mut style: Style, string: &BStr) -> Style {
             90..=97 => style.fg(Color::AnsiValue(part as u8 - 90 + 8)),
             100..=107 => style.bg(Color::AnsiValue(part as u8 - 90 + 8)),
             38 => match parts.next() {
-                Some((2, _)) => if let Some(((r, g), b)) = parts.next().zip(parts.next()).zip(parts.next()) {
-                    style.fg(Color::Rgb { r: r.0 as u8, g: g.0 as u8, b: b.0 as u8 })
-                } else {
-                    style
+                Some((2, _)) => {
+                    if let Some(r) = parts.next()
+                        && let Ok(r) = r.0.try_into()
+                        && let Some(g) = parts.next()
+                        && let Ok(g) = g.0.try_into()
+                        && let Some(b) = parts.next()
+                        && let Ok(b) = b.0.try_into()
+                    {
+                        style.fg(Color::Rgb { r, g, b })
+                    } else {
+                        style
+                    }
                 },
-                Some((5, _)) => if let Some(part) = parts.next() {
-                    style.fg(Color::AnsiValue(part.0 as u8))
+                Some((5, _)) => if let Some(part) = parts.next() && let Ok(part) = part.0.try_into() {
+                    style.fg(Color::AnsiValue(part))
                 } else {
                     style
                 },
                 _ => style,
             },
             48 => match parts.next() {
-                Some((2, _)) => if let Some(((r, g), b)) = parts.next().zip(parts.next()).zip(parts.next()) {
-                    style.bg(Color::Rgb { r: r.0 as u8, g: g.0 as u8, b: b.0 as u8 })
-                } else {
-                    style
+                Some((2, _)) => {
+                    if let Some(r) = parts.next()
+                        && let Ok(r) = r.0.try_into()
+                        && let Some(g) = parts.next()
+                        && let Ok(g) = g.0.try_into()
+                        && let Some(b) = parts.next()
+                        && let Ok(b) = b.0.try_into()
+                    {
+                        style.bg(Color::Rgb { r, g, b })
+                    } else {
+                        style
+                    }
                 },
-                Some((5, _)) => if let Some(part) = parts.next() {
-                    style.bg(Color::AnsiValue(part.0 as u8))
+                Some((5, _)) => if let Some(part) = parts.next() && let Ok(part) = part.0.try_into() {
+                    style.bg(Color::AnsiValue(part))
                 } else {
                     style
                 },
                 _ => style,
             },
             58 => match parts.next() {
-                Some((2, _)) => if let Some(((r, g), b)) = parts.next().zip(parts.next()).zip(parts.next()) {
-                    style.underline_color(Color::Rgb { r: r.0 as u8, g: g.0 as u8, b: b.0 as u8 })
-                } else {
-                    style
+                Some((2, _)) => {
+                    if let Some(r) = parts.next()
+                        && let Ok(r) = r.0.try_into()
+                        && let Some(g) = parts.next()
+                        && let Ok(g) = g.0.try_into()
+                        && let Some(b) = parts.next()
+                        && let Ok(b) = b.0.try_into()
+                    {
+                        style.underline_color(Color::Rgb { r, g, b })
+                    } else {
+                        style
+                    }
                 },
-                Some((5, _)) => if let Some(part) = parts.next() {
-                    style.underline_color(Color::AnsiValue(part.0 as u8))
+                Some((5, _)) => if let Some(part) = parts.next() && let Ok(part) = part.0.try_into() {
+                    style.underline_color(Color::AnsiValue(part))
                 } else {
                     style
                 },

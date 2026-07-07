@@ -125,7 +125,7 @@ pub async fn subshell_run_with_args(ui: Ui, lua: Lua, args: FullShellRunArgs) ->
                     // fork it now to get the pid
                     let (result, queue_result) = ui.shell.with_queued_signals::<Result<_>, _>(|| {
                         let pid = ui.shell.exec_subshell(token, args.command.as_ref(), false, fds)? as _;
-                        let pid_waiter = crate::shell::signals::sigchld::register_pid(&ui, pid as _, true);
+                        let pid_waiter = crate::shell::signals::sigchld::register_pid(ui, pid as _, true);
                         Ok((pid, pid_waiter))
                     });
                     crate::log_if_err(queue_result);
