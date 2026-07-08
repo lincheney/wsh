@@ -137,9 +137,9 @@ auto_from_lua! {
 auto_from_lua! {
     #[derive(Debug)]
     enum SpawnArgs {
-        Shell(BString),
-        Simple(Array<String>),
         Full(FullSpawnArgs),
+        Simple(Array<String>),
+        Shell(BString),
     }
 }
 
