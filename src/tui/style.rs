@@ -7,13 +7,22 @@ bitflags::bitflags! {
         const BOLD        = 1 << 0;
         const DIM         = 1 << 1;
         const ITALIC      = 1 << 2;
-        const UNDERLINED  = 1 << 3;
-        const SLOW_BLINK  = 1 << 4;
-        const RAPID_BLINK = 1 << 5;
-        const REVERSED    = 1 << 6;
-        const HIDDEN      = 1 << 7;
-        const CROSSED_OUT = 1 << 8;
+        const BLINK       = 1 << 3;
+        const REVERSED    = 1 << 4;
+        const HIDDEN      = 1 << 5;
+        const CROSSED_OUT = 1 << 6;
     }
+}
+
+#[derive(Default, Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Underline {
+    #[default]
+    None,
+    Single,
+    Double,
+    Curly,
+    Dashed,
+    Dotted,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,6 +39,7 @@ pub struct Hyperlink {
 pub struct Style {
     pub fg:              Option<Color>,
     pub bg:              Option<Color>,
+    pub underline:       Option<Underline>,
     pub underline_color: Option<Color>,
     pub hyperlink:       Option<Rc<Hyperlink>>,
     /// actual values of modifier bits
@@ -43,6 +53,7 @@ impl Style {
         Self {
             fg: None,
             bg: None,
+            underline: None,
             underline_color: None,
             hyperlink: None,
             modifier: Modifier::empty(),
@@ -55,6 +66,7 @@ impl Style {
         Style {
             fg: other.fg.or(self.fg),
             bg: other.bg.or(self.bg),
+            underline: other.underline.or(self.underline),
             underline_color: other.underline_color.or(self.underline_color),
             hyperlink: other.hyperlink.or(self.hyperlink),
             modifier: (!other.modifier_mask & self.modifier) | (other.modifier_mask & other.modifier),
@@ -85,6 +97,11 @@ impl Style {
 
     pub const fn bg(mut self, c: Color) -> Self {
         self.bg = Some(c);
+        self
+    }
+
+    pub const fn underline(mut self, u: Underline) -> Self {
+        self.underline = Some(u);
         self
     }
 

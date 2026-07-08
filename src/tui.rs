@@ -29,7 +29,7 @@ pub mod layout;
 pub mod error_message;
 pub use drawer::{Drawer, Canvas, DummyCanvas};
 pub use error_message::ErrorMessage;
-pub use style::{Style, Modifier, Hyperlink};
+pub use style::{Style, Modifier, Hyperlink, Underline};
 pub use cell::Cell;
 pub use buffer::Buffer;
 
@@ -66,7 +66,7 @@ pub fn allocate_height<W: Write>(stdout: &mut W, height: u16) -> std::io::Result
 
 fn cell_is_empty(cell: &Cell) -> bool {
     let active = cell.style.modifier & cell.style.modifier_mask;
-    cell.text() == " " && matches!(cell.style.bg, None | Some(Color::Reset)) && !active.intersects(Modifier::UNDERLINED | Modifier::REVERSED | Modifier::CROSSED_OUT)
+    cell.text() == " " && matches!(cell.style.bg, None | Some(Color::Reset)) && !active.intersects(Modifier::REVERSED | Modifier::CROSSED_OUT) && matches!(cell.style.underline, None | Some(Underline::None))
 }
 
 #[derive(Default)]
@@ -311,7 +311,7 @@ impl Tui {
                             lineno,
                             start: style.start_column,
                             end: style.end_column.into(),
-                            inner: widget::StyleOptions::from(style.inner).as_style().into(),
+                            inner: Style::from(style.inner).into(),
                         });
                     }
                 }

@@ -1,105 +1,16 @@
 use bstr::BStr;
 use std::default::Default;
-use std::rc::Rc;
-use crate::tui::{Style, Modifier, Hyperlink};
+use crate::tui::{Style, Modifier};
 use crate::tui::border::{Border};
-use crossterm::style::Color;
 mod ansi;
 pub use ansi::parse_ansi_col;
 use super::scroll::ScrollPosition;
 use super::text::Scroll;
 
-#[derive(Default, Debug, Clone, Copy)]
-pub enum UnderlineOption {
-    #[default]
-    None,
-    Set,
-    Color(Color),
-}
-
-#[derive(Debug, Default, Clone)]
-pub struct StyleOptions {
-    pub fg: Option<Color>,
-    pub bg: Option<Color>,
-    pub bold: Option<bool>,
-    pub dim: Option<bool>,
-    pub italic: Option<bool>,
-    pub underline: Option<UnderlineOption>,
-    pub strikethrough: Option<bool>,
-    pub reversed: Option<bool>,
-    pub blink: Option<bool>,
-    pub hyperlink: Option<Option<Rc<Hyperlink>>>,
-}
-
-impl StyleOptions {
-    pub fn as_style(&self) -> Style {
-        let mut modifier = Modifier::empty();
-        let mut modifier_mask = Modifier::empty();
-        let mut underline_color = None;
-
-        match self.underline {
-            None => (),
-            Some(UnderlineOption::None) => {
-                modifier_mask |= Modifier::UNDERLINED;
-            },
-            Some(UnderlineOption::Set) => {
-                modifier      |= Modifier::UNDERLINED;
-                modifier_mask |= Modifier::UNDERLINED;
-            },
-            Some(UnderlineOption::Color(color)) => {
-                underline_color = Some(color);
-                modifier      |= Modifier::UNDERLINED;
-                modifier_mask |= Modifier::UNDERLINED;
-            },
-        }
-
-        macro_rules! set_modifier {
-            ($field:ident, $flag:ident) => {
-                if let Some(v) = self.$field {
-                    modifier_mask |= Modifier::$flag;
-                    if v { modifier |= Modifier::$flag; }
-                }
-            }
-        }
-
-        set_modifier!(bold,          BOLD);
-        set_modifier!(dim,           DIM);
-        set_modifier!(italic,        ITALIC);
-        set_modifier!(strikethrough, CROSSED_OUT);
-        set_modifier!(reversed,      REVERSED);
-        set_modifier!(blink,         SLOW_BLINK);
-
-        Style {
-            fg: self.fg,
-            bg: self.bg,
-            underline_color,
-            hyperlink: self.hyperlink.clone().flatten(),
-            modifier,
-            modifier_mask,
-        }
-    }
-
-    pub fn merge(&self, other: &Self) -> Self {
-        Self{
-            fg: other.fg.or(self.fg),
-            bg: other.bg.or(self.bg),
-            bold: other.bold.or(self.bold),
-            dim: other.dim.or(self.dim),
-            italic: other.italic.or(self.italic),
-            underline: other.underline.or(self.underline),
-            strikethrough: other.strikethrough.or(self.strikethrough),
-            reversed: other.reversed.or(self.reversed),
-            blink: other.blink.or(self.blink),
-            hyperlink: other.hyperlink.clone().or_else(|| self.hyperlink.clone()),
-        }
-    }
-
-}
-
 #[derive(Default, Debug, Clone)]
 pub struct Widget {
     pub inner: super::text::Text,
-    pub style: StyleOptions,
+    pub style: Style,
     pub ephemeral: super::text::HighlightedRangeSet<()>,
     pub border_show_empty: bool,
     pub border: Border,

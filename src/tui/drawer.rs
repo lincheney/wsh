@@ -16,7 +16,7 @@ use crossterm::{
         Color,
     },
 };
-use super::{Cell, Style, Modifier, Hyperlink};
+use super::{Cell, Style, Modifier, Hyperlink, style::Underline};
 
 pub struct SetHyperlink(pub Option<Rc<Hyperlink>>);
 
@@ -83,6 +83,7 @@ pub struct Drawer<'a, 'b, W, C> {
     pos: (u16, u16),
     fg: Color,
     bg: Color,
+    underline: Underline,
     underline_color: Color,
     hyperlink: Option<Rc<super::style::Hyperlink>>,
     modifier: Modifier,
@@ -97,6 +98,7 @@ impl<'a, 'b, W, C> Drawer<'a, 'b, W, C> {
             pos,
             fg: Color::Reset,
             bg: Color::Reset,
+            underline: Underline::default(),
             underline_color: Color::Reset,
             hyperlink: None,
             modifier: Modifier::default(),
@@ -355,6 +357,7 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
         let cell_fg = cell.style.fg.unwrap_or(Color::Reset);
         let cell_bg = cell.style.bg.unwrap_or(Color::Reset);
         let cell_uc = cell.style.underline_color.unwrap_or(Color::Reset);
+        let cell_ul = cell.style.underline.unwrap_or_default();
 
         if cell.style.hyperlink != self.hyperlink {
             self.hyperlink.clone_from(&cell.style.hyperlink);
@@ -371,6 +374,16 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
             )))?;
             self.fg = cell_fg;
             self.bg = cell_bg;
+        }
+        if cell_ul != self.underline {
+            queue!(self.writer, SetAttribute(match cell_ul {
+                Underline::None   => CAttribute::NoUnderline,
+                Underline::Single => CAttribute::Underlined,
+                Underline::Double => CAttribute::DoubleUnderlined,
+                Underline::Curly  => CAttribute::Undercurled,
+                Underline::Dashed => CAttribute::Underdashed,
+                Underline::Dotted => CAttribute::Underdotted,
+            }))?;
         }
         if cell_uc != self.underline_color {
             queue!(self.writer, SetUnderlineColor(cell_uc))?;
@@ -399,16 +412,13 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
         if removed.contains(Modifier::ITALIC) {
             queue!(self.writer, SetAttribute(CAttribute::NoItalic))?;
         }
-        if removed.contains(Modifier::UNDERLINED) {
-            queue!(self.writer, SetAttribute(CAttribute::NoUnderline))?;
-        }
         if removed.contains(Modifier::DIM) {
             queue!(self.writer, SetAttribute(CAttribute::NormalIntensity))?;
         }
         if removed.contains(Modifier::CROSSED_OUT) {
             queue!(self.writer, SetAttribute(CAttribute::NotCrossedOut))?;
         }
-        if removed.contains(Modifier::SLOW_BLINK) || removed.contains(Modifier::RAPID_BLINK) {
+        if removed.contains(Modifier::BLINK) {
             queue!(self.writer, SetAttribute(CAttribute::NoBlink))?;
         }
 
@@ -422,20 +432,14 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
         if added.contains(Modifier::ITALIC) {
             queue!(self.writer, SetAttribute(CAttribute::Italic))?;
         }
-        if added.contains(Modifier::UNDERLINED) {
-            queue!(self.writer, SetAttribute(CAttribute::Underlined))?;
-        }
         if added.contains(Modifier::DIM) {
             queue!(self.writer, SetAttribute(CAttribute::Dim))?;
         }
         if added.contains(Modifier::CROSSED_OUT) {
             queue!(self.writer, SetAttribute(CAttribute::CrossedOut))?;
         }
-        if added.contains(Modifier::SLOW_BLINK) {
+        if added.contains(Modifier::BLINK) {
             queue!(self.writer, SetAttribute(CAttribute::SlowBlink))?;
-        }
-        if added.contains(Modifier::RAPID_BLINK) {
-            queue!(self.writer, SetAttribute(CAttribute::RapidBlink))?;
         }
 
         self.modifier = new;

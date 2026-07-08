@@ -1,7 +1,6 @@
 use crate::lua::{LuaWrapper, auto_from_lua, Array, FromLuaStr, FromLuaSerde, api::number::PossiblyMaxUsize};
 use bstr::{BString};
 use std::default::Default;
-use std::rc::Rc;
 use serde::{Serialize};
 use anyhow::Result;
 use crossterm::style::Color;
@@ -13,6 +12,7 @@ use crate::tui::{
     Style,
     Modifier,
     Hyperlink,
+    Underline,
     text::Alignment,
     Cell,
     sizing,
@@ -254,17 +254,48 @@ auto_from_lua! {
 }
 
 auto_from_lua! {
+    #[allow(non_camel_case_types)]
     #[derive(Debug, Clone, Serialize)]
-    struct UnderlineStyleOptions {
-        color: LuaColor,
+    enum UnderlineStyle {
+        single,
+        double,
+        curly,
+        dashed,
+        dotted,
+    }
+}
+
+impl From<Underline> for Option<UnderlineStyle> {
+    fn from(hl: Underline) -> Self {
+        match hl {
+            Underline::None => None,
+            Underline::Single => Some(UnderlineStyle::single),
+            Underline::Double => Some(UnderlineStyle::double),
+            Underline::Curly => Some(UnderlineStyle::curly),
+            Underline::Dashed => Some(UnderlineStyle::dashed),
+            Underline::Dotted => Some(UnderlineStyle::dotted),
+        }
+    }
+}
+
+impl From<UnderlineStyle> for Underline {
+    fn from(hl: UnderlineStyle) -> Self {
+        match hl {
+            UnderlineStyle::single => Underline::Single,
+            UnderlineStyle::double => Underline::Double,
+            UnderlineStyle::curly => Underline::Curly,
+            UnderlineStyle::dashed => Underline::Dashed,
+            UnderlineStyle::dotted => Underline::Dotted,
+        }
     }
 }
 
 auto_from_lua! {
     #[derive(Debug, Clone, Serialize)]
     enum UnderlineOption {
+        Colored{style: UnderlineStyle, color: LuaColor,},
+        Styled(UnderlineStyle),
         Bool(bool),
-        Options(UnderlineStyleOptions),
     }
 }
 
@@ -272,7 +303,7 @@ auto_from_lua! {
     #[derive(Debug, Clone, Serialize)]
     enum HyperlinkOption {
         Url(String),
-        Detailed { url: String, id: Option<String>, },
+        Detailed{ url: String, id: Option<String>, },
     }
 }
 
@@ -289,6 +320,59 @@ auto_from_lua! {
         reversed: Option<bool>,
         blink: Option<bool>,
         hyperlink: Option<HyperlinkOption>,
+    }
+}
+
+impl From<StyleOptions> for Style {
+    fn from(style: StyleOptions) -> Self {
+
+        let underline_color = if let Some(UnderlineOption::Colored{color, ..}) = style.underline {
+            Some(color.0)
+        } else {
+            None
+        };
+
+        let underline = style.underline.map(|ul| {
+            match ul {
+                UnderlineOption::Bool(false) => Underline::None,
+                UnderlineOption::Bool(true) => Underline::Single,
+                UnderlineOption::Colored{style, ..} | UnderlineOption::Styled(style) => style.into(),
+            }
+        });
+
+        let mut modifier = Modifier::empty();
+        let mut modifier_mask = Modifier::empty();
+        macro_rules! set_modifier {
+            ($field:ident, $flag:ident) => {
+                if let Some(v) = style.$field {
+                    modifier_mask |= Modifier::$flag;
+                    if v { modifier |= Modifier::$flag; }
+                }
+            }
+        }
+
+        set_modifier!(bold,          BOLD);
+        set_modifier!(dim,           DIM);
+        set_modifier!(italic,        ITALIC);
+        set_modifier!(strikethrough, CROSSED_OUT);
+        set_modifier!(reversed,      REVERSED);
+        set_modifier!(blink,         BLINK);
+
+        let hyperlink = match style.hyperlink {
+            None => None,
+            Some(HyperlinkOption::Url(url)) => Some(Hyperlink{ url: url.into(), id: None }),
+            Some(HyperlinkOption::Detailed { url, id }) => Some(Hyperlink{ url: url.into(), id: id.map(|id| id.into()) }),
+        };
+
+        Style {
+            fg: style.fg.map(|x| x.0),
+            bg: style.bg.map(|x| x.0),
+            underline,
+            underline_color,
+            hyperlink: hyperlink.map(|h| h.into()),
+            modifier,
+            modifier_mask,
+        }
     }
 }
 
@@ -335,14 +419,20 @@ impl From<Style> for StyleOptions {
             bold:          get_modifier!(Modifier::BOLD),
             dim:           get_modifier!(Modifier::DIM),
             italic:        get_modifier!(Modifier::ITALIC),
-            underline: if let Some(color) = style.underline_color {
-                Some(UnderlineOption::Options(UnderlineStyleOptions { color: LuaColor(color) }))
-            } else {
-                get_modifier!(Modifier::UNDERLINED).map(UnderlineOption::Bool)
+            underline: match (style.underline, style.underline_color) {
+                (None, _) => None,
+                (Some(style), None) => match Option::<UnderlineStyle>::from(style) {
+                    None => Some(UnderlineOption::Bool(false)),
+                    Some(style) => Some(UnderlineOption::Styled(style)),
+                },
+                (Some(style), Some(color)) => match Option::<UnderlineStyle>::from(style) {
+                    None => Some(UnderlineOption::Bool(false)),
+                    Some(style) => Some(UnderlineOption::Colored{style, color: LuaColor(color)}),
+                },
             },
             strikethrough: get_modifier!(Modifier::CROSSED_OUT),
             reversed:      get_modifier!(Modifier::REVERSED),
-            blink:         get_modifier!(Modifier::SLOW_BLINK),
+            blink:         get_modifier!(Modifier::BLINK),
             hyperlink: style.hyperlink.as_ref().map(|h| {
                 HyperlinkOption::Detailed {
                     url: h.url.to_string(),
@@ -359,39 +449,6 @@ auto_from_lua! {
         #[flatten]
         inner: StyleOptions,
         no_blend: Option<bool>,
-    }
-}
-
-impl From<StyleOptions> for tui::widget::StyleOptions {
-    fn from(style: StyleOptions) -> Self {
-        Self {
-            fg: style.fg.map(|x| x.0),
-            bg: style.bg.map(|x| x.0),
-            bold: style.bold,
-            dim: style.dim,
-            italic: style.italic,
-            underline: match style.underline {
-                None => None,
-                Some(UnderlineOption::Bool(false)) => Some(tui::widget::UnderlineOption::None),
-                Some(UnderlineOption::Bool(true)) => Some(tui::widget::UnderlineOption::Set),
-                Some(UnderlineOption::Options(opts)) => Some(tui::widget::UnderlineOption::Color(opts.color.0)),
-            },
-            strikethrough: style.strikethrough,
-            reversed: style.reversed,
-            blink: style.blink,
-            hyperlink: match style.hyperlink {
-                None => None,
-                Some(HyperlinkOption::Url(url)) if url.is_empty() => Some(None),
-                Some(HyperlinkOption::Url(url)) => Some(Some(Rc::new(Hyperlink {
-                    url: url.into(),
-                    id: None,
-                }))),
-                Some(HyperlinkOption::Detailed { url, id }) => Some(Some(Rc::new(Hyperlink {
-                    url: url.into(),
-                    id: id.map(|id| id.into()),
-                }))),
-            },
-       }
     }
 }
 
@@ -412,7 +469,7 @@ fn parse_line<T: Default+Clone>(line: LineOptions, text: &mut tui::text::Text<T>
                         let hl = if part.style.is_none() {
                             None
                         } else {
-                            Some(tui::widget::StyleOptions::from(part.style).as_style().into())
+                            Some(Style::from(part.style).into())
                         };
                         text.push_str(part.text.as_ref(), hl);
                     }
@@ -420,7 +477,7 @@ fn parse_line<T: Default+Clone>(line: LineOptions, text: &mut tui::text::Text<T>
             }
 
             if !style.is_none() {
-                let inner = tui::widget::StyleOptions::from(style).as_style().into();
+                let inner = Style::from(style).into();
                 text.add_highlight(tui::text::HighlightedRange{
                     lineno: text.len() - 1,
                     start: 0,
@@ -473,10 +530,10 @@ fn set_widget_options(
             };
 
             if let Some(sides) = sides {
-                let style: tui::widget::StyleOptions = options.style.clone().into();
+                let style: Style = options.style.clone().into();
                 widget.border.sides = sides;
                 widget.border.kind = options.r#type.unwrap_or(FromLuaStr(widget.border.kind)).0;
-                widget.border.style = widget.border.style.clone().patch(style.as_style());
+                widget.border.style = widget.border.style.clone().patch(style);
 
                 if let Some(text) = options.title_top {
                     let text: BorderTitleOptions = text.into();
@@ -508,8 +565,8 @@ fn set_widget_options(
         None => {},
     }
 
-    widget.style = widget.style.merge(&style.style.clone().into());
-    widget.inner.style = widget.style.as_style();
+    widget.style = widget.style.clone().patch(style.style.into());
+    widget.inner.style = widget.style.clone();
 }
 
 fn process_message(tui: &mut tui::Tui, options: MessageOptions) -> Result<&mut Node> {
@@ -686,14 +743,14 @@ auto_from_lua! {
 fn add_buf_highlight(ui: &Ui, _lua: &Lua, val: BufferHighlight) -> Result<()> {
     let blend = !val.style.no_blend.unwrap_or_default();
     let priority = val.priority.unwrap_or_default();
-    let style: tui::widget::StyleOptions = val.style.inner.into();
+    let style: Style = val.style.inner.into();
 
     ui.try_borrow_mut()?.buffer.add_highlight(tui::text::HighlightedRange{
         lineno: 0,
         start: usize::from(val.start).saturating_sub(1),
         end: val.finish.into(),
         inner: tui::text::Highlight{
-            style: style.as_style(),
+            style,
             namespace: val.namespace.unwrap_or(0),
             virtual_text: val.virtual_text,
             conceal: val.conceal,
@@ -908,8 +965,7 @@ fn sgr_to_style(lua: &Lua, sgr: String) -> LuaResult<LuaValue> {
 }
 
 fn style_to_sgr(_lua: &Lua, options: StyleOptions) -> LuaResult<Option<BString>> {
-    let style: tui::widget::StyleOptions = options.into();
-    let style = style.as_style();
+    let style: Style = options.into();
     if style == Style::default() {
         return Ok(None);
     }

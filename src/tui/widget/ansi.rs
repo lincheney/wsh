@@ -2,7 +2,7 @@ use std::rc::Rc;
 use std::ops::Range;
 use unicode_width::{UnicodeWidthStr};
 use bstr::{BStr, BString, ByteSlice};
-use crate::tui::style::{Style, Color, Modifier};
+use crate::tui::style::{Style, Color, Modifier, Underline};
 use crate::tui::text::{Text};
 
 const TAB_SIZE: usize = 8;
@@ -67,27 +67,29 @@ pub fn parse_ansi_col(mut style: Style, string: &BStr) -> Style {
             2 => style.add_modifier(Modifier::DIM),
             3 => style.add_modifier(Modifier::ITALIC),
             4 => if colon {
-                match parts.next() {
-                    Some((0, _)) => style.remove_modifier(Modifier::UNDERLINED),
-                    Some((1, _)) => style.add_modifier(Modifier::UNDERLINED),
-                    Some((2, _)) => style.add_modifier(Modifier::UNDERLINED), // underdouble
-                    Some((3, _)) => style.add_modifier(Modifier::UNDERLINED), // undercurl
-                    Some((4, _)) => style.add_modifier(Modifier::UNDERLINED), // underdotted
-                    Some((5, _)) => style.add_modifier(Modifier::UNDERLINED), // underdashed
-                    _ => style.add_modifier(Modifier::UNDERLINED),
-                }
+                style.underline = match parts.next() {
+                    Some((0, _)) => Some(Underline::None),
+                    Some((1, _)) => Some(Underline::Single),
+                    Some((2, _)) => Some(Underline::Double),
+                    Some((3, _)) => Some(Underline::Curly),
+                    Some((4, _)) => Some(Underline::Dashed),
+                    Some((5, _)) => Some(Underline::Dotted),
+                    _ => Some(Underline::Single),
+                };
+                style
             } else {
-                style.add_modifier(Modifier::UNDERLINED)
+                style.underline = Some(Underline::Single);
+                style
             },
-            5 => style.add_modifier(Modifier::SLOW_BLINK),
+            5 => style.add_modifier(Modifier::BLINK),
             7 => style.add_modifier(Modifier::REVERSED),
             8 => style.add_modifier(Modifier::HIDDEN),
             9 => style.add_modifier(Modifier::CROSSED_OUT),
-            21 => style.add_modifier(Modifier::UNDERLINED), // underdouble
+            21 => { style.underline = Some(Underline::Double); style },
             22 => style.remove_modifier(Modifier::BOLD).remove_modifier(Modifier::DIM),
             23 => style.remove_modifier(Modifier::ITALIC),
-            24 => style.remove_modifier(Modifier::UNDERLINED),
-            25 => style.remove_modifier(Modifier::SLOW_BLINK),
+            24 => { style.underline = Some(Underline::None); style },
+            25 => style.remove_modifier(Modifier::BLINK),
             27 => style.remove_modifier(Modifier::REVERSED),
             28 => style.remove_modifier(Modifier::HIDDEN),
             29 => style.remove_modifier(Modifier::CROSSED_OUT),
