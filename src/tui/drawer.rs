@@ -384,6 +384,7 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
                 Underline::Dashed => CAttribute::Underdashed,
                 Underline::Dotted => CAttribute::Underdotted,
             }))?;
+            self.underline = cell_ul
         }
         if cell_uc != self.underline_color {
             queue!(self.writer, SetUnderlineColor(cell_uc))?;
