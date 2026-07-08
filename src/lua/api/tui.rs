@@ -476,7 +476,7 @@ fn parse_line<T: Default+Clone>(line: LineOptions, text: &mut tui::text::Text<T>
                 },
             }
 
-            if !style.is_none() {
+            if !style.is_none() && text.len() > 0 {
                 let inner = Style::from(style).into();
                 text.add_highlight(tui::text::HighlightedRange{
                     lineno: text.len() - 1,
