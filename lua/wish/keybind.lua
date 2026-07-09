@@ -86,7 +86,7 @@ end)
 -- wish.set_keymap('<down>', require('wish/history').history_down)
 -- wish.set_keymap('<c-p>', require('wish/history').history_up)
 -- wish.set_keymap('<c-n>', require('wish/history').history_down)
-wish.set_keymap('<c-r>', require('wish/history').history_search)
+-- wish.set_keymap('<c-r>', require('wish/history').history_search)
 
 wish.set_keymap('<a-a>', function()
     -- run in the background

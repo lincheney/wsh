@@ -53,7 +53,7 @@ function M.new()
             end
         end
 
-        function plugin.start(source, on_accept)
+        function plugin.start(opts, source, on_accept)
             plugin.count = 0
             plugin.on_accept = on_accept
 

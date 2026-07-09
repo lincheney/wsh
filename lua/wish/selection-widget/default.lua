@@ -114,16 +114,6 @@ local function recalc_filter(plugin)
     redraw_cursor(plugin)
 end
 
-local function add_lines(plugin, lines)
-    if plugin.inner.is_enabled() and lines then
-        for i = 1, #lines do
-            table.insert(plugin.lines, lines[i])
-            table.insert(plugin.text, extract_text(lines[i]))
-        end
-        recalc_filter(plugin)
-    end
-end
-
 function M.new()
     return wish.plugin(function(wish, opts, plugin)
 
@@ -180,6 +170,12 @@ function M.new()
             plugin.filtered = {}
             plugin.match_ranges = {}
             plugin.starting_text = not opts.menu_only and wish.get_buffer()
+
+            inner.up = plugin.up
+            inner.down = plugin.down
+            inner.accept = plugin.accept
+            inner.stop = plugin.stop
+
             wish.clear_message(plugin.widget)
 
             if not plugin.menu_only then
@@ -189,13 +185,35 @@ function M.new()
             end
         end)
 
+        local function finish(result)
+            if plugin.on_accept then
+                local on_accept = plugin.on_accept
+                plugin.on_accept = nil
+                on_accept(result)
+            end
+        end
+
+        local function add_lines(plugin, lines)
+            if plugin.inner.is_enabled() then
+                if lines then
+                    for i = 1, #lines do
+                        table.insert(plugin.lines, lines[i])
+                        table.insert(plugin.text, extract_text(lines[i]))
+                    end
+                    recalc_filter(plugin)
+                elseif #plugin.lines == 0 then
+                    finish(false)
+                end
+            end
+        end
+
         function plugin.add_lines(...)
             return add_lines(plugin, ...)
         end
 
-        function plugin.start(source, on_accept)
-            plugin.on_accept = opts.on_accept
-            plugin.inner.enable()
+        function plugin.start(opts, source, on_accept)
+            plugin.on_accept = on_accept
+            plugin.inner.enable(opts)
             if type(source) == 'table' then
                 plugin.add_lines(source)
             elseif type(source) == 'function' then
@@ -215,7 +233,6 @@ function M.new()
         function plugin.stop()
             plugin.inner.disable()
             wish.set_message{id = plugin.widget, hidden = true}
-            plugin.on_accept(false)
         end
 
         -- function plugin.clear()
@@ -231,10 +248,15 @@ function M.new()
             if plugin.inner.is_enabled() then
                 local selected = nil
                 if plugin.on_accept and plugin.selected > 0 then
-                    selected = extract_text(plugin.filtered[plugin.selected])
+                    for i = 1, #plugin.lines do
+                        if plugin.lines[i] == plugin.filtered[plugin.selected] then
+                            selected = i
+                            break
+                        end
+                    end
                 end
+                finish(selected)
                 plugin.stop()
-                plugin.on_accept(selected)
             end
         end
 
@@ -255,14 +277,6 @@ function M.new()
         function plugin.down()
             move_cursor(plugin, plugin.selected + 1)
         end
-
-        wish.set_keymap('<up>', function()
-            plugin.up()
-        end)
-
-        wish.set_keymap('<down>', function()
-            plugin.down()
-        end)
 
         wish.add_event_callback('accept_line', function()
             plugin.stop()

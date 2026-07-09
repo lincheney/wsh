@@ -14,6 +14,12 @@ return wish.plugin(function(wish, opts, plugin)
         }
     }
 
+    local selector_keybinds = opts.selector_keybinds or {
+        ['<enter>'] = 'accept',
+        ['<up>'] = 'up',
+        ['<down>'] = 'down',
+    }
+
     function plugin.start()
         local cancelled = false
         local keymap_layer = wish.add_keymap_layer()
@@ -24,11 +30,27 @@ return wish.plugin(function(wish, opts, plugin)
         end, keymap_layer)
 
         local all_matches = nil
-
         local result = nil
+        local zsh_finished = false
+        local selector_finished = false
+
+        local function finish()
+            if zsh_finished and selector_finished then
+                wish.del_keymap_layer(keymap_layer)
+                if result then
+                    wish.set_message{id = loading_msg, hidden = true}
+                    wish.insert_completion(all_matches[result])
+                elseif cancelled then
+                    wish.set_message{id = loading_msg, hidden = true}
+                elseif not all_matches or #all_matches == 0 then
+                    wish.set_message{id = loading_msg, hidden = false, contents = 'No completion matches', fg = 'red'}
+                end
+            end
+        end
+
         wish.schedule(function()
             wish.get_completions(nil, function(matches)
-                if cancelled then
+                if cancelled or selector_finished then
                     return
                 end
                 wish.set_message{id = loading_msg, hidden = true}
@@ -51,24 +73,20 @@ return wish.plugin(function(wish, opts, plugin)
                 end
             end)
             selector.add_lines()
-
-            wish.del_keymap_layer(keymap_layer)
-            if result then
-                wish.set_message{id = loading_msg, hidden = true}
-                wish.insert_completion(all_matches[result])
-            elseif cancelled then
-                wish.set_message{id = loading_msg, hidden = true}
-            elseif not all_matches or #all_matches == 0 then
-                wish.set_message{id = loading_msg, hidden = false, contents = 'No completion matches', fg = 'red'}
-            end
+            zsh_finished = true
+            finish()
         end)
 
         -- loading message
         wish.set_message{id = loading_msg, hidden = false, contents = 'Loading matches ...', fg = 'grey'}
 
-        selector.start(nil, function(r)
-            cancelled = true
+        local opts = {
+            keybinds = selector_keybinds
+        }
+        selector.start(opts, nil, function(r)
             result = r
+            selector_finished = true
+            finish()
         end)
 
     end

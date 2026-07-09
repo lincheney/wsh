@@ -171,6 +171,9 @@ return function(plugin_fn)
 
                 if config and config.keybinds then
                     for k, v in pairs(config.keybinds) do
+                        if type(plugin_obj[v]) ~= 'function' then
+                            error('expected function for keybind for '..k..' , got '..type(plugin_obj[v]))
+                        end
                         proxy.set_keymap(k, plugin_obj[v])
                     end
                 end

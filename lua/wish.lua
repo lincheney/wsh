@@ -12,6 +12,11 @@ require('wish.completion').enable{
         ['<tab>'] = 'start',
     }
 }
+require('wish.history-selector').enable{
+    keybinds = {
+        ['<c-r>'] = 'start',
+    }
+}
 
 local config_home = os.getenv('XDG_CONFIG_HOME')
 if not config_home then
