@@ -239,9 +239,9 @@ pub fn get_completions(line: BString, callback: Box<dyn FnMut(std::iter::Peekabl
         } else {
             panic!("ui is not running");
         }
-        let len = line.len();
-        super::set_zle_buffer(line, len as i64 + 1);
     });
+    let len = line.len();
+    super::set_zle_buffer(line, len as i64 + 1);
 
     unsafe {
         // this is kinda what completecall() does
