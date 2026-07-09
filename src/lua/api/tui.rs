@@ -24,7 +24,11 @@ struct LuaColor(Color);
 
 impl FromLua for LuaColor {
     fn from_lua(value: LuaValue, _lua: &Lua) -> LuaResult<Self> {
-        if let Some(string) = value.as_string() {
+        if let Some(n) = value.as_u32() && n <= u8::MAX as _ {
+            // try numeric ANSI index
+            return Ok(LuaColor(Color::AnsiValue(n as _)));
+
+        } else if let Some(string) = value.as_string() {
             if let Ok(string) = std::str::from_utf8(&string.as_bytes()) {
                 if let Ok(color) = Color::try_from(string) {
                     return Ok(LuaColor(color))
@@ -35,15 +39,13 @@ impl FromLua for LuaColor {
                     let g = ((rgb >> 8) & 0xff) as _;
                     let b = (rgb & 0xff) as _;
                     return Ok(LuaColor(Color::Rgb{r, g, b}));
-                } else if let Ok(n) = string.parse::<u8>() {
-                    // try numeric ANSI index
-                    return Ok(LuaColor(Color::AnsiValue(n)));
                 }
             }
 
             Err(crate::lua::lua_error(format!("unknown color: {string:?}")))
+
         } else {
-            Err(crate::lua::lua_error("expected string"))
+            Err(crate::lua::lua_error("expected string or 0 <= number <= 255"))
         }
     }
 }
@@ -960,8 +962,8 @@ fn sgr_to_style(lua: &Lua, sgr: String) -> LuaResult<LuaValue> {
         &sgr
     };
     let style = tui::widget::parse_ansi_col(Style::default(), sgr.into());
-    let options = StyleOptions::from(style);
-    lua.to_value(&options)
+    let style = StyleOptions::from(style);
+    lua.to_value_with(&style, mlua::serde::ser::Options::new().serialize_none_to_null(false))
 }
 
 fn style_to_sgr(_lua: &Lua, options: StyleOptions) -> LuaResult<Option<BString>> {
