@@ -65,7 +65,14 @@ impl Buffer {
     }
 
     pub fn get_len(&mut self) -> usize {
-        *self.len.get_or_insert_with(|| self.contents.get()[0].graphemes().count())
+        *self.len.get_or_insert_with(|| {
+            let bytes = &self.contents.get()[0];
+            if bytes.is_ascii() {
+                bytes.len()
+            } else {
+                bytes.graphemes().count()
+            }
+        })
     }
 
     fn fix_cursor(&mut self) {
@@ -170,7 +177,12 @@ impl Buffer {
 
         // calculate the new cursor
         let end = edit.position + new.len();
-        self.cursor = self.get_contents().grapheme_indices().take_while(|(s, _, _)| *s < end).count();
+        let bytes = self.get_contents();
+        self.cursor = if bytes.is_ascii() {
+            end.min(bytes.len())
+        } else {
+            bytes.grapheme_indices().take_while(|(s, _, _)| *s < end).count()
+        };
         self.fix_cursor();
     }
 
@@ -234,11 +246,17 @@ impl Buffer {
     }
 
     fn byte_pos(&self, pos: usize) -> usize {
-        self.get_contents()
+        let bytes = self.get_contents();
+
+        if bytes.is_ascii() {
+            return pos.min(bytes.len());
+        }
+
+        bytes
             .grapheme_indices()
             .nth(pos)
             .map(|(s, _, _)| s)
-            .unwrap_or_else(|| self.get_contents().len())
+            .unwrap_or_else(|| bytes.len())
     }
 
     pub fn cursor_byte_pos(&self) -> usize {

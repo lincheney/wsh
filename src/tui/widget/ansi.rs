@@ -189,12 +189,17 @@ impl Parser {
         let Some(line) = text.get().last() else {
             return 0;
         };
+        if line.is_ascii() {
+            return pos.min(line.len() + 1);
+        }
+
         let mut width = 0;
         let mut byte_pos = 0;
         for (s, _, c) in line.grapheme_indices().chain(std::iter::once((line.len(), line.len(), " "))) {
-            if width <= pos {
-                byte_pos = s;
+            if width > pos {
+                break
             }
+            byte_pos = s;
             width += c.width();
         }
         byte_pos
