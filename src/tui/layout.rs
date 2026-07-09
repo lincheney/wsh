@@ -90,17 +90,19 @@ impl Layout {
     pub fn iter_widgets<F: FnMut(&Node, &Widget)>(
         &self,
         map: &HashMap<NodeId, Node>,
+        include_hidden: bool,
         func: &mut F,
     ) {
         for id in &self.children {
             match map.get(id) {
+                None => (),
+                Some(node) if !include_hidden && node.is_hidden() => (),
                 Some(Node{kind: NodeKind::Layout(layout), ..}) => {
-                    layout.iter_widgets(map, func);
+                    layout.iter_widgets(map, include_hidden, func);
                 },
                 Some(node @ Node{kind: NodeKind::Widget(widget), ..}) => {
                     func(node, widget);
                 },
-                None => (),
             }
         }
     }
@@ -327,7 +329,7 @@ impl Nodes {
         match self.map.get(&id) {
             Some(Node{kind: NodeKind::Layout(layout), ..}) => {
                 let mut ids = vec![];
-                layout.iter_widgets(&self.map, &mut |node, _widget| {
+                layout.iter_widgets(&self.map, true, &mut |node, _widget| {
                     ids.push(node.id);
                 });
                 for id in ids {
@@ -409,14 +411,14 @@ impl Nodes {
         resized
     }
 
-    fn iter_widgets<F: FnMut(&Node, &Widget)>(&self, mut func: F) {
-        self.root.iter_widgets(&self.map, &mut func);
+    fn iter_widgets<F: FnMut(&Node, &Widget)>(&self, include_hidden: bool, mut func: F) {
+        self.root.iter_widgets(&self.map, include_hidden, &mut func);
     }
 
     pub fn trigger_ephemeral_callbacks<F: FnMut(NodeId, &mut Widget, usize)>(&mut self, tmp: bool, mut func: F) {
         let mut data = vec![];
 
-        self.iter_widgets(|node, widget| {
+        self.iter_widgets(false, |node, widget| {
             let size = node.get_size(tmp);
             let border_height = widget.border.inner_height();
             let height = size.1.saturating_sub(border_height);
