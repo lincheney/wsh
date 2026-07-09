@@ -33,12 +33,14 @@ return wish.plugin(function(wish, opts, plugin)
         local result = nil
         local zsh_finished = false
         local selector_finished = false
+        local buffer, cursor = wish.get_buffer()
 
         local function finish()
             if zsh_finished and selector_finished then
                 wish.del_keymap_layer(keymap_layer)
                 if result then
                     wish.set_message{id = loading_msg, hidden = true}
+                    wish.set_buffer(buffer, cursor)
                     wish.insert_completion(all_matches[result])
                 elseif cancelled then
                     wish.set_message{id = loading_msg, hidden = true}
@@ -49,7 +51,7 @@ return wish.plugin(function(wish, opts, plugin)
         end
 
         wish.schedule(function()
-            wish.get_completions(nil, function(matches)
+            wish.get_completions(string.sub(buffer, 1, wish.str.to_byte_pos(buffer, cursor)), function(matches)
                 if cancelled or selector_finished then
                     return
                 end
