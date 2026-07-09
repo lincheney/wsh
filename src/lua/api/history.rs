@@ -36,18 +36,21 @@ fn get_history_index(ui: &Ui, _lua: &Lua, _val: ()) -> Result<usize> {
 async fn goto_history_internal(ui: Ui, index: HistoryIndex) -> Result<()> {
     let changed = {
 
-        let (buffer, cursor) = {
-            let ui = ui.try_borrow()?;
-            (ui.buffer.get_contents().clone(), ui.buffer.get_cursor())
+        let (new_buffer, new_cursor) = {
+            let buffer = &ui.try_borrow()?.buffer;
+            let cursor = buffer.get_cursor();
+            let buffer = buffer.get_contents();
+
+            ui.shell.set_zle_buffer(buffer.as_ref(), cursor as _);
+            ui.shell.goto_history(index, false);
+
+            let (new_buffer, new_cursor) = ui.shell.get_zle_buffer();
+            let new_cursor = new_cursor.unwrap_or(new_buffer.len() as _) as _;
+            let new_buffer = (new_buffer != *buffer).then_some(new_buffer);
+            let new_cursor = (new_cursor != cursor).then_some(new_cursor);
+
+            (new_buffer, new_cursor)
         };
-
-        ui.shell.set_zle_buffer(buffer.as_ref(), cursor as _);
-        ui.shell.goto_history(index, false);
-
-        let (new_buffer, new_cursor) = ui.shell.get_zle_buffer();
-        let new_cursor = new_cursor.unwrap_or(new_buffer.len() as _) as _;
-        let new_buffer = (new_buffer != *buffer).then_some(new_buffer);
-        let new_cursor = (new_cursor != cursor).then_some(new_cursor);
 
         if let Some(new_buffer) = &new_buffer {
             ui.insert_or_set_buffer(false, new_buffer, new_cursor).await?;
