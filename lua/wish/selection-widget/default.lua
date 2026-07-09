@@ -164,12 +164,15 @@ function M.new()
         end)
 
         plugin.inner = wish.plugin(function(wish, opts, inner)
-            plugin.selected = 0
-            plugin.lines = {}
-            plugin.text = {}
-            plugin.filtered = {}
-            plugin.match_ranges = {}
-            plugin.starting_text = not opts.menu_only and wish.get_buffer()
+
+            wish.add_event_callback('init', function()
+                plugin.selected = 0
+                plugin.lines = {}
+                plugin.text = {}
+                plugin.filtered = {}
+                plugin.match_ranges = {}
+                plugin.starting_text = not opts.menu_only and wish.get_buffer()
+            end)
 
             inner.up = plugin.up
             inner.down = plugin.down
@@ -247,7 +250,8 @@ function M.new()
         function plugin.accept()
             if plugin.inner.is_enabled() then
                 local selected = nil
-                if plugin.on_accept and plugin.selected > 0 then
+                if plugin.on_accept then
+                    plugin.selected = math.max(plugin.selected, 1)
                     for i = 1, #plugin.lines do
                         if plugin.lines[i] == plugin.filtered[plugin.selected] then
                             selected = i

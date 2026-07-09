@@ -21,6 +21,8 @@ return wish.plugin(function(wish, opts, plugin)
     }
 
     function plugin.start()
+        selector.stop()
+
         local cancelled = false
         local keymap_layer = wish.add_keymap_layer()
 
@@ -74,9 +76,13 @@ return wish.plugin(function(wish, opts, plugin)
                     selector.add_lines(filtered)
                 end
             end)
-            selector.add_lines()
             zsh_finished = true
-            finish()
+            if #all_matches <= 1 then
+                selector.accept()
+            else
+                finish()
+            end
+            selector.add_lines()
         end)
 
         -- loading message
