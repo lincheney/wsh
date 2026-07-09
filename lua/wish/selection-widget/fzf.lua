@@ -7,7 +7,7 @@ function M.new()
             if not plugin.proc then
                 plugin.cursor = wish.get_cursor()
                 -- go to last line
-                wish.set_cursor(wish.str.len(wish.get_buffer()) + 1)
+                wish.set_cursor(wish.MAXNUM)
                 wish.redraw{now=true}
 
                 plugin.proc = wish.async.spawn{
