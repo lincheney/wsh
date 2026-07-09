@@ -5,7 +5,12 @@ use bstr::{ByteSlice};
 use unicode_width::{UnicodeWidthStr, UnicodeWidthChar};
 
 fn len(_lua: &Lua, string: LuaString) -> LuaResult<usize> {
-    Ok(string.as_bytes().grapheme_indices().count())
+    let bytes = string.as_bytes();
+    if bytes.is_ascii() {
+        Ok(bytes.len())
+    } else {
+        Ok(string.as_bytes().grapheme_indices().count())
+    }
 }
 
 fn width(_lua: &Lua, string: String) -> LuaResult<usize> {
