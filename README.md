@@ -66,6 +66,8 @@ i wish i could have
 * [x] file ls colour for completion
 * [ ] snippets?
 * [ ] capture job status reporting
+* [ ] builtin fuzzy matcher? eg nucleo
+    * feels out of scope but maybe convenient
 * [x] recursive keymaps
 * [x] recursive keymaps in lua
 * [ ] control c style escape hatch

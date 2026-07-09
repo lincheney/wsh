@@ -4,10 +4,17 @@ local SELECTION = require('wish.selection-widget')
 local HISTORY_MENU = {}
 local HISTORY_SEARCH = {}
 
-local selector = SELECTION.default.new().enable()
+local selector = SELECTION.new().enable{
+    style = {
+        border = {
+            title_top = 'history',
+            fg = 'green',
+            type = 'rounded',
+        }
+    }
+}
 
-local show_history
-function show_history(filter, data)
+local function show_history(filter, data)
     local current, history = wish.get_history()
     local reverse = not filter
 
@@ -20,34 +27,11 @@ function show_history(filter, data)
         end
     end
 
-    selector.start(lines, function(line)
-        wish.pprint(line)
+    selector.start(lines, function(index)
+        if index then
+            wish.goto_history(history[index].histnum)
+        end
     end)
-    -- wish.schedule(function()
-        -- -- )
-            -- -- data = data,
-            -- -- selected = filter and math.max(1, ix) or ix,
-            -- -- reverse = reverse,
-            -- -- filter = filter,
-            -- -- no_keymaps = not filter,
-            -- -- reload_callback = filter and function()
-                -- -- show_history(widget, filter, data)
-            -- -- end,
--- --
-            -- -- align = 'Left',
-            -- -- border = {
-                -- -- fg = 'green',
-                -- -- type = 'Rounded',
-                -- -- title = {
-                    -- -- text = 'history',
-                -- -- },
-            -- -- },
-        -- -- }
---
-        -- if filter and result then
-            -- wish.goto_history(history[result].histnum)
-        -- end
-    -- end)
 end
 
 function M.history_up()

@@ -7,6 +7,11 @@ wish.utf8 = require('wish.utf8')
 require('wish.keybind')
 require('wish.syntax-highlight').enable()
 require('wish.paste').enable()
+require('wish.completion').enable{
+    keybinds = {
+        ['<tab>'] = 'start',
+    }
+}
 
 local config_home = os.getenv('XDG_CONFIG_HOME')
 if not config_home then

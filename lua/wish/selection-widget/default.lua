@@ -189,18 +189,22 @@ function M.new()
             end
         end)
 
+        function plugin.add_lines(...)
+            return add_lines(plugin, ...)
+        end
+
         function plugin.start(source, on_accept)
             plugin.on_accept = opts.on_accept
             plugin.inner.enable()
             if type(source) == 'table' then
-                add_lines(plugin, source)
+                plugin.add_lines(source)
             elseif type(source) == 'function' then
                 wish.schedule(function()
-                    for lines in source() do
+                    for lines in source do
                         if not plugin.inner.is_enabled() then
                             break
                         end
-                        add_lines(plugin, lines)
+                        plugin.add_lines(lines)
                     end
                 end)
             elseif source then
@@ -211,6 +215,7 @@ function M.new()
         function plugin.stop()
             plugin.inner.disable()
             wish.set_message{id = plugin.widget, hidden = true}
+            plugin.on_accept(false)
         end
 
         -- function plugin.clear()
@@ -224,14 +229,12 @@ function M.new()
 
         function plugin.accept()
             if plugin.inner.is_enabled() then
+                local selected = nil
                 if plugin.on_accept and plugin.selected > 0 then
-                    local selected = plugin.filtered[plugin.selected]
-                    if type(selected) == 'table' then
-                        selected = table.concat(wish.table.map(selected, function(x) return x.text end))
-                    end
-                    plugin.on_accept(selected)
+                    selected = extract_text(plugin.filtered[plugin.selected])
                 end
                 plugin.stop()
+                plugin.on_accept(selected)
             end
         end
 
