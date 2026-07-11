@@ -6,6 +6,7 @@ return wish.plugin(function(wish, opts, plugin)
     local loading_msg = wish.set_message{hidden = true, persist = true}
 
     local selector = SELECTION.new().enable{
+        select_one = true,
         style = {
             border = {
                 fg = 'blue',
@@ -77,12 +78,7 @@ return wish.plugin(function(wish, opts, plugin)
                 end
             end)
             zsh_finished = true
-            if #all_matches <= 1 then
-                selector.accept()
-            else
-                finish()
-            end
-            selector.add_lines()
+            selector.no_more_lines()
         end)
 
         -- loading message

@@ -141,6 +141,8 @@ function M.new()
             max_height = 11,
         }, style))
 
+        plugin.select_one = opts.select_one
+
         wish.add_render_callback(function(widget, lineno)
             if widget == plugin.widget and (plugin.selected == lineno or plugin.match_ranges[lineno]) then
                 local tbl = {}
@@ -196,22 +198,22 @@ function M.new()
             end
         end
 
-        local function add_lines(plugin, lines)
-            if plugin.inner.is_enabled() then
-                if lines then
-                    for i = 1, #lines do
-                        table.insert(plugin.lines, lines[i])
-                        table.insert(plugin.text, extract_text(lines[i]))
-                    end
-                    recalc_filter(plugin)
-                elseif #plugin.lines == 0 then
-                    finish(false)
-                end
+        function plugin.no_more_lines()
+            if #plugin.lines == 0 then
+                finish(false)
+            elseif plugin.select_one and #plugin.lines == 1 then
+                finish(1)
             end
         end
 
-        function plugin.add_lines(...)
-            return add_lines(plugin, ...)
+        function plugin.add_lines(lines)
+            if plugin.inner.is_enabled() then
+                for i = 1, #lines do
+                    table.insert(plugin.lines, lines[i])
+                    table.insert(plugin.text, extract_text(lines[i]))
+                end
+                recalc_filter(plugin)
+            end
         end
 
         function plugin.start(opts, source, on_accept)
@@ -219,6 +221,7 @@ function M.new()
             plugin.inner.enable(opts)
             if type(source) == 'table' then
                 plugin.add_lines(source)
+                plugin.no_more_lines()
             elseif type(source) == 'function' then
                 wish.schedule(function()
                     for lines in source do
@@ -227,6 +230,7 @@ function M.new()
                         end
                         plugin.add_lines(lines)
                     end
+                    plugin.no_more_lines()
                 end)
             elseif source then
                 error('expected source to be array of lines or function, got: ' .. type(source))
@@ -236,6 +240,7 @@ function M.new()
         function plugin.stop()
             plugin.inner.disable()
             wish.set_message{id = plugin.widget, hidden = true}
+            finish(false)
         end
 
         -- function plugin.clear()
