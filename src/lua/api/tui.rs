@@ -955,6 +955,10 @@ fn get_status_bar_geometry(ui: &Ui, lua: &Lua, (): ()) -> Result<Option<LuaTable
     }
 }
 
+fn get_cursor_pos(ui: &Ui, _lua: &Lua, (): ()) -> Result<(u16, u16)> {
+    Ok(ui.try_borrow()?.cmdline.cursor_coord)
+}
+
 fn sgr_to_style(lua: &Lua, sgr: String) -> LuaResult<LuaValue> {
     let sgr = if sgr.starts_with("\x1b[") && sgr.ends_with('m') {
         &sgr[2..sgr.len()-1]
@@ -1020,6 +1024,7 @@ pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
     lua.set_async_fn("enable_mouse_mode", enable_mouse_mode)?;
     lua.set_fn("get_message_geometry", get_message_geometry)?;
     lua.set_fn("get_status_bar_geometry", get_status_bar_geometry)?;
+    lua.set_fn("get_cursor_pos", get_cursor_pos)?;
     lua.set_fn("add_render_callback", add_render_callback)?;
     lua.set_fn("remove_render_callback", remove_render_callback)?;
 
