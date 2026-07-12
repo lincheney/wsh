@@ -7,7 +7,7 @@ local NAMESPACE = wish.add_buf_highlight_namespace()
 
 M.PROMPT_TIMEOUT = 0.04 -- same as rlwrap
 
-M.BORDER_RUNNING = 'lightblue'
+M.BORDER_RUNNING = 'blue'
 M.BORDER_WAITING = M.BORDER_RUNNING
 M.BORDER_SUCCEEDED = 'lightgreen'
 M.BORDER_FAILED = '#ffaaaa'

@@ -4,7 +4,7 @@ return wish.plugin(function(wish, opts, plugin)
     local NAMESPACE = wish.add_buf_highlight_namespace()
 
     local styles = opts.styles or {
-        {fg = 'lightblue' },
+        {fg = 'blue' },
         {fg = 'lightred' },
         {fg = 'lightgreen' },
         {fg = 'lightyellow' },
