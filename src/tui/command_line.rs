@@ -11,7 +11,9 @@ const FALLBACK_PROMPT: &MetaStr = crate::meta_str!(c">>> ");
 // for internal use
 const PREDISPLAY_NS: usize = usize::MAX;
 const POSTDISPLAY_NS: usize = PREDISPLAY_NS - 1;
+const TRUNCATION_NS: usize = POSTDISPLAY_NS - 1;
 
+pub const MAX_CMDLINE_HEIGHT: usize = 3;
 #[derive(Default, Debug)]
 pub struct ShellVars {
     predisplay: Option<BString>,
@@ -129,7 +131,7 @@ impl CommandLine<'_> {
         self.buffer.clear_highlights_in_namespace(namespace);
         if let Some(text) = text && !text.is_empty() {
             self.buffer.add_highlight(HighlightedRange {
-                lineno: 0,
+                parano: 0,
                 start: pos,
                 end: pos,
                 inner: Highlight {
@@ -177,7 +179,9 @@ impl CommandLine<'_> {
             self.prompt_size = prompt_size;
             let (width, height) = self.buffer.get_size(width, self.prompt_size.0 as _);
             // there is 1 overlapping line
-            self.draw_end_pos = (width as _, (height + self.prompt_size.1).saturating_sub(2) as _);
+            let y = (height + self.prompt_size.1).saturating_sub(2).min(MAX_CMDLINE_HEIGHT - 1);
+
+            self.draw_end_pos = (width as _, y as _);
             self.buffer.dirty = true;
         }
     }
@@ -205,7 +209,7 @@ impl CommandLine<'_> {
                         drawer.term_width() as _,
                         None,
                         None,
-                        |lineno| widget.inner.highlights.get_for_lineno(lineno).iter(),
+                        |parano| widget.inner.highlights.get_for_parano(parano).iter(),
                     ).render(drawer, false, false, NoRendererCallback::None)?;
                 }
             }
@@ -220,18 +224,10 @@ impl CommandLine<'_> {
             }
 
             // also record where is the cursor
-            let cursor = self.buffer.cursor_byte_pos();
-            let mut cursor_coord = drawer.get_pos();
-            self.buffer.render(drawer, cursor_coord.0, Some(|drawer: &mut Drawer<W, C>, lineno, range: std::range::Range<_>| {
-                if range.end == cursor && lineno == 0 {
-                    cursor_coord = drawer.get_pos();
-                }
-            }))?;
-            self.cursor_coord = cursor_coord;
+            self.cursor_coord = self.buffer.render(drawer, prompt_end.0, Some(MAX_CMDLINE_HEIGHT))?;
             self.draw_end_pos = drawer.get_pos();
         }
 
         Ok(())
     }
-
 }

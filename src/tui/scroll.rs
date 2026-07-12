@@ -8,26 +8,45 @@ use super::wrap::WrapToken;
 #[derive(Debug, Clone, Copy, Default ,PartialEq)]
 pub enum ScrollPosition {
     Line(usize),
+    Paragraph(usize),
     #[default]
     StickyBottom,
 }
 
+#[derive(Debug)]
+pub struct ScrollPositionRange {
+    pub parano: usize,
+    pub para_range: std::ops::Range<usize>,
+}
+
 impl ScrollPosition {
-    pub fn get_approx_line_range(&self, max_height: Option<usize>, len: usize) -> (usize, std::ops::Range<usize>) {
-        let lineno = match *self {
-            ScrollPosition::Line(lineno) => lineno.min(len.saturating_sub(1)),
-            ScrollPosition::StickyBottom => len.saturating_sub(1),
+    pub fn get_approx_range(&self, max_height: Option<usize>, paragraphs: &[BString]) -> ScrollPositionRange {
+        let parano = match *self {
+            ScrollPosition::Paragraph(parano) if parano < paragraphs.len() => parano,
+            ScrollPosition::Line(lineno) if let Some((parano, _)) = paragraphs
+                .iter()
+                .enumerate()
+                .scan(0, |sum, (i, p)| { *sum += p.split(|&c| c == b'\n').count() + 1; Some((i, *sum)) })
+                .skip_while(|(_, sum)| *sum < lineno)
+                .next()
+            => parano,
+            // sticky bottom
+            _ => paragraphs.len().saturating_sub(1),
         };
 
-        let min_lineno = max_height.map_or(0, |h| lineno.saturating_sub(h));
-        let max_lineno = max_height.map_or(len, |h| lineno + h);
-        (lineno, min_lineno .. max_lineno + 1)
+        let min = max_height.map_or(0, |h| parano.saturating_sub(h));
+        let max = max_height.map_or(paragraphs.len(), |h| parano + h);
+        ScrollPositionRange {
+            parano,
+            para_range: min .. max + 1,
+        }
     }
 }
 
 #[derive(Debug)]
 pub struct ScrollWrapToken<'a> {
-    pub lineno: usize,
+    pub parano: usize,
+    lineno: usize,
     visual_lineno: usize,
     pub range: Range<usize>,
     pub inner: WrapToken<'a>,
@@ -36,7 +55,7 @@ pub struct ScrollWrapToken<'a> {
 
 #[derive(Debug)]
 pub struct Scrolled<'a> {
-    pub total_line_count: usize,
+    pub total_visual_line_count: usize,
     pub range: Range<usize>,
     pub in_view: Vec<ScrollWrapToken<'a>>,
 }
@@ -53,6 +72,10 @@ impl ScrolledLinesIter<'_> {
 
     pub fn has_more(&self) -> bool {
         self.start < self.inner.len()
+    }
+
+    pub fn first_lineno(&self) -> Option<usize> {
+        self.inner.get(self.start).map(|t| t.lineno)
     }
 }
 
@@ -87,7 +110,7 @@ impl<'a> Scrolled<'a> {
 }
 
 pub fn wrap<'a, T, I, F>(
-    lines: &'a [BString],
+    paragraphs: &'a [BString],
     init_style: Option<Style>,
     max_width: usize,
     max_height: Option<usize>,
@@ -101,16 +124,17 @@ where
     F: Fn(usize) -> I,
 {
 
-    let (lineno, line_range) = scroll.get_approx_line_range(max_height, lines.len());
+    let approx_range = scroll.get_approx_range(max_height, paragraphs);
 
     let mut total_line_count = 0;
+    let mut total_visual_line_count = 0;
     let mut tokens = vec![];
     // let mut start = 0;
 
     // add a dummy line at the end
-    for (i, line) in lines.iter().map(|l| l.as_ref()).chain(std::iter::once(BStr::new(b""))).enumerate() {
+    for (i, paragraph) in paragraphs.iter().map(|l| l.as_ref()).chain(std::iter::once(BStr::new(b""))).enumerate() {
 
-        let past_end = i >= lines.len();
+        let past_end = i >= paragraphs.len();
 
         let highlights = highlight_getter(i);
         // start = end;
@@ -119,19 +143,20 @@ where
             continue
         }
 
-        let may_be_in_range = line_range.contains(&i);
+        let may_be_in_range = approx_range.para_range.contains(&i);
 
-        let (_, y) = if may_be_in_range {
+        let (_, y, lineno) = if may_be_in_range {
             super::wrap::wrap(
-                line,
+                paragraph,
                 highlights,
                 init_style.clone(),
                 max_width,
                 initial_indent,
-                Some(|range, token, lineno, style| {
+                Some(|range, token, wrapped_no, lineno, style| {
                     tokens.push(ScrollWrapToken {
-                        lineno: i,
-                        visual_lineno: total_line_count + lineno,
+                        parano: i,
+                        lineno: total_line_count + lineno,
+                        visual_lineno: total_visual_line_count + wrapped_no,
                         range,
                         inner: token,
                         style,
@@ -140,26 +165,28 @@ where
             )
         } else {
             super::wrap::wrap(
-                line,
+                paragraph,
                 highlights.clone().filter(|hl| hl.inner.may_cause_resize()),
                 init_style.clone(),
                 max_width,
                 initial_indent,
-                // don't bother with the callback for lines out of range
+                // don't bother with the callback for paragraphs out of range
                 super::wrap::NoCallback::None,
             )
         };
 
         if may_be_in_range {
             tokens.push(ScrollWrapToken {
-                lineno: i,
-                visual_lineno: tokens.last().map_or(total_line_count, |t| t.visual_lineno),
-                range: (line.len() .. line.len()).into(),
+                parano: i,
+                lineno: tokens.last().map_or(total_line_count, |t| t.lineno),
+                visual_lineno: tokens.last().map_or(total_visual_line_count, |t| t.visual_lineno),
+                range: (paragraph.len() .. paragraph.len()).into(),
                 inner: WrapToken::LineBreak,
                 style: None,
             });
         }
-        total_line_count += y + 1;
+        total_line_count += lineno + 1;
+        total_visual_line_count += y + 1;
         initial_indent = 0;
     }
 
@@ -175,8 +202,16 @@ where
 
     let (start, end) = if !tokens.is_empty() && let Some(max_height) = max_height {
 
-        let start = tokens.partition_point(|t| t.lineno < lineno);
-        let end = start + tokens[start..].partition_point(|t| t.lineno <= lineno);
+        let (start, end) = if let ScrollPosition::Line(lineno) = scroll {
+            let start = tokens.partition_point(|t| t.lineno < lineno);
+            let end = start + tokens[start..].partition_point(|t| t.lineno <= lineno);
+            (start, end)
+        } else {
+            let start = tokens.partition_point(|t| t.parano < approx_range.parano);
+            let end = start + tokens[start..].partition_point(|t| t.parano <= approx_range.parano);
+            (start, end)
+        };
+
         let start = tokens.get(start).or(tokens.last()).unwrap().visual_lineno;
         let end = tokens.get(end.saturating_sub(1)).or(tokens.last()).unwrap().visual_lineno + 1;
         let current_height = end - start;
@@ -194,7 +229,7 @@ where
                 (start, end)
             },
             Ordering::Greater => {
-                // can fit more lines
+                // can fit more paragraphs
                 // prefer to add space on the bottom first?
                 let end = (end + (max_height - current_height) / 2).min(max_visual);
                 let start = end.saturating_sub(max_height);
@@ -216,7 +251,7 @@ where
     drop(tokens.drain(partition_end..));
 
     Scrolled {
-        total_line_count,
+        total_visual_line_count,
         range: (start .. end).into(),
         in_view: tokens,
     }

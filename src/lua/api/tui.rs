@@ -481,7 +481,7 @@ fn parse_line<T: Default+Clone>(line: LineOptions, text: &mut tui::text::Text<T>
             if !style.is_none() && text.len() > 0 {
                 let inner = Style::from(style).into();
                 text.add_highlight(tui::text::HighlightedRange{
-                    lineno: text.len() - 1,
+                    parano: text.len() - 1,
                     start: 0,
                     end: usize::MAX,
                     inner,
@@ -748,7 +748,7 @@ fn add_buf_highlight(ui: &Ui, _lua: &Lua, val: BufferHighlight) -> Result<()> {
     let style: Style = val.style.inner.into();
 
     ui.try_borrow_mut()?.buffer.add_highlight(tui::text::HighlightedRange{
-        lineno: 0,
+        parano: 0,
         start: usize::from(val.start).saturating_sub(1),
         end: val.finish.into(),
         inner: tui::text::Highlight{

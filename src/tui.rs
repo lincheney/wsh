@@ -17,7 +17,7 @@ pub mod buffer;
 pub mod border;
 mod drawer;
 mod wrap;
-mod scroll;
+pub mod scroll;
 mod rect;
 pub mod sizing;
 pub mod widget;
@@ -294,7 +294,7 @@ impl Tui {
 
         // render callbacks
         if new_widgets_height > 0 && !self.render_callbacks.is_empty() {
-            self.nodes.trigger_ephemeral_callbacks(false, |id, widget, lineno| {
+            self.nodes.trigger_ephemeral_callbacks(false, |id, widget, parano| {
                 let id = if let layout::NodeId::Normal(id) = id {
                     Some(id)
                 } else {
@@ -303,12 +303,12 @@ impl Tui {
 
                 let mut added = false;
                 for cb in self.render_callbacks.values() {
-                    let result: LuaResult<Option<Vec<crate::lua::EphemeralStyleOptions>>> = cb.call((id, lineno+1));
+                    let result: LuaResult<Option<Vec<crate::lua::EphemeralStyleOptions>>> = cb.call((id, parano+1));
                     let result = crate::log_if_err(result);
                     for style in result.into_iter().flatten().flatten() {
                         added = true;
                         widget.ephemeral.push(text::HighlightedRange {
-                            lineno,
+                            parano,
                             start: style.start_column,
                             end: style.end_column.into(),
                             inner: Style::from(style.inner).into(),
@@ -319,7 +319,7 @@ impl Tui {
                 if !added {
                     // add a dummy one
                     widget.ephemeral.push(text::HighlightedRange {
-                        lineno,
+                        parano,
                         start: 0,
                         end: 0,
                         inner: Default::default(),

@@ -86,7 +86,7 @@ impl<'a> TextRenderer<'a> {
 
         let content_width = width.saturating_sub(border_width as _);
 
-        let scroll = scroll.unwrap_or(Scroll{ show_scrollbar: false, position: ScrollPosition::Line(0) });
+        let scroll = scroll.unwrap_or(Scroll{ show_scrollbar: false, position: ScrollPosition::Paragraph(0) });
 
         let mut indent_cell = Cell::EMPTY;
         indent_cell.style = text.style.clone();
@@ -94,7 +94,7 @@ impl<'a> TextRenderer<'a> {
 
         let text_height = height.map(|h| h.saturating_sub(border_height as _));
         let scrolled = crate::tui::scroll::wrap(
-            &text.lines,
+            &text.paragraphs,
             Some(text.style.clone()),
             content_width - if scroll.show_scrollbar { 1 } else { 0 },
             text_height,
@@ -103,8 +103,8 @@ impl<'a> TextRenderer<'a> {
             highlight_getter,
         );
 
-        let scrollbar_range = if scroll.show_scrollbar && !(scrolled.range.start == 0 && scrolled.range.end >= scrolled.total_line_count.max(1)) {
-            let num_lines = scrolled.total_line_count.max(1);
+        let scrollbar_range = if scroll.show_scrollbar && !(scrolled.range.start == 0 && scrolled.range.end >= scrolled.total_visual_line_count.max(1)) {
+            let num_lines = scrolled.total_visual_line_count.max(1);
             let text_height = text_height.unwrap_or(num_lines);
             let height = (text_height as f64 * std::ops::Range::from(scrolled.range).len() as f64 / num_lines as f64).round().max(1.) as usize;
             let start = text_height as f64 * scrolled.range.start as f64 / num_lines as f64;
@@ -243,7 +243,7 @@ impl Renderer for TextRenderer<'_> {
                     drawer.draw_cell(&cell, false)?;
                 }
                 if let Some(callback) = callback {
-                    callback(drawer, token.lineno, token.range);
+                    callback(drawer, token.parano, token.range);
                 }
             }
 

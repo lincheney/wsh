@@ -44,7 +44,7 @@ impl<T: Default> From<Style> for Highlight<T> {
 
 #[derive(Debug, Clone)]
 pub struct HighlightedRange<T> {
-    pub lineno: usize,
+    pub parano: usize,
     pub start: usize,
     pub end: usize,
     pub inner: Highlight<T>,
@@ -107,7 +107,7 @@ impl<T> PartialOrd for HighlightedRange<T> {
 impl<T> Ord for HighlightedRange<T> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // sort in reverse order of priority so higher priority comes first
-        self.lineno.cmp(&other.lineno).then(self.inner.priority.total_cmp(&other.inner.priority).reverse())
+        self.parano.cmp(&other.parano).then(self.inner.priority.total_cmp(&other.inner.priority).reverse())
     }
 }
 
@@ -128,28 +128,28 @@ impl<T> HighlightedRangeSet<T> {
         self.inner.insert(index, hl);
     }
 
-    pub fn index_for_lineno(&self, lineno: usize) -> Result<usize, usize> {
-        let mut index = self.binary_search_by(|x| x.lineno.cmp(&lineno))?;
+    pub fn index_for_parano(&self, parano: usize) -> Result<usize, usize> {
+        let mut index = self.binary_search_by(|x| x.parano.cmp(&parano))?;
         // find the start by searching backwards
-        while index > 0 && self.get(index-1).is_some_and(|x| x.lineno == lineno) {
+        while index > 0 && self.get(index-1).is_some_and(|x| x.parano == parano) {
             index -= 1;
         }
         Ok(index)
     }
 
     pub fn get_range_for_lines(&self, range: Range<usize>) -> Range<usize> {
-        match self.index_for_lineno(range.start) {
+        match self.index_for_parano(range.start) {
             Ok(start) => {
-                let end = start + self[start..].partition_point(|x| x.lineno < range.end);
+                let end = start + self[start..].partition_point(|x| x.parano < range.end);
                 start .. end
             },
             Err(start) => start .. start,
         }
     }
 
-    pub fn get_for_lineno(&self, lineno: usize) -> &[HighlightedRange<T>] {
-        let range = self.get_range_for_lines(lineno .. lineno + 1);
-        // ::log::debug!("DEBUG(purge) \t{}\t= {:?}", stringify!((lineno, range, &self[range])), (lineno, range, &self[range]));
+    pub fn get_for_parano(&self, parano: usize) -> &[HighlightedRange<T>] {
+        let range = self.get_range_for_lines(parano .. parano + 1);
+        // ::log::debug!("DEBUG(purge) \t{}\t= {:?}", stringify!((parano, range, &self[range])), (parano, range, &self[range]));
         &self[range]
     }
 }

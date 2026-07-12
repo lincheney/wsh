@@ -3,6 +3,7 @@ use bstr::{BStr, BString, ByteVec};
 use crate::tui::{Style, Cell};
 mod renderer;
 pub use renderer::{Renderer, TextRenderer, NoCallback as NoRendererCallback};
+pub use super::scroll::ScrollPosition;
 mod highlight;
 pub use highlight::{Highlight, HighlightedRange, HighlightedRangeSet};
 
@@ -34,7 +35,7 @@ pub enum Alignment {
 
 #[derive(Debug, Default, Clone)]
 pub struct Text<T=()> {
-    pub(in crate::tui) lines: Vec<BString>,
+    pub(in crate::tui) paragraphs: Vec<BString>,
     pub alignment: Alignment,
     pub highlights: highlight::HighlightedRangeSet<T>,
     pub style: Style,
@@ -44,11 +45,11 @@ pub struct Text<T=()> {
 impl<T> Text<T> {
 
     pub fn get(&self) -> &[BString] {
-        &self.lines
+        &self.paragraphs
     }
 
     pub fn len(&self) -> usize {
-        self.lines.len()
+        self.paragraphs.len()
     }
 
     pub fn add_highlight(&mut self, hl: HighlightedRange<T>) {
@@ -69,31 +70,31 @@ impl<T> Text<T> {
     }
 
     pub fn clear(&mut self) {
-        self.lines.clear();
+        self.paragraphs.clear();
         self.clear_highlights(None);
     }
 
     pub fn push_line(&mut self, line: BString, hl: Option<Highlight<T>>) {
         if let Some(hl) = hl {
             self.highlights.push(HighlightedRange{
-                lineno: self.lines.len(),
+                parano: self.paragraphs.len(),
                 start: 0,
                 end: usize::MAX,
                 inner: hl,
             });
         }
-        self.lines.push(line);
+        self.paragraphs.push(line);
     }
 
     pub fn push_str(&mut self, str: &BStr, hl: Option<Highlight<T>>) {
-        if self.lines.is_empty() {
+        if self.paragraphs.is_empty() {
             self.push_line(b"".into(), None);
         }
-        let lineno = self.lines.len() - 1;
-        let line = self.lines.last_mut().unwrap();
+        let parano = self.paragraphs.len() - 1;
+        let line = self.paragraphs.last_mut().unwrap();
         if let Some(hl) = hl {
             self.highlights.push(HighlightedRange{
-                lineno,
+                parano,
                 start: line.len(),
                 end: line.len() + str.len(),
                 inner: hl,
@@ -102,30 +103,30 @@ impl<T> Text<T> {
         line.push_str(str);
     }
 
-    pub fn insert_line(&mut self, line: BString, lineno: usize, hl: Option<Highlight<T>>) {
+    pub fn insert_line(&mut self, line: BString, parano: usize, hl: Option<Highlight<T>>) {
         // shift highlights
         for h in self.highlights.iter_mut() {
-            if h.lineno >= lineno {
-                h.lineno += 1;
+            if h.parano >= parano {
+                h.parano += 1;
             }
         }
         if let Some(hl) = hl {
             self.add_highlight(HighlightedRange{
-                lineno,
+                parano,
                 start: 0,
                 end: usize::MAX,
                 inner: hl,
             });
         }
-        self.lines.insert(lineno, line);
+        self.paragraphs.insert(parano, line);
     }
 
-    pub fn swap_line(&mut self, line: &mut BString, lineno: usize, hl: Option<Highlight<T>>) {
-        std::mem::swap(&mut self.lines[lineno], line);
-        self.clear_highlights(Some(lineno .. lineno + 1));
+    pub fn swap_line(&mut self, line: &mut BString, parano: usize, hl: Option<Highlight<T>>) {
+        std::mem::swap(&mut self.paragraphs[parano], line);
+        self.clear_highlights(Some(parano .. parano + 1));
         if let Some(hl) = hl && !hl.is_empty() {
             self.highlights.push(HighlightedRange{
-                lineno,
+                parano,
                 start: 0,
                 end: usize::MAX,
                 inner: hl,
@@ -136,17 +137,17 @@ impl<T> Text<T> {
     pub fn delete_lines(&mut self, range: Range<usize>) {
         let start = range.start;
         let end = range.end;
-        drop(self.lines.drain(range));
+        drop(self.paragraphs.drain(range));
         let range = self.highlights.get_range_for_lines(start .. end);
         for hl in &mut self.highlights[range.end..] {
-            hl.lineno -= 1;
+            hl.parano -= 1;
         }
         self.highlights.drain(range);
     }
 
-    pub fn delete_str(&mut self, lineno: usize, offset: usize, length: usize) {
-        self.lines[lineno].drain(offset .. offset + length);
-        let range = self.highlights.get_range_for_lines(lineno .. lineno + 1);
+    pub fn delete_str(&mut self, parano: usize, offset: usize, length: usize) {
+        self.paragraphs[parano].drain(offset .. offset + length);
+        let range = self.highlights.get_range_for_lines(parano .. parano + 1);
         for hl in &mut self.highlights[range] {
             hl.shift(offset .. offset + length, offset);
         }
@@ -172,10 +173,10 @@ impl<T> Text<T> {
         let mut start = 0;
 
         // add a dummy line at the end
-        for (i, line) in self.lines.iter().map(|l| l.as_ref()).chain(std::iter::once(BStr::new(b""))).enumerate() {
-            let past_end = i >= self.lines.len();
+        for (i, line) in self.paragraphs.iter().map(|l| l.as_ref()).chain(std::iter::once(BStr::new(b""))).enumerate() {
+            let past_end = i >= self.paragraphs.len();
 
-            let line_filter = |h: &HighlightedRange<T>| h.lineno == i || (past_end && h.lineno > i);
+            let line_filter = |h: &HighlightedRange<T>| h.parano == i || (past_end && h.parano > i);
             let end = start + self.highlights[start..].partition_point(line_filter);
             let highlights = self.highlights[start..end].iter()
                 .chain(extra_highlights.clone().filter(|h| line_filter(h)))
@@ -187,12 +188,12 @@ impl<T> Text<T> {
                 continue
             }
 
-            let (x, y) = super::wrap::wrap(line, highlights, None, width, initial_indent, super::wrap::NoCallback::None);
+            let (x, y, _lineno) = super::wrap::wrap(line, highlights, None, width, initial_indent, super::wrap::NoCallback::None);
             pos.0 = x;
             pos.1 += y;
             initial_indent = 0;
 
-            if i + 1 != self.lines.len() {
+            if i + 1 != self.paragraphs.len() {
                 pos = (0, pos.1 + 1);
             }
         }
@@ -215,12 +216,12 @@ impl<T> Text<T> {
 
 impl<T: Clone> Text<T> {
     pub fn push_lines<I: IntoIterator<Item=BString>>(&mut self, lines: I, hl: Option<Highlight<T>>) {
-        let old_len = self.lines.len();
-        self.lines.extend(lines);
+        let old_len = self.paragraphs.len();
+        self.paragraphs.extend(lines);
         if let Some(hl) = hl {
-            for (i, line) in self.lines[old_len..].iter().enumerate() {
+            for (i, line) in self.paragraphs[old_len..].iter().enumerate() {
                 self.highlights.push(HighlightedRange{
-                    lineno: old_len + i,
+                    parano: old_len + i,
                     start: 0,
                     end: line.len(),
                     inner: hl.clone(),
@@ -229,13 +230,13 @@ impl<T: Clone> Text<T> {
         }
     }
 
-    pub fn insert_lines<I: IntoIterator<Item=BString>>(&mut self, lines: I, lineno: usize, hl: Option<Highlight<T>>) {
-        let old_len = self.lines.len();
-        self.lines.splice(lineno..lineno, lines);
+    pub fn insert_lines<I: IntoIterator<Item=BString>>(&mut self, lines: I, parano: usize, hl: Option<Highlight<T>>) {
+        let old_len = self.paragraphs.len();
+        self.paragraphs.splice(parano..parano, lines);
         if let Some(hl) = hl {
-            for (i, line) in self.lines[old_len..].iter().enumerate() {
+            for (i, line) in self.paragraphs[old_len..].iter().enumerate() {
                 self.highlights.push(HighlightedRange{
-                    lineno: old_len + i,
+                    parano: old_len + i,
                     start: 0,
                     end: line.len(),
                     inner: hl.clone(),
@@ -244,9 +245,9 @@ impl<T: Clone> Text<T> {
         }
     }
 
-    pub fn insert_str(&mut self, str: &BStr, lineno: usize, offset: usize, retain_highlights: bool, hl: Option<Highlight<T>>) {
+    pub fn insert_str(&mut self, str: &BStr, parano: usize, offset: usize, retain_highlights: bool, hl: Option<Highlight<T>>) {
         // shift highlights
-        let range = self.highlights.get_range_for_lines(lineno .. lineno + 1);
+        let range = self.highlights.get_range_for_lines(parano .. parano + 1);
         if retain_highlights {
             for h in &mut self.highlights[range] {
                 h.shift(offset .. offset, str.len());
@@ -264,13 +265,13 @@ impl<T: Clone> Text<T> {
 
         if let Some(hl) = hl && !hl.is_empty() {
             self.highlights.push(HighlightedRange{
-                lineno,
+                parano,
                 start: offset,
                 end: offset + str.len(),
                 inner: hl,
             });
         }
-        self.lines[lineno].insert_str(offset, str);
+        self.paragraphs[parano].insert_str(offset, str);
     }
 
 }

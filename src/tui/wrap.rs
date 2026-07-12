@@ -7,7 +7,7 @@ use super::text::{HighlightedRange, Highlight};
 
 const ESCAPE_STYLE: Style = Style::new().fg(Color::AnsiValue(7));
 
-pub type NoCallback<'a> = Option<fn(Range<usize>, WrapToken<'a>, usize, Option<Style>)>;
+pub type NoCallback<'a> = Option<fn(Range<usize>, WrapToken<'a>, usize, usize, Option<Style>)>;
 
 pub fn merge_highlights<'a, T: 'a, I: Iterator<Item=&'a Highlight<T>>>(init: Style, iter: I) -> Style {
     let mut style = init;
@@ -69,26 +69,26 @@ macro_rules! define_wrap_ascii {
         fn $name $(<
             'a,
             #[allow(non_camel_case_types)]
-            $callback: FnMut(Range<usize>, WrapToken<'a>, usize, Option<Style>)
+            $callback: FnMut(Range<usize>, WrapToken<'a>, usize, usize, Option<Style>)
         >)? (
             grapheme: u8,
             max_width: usize,
-            (mut x, mut y): (usize, usize),
+            (mut x, mut y, mut lineno): (usize, usize, usize),
             $(
             range: Range<usize>,
             style: Option<Style>,
             mut $callback: $callback,
             )?
-        ) -> (usize, usize) {
+        ) -> (usize, usize, usize) {
 
             if grapheme == b'\n' {
                 // newline
-                $($callback(range, WrapToken::LineBreak, y, None);)?
-                (0, y + 1)
+                $($callback(range, WrapToken::LineBreak, y, lineno, None);)?
+                (0, y + 1, lineno + 1)
 
             } else if grapheme == b'\t' {
                 let width = if x >= max_width {
-                    $($callback((range.start..range.start).into(), WrapToken::LineBreak, y, None);)?
+                    $($callback((range.start..range.start).into(), WrapToken::LineBreak, y, lineno, None);)?
                     x = 0;
                     y += 1;
                     max_width
@@ -98,19 +98,19 @@ macro_rules! define_wrap_ascii {
 
                 $(
                     for _ in 0 .. width {
-                        $callback(range, WrapToken::AsciiChar([b' ']), y, style.clone())
+                        $callback(range, WrapToken::AsciiChar([b' ']), y, lineno, style.clone())
                     }
                 )?
-                (x + width, y)
+                (x + width, y, lineno)
 
             } else {
                 if x + 1 > max_width {
-                    $($callback((range.start..range.start).into(), WrapToken::LineBreak, y, None);)?
+                    $($callback((range.start..range.start).into(), WrapToken::LineBreak, y, lineno, None);)?
                     x = 0;
                     y += 1;
                 }
-                $($callback(range, WrapToken::AsciiChar([grapheme]), y, style);)?
-                (x + 1, y)
+                $($callback(range, WrapToken::AsciiChar([grapheme]), y, lineno, style);)?
+                (x + 1, y, lineno)
             }
         }
 
@@ -127,33 +127,33 @@ macro_rules! define_wrap_grapheme {
             'a,
             $(
             #[allow(non_camel_case_types)]
-            $callback: FnMut(Range<usize>, WrapToken<'a>, usize, Option<Style>)
+            $callback: FnMut(Range<usize>, WrapToken<'a>, usize, usize, Option<Style>)
             )?
         > (
             grapheme: &'a str,
             width: usize,
             max_width: usize,
-            (mut x, mut y): (usize, usize),
+            (mut x, mut y, lineno): (usize, usize, usize),
             line: &'a BStr,
             range: Range<usize>,
             $(
             style: Option<Style>,
             mut $callback: $callback,
             )?
-        ) -> (usize, usize) {
+        ) -> (usize, usize, usize) {
 
             if grapheme.len() == 1 {
-                return $wrap_ascii(grapheme.as_bytes()[0], max_width, (x, y), $( range, style, $callback )?)
+                return $wrap_ascii(grapheme.as_bytes()[0], max_width, (x, y, lineno), $( range, style, $callback )?)
             }
 
             if width > 0 && (grapheme != "\u{FFFD}" || &line.as_bytes()[range] == grapheme.as_bytes()) {
                 if x + grapheme.width() > max_width {
                     x = 0;
                     y += 1;
-                    $($callback((range.start..range.start).into(), WrapToken::LineBreak, y, None);)?
+                    $($callback((range.start..range.start).into(), WrapToken::LineBreak, y, lineno, None);)?
                 }
-                $($callback(range, WrapToken::String(Cow::Borrowed(grapheme)), y, style);)?
-                (x + grapheme.width(), y)
+                $($callback(range, WrapToken::String(Cow::Borrowed(grapheme)), y, lineno, style);)?
+                (x + grapheme.width(), y, lineno)
 
             } else {
                 // invalid text
@@ -167,17 +167,17 @@ macro_rules! define_wrap_grapheme {
                     if x + width > max_width {
                         x = 0;
                         y += 1;
-                        $($callback((range.start..range.start).into(), WrapToken::LineBreak, y, None);)?
+                        $($callback((range.start..range.start).into(), WrapToken::LineBreak, y, lineno, None);)?
                     }
                     let string = format!("<u{c:04x}>");
                     debug_assert_eq!(string.width(), width);
                     $(
-                    $callback((range.start + i .. range.start + i + 1).into(), WrapToken::String(Cow::Owned(string)), y, style.clone());
+                    $callback((range.start + i .. range.start + i + 1).into(), WrapToken::String(Cow::Owned(string)), y, lineno, style.clone());
                     i += 1;
                     )?
                     x += width;
                 }
-                (x, y)
+                (x, y, lineno)
             }
         }
     )
@@ -190,33 +190,35 @@ pub fn wrap<
     'a,
     T: 'a,
     I: Clone + Iterator<Item=&'a HighlightedRange<T>>,
-    F: FnMut(Range<usize>, WrapToken<'a>, usize, Option<Style>)
+    F: FnMut(Range<usize>, WrapToken<'a>, usize, usize, Option<Style>)
 >(
-    line: &'a BStr,
+    paragraph: &'a BStr,
     highlights: I,
     init_style: Option<Style>,
     max_width: usize,
     initial_indent: usize,
     mut callback: Option<F>,
-) -> (usize, usize) {
+) -> (usize, usize, usize) {
     // TODO performance is terrible if too many lines
 
-    let all_ascii = line.iter().all(|c| matches!(c, 0x20 ..= 0x7e | b'\n'));
+    let all_ascii = paragraph.iter().all(|c| matches!(c, 0x20 ..= 0x7e | b'\n'));
 
     if all_ascii && callback.is_none() && highlights.clone().next().is_none() {
         // all ascii, no callback, no highlights
         // can't get any easier
-        let mut last = line.as_bytes();
-        let y: usize = line.split(|&c| c == b'\n').enumerate().map(|(i, l)| {
+        let mut last = paragraph.as_bytes();
+        let mut lineno = 0;
+        let y: usize = paragraph.split(|&c| c == b'\n').enumerate().map(|(i, l)| {
             last = l;
             let len = l.len() + if i == 0 { initial_indent } else { 0 };
+            lineno = i;
             len.saturating_sub(1) / max_width + 1
         }).sum();
-        let x = (last.len() + if last.len() == line.len() { initial_indent } else { 0 }) % max_width;
-        return (x, y - 1);
+        let x = (last.len() + if last.len() == paragraph.len() { initial_indent } else { 0 }) % max_width;
+        return (x, y - 1, lineno);
     }
 
-    let mut pos = (initial_indent, 0);
+    let mut pos = (initial_indent, 0, 0);
     let mut style = init_style.clone();
 
     let handle_virtual_text = |hl: &'a HighlightedRange<T>, start, mut pos, callback: &mut Option<&mut F>, init_style: &Option<Style>| {
@@ -224,8 +226,8 @@ pub fn wrap<
             if let Some(callback) = callback {
                 let style = init_style.as_ref().map(|s| merge_highlights(s.clone(), [&hl.inner].into_iter()));
                 for (s, e, grapheme) in text.grapheme_indices() {
-                    pos = wrap_grapheme_with_callback(grapheme, grapheme.width(), max_width, pos, text.as_ref(), (s..e).into(), style.clone(), |_, token, lineno, style| {
-                        callback((start .. start).into(), token, lineno, style);
+                    pos = wrap_grapheme_with_callback(grapheme, grapheme.width(), max_width, pos, text.as_ref(), (s..e).into(), style.clone(), |_, token, wrapped_no, lineno, style| {
+                        callback((start .. start).into(), token, wrapped_no, lineno, style);
                     });
                 }
             } else {
@@ -274,7 +276,7 @@ pub fn wrap<
         // most of the time it is ascii, to optimise for it
 
         if let Some(mut callback) = callback.as_mut() {
-            for (i, &c) in line.iter().enumerate() {
+            for (i, &c) in paragraph.iter().enumerate() {
                 let conceal;
                 (pos, style, conceal) = handle_highlights(i, i+1, pos, style, Some(&mut callback));
                 if !conceal {
@@ -282,7 +284,7 @@ pub fn wrap<
                 }
             }
         } else {
-            for (i, &c) in line.iter().enumerate() {
+            for (i, &c) in paragraph.iter().enumerate() {
                 let conceal;
                 (pos, style, conceal) = handle_highlights(i, i+1, pos, style, None);
                 if !conceal {
@@ -294,19 +296,19 @@ pub fn wrap<
     } else {
 
         if let Some(mut callback) = callback.as_mut() {
-            for (s, e, grapheme) in line.grapheme_indices() {
+            for (s, e, grapheme) in paragraph.grapheme_indices() {
                 let conceal;
                 (pos, style, conceal) = handle_highlights(s, e, pos, style, Some(&mut callback));
                 if !conceal {
-                    pos = wrap_grapheme_with_callback(grapheme, grapheme.width(), max_width, pos, line, (s..e).into(), style.clone(), &mut callback);
+                    pos = wrap_grapheme_with_callback(grapheme, grapheme.width(), max_width, pos, paragraph, (s..e).into(), style.clone(), &mut callback);
                 }
             }
         } else {
-            for (s, e, grapheme) in line.grapheme_indices() {
+            for (s, e, grapheme) in paragraph.grapheme_indices() {
                 let conceal;
                 (pos, style, conceal) = handle_highlights(s, e, pos, style, callback.as_mut());
                 if !conceal {
-                    pos = wrap_grapheme(grapheme, grapheme.width(), max_width, pos, line, (s..e).into());
+                    pos = wrap_grapheme(grapheme, grapheme.width(), max_width, pos, paragraph, (s..e).into());
                 }
             }
         }
@@ -315,7 +317,7 @@ pub fn wrap<
 
     // virtual text
     for hl in highlights {
-        if hl.start >= line.len() {
+        if hl.start >= paragraph.len() {
             pos = handle_virtual_text(hl, hl.start, pos, &mut callback.as_mut(), &init_style);
         }
     }

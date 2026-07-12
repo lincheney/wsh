@@ -422,18 +422,18 @@ impl Nodes {
             let size = node.get_size(tmp);
             let border_height = widget.border.inner_height();
             let height = size.1.saturating_sub(border_height);
-            let (_, line_range) = widget.scroll.position.get_approx_line_range(Some(height as _), widget.inner.len());
+            let para_range = widget.scroll.position.get_approx_range(Some(height as _), widget.inner.get()).para_range;
 
-            for lineno in line_range {
-                if widget.ephemeral.index_for_lineno(lineno).is_err() {
-                    data.push((node.id, lineno));
+            for parano in para_range {
+                if widget.ephemeral.index_for_parano(parano).is_err() {
+                    data.push((node.id, parano));
                 }
             }
         });
 
-        for (id, lineno) in data {
+        for (id, parano) in data {
             if let Some(Node{kind: NodeKind::Widget(widget), ..}) = self.map.get_mut(&id) {
-                func(id, widget, lineno);
+                func(id, widget, parano);
             }
         }
     }
@@ -523,10 +523,10 @@ impl<'a> NodeRenderer<'a, std::slice::Iter<'a, NodeId>> {
                     size.0 as _, // width
                     Some(size.1 as _), // height
                     Some(widget.scroll), // scroll
-                    |lineno| {
-                        widget.inner.highlights.get_for_lineno(lineno).iter()
-                            .sorted_merge_with(widget.ephemeral.get_for_lineno(lineno).iter())
-                            .sorted_merge_with(widget.cursor_space_hl.iter().filter(move |hl| hl.lineno == lineno))
+                    |parano| {
+                        widget.inner.highlights.get_for_parano(parano).iter()
+                            .sorted_merge_with(widget.ephemeral.get_for_parano(parano).iter())
+                            .sorted_merge_with(widget.cursor_space_hl.iter().filter(move |hl| hl.parano == parano))
                     },
                 );
                 NodeRenderer::Widget {

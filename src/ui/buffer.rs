@@ -1,9 +1,8 @@
-use std::range::Range;
 use byteyarn::ByteYarn;
 use std::io::Write;
 use bstr::{BStr, BString, ByteSlice};
 use crate::tui::{Drawer, Canvas};
-use crate::tui::text::{Text, HighlightedRange, TextRenderer, Renderer};
+use crate::tui::text::{Text, HighlightedRange};
 pub mod suffix;
 
 #[derive(Debug)]
@@ -263,24 +262,71 @@ impl Buffer {
         self.byte_pos(self.cursor)
     }
 
-    pub fn render<W :Write, C: Canvas, F: FnMut(&mut Drawer<W, C>, usize, Range<usize>)>(
+    fn get_cursor_lineno(&self) -> usize {
+        self.contents.get()[0][..self.cursor_byte_pos()].split(|&c| c == b'\n').count().saturating_sub(1)
+    }
+
+    pub fn render<W :Write, C: Canvas>(
         &self,
         drawer: &mut Drawer<W, C>,
         initial_indent: u16,
-        callback: Option<F>,
-    ) -> std::io::Result<()> {
+        max_height: Option<usize>,
+    ) -> std::io::Result<(u16, u16)> {
 
-        TextRenderer::new(
-            &self.contents,
+        let cursor = self.cursor_byte_pos();
+        let mut cursor_coord = drawer.get_pos();
+        let width = drawer.term_width() as usize;
+        let scroll = crate::tui::text::ScrollPosition::Line(self.get_cursor_lineno());
+
+        let scrolled = crate::tui::scroll::wrap(
+            &self.contents.get(),
+            Some(self.contents.style.clone()),
+            width,
+            max_height,
             initial_indent as _,
-            None,
-            drawer.term_width() as _,
-            None,
-            None,
-            |lineno| self.contents.highlights.get_for_lineno(lineno).iter(),
-        ).render(drawer, false, false, callback)?;
+            scroll,
+            |parano| self.contents.highlights.get_for_parano(parano).iter(),
+        );
+        let mut lines = scrolled.into_lines();
+
+        let mut first = true;
+        let first_lineno = lines.first_lineno().unwrap_or(0);
+        while let Some(slice) = lines.next() {
+            let mut line = lines.slice(slice);
+
+            if first {
+                first = false;
+                if first_lineno > 0 && initial_indent as usize + line.iter().map(|t| t.inner.width()).sum::<usize>() >= width {
+                    // truncate first line if cursor is on line >= 2
+                    // we don't truncate line 0
+                    // which will be shown so long as cursor is on line <= 1
+                    line = &line[line.len().min(initial_indent as usize) ..];
+                }
+            } else {
+                // do not draw newline before first line
+                drawer.goto_newline(None)?;
+            }
+
+            // draw the line
+            let mut cell = crate::tui::Cell::EMPTY;
+            for token in line {
+                if let Some(symbol) = token.inner.as_str() {
+                    cell.reset();
+                    cell.set_text(symbol);
+                    if let Some(style) = &token.style {
+                        cell.style = style.clone();
+                    }
+                    drawer.draw_cell(&cell, false)?;
+                }
+
+                if token.range.end == cursor && token.parano == 0 {
+                    cursor_coord = drawer.get_pos();
+                }
+            }
+        }
+
         drawer.clear_to_end_of_line(None, crate::shell::is_interrupted())?;
-        Ok(())
+        Ok(cursor_coord)
     }
 
 }

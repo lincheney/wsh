@@ -34,14 +34,14 @@ impl Widget {
             }
 
             let pos = ansi::Parser::to_byte_pos(&self.inner, self.ansi.cursor_x);
-            let (lineno, need_space) = if let Some(line) = self.inner.get().last() {
-                (self.inner.len().saturating_sub(1), pos == line.len())
+            let (parano, need_space) = if let Some(para) = self.inner.get().last() {
+                (self.inner.len().saturating_sub(1), pos == para.len())
             } else {
                 (0, true)
             };
 
             self.cursor_space_hl = Some(super::text::HighlightedRange{
-                lineno,
+                parano,
                 start: pos,
                 end: pos + 1,
                 inner: super::text::Highlight {
@@ -93,11 +93,8 @@ impl Widget {
     pub fn scroll(&mut self, value: isize, relative: bool) -> bool {
         let max_line = self.inner.len().saturating_sub(1);
         let value = if relative {
-            let current_line = match self.scroll.position {
-                ScrollPosition::Line(line) => line,
-                ScrollPosition::StickyBottom => max_line,
-            };
-            current_line as isize + value
+            let current = self.scroll.position.get_approx_range(None, self.inner.get()).parano;
+            current as isize + value
         } else {
             value
         };
@@ -106,7 +103,7 @@ impl Widget {
         let new_scroll = if value >= max_line {
             ScrollPosition::StickyBottom
         } else {
-            ScrollPosition::Line(value)
+            ScrollPosition::Paragraph(value)
         };
 
         if self.scroll.position == new_scroll {
