@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use byteyarn::ByteYarn;
 use std::io::Write;
 use bstr::{BStr, BString, ByteSlice};
@@ -15,7 +16,7 @@ pub struct Edit {
 
 #[derive(Debug, Default)]
 pub struct Buffer {
-    contents: Text<usize>,
+    contents: Text<usize, Cow<'static, BStr>>,
     // display: String,
     len: Option<usize>,
     cursor: usize,
@@ -41,7 +42,7 @@ impl Buffer {
         new
     }
 
-    pub fn add_highlight(&mut self, hl: HighlightedRange<usize>) {
+    pub fn add_highlight(&mut self, hl: HighlightedRange<usize, Cow<'static, BStr>>) {
         self.contents.add_highlight(hl);
         self.dirty = true;
     }
@@ -55,7 +56,7 @@ impl Buffer {
         self.retain_highlights(|h| *h.namespace() != namespace);
     }
 
-    pub fn retain_highlights<F: Fn(&HighlightedRange<usize>) -> bool>(&mut self, func: F) {
+    pub fn retain_highlights<F: Fn(&HighlightedRange<usize, Cow<'static, BStr>>) -> bool>(&mut self, func: F) {
         self.contents.retain_highlights(func);
         self.dirty = true;
     }
@@ -272,8 +273,8 @@ impl Buffer {
         drawer: &mut Drawer<W, C>,
         initial_indent: u16,
         max_height: Option<usize>,
-        predisplay: Option<Highlight<usize>>,
-        postdisplay: Option<Highlight<usize>>,
+        predisplay: Option<Highlight<usize, Cow<'_, BStr>>>,
+        postdisplay: Option<Highlight<usize, Cow<'_, BStr>>>,
     ) -> std::io::Result<(u16, u16)> {
 
         let cursor = self.cursor_byte_pos();

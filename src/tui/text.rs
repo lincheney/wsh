@@ -34,15 +34,15 @@ pub enum Alignment {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct Text<T=()> {
+pub struct Text<T=(), S=BString> {
     pub(in crate::tui) paragraphs: Vec<BString>,
     pub alignment: Alignment,
-    pub highlights: highlight::HighlightedRangeSet<T>,
+    pub highlights: highlight::HighlightedRangeSet<T, S>,
     pub style: Style,
     pub dirty: bool,
 }
 
-impl<T> Text<T> {
+impl<T, S> Text<T, S> {
 
     pub fn get(&self) -> &[BString] {
         &self.paragraphs
@@ -52,7 +52,7 @@ impl<T> Text<T> {
         self.paragraphs.len()
     }
 
-    pub fn add_highlight(&mut self, hl: HighlightedRange<T>) {
+    pub fn add_highlight(&mut self, hl: HighlightedRange<T, S>) {
         self.highlights.push(hl);
     }
 
@@ -65,7 +65,7 @@ impl<T> Text<T> {
         }
     }
 
-    pub fn retain_highlights<F: Fn(&HighlightedRange<T>) -> bool>(&mut self, func: F) {
+    pub fn retain_highlights<F: Fn(&HighlightedRange<T, S>) -> bool>(&mut self, func: F) {
         self.highlights.retain(func);
     }
 
@@ -74,7 +74,7 @@ impl<T> Text<T> {
         self.clear_highlights(None);
     }
 
-    pub fn push_line(&mut self, line: BString, hl: Option<Highlight<T>>) {
+    pub fn push_line(&mut self, line: BString, hl: Option<Highlight<T, S>>) {
         if let Some(hl) = hl {
             self.highlights.push(HighlightedRange{
                 parano: self.paragraphs.len(),
@@ -86,7 +86,7 @@ impl<T> Text<T> {
         self.paragraphs.push(line);
     }
 
-    pub fn push_str(&mut self, str: &BStr, hl: Option<Highlight<T>>) {
+    pub fn push_str(&mut self, str: &BStr, hl: Option<Highlight<T, S>>) {
         if self.paragraphs.is_empty() {
             self.push_line(b"".into(), None);
         }
@@ -103,7 +103,7 @@ impl<T> Text<T> {
         line.push_str(str);
     }
 
-    pub fn insert_line(&mut self, line: BString, parano: usize, hl: Option<Highlight<T>>) {
+    pub fn insert_line(&mut self, line: BString, parano: usize, hl: Option<Highlight<T, S>>) {
         // shift highlights
         for h in self.highlights.iter_mut() {
             if h.parano >= parano {
@@ -119,19 +119,6 @@ impl<T> Text<T> {
             });
         }
         self.paragraphs.insert(parano, line);
-    }
-
-    pub fn swap_line(&mut self, line: &mut BString, parano: usize, hl: Option<Highlight<T>>) {
-        std::mem::swap(&mut self.paragraphs[parano], line);
-        self.clear_highlights(Some(parano .. parano + 1));
-        if let Some(hl) = hl && !hl.is_empty() {
-            self.highlights.push(HighlightedRange{
-                parano,
-                start: 0,
-                end: usize::MAX,
-                inner: hl,
-            });
-        }
     }
 
     pub fn delete_lines(&mut self, range: Range<usize>) {
@@ -157,6 +144,22 @@ impl<T> Text<T> {
         self.clear();
         self.dirty = true;
     }
+}
+
+impl<T, S: AsRef<BStr>> Text<T, S> {
+
+    pub fn swap_line(&mut self, line: &mut BString, parano: usize, hl: Option<Highlight<T, S>>) {
+        std::mem::swap(&mut self.paragraphs[parano], line);
+        self.clear_highlights(Some(parano .. parano + 1));
+        if let Some(hl) = hl && !hl.is_empty() {
+            self.highlights.push(HighlightedRange{
+                parano,
+                start: 0,
+                end: usize::MAX,
+                inner: hl,
+            });
+        }
+    }
 
     pub fn get_size<'a, I>(
         &'a self,
@@ -166,7 +169,7 @@ impl<T> Text<T> {
     ) -> (usize, usize)
     where
         T: 'a,
-        I: Clone + Iterator<Item=&'a HighlightedRange<T>>,
+        I: Clone + Iterator<Item=&'a HighlightedRange<T, S>>,
     {
 
         let mut pos = (0, 0);
@@ -176,7 +179,7 @@ impl<T> Text<T> {
         for (i, line) in self.paragraphs.iter().map(|l| l.as_ref()).chain(std::iter::once(BStr::new(b""))).enumerate() {
             let past_end = i >= self.paragraphs.len();
 
-            let line_filter = |h: &HighlightedRange<T>| h.parano == i || (past_end && h.parano > i);
+            let line_filter = |h: &HighlightedRange<T, S>| h.parano == i || (past_end && h.parano > i);
             let end = start + self.highlights[start..].partition_point(line_filter);
             let highlights = self.highlights[start..end].iter()
                 .chain(extra_highlights.clone().filter(|h| line_filter(h)))
@@ -214,8 +217,8 @@ impl<T> Text<T> {
 
 }
 
-impl<T: Clone> Text<T> {
-    pub fn push_lines<I: IntoIterator<Item=BString>>(&mut self, lines: I, hl: Option<Highlight<T>>) {
+impl<T: Clone, S: Clone> Text<T, S> {
+    pub fn push_lines<I: IntoIterator<Item=BString>>(&mut self, lines: I, hl: Option<Highlight<T, S>>) {
         let old_len = self.paragraphs.len();
         self.paragraphs.extend(lines);
         if let Some(hl) = hl {
@@ -230,7 +233,7 @@ impl<T: Clone> Text<T> {
         }
     }
 
-    pub fn insert_lines<I: IntoIterator<Item=BString>>(&mut self, lines: I, parano: usize, hl: Option<Highlight<T>>) {
+    pub fn insert_lines<I: IntoIterator<Item=BString>>(&mut self, lines: I, parano: usize, hl: Option<Highlight<T, S>>) {
         let old_len = self.paragraphs.len();
         self.paragraphs.splice(parano..parano, lines);
         if let Some(hl) = hl {
@@ -244,8 +247,10 @@ impl<T: Clone> Text<T> {
             }
         }
     }
+}
 
-    pub fn insert_str(&mut self, str: &BStr, parano: usize, offset: usize, retain_highlights: bool, hl: Option<Highlight<T>>) {
+impl<T: Clone, S: Clone + AsRef<BStr>> Text<T, S> {
+    pub fn insert_str(&mut self, str: &BStr, parano: usize, offset: usize, retain_highlights: bool, hl: Option<Highlight<T, S>>) {
         // shift highlights
         let range = self.highlights.get_range_for_lines(parano .. parano + 1);
         if retain_highlights {

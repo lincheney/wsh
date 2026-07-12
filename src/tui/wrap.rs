@@ -9,7 +9,7 @@ const ESCAPE_STYLE: Style = Style::new().fg(Color::AnsiValue(7));
 
 pub type NoCallback<'a> = Option<fn(Range<usize>, WrapToken<'a>, usize, usize, Option<Style>)>;
 
-pub fn merge_highlights<'a, T: 'a, I: Iterator<Item=&'a Highlight<T>>>(init: Style, iter: I) -> Style {
+pub fn merge_highlights<'a, T: 'a, S: 'a, I: Iterator<Item=&'a Highlight<T, S>>>(init: Style, iter: I) -> Style {
     let mut style = init;
     for h in iter {
         if !h.blend {
@@ -27,7 +27,7 @@ pub fn merge_highlights<'a, T: 'a, I: Iterator<Item=&'a Highlight<T>>>(init: Sty
     style
 }
 
-pub fn merge_conceal<'a, T: 'a, I: Iterator<Item=&'a Highlight<T>>>(iter: I) -> bool {
+pub fn merge_conceal<'a, T: 'a, S: 'a, I: Iterator<Item=&'a Highlight<T, S>>>(iter: I) -> bool {
     let mut conceal = false;
     for h in iter {
         if !h.blend {
@@ -189,7 +189,8 @@ define_wrap_grapheme!(wrap_grapheme_with_callback, wrap_ascii_with_callback, cal
 pub fn wrap<
     'a,
     T: 'a,
-    I: Clone + Iterator<Item=&'a HighlightedRange<T>>,
+    S: 'a + AsRef<BStr>,
+    I: Clone + Iterator<Item=&'a HighlightedRange<T, S>>,
     F: FnMut(Range<usize>, WrapToken<'a>, usize, usize, Option<Style>)
 >(
     paragraph: &'a BStr,
@@ -221,17 +222,17 @@ pub fn wrap<
     let mut pos = (initial_indent, 0, 0);
     let mut style = init_style.clone();
 
-    let handle_virtual_text = |hl: &'a HighlightedRange<T>, start, mut pos, callback: &mut Option<&mut F>, init_style: &Option<Style>| {
-        if let Some(text) = &hl.inner.virtual_text && !text.is_empty() {
+    let handle_virtual_text = |hl: &'a HighlightedRange<T, S>, start, mut pos, callback: &mut Option<&mut F>, init_style: &Option<Style>| {
+        if let Some(text) = &hl.inner.virtual_text && !text.as_ref().is_empty() {
             if let Some(callback) = callback {
                 let style = init_style.as_ref().map(|s| merge_highlights(s.clone(), [&hl.inner].into_iter()));
-                for (s, e, grapheme) in text.grapheme_indices() {
+                for (s, e, grapheme) in text.as_ref().grapheme_indices() {
                     pos = wrap_grapheme_with_callback(grapheme, grapheme.width(), max_width, pos, text.as_ref(), (s..e).into(), style.clone(), |_, token, wrapped_no, lineno, style| {
                         callback((start .. start).into(), token, wrapped_no, lineno, style);
                     });
                 }
             } else {
-                for (s, e, grapheme) in text.grapheme_indices() {
+                for (s, e, grapheme) in text.as_ref().grapheme_indices() {
                     pos = wrap_grapheme(grapheme, grapheme.width(), max_width, pos, text.as_ref(), (s..e).into());
                 }
             }

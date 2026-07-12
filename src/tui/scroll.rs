@@ -109,7 +109,7 @@ impl<'a> Scrolled<'a> {
     }
 }
 
-pub fn wrap<'a, T, I, F>(
+pub fn wrap<'a, T, S, I, F>(
     paragraphs: &'a [BString],
     init_style: Option<Style>,
     max_width: usize,
@@ -120,7 +120,8 @@ pub fn wrap<'a, T, I, F>(
 ) -> Scrolled<'a>
 where
     T: 'a,
-    I: Clone + Iterator<Item=&'a HighlightedRange<T>>,
+    S: 'a + AsRef<BStr>,
+    I: Clone + Iterator<Item=&'a HighlightedRange<T, S>>,
     F: Fn(usize) -> I,
 {
 

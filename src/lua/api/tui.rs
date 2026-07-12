@@ -754,7 +754,7 @@ fn add_buf_highlight(ui: &Ui, _lua: &Lua, val: BufferHighlight) -> Result<()> {
         inner: tui::text::Highlight{
             style,
             namespace: val.namespace.unwrap_or(0),
-            virtual_text: val.virtual_text,
+            virtual_text: val.virtual_text.map(std::borrow::Cow::Owned),
             conceal: val.conceal,
             blend,
             priority,

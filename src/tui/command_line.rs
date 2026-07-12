@@ -181,10 +181,10 @@ impl CommandLine<'_> {
             let mut postdisplay = None;
             if let PromptMode::ShellVars(vars) = &self.prompt_mode {
                 if let Some(text) = &vars.predisplay && !text.is_empty() {
-                    predisplay = Some(Highlight { virtual_text: Some(text.clone()), ..Default::default() });
+                    predisplay = Some(Highlight { virtual_text: Some(Cow::Borrowed(text.as_ref())), ..Default::default() });
                 }
                 if let Some(text) = &vars.postdisplay && !text.is_empty() {
-                    postdisplay = Some(Highlight { virtual_text: Some(text.clone()), ..Default::default() });
+                    postdisplay = Some(Highlight { virtual_text: Some(Cow::Borrowed(text.as_ref())), ..Default::default() });
                 }
             };
 

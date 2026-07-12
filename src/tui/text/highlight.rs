@@ -1,21 +1,21 @@
 use std::ops::Range;
-use bstr::{BString};
+use bstr::{BString, BStr};
 use crate::tui::{Style};
 
 #[derive(Debug, Clone, Default)]
-pub struct Highlight<T> {
+pub struct Highlight<T, S=BString> {
     pub style: Style,
     pub blend: bool,
     pub namespace: T,
-    pub virtual_text: Option<BString>,
+    pub virtual_text: Option<S>,
     pub conceal: Option<bool>,
     pub priority: f64,
 }
 
-impl<T> Highlight<T> {
+impl<T, S: AsRef<BStr>> Highlight<T, S> {
     pub fn is_empty(&self) -> bool {
         self.style == Style::default()
-        && self.virtual_text.as_ref().is_none_or(|s| s.is_empty())
+        && self.virtual_text.as_ref().is_none_or(|s| s.as_ref().is_empty())
         && !self.conceal.unwrap_or_default()
     }
 
@@ -25,7 +25,7 @@ impl<T> Highlight<T> {
     }
 
     pub fn has_virtual_text(&self) -> bool {
-        self.virtual_text.as_ref().is_some_and(|x| !x.is_empty())
+        self.virtual_text.as_ref().is_some_and(|x| !x.as_ref().is_empty())
     }
 }
 
@@ -43,14 +43,14 @@ impl<T: Default> From<Style> for Highlight<T> {
 }
 
 #[derive(Debug, Clone)]
-pub struct HighlightedRange<T> {
+pub struct HighlightedRange<T, S=BString> {
     pub parano: usize,
     pub start: usize,
     pub end: usize,
-    pub inner: Highlight<T>,
+    pub inner: Highlight<T, S>,
 }
 
-impl<T> HighlightedRange<T> {
+impl<T, S> HighlightedRange<T, S> {
     pub fn shift(&mut self, range: Range<usize>, new_end: usize) {
         if range.end <= self.start {
             self.start = self.start.saturating_add(new_end) - range.end;
@@ -76,7 +76,7 @@ impl<T> HighlightedRange<T> {
     }
 }
 
-impl<T: Clone> HighlightedRange<T> {
+impl<T: Clone, S: Clone> HighlightedRange<T, S> {
     pub fn split(&mut self, index: usize) -> Option<Self> {
         if (self.start .. self.end).contains(&index) {
             let mut other = self.clone();
@@ -90,21 +90,21 @@ impl<T: Clone> HighlightedRange<T> {
     }
 }
 
-impl<T> PartialEq for HighlightedRange<T> {
+impl<T, S> PartialEq for HighlightedRange<T, S> {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other).is_eq()
     }
 }
 
-impl<T> Eq for HighlightedRange<T> {}
+impl<T, S> Eq for HighlightedRange<T, S> {}
 
-impl<T> PartialOrd for HighlightedRange<T> {
+impl<T, S> PartialOrd for HighlightedRange<T, S> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<T> Ord for HighlightedRange<T> {
+impl<T, S> Ord for HighlightedRange<T, S> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // sort in reverse order of priority so higher priority comes first
         self.parano.cmp(&other.parano).then(self.inner.priority.total_cmp(&other.inner.priority).reverse())
@@ -112,15 +112,15 @@ impl<T> Ord for HighlightedRange<T> {
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct HighlightedRangeSet<T> {
-    inner: Vec<HighlightedRange<T>>
+pub struct HighlightedRangeSet<T, S=BString> {
+    inner: Vec<HighlightedRange<T, S>>
 }
-crate::impl_deref_helper!(self: HighlightedRangeSet<T>, &self.inner => Vec<HighlightedRange<T>>);
-crate::impl_deref_helper!(mut self: HighlightedRangeSet<T>, &mut self.inner => Vec<HighlightedRange<T>>);
+crate::impl_deref_helper!(self: HighlightedRangeSet<T, S>, &self.inner => Vec<HighlightedRange<T, S>>);
+crate::impl_deref_helper!(mut self: HighlightedRangeSet<T, S>, &mut self.inner => Vec<HighlightedRange<T, S>>);
 
-impl<T> HighlightedRangeSet<T> {
+impl<T, S> HighlightedRangeSet<T, S> {
 
-    pub fn push(&mut self, hl: HighlightedRange<T>) {
+    pub fn push(&mut self, hl: HighlightedRange<T, S>) {
         // sort in reverse order of priority so higher priority comes first
         let index = match self.binary_search(&hl) {
             Ok(index) | Err(index) => index,
@@ -147,7 +147,7 @@ impl<T> HighlightedRangeSet<T> {
         }
     }
 
-    pub fn get_for_parano(&self, parano: usize) -> &[HighlightedRange<T>] {
+    pub fn get_for_parano(&self, parano: usize) -> &[HighlightedRange<T, S>] {
         let range = self.get_range_for_lines(parano .. parano + 1);
         // ::log::debug!("DEBUG(purge) \t{}\t= {:?}", stringify!((parano, range, &self[range])), (parano, range, &self[range]));
         &self[range]
