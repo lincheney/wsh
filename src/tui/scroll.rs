@@ -27,8 +27,7 @@ impl ScrollPosition {
                 .iter()
                 .enumerate()
                 .scan(0, |sum, (i, p)| { *sum += p.split(|&c| c == b'\n').count() + 1; Some((i, *sum)) })
-                .skip_while(|(_, sum)| *sum < lineno)
-                .next()
+                .find(|(_, sum)| *sum >= lineno)
             => parano,
             // sticky bottom
             _ => paragraphs.len().saturating_sub(1),
