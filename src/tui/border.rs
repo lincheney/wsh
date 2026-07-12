@@ -64,7 +64,7 @@ impl Title {
         let highlights = self.text.highlights.iter();
         let mut finished = false;
         let mut cells = vec![];
-        super::wrap::wrap(first_line.into(), highlights, Some(self.text.style.clone()), width - 2, 0, Some(|_, token: super::wrap::WrapToken, _wrapped_no, _lineno, style| {
+        super::wrap::wrap(first_line.into(), highlights, Some(&self.text.style), width - 2, 0, Some(|_, token: super::wrap::WrapToken, _wrapped_no, _lineno, style| {
             if !finished && let Some(string) = token.as_str() {
                 let mut cell = Cell::new(string);
                 if let Some(style) = style {

@@ -110,7 +110,7 @@ impl<'a> Scrolled<'a> {
 
 pub fn wrap<'a, T, S, I, F>(
     paragraphs: &'a [BString],
-    init_style: Option<Style>,
+    init_style: Option<&Style>,
     max_width: usize,
     max_height: Option<usize>,
     mut initial_indent: usize,
@@ -149,7 +149,7 @@ where
             super::wrap::wrap(
                 paragraph,
                 highlights,
-                init_style.clone(),
+                init_style,
                 max_width,
                 initial_indent,
                 Some(|range, token, wrapped_no, lineno, style| {
@@ -167,7 +167,7 @@ where
             super::wrap::wrap(
                 paragraph,
                 highlights.clone().filter(|hl| hl.inner.may_cause_resize()),
-                init_style.clone(),
+                init_style,
                 max_width,
                 initial_indent,
                 // don't bother with the callback for paragraphs out of range

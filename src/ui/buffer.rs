@@ -287,7 +287,7 @@ impl Buffer {
 
         let scrolled = crate::tui::scroll::wrap(
             self.contents.get(),
-            Some(self.contents.style.clone()),
+            Some(&self.contents.style),
             width,
             max_height,
             initial_indent as _,

@@ -195,7 +195,7 @@ pub fn wrap<
 >(
     paragraph: &'a BStr,
     highlights: I,
-    init_style: Option<Style>,
+    init_style: Option<&Style>,
     max_width: usize,
     initial_indent: usize,
     mut callback: Option<F>,
@@ -220,12 +220,12 @@ pub fn wrap<
     }
 
     let mut pos = (initial_indent, 0, 0);
-    let mut style = init_style.clone();
+    let mut style = init_style.cloned();
 
-    let handle_virtual_text = |hl: &'a HighlightedRange<T, S>, start, mut pos, callback: &mut Option<&mut F>, init_style: &Option<Style>| {
+    let handle_virtual_text = |hl: &'a HighlightedRange<T, S>, start, mut pos, callback: &mut Option<&mut F>, init_style: Option<&Style>| {
         if let Some(text) = &hl.inner.virtual_text && !text.as_ref().is_empty() {
             if let Some(callback) = callback {
-                let style = init_style.as_ref().map(|s| merge_highlights(s.clone(), [&hl.inner].into_iter()));
+                let style = init_style.map(|s| merge_highlights(s.clone(), [&hl.inner].into_iter()));
                 for (s, e, grapheme) in text.as_ref().grapheme_indices() {
                     pos = wrap_grapheme_with_callback(grapheme, grapheme.width(), max_width, pos, text.as_ref(), (s..e).into(), style.clone(), |_, token, wrapped_no, lineno, style| {
                         callback((start .. start).into(), token, wrapped_no, lineno, style);
@@ -245,7 +245,7 @@ pub fn wrap<
 
         if highlights.clone().any(|h| h.start == start || h.end == start) {
 
-            style = init_style.as_ref().map(|s| {
+            style = init_style.map(|s| {
                 let highlights = highlights.clone()
                     .filter(|h| h.start <= start && start < h.end)
                     .map(|hl| &hl.inner);
@@ -265,7 +265,7 @@ pub fn wrap<
             let x = if conceal { end } else { start };
             for hl in highlights.clone() {
                 if hl.start == start {
-                    pos = handle_virtual_text(hl, x, pos, &mut callback, &init_style);
+                    pos = handle_virtual_text(hl, x, pos, &mut callback, init_style);
                 }
             }
         }
@@ -319,7 +319,7 @@ pub fn wrap<
     // virtual text
     for hl in highlights {
         if hl.start >= paragraph.len() {
-            pos = handle_virtual_text(hl, hl.start, pos, &mut callback.as_mut(), &init_style);
+            pos = handle_virtual_text(hl, hl.start, pos, &mut callback.as_mut(), init_style);
         }
     }
 

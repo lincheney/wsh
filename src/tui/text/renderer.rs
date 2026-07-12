@@ -96,7 +96,7 @@ impl<'a> TextRenderer<'a> {
         let text_height = height.map(|h| h.saturating_sub(border_height as _));
         let scrolled = crate::tui::scroll::wrap(
             &text.paragraphs,
-            Some(text.style.clone()),
+            Some(&text.style),
             content_width - if scroll.show_scrollbar { 1 } else { 0 },
             text_height,
             initial_indent,
