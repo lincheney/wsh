@@ -2,7 +2,8 @@ use byteyarn::ByteYarn;
 use std::io::Write;
 use bstr::{BStr, BString, ByteSlice};
 use crate::tui::{Drawer, Canvas};
-use crate::tui::text::{Text, HighlightedRange};
+use crate::tui::text::{Text, HighlightedRange, Highlight};
+use crate::utils::merge_sort_iter::SortedMergeable;
 pub mod suffix;
 
 #[derive(Debug)]
@@ -271,12 +272,17 @@ impl Buffer {
         drawer: &mut Drawer<W, C>,
         initial_indent: u16,
         max_height: Option<usize>,
+        predisplay: Option<Highlight<usize>>,
+        postdisplay: Option<Highlight<usize>>,
     ) -> std::io::Result<(u16, u16)> {
 
         let cursor = self.cursor_byte_pos();
         let mut cursor_coord = drawer.get_pos();
         let width = drawer.term_width() as usize;
         let scroll = crate::tui::text::ScrollPosition::Line(self.get_cursor_lineno());
+
+        let predisplay = predisplay.map(|inner| HighlightedRange { parano: 0, start: 0, end: 0, inner });
+        let postdisplay = postdisplay.map(|inner| HighlightedRange { parano: 0, start: usize::MAX, end: usize::MAX, inner });
 
         let scrolled = crate::tui::scroll::wrap(
             &self.contents.get(),
@@ -285,7 +291,11 @@ impl Buffer {
             max_height,
             initial_indent as _,
             scroll,
-            |parano| self.contents.highlights.get_for_parano(parano).iter(),
+            |_parano| {
+                self.contents.highlights.iter()
+                    .sorted_merge_with(predisplay.iter())
+                    .sorted_merge_with(postdisplay.iter())
+            },
         );
         let mut lines = scrolled.into_lines();
 

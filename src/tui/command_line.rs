@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use super::text::{HighlightedRange, Highlight, TextRenderer, Renderer, NoRendererCallback};
+use super::text::{Highlight, TextRenderer, Renderer, NoRendererCallback};
 use bstr::{BString, BStr};
 use std::io::{Write};
 use crate::tui::{Drawer, Canvas};
@@ -8,9 +8,6 @@ use crate::shell::{Shell, MetaStr};
 use crate::meta_str;
 
 const FALLBACK_PROMPT: &MetaStr = crate::meta_str!(c">>> ");
-// for internal use
-const PREDISPLAY_NS: usize = usize::MAX;
-const POSTDISPLAY_NS: usize = PREDISPLAY_NS - 1;
 
 pub const MAX_CMDLINE_HEIGHT: usize = 3;
 #[derive(Default, Debug)]
@@ -126,49 +123,7 @@ impl CommandLine<'_> {
         self.draw_end_pos = (0, 0);
     }
 
-    pub fn refresh_display_string(&mut self, text: Option<BString>, pos: usize, namespace: usize) {
-        self.buffer.clear_highlights_in_namespace(namespace);
-        if let Some(text) = text && !text.is_empty() {
-            self.buffer.add_highlight(HighlightedRange {
-                parano: 0,
-                start: pos,
-                end: pos,
-                inner: Highlight {
-                    style: Default::default(),
-                    blend: true,
-                    namespace,
-                    virtual_text: Some(text),
-                    conceal: None,
-                    priority: 0.,
-                },
-            });
-        }
-    }
-
     pub fn refresh(&mut self, width: usize) {
-        if self.predisplay_dirty || self.postdisplay_dirty {
-            match &self.prompt_mode {
-                PromptMode::ShellVars(vars) => {
-                    let predisplay = vars.predisplay.clone();
-                    let postdisplay = vars.postdisplay.clone();
-                    if self.predisplay_dirty {
-                        self.refresh_display_string(predisplay, PREDISPLAY_NS, 0);
-                    }
-                    if self.postdisplay_dirty {
-                        self.refresh_display_string(postdisplay, POSTDISPLAY_NS, usize::MAX);
-                    }
-                }
-                PromptMode::Custom(_) => {
-                    if self.predisplay_dirty {
-                        self.buffer.clear_highlights_in_namespace(PREDISPLAY_NS);
-                    }
-                    if self.postdisplay_dirty {
-                        self.buffer.clear_highlights_in_namespace(POSTDISPLAY_NS);
-                    }
-                }
-            }
-        }
-
         let prompt_size = match &self.prompt_mode {
             PromptMode::ShellVars(vars) => vars.prompt_size,
             PromptMode::Custom(widget) => widget.inner.get_size(width, 0, widget.cursor_space_hl.iter()),
@@ -215,15 +170,32 @@ impl CommandLine<'_> {
         }
 
         // redraw the buffer
-        if dirty || self.buffer.dirty {
+        if dirty || self.buffer.dirty || self.predisplay_dirty || self.postdisplay_dirty {
             // draw buffer starting from end of prompt
             if !drawer.try_move_to(prompt_end) {
                 // no space for the buffer
                 return Ok(())
             }
 
+            let mut predisplay = None;
+            let mut postdisplay = None;
+            if let PromptMode::ShellVars(vars) = &self.prompt_mode {
+                if let Some(text) = &vars.predisplay && !text.is_empty() {
+                    predisplay = Some(Highlight { virtual_text: Some(text.clone()), ..Default::default() });
+                }
+                if let Some(text) = &vars.postdisplay && !text.is_empty() {
+                    postdisplay = Some(Highlight { virtual_text: Some(text.clone()), ..Default::default() });
+                }
+            };
+
             // also record where is the cursor
-            self.cursor_coord = self.buffer.render(drawer, prompt_end.0, Some(MAX_CMDLINE_HEIGHT))?;
+            self.cursor_coord = self.buffer.render(
+                drawer,
+                prompt_end.0,
+                Some(MAX_CMDLINE_HEIGHT),
+                predisplay,
+                postdisplay,
+            )?;
             self.draw_end_pos = drawer.get_pos();
         }
 
