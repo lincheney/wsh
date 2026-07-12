@@ -73,7 +73,7 @@ macro_rules! define_wrap_ascii {
         >)? (
             grapheme: u8,
             max_width: usize,
-            (mut x, mut y, mut lineno): (usize, usize, usize),
+            (mut x, mut y, lineno): (usize, usize, usize),
             $(
             range: Range<usize>,
             style: Option<Style>,

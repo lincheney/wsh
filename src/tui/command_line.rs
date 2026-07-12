@@ -11,7 +11,6 @@ const FALLBACK_PROMPT: &MetaStr = crate::meta_str!(c">>> ");
 // for internal use
 const PREDISPLAY_NS: usize = usize::MAX;
 const POSTDISPLAY_NS: usize = PREDISPLAY_NS - 1;
-const TRUNCATION_NS: usize = POSTDISPLAY_NS - 1;
 
 pub const MAX_CMDLINE_HEIGHT: usize = 3;
 #[derive(Default, Debug)]

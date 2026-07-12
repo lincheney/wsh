@@ -1,3 +1,4 @@
+use std::ops::ControlFlow;
 use std::range::Range;
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
@@ -579,7 +580,7 @@ impl<'a> Renderer for NodeRenderer<'a, std::slice::Iter<'a, NodeId>> {
         newline: bool,
         pad: bool,
         callback: &mut Option<F>,
-    ) -> std::io::Result<bool>
+    ) -> std::io::Result<ControlFlow<()>>
     where
         W :Write,
         C: Canvas,
@@ -587,7 +588,7 @@ impl<'a> Renderer for NodeRenderer<'a, std::slice::Iter<'a, NodeId>> {
     {
 
         if self.finished() {
-            return Ok(false)
+            return Ok(ControlFlow::Break(()))
         }
 
         match self {
@@ -607,7 +608,7 @@ impl<'a> Renderer for NodeRenderer<'a, std::slice::Iter<'a, NodeId>> {
                     let last = i == len - 1;
 
                     if !*finished {
-                        *finished = !renderer.draw_one_line(drawer, newline && first, !last, callback)?;
+                        *finished = renderer.draw_one_line(drawer, newline && first, !last, callback)?.is_break();
                         all_finished = all_finished && *finished;
                     } else if !last {
                         if newline && first {
@@ -616,7 +617,11 @@ impl<'a> Renderer for NodeRenderer<'a, std::slice::Iter<'a, NodeId>> {
                         drawer.draw_cell_n_times(&crate::tui::Cell::EMPTY, false, node.size.get().0 as _)?;
                     }
                 }
-                Ok(!all_finished)
+                Ok(if all_finished {
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(())
+                })
             },
             NodeRenderer::Widget{ renderer, widget, tmp, pos_recorded } => {
                 if !*tmp && !*pos_recorded {

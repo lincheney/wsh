@@ -1,3 +1,4 @@
+use std::ops::ControlFlow;
 use std::range::Range;
 use std::io::Write;
 use crate::tui::{Drawer, Canvas, Cell, text::Alignment, border::Border};
@@ -18,7 +19,7 @@ pub trait Renderer {
         newlines: bool,
         pad: bool,
         callback: &mut Option<F>,
-    ) -> std::io::Result<bool>
+    ) -> std::io::Result<ControlFlow<()>>
     where
         W :Write,
         C: Canvas,
@@ -37,7 +38,7 @@ pub trait Renderer {
         C: Canvas,
         F: FnMut(&mut Drawer<W, C>, usize, Range<usize>),
     {
-        while self.draw_one_line(drawer, newline, pad, &mut callback)? {
+        while self.draw_one_line(drawer, newline, pad, &mut callback)?.is_continue() {
             newline = true;
         }
         Ok(())
@@ -173,7 +174,7 @@ impl Renderer for TextRenderer<'_> {
         newline: bool,
         pad: bool,
         callback: &mut Option<F>,
-    ) -> std::io::Result<bool>
+    ) -> std::io::Result<ControlFlow<()>>
     where
         W :Write,
         C: Canvas,
@@ -181,7 +182,7 @@ impl Renderer for TextRenderer<'_> {
     {
 
         let remaining_height = match &mut self.remaining_height {
-            Some(0) => return Ok(false), // no height left, done
+            Some(0) => return Ok(ControlFlow::Break(())), // no height left, done
             Some(height) => {
                 let old = *height;
                 *height -= 1;
@@ -197,7 +198,7 @@ impl Renderer for TextRenderer<'_> {
             }
             border.render_top(drawer, self.width as u16)?;
             self.top_consumed = true;
-            return Ok(true)
+            return Ok(ControlFlow::Continue(()))
         }
 
         let line = if let Some(slice) = self.lines.next() {
@@ -265,7 +266,7 @@ impl Renderer for TextRenderer<'_> {
                 drawer.draw_cell_n_times(&self.clear_cell, false, x as _)?;
             }
 
-            return Ok(true)
+            return Ok(ControlFlow::Continue(()))
         }
 
         // draw bottom border row
@@ -275,9 +276,9 @@ impl Renderer for TextRenderer<'_> {
             }
             border.render_bottom(drawer, self.width as u16)?;
             self.bottom_consumed = true;
-            return Ok(true)
+            return Ok(ControlFlow::Continue(()))
         }
 
-        Ok(false)
+        Ok(ControlFlow::Break(()))
     }
 }
