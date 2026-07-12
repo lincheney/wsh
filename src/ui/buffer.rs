@@ -286,16 +286,18 @@ impl Buffer {
         let postdisplay = postdisplay.map(|inner| HighlightedRange { parano: 0, start: usize::MAX, end: usize::MAX, inner });
 
         let scrolled = crate::tui::scroll::wrap(
-            &self.contents.get(),
+            self.contents.get(),
             Some(self.contents.style.clone()),
             width,
             max_height,
             initial_indent as _,
             scroll,
-            |_parano| {
-                self.contents.highlights.iter()
-                    .sorted_merge_with(predisplay.iter())
-                    .sorted_merge_with(postdisplay.iter())
+            |parano| {
+                (parano == 0).then(||
+                    self.contents.highlights.iter()
+                        .sorted_merge_with(predisplay.iter())
+                        .sorted_merge_with(postdisplay.iter())
+                ).into_iter().flatten()
             },
         );
         let mut lines = scrolled.into_lines();
