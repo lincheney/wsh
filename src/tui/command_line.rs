@@ -186,7 +186,7 @@ impl CommandLine<'_> {
                 if let Some(text) = &vars.postdisplay && !text.is_empty() {
                     postdisplay = Some(Highlight { virtual_text: Some(Cow::Borrowed(text.as_ref())), ..Default::default() });
                 }
-            };
+            }
 
             // also record where is the cursor
             self.cursor_coord = self.buffer.render(

@@ -309,10 +309,8 @@ impl Buffer {
 
             if first {
                 first = false;
+                // we don't truncate line 0
                 if first_lineno > 0 && initial_indent as usize + line.iter().map(|t| t.inner.width()).sum::<usize>() >= width {
-                    // truncate first line if cursor is on line >= 2
-                    // we don't truncate line 0
-                    // which will be shown so long as cursor is on line <= 1
                     line = &line[line.len().min(initial_indent as usize) ..];
                 }
             } else {

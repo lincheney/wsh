@@ -9,19 +9,10 @@ pub use highlight::{Highlight, HighlightedRange, HighlightedRangeSet};
 
 pub(super) const TAB_WIDTH: usize = 4;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy)]
 pub struct Scroll {
     pub show_scrollbar: bool,
     pub position: super::scroll::ScrollPosition,
-}
-
-impl Default for Scroll {
-    fn default() -> Self {
-        Self {
-            show_scrollbar: true,
-            position: Default::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, strum::EnumString, strum::Display)]
