@@ -10,12 +10,18 @@ pub enum Metric {
 }
 
 impl Metric {
-    fn resolve(self, available: Option<Unit>) -> Unit {
+    pub fn resolve(self, available: Option<Unit>) -> Unit {
         match (self, available) {
             (Self::Fixed(x), _) => x,
             (Self::Percent(x), Some(available)) => ((available * x) as f64 / 100.) as Unit,
             _ => 0, // this is good default?
         }
+    }
+}
+
+impl Default for Metric {
+    fn default() -> Self {
+        Self::Percent(100)
     }
 }
 

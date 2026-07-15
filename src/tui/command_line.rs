@@ -9,7 +9,6 @@ use crate::meta_str;
 
 const FALLBACK_PROMPT: &MetaStr = crate::meta_str!(c">>> ");
 
-pub const MAX_CMDLINE_HEIGHT: usize = 3;
 #[derive(Default, Debug)]
 pub struct ShellVars {
     predisplay: Option<BString>,
@@ -34,6 +33,8 @@ impl Default for PromptMode {
 pub struct CommandLineState {
     pub cursor_coord: (u16, u16),
     pub draw_end_pos: (u16, u16),
+    max_buffer_height_metric: super::sizing::Metric,
+    max_buffer_height_value: u16,
 
     pub prompt_mode: PromptMode,
     pub predisplay_dirty: bool,
@@ -123,7 +124,7 @@ impl CommandLine<'_> {
         self.draw_end_pos = (0, 0);
     }
 
-    pub fn refresh(&mut self, width: usize) {
+    pub fn refresh(&mut self, width: usize, height: usize) {
         let prompt_size = match &self.prompt_mode {
             PromptMode::ShellVars(vars) => vars.prompt_size,
             PromptMode::Custom(widget) => widget.inner.get_size(width, 0, widget.cursor_space_hl.iter()),
@@ -131,11 +132,12 @@ impl CommandLine<'_> {
 
         if self.buffer.dirty || self.prompt_size != prompt_size {
             self.prompt_size = prompt_size;
-            let (width, height) = self.buffer.get_size(width, self.prompt_size.0 as _);
+            let (buf_width, buf_height) = self.buffer.get_size(width, self.prompt_size.0 as _);
             // there is 1 overlapping line
-            let y = (height + self.prompt_size.1).saturating_sub(2).min(MAX_CMDLINE_HEIGHT - 1);
+            self.max_buffer_height_value = self.max_buffer_height_metric.resolve(Some(height as _));
+            let y = (buf_height + self.prompt_size.1).saturating_sub(2).min(self.max_buffer_height_value.saturating_sub(1) as _);
 
-            self.draw_end_pos = (width as _, y as _);
+            self.draw_end_pos = (buf_width as _, y as _);
             self.buffer.dirty = true;
         }
     }
@@ -192,7 +194,7 @@ impl CommandLine<'_> {
             self.cursor_coord = self.buffer.render(
                 drawer,
                 prompt_end.0,
-                Some(MAX_CMDLINE_HEIGHT),
+                Some(self.max_buffer_height_value as _),
                 predisplay,
                 postdisplay,
             )?;

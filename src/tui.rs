@@ -269,11 +269,11 @@ impl Tui {
         let old_height = old_cmdline_height + old_widgets_height + old_status_bar_height;
 
         // refresh the widgets etc
-        if cmdline.is_dirty() {
-            cmdline.refresh(width as _);
-        }
         if status_bar.dirty {
             status_bar.refresh(width as _);
+        }
+        if cmdline.is_dirty() {
+            cmdline.refresh(width as _, self.max_height.saturating_sub(status_bar.get_height() as _) as _);
         }
         if self.dirty {
             // the nodes are the main part of the ui that can be resized to fit on the screen
