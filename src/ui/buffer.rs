@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use byteyarn::ByteYarn;
 use std::io::Write;
 use bstr::{BStr, BString, ByteSlice};
-use crate::tui::{Drawer, Canvas};
+use crate::tui::{Drawer, Canvas, Cell};
 use crate::tui::text::{Text, HighlightedRange, Highlight};
 use crate::utils::merge_sort_iter::SortedMergeable;
 pub mod suffix;
@@ -310,8 +310,16 @@ impl Buffer {
             if first {
                 first = false;
                 // we don't truncate line 0
-                if first_lineno > 0 && initial_indent as usize + line.iter().map(|t| t.inner.width()).sum::<usize>() >= width {
-                    line = &line[line.len().min(initial_indent as usize) ..];
+                if first_lineno > 0 {
+                    // draw zr_start_ellipsis instead
+                    drawer.draw_cell(&Cell::new(">"), false)?;
+                    drawer.draw_cell_n_times(&Cell::new("."), false, 4)?;
+                    // the line may no longer fit due to the prompt and ellipsis taking up space
+                    // truncate from the left
+                    let x = drawer.get_pos().0 as usize;
+                    if x + line.iter().map(|t| t.inner.width()).sum::<usize>() >= width {
+                        line = &line[line.len().min(x) ..];
+                    }
                 }
             } else {
                 // do not draw newline before first line
