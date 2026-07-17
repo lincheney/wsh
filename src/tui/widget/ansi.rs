@@ -370,6 +370,10 @@ impl Parser {
                     self.buffer.clear();
                     State::None
                 },
+                (State::Csi | State::CsiParams, b' ' | b'"' | b'\'' | b'$' | b'*' | b'#') => {
+                    self.buffer.clear();
+                    State::CsiOther
+                },
                 (State::CsiParams, _) => {
                     self.buffer.clear();
                     State::None
@@ -378,7 +382,7 @@ impl Parser {
                 (State::Esc, b' ' | b'#' | b'%' | b'(' | b')' | b'*' | b'+') => State::EscOther,
                 (State::EscOther, _) => State::None,
 
-                (State::Csi, b'?' | b'>' | b'=' | b'!') => State::CsiOther,
+                (State::Csi, b'?' | b'<' | b'>' | b'=' | b'!') => State::CsiOther,
                 (State::CsiOther, b'0'..=b'9' | b';' | b':') => State::CsiOther,
                 (State::CsiOther, _) => State::None,
                 (State::Csi, _) => State::None,
