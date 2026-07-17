@@ -82,13 +82,6 @@ macro_rules! event_types {
                 }
             }
 
-            fn add_event_callback(&self, typ: EventType, cb: Function) -> usize {
-                let counter = self.counter.get();
-                self.get_callbacks(typ).add(counter, cb);
-                self.counter.set(counter + 1);
-                counter
-            }
-
             fn remove_event_callback(&self, id: usize) {
             $(
                 if self.$name.remove(id) {
@@ -113,17 +106,6 @@ macro_rules! event_types {
                 Ok(())
             }
         )*
-        }
-
-        async fn trigger_event_callback(ui: Ui, _lua: Lua, (event, args): (String, LuaMultiValue)) -> Result<()> {
-            let callbacks = match event.as_ref() {
-                $(
-                stringify!($name) => ui.event_callbacks.$name.get_owned(),
-                )*
-                _ => anyhow::bail!("invalid event {event}"),
-            };
-            trigger_callbacks_multi_value(&ui, &callbacks, args).await;
-            Ok(())
         }
 
     )
@@ -192,11 +174,21 @@ event_types!(
 
 
 fn add_event_callback(ui: &Ui, _lua: &Lua, (typ, callback): (EventType, Function)) -> Result<usize> {
-    Ok(ui.event_callbacks.add_event_callback(typ, callback))
+    let events = &ui.event_callbacks;
+    let counter = events.counter.get();
+    events.get_callbacks(typ).add(counter, callback);
+    events.counter.set(counter + 1);
+    Ok(counter)
 }
 
 fn remove_event_callback(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
     ui.event_callbacks.remove_event_callback(id);
+    Ok(())
+}
+
+async fn trigger_event_callback(ui: Ui, _lua: Lua, (typ, args): (EventType, LuaMultiValue)) -> Result<()> {
+    let callbacks = ui.event_callbacks.get_callbacks(typ).get_owned();
+    trigger_callbacks_multi_value(&ui, &callbacks, args).await;
     Ok(())
 }
 
