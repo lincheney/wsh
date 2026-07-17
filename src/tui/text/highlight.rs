@@ -106,8 +106,7 @@ impl<T, S> PartialOrd for HighlightedRange<T, S> {
 
 impl<T, S> Ord for HighlightedRange<T, S> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        // sort in reverse order of priority so higher priority comes first
-        self.parano.cmp(&other.parano).then(self.inner.priority.total_cmp(&other.inner.priority).reverse())
+        self.parano.cmp(&other.parano).then(self.inner.priority.total_cmp(&other.inner.priority))
     }
 }
 
