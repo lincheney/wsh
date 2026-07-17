@@ -100,7 +100,7 @@ macro_rules! event_types {
                             mlua::SerializeOptions::new().serialize_none_to_null(false),
                         ).unwrap()
                     ),*);
-                    let args = ui.lua.pack_multi(args).unwrap();
+                    let args = ui.lua.pack_multi(args)?;
                     trigger_callbacks_multi_value(&ui, &callbacks, args).await;
                 }
                 Ok(())
