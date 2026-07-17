@@ -166,7 +166,7 @@ impl<T, S: AsRef<BStr>> Text<T, S> {
 
         let empty = self.paragraphs.is_empty();
         let highlights = self.highlights.iter()
-            .skip_while(|hl| empty || hl.parano == 0)
+            .take_while(|hl| empty || hl.parano == 0)
             .chain(extra_highlights.clone().filter(|hl| empty || hl.parano == 0))
             .filter(|h| h.inner.may_cause_resize());
 
