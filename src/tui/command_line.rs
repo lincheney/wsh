@@ -318,7 +318,8 @@ impl RightPromptMode {
                             None,
                             drawer.get_pos().0 as _,
                             Some(1),
-                            None,
+                            // show the last line
+                            Some(super::text::Scroll::default()),
                             |parano| widget.inner.highlights.get_for_parano(parano).iter(),
                         ).render(drawer, false, false, NoRendererCallback::None)?;
                     }
