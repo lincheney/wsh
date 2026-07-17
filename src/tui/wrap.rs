@@ -215,7 +215,11 @@ pub fn wrap<
             lineno = i;
             len.saturating_sub(1) / max_width + 1
         }).sum();
-        let x = (last.len() + if last.len() == paragraph.len() { initial_indent } else { 0 }) % max_width;
+        let mut x = last.len() + if last.len() == paragraph.len() { initial_indent } else { 0 };
+        if x > 0 {
+            x = (x - 1) % max_width + 1;
+        }
+
         return (x, y - 1, lineno);
     }
 
