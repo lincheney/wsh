@@ -15,7 +15,7 @@ pub mod buffer;
 
 use crossterm::{
     terminal::{Clear, ClearType, BeginSynchronizedUpdate, EndSynchronizedUpdate},
-    cursor::MoveToColumn,
+    cursor::{MoveToColumn, SetCursorStyle},
     event,
     style,
     execute,
@@ -65,6 +65,7 @@ pub struct UiInner {
 
     pub termios_input_flags: TermiosInputFlags,
     pub mouse_mode: bool,
+    pub cursor_style: Option<SetCursorStyle>,
 
     pub pid_map: PidMap,
     pub event_callbacks: EventCallbacks ,
@@ -100,6 +101,7 @@ impl Ui {
                 eof: termios.control_chars[termios::SpecialCharacterIndices::VEOF as usize],
             },
             mouse_mode: false,
+            cursor_style: None,
             pid_map: Default::default(),
             event_callbacks: Default::default(),
         };
@@ -729,6 +731,9 @@ impl UiInner {
         if self.mouse_mode {
             queue!(stdout, ENABLE_SGR_MOUSE)?;
         }
+        if let Some(style) = self.cursor_style {
+            queue!(stdout, style)?;
+        }
         execute!(
             stdout,
             event::EnableBracketedPaste,
@@ -749,6 +754,14 @@ impl UiInner {
         )
     }
 
+    pub fn apply_cursor_style(&self) -> std::io::Result<()> {
+        if let Some(style) = self.cursor_style {
+            execute!(self.stdout.lock(), style)
+        } else {
+            Ok(())
+        }
+    }
+
     pub fn apply_intr(&self, intr: u8) -> Result<()> {
         let mut attrs = termios::tcgetattr(&self.stdout)?;
         attrs.control_chars[termios::SpecialCharacterIndices::VINTR as usize] = intr;
@@ -765,6 +778,7 @@ impl UiInner {
 
         crate::log_if_err(execute!(
             self.stdout,
+            SetCursorStyle::SteadyBlock,
             DISABLE_SGR_MOUSE,
             event::DisableBracketedPaste,
             event::DisableFocusChange,

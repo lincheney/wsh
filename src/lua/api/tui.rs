@@ -3,7 +3,10 @@ use bstr::{BString};
 use std::default::Default;
 use serde::{Serialize};
 use anyhow::Result;
-use crossterm::style::Color;
+use crossterm::{
+    style::Color,
+    cursor::SetCursorStyle,
+};
 use mlua::{prelude::*};
 use crate::ui::{Ui};
 use crate::tui::{
@@ -940,6 +943,46 @@ fn set_rprompt(ui: &Ui, __lua: &Lua, val: Option<RPromptOptions>) -> Result<()> 
     Ok(())
 }
 
+auto_from_lua! {
+    #[derive(Debug)]
+    enum LuaCursorShape {
+        Block,
+        Bar,
+        Underscore,
+    }
+}
+
+auto_from_lua! {
+    #[derive(Debug)]
+    struct LuaCursorStyle {
+        shape: LuaCursorShape,
+        blinking: Option<bool>,
+    }
+}
+
+async fn set_cursor_style(ui: Ui, _lua: Lua, options: LuaCursorStyle) -> Result<()> {
+    let shape = match (options.shape, options.blinking.unwrap_or(false)) {
+        (LuaCursorShape::Block, true)       => SetCursorStyle::BlinkingBlock,
+        (LuaCursorShape::Block, false)      => SetCursorStyle::SteadyBlock,
+        (LuaCursorShape::Bar, true)         => SetCursorStyle::BlinkingBar,
+        (LuaCursorShape::Bar, false)        => SetCursorStyle::SteadyBar,
+        (LuaCursorShape::Underscore, true)  => SetCursorStyle::BlinkingUnderScore,
+        (LuaCursorShape::Underscore, false) => SetCursorStyle::SteadyUnderScore,
+    };
+
+    let locks = (
+        ui.has_foreground_process.lock().await,
+        ui.print_lock.lock_exclusive().await,
+    );
+
+    let mut ui = ui.try_borrow_mut()?;
+    ui.cursor_style = Some(shape);
+    ui.apply_cursor_style()?;
+
+    drop(locks);
+    Ok(())
+}
+
 async fn enable_mouse_mode(ui: Ui, _lua: Lua, enable: Option<bool>) -> Result<()> {
     let locks = (
         ui.has_foreground_process.lock().await,
@@ -1060,6 +1103,7 @@ pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
     lua.set_fn("get_message_geometry", get_message_geometry)?;
     lua.set_fn("get_status_bar_geometry", get_status_bar_geometry)?;
     lua.set_fn("get_cursor_pos", get_cursor_pos)?;
+    lua.set_async_fn("set_cursor_style", set_cursor_style)?;
     lua.set_fn("add_render_callback", add_render_callback)?;
     lua.set_fn("remove_render_callback", remove_render_callback)?;
 
