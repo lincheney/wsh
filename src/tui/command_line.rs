@@ -39,6 +39,7 @@ impl Default for PromptMode {
 pub enum RightPromptMode {
     ShellVars(ShellVarPrompt),
     Custom{widget: super::widget::Widget, auto_disappear: bool},
+    None,
 }
 
 impl Default for RightPromptMode {
@@ -125,10 +126,16 @@ impl CommandLineState {
                 Cow::Owned(prompt) => Cow::Owned(prompt.unmetafy()),
                 Cow::Borrowed(prompt) => prompt.unmetafy(),
             };
-            *vars = ShellVarPrompt {
-                inner: prompt,
-                size: prompt_size,
-            };
+
+            if prompt_size.1 > 1 {
+                // draw nothing if multiline
+                self.rprompt_mode = RightPromptMode::None;
+            } else {
+                *vars = ShellVarPrompt {
+                    inner: prompt,
+                    size: prompt_size,
+                };
+            }
         }
 
         shell.end_zle_scope();
@@ -182,6 +189,7 @@ impl CommandLine<'_> {
 
         let mut rprompt_size = match &self.rprompt_mode {
             _ if !self.rprompt_dirty => self.rprompt_size,
+            RightPromptMode::None => (0, 0),
             // add extra space for the cursor
             RightPromptMode::ShellVars(vars) => (vars.size.0 + 1, vars.size.0),
             RightPromptMode::Custom{widget, ..} => {
@@ -308,6 +316,7 @@ impl RightPromptMode {
                 drawer.move_to((width.saturating_sub(size.0 - 1) as _, pos.1));
 
                 match self {
+                    Self::None => (),
                     Self::ShellVars(vars) => {
                         drawer.write_raw(&vars.inner, None)?;
                     }
