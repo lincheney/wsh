@@ -3,7 +3,7 @@ use byteyarn::ByteYarn;
 use std::io::Write;
 use bstr::{BStr, BString, ByteSlice};
 use crate::tui::{Drawer, Canvas, Cell, command_line::RightPromptMode};
-use crate::tui::text::{Text, HighlightedRange, Highlight, TextSize};
+use crate::tui::text::{Text, HighlightedRange, Highlight};
 use crate::utils::merge_sort_iter::SortedMergeable;
 pub mod suffix;
 
@@ -61,8 +61,12 @@ impl Buffer {
         self.dirty = true;
     }
 
-    pub fn get_size(&self, width: usize, initial_indent: usize) -> TextSize {
+    pub fn get_size(&self, width: usize, initial_indent: usize) -> (usize, usize) {
         self.contents.get_size(width, initial_indent, [].iter())
+    }
+
+    pub fn get_first_line_width(&self, width: usize, initial_indent: usize) -> usize {
+        self.contents.get_first_line_width(width, initial_indent, [].iter())
     }
 
     pub fn get_len(&mut self) -> usize {

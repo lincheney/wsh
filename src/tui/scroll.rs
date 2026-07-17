@@ -1,3 +1,4 @@
+use std::ops::ControlFlow;
 use std::cmp::Ordering;
 use std::range::Range;
 use super::text::{HighlightedRange};
@@ -161,6 +162,7 @@ where
                         inner: token,
                         style,
                     });
+                    ControlFlow::Continue(())
                 }),
             )
         } else {

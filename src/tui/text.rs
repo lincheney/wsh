@@ -1,3 +1,4 @@
+use std::ops::ControlFlow;
 use std::ops::Range;
 use bstr::{BStr, BString, ByteVec};
 use crate::tui::{Style, Cell};
@@ -22,13 +23,6 @@ pub enum Alignment {
     Left,
     Center,
     Right,
-}
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct TextSize {
-    pub height: usize,
-    pub first_line_width: usize,
-    pub last_line_width: usize,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -159,22 +153,58 @@ impl<T, S: AsRef<BStr>> Text<T, S> {
         }
     }
 
-    pub fn get_size<'a, I>(
+    pub fn get_first_line_width<'a, I>(
         &'a self,
         width: usize,
-        mut initial_indent: usize,
+        initial_indent: usize,
         extra_highlights: I,
-    ) -> TextSize
+    ) -> usize
     where
         T: 'a,
         I: Clone + Iterator<Item=&'a HighlightedRange<T, S>>,
     {
 
-        let mut pos = TextSize::default();
+        let empty = self.paragraphs.is_empty();
+        let highlights = self.highlights.iter()
+            .skip_while(|hl| empty || hl.parano == 0)
+            .chain(extra_highlights.clone().filter(|hl| empty || hl.parano == 0))
+            .filter(|h| h.inner.may_cause_resize());
+
+        let mut first_line_width = 0;
+
+        // skip if no text, not even virtual text
+        if !empty || highlights.clone().any(|hl| hl.inner.has_virtual_text()) {
+            let paragraph = self.paragraphs.first().map(|p| p.as_ref()).unwrap_or_default();
+            super::wrap::wrap(paragraph, highlights, None, width, initial_indent, Some(|_, token, _, _, _| {
+                if matches!(token, super::wrap::WrapToken::LineBreak) {
+                    ControlFlow::Break(())
+                } else {
+                    first_line_width += 1;
+                    ControlFlow::Continue(())
+                }
+            }));
+        }
+
+        first_line_width
+    }
+
+    pub fn get_size<'a, I>(
+        &'a self,
+        width: usize,
+        mut initial_indent: usize,
+        extra_highlights: I,
+    ) -> (usize, usize)
+    where
+        T: 'a,
+        I: Clone + Iterator<Item=&'a HighlightedRange<T, S>>,
+    {
+
+        let mut last_line_width = 0;
+        let mut height = 0;
         let mut start = 0;
 
         // add a dummy line at the end
-        for (i, line) in self.paragraphs.iter().map(|l| l.as_ref()).chain(std::iter::once(BStr::new(b""))).enumerate() {
+        for (i, para) in self.paragraphs.iter().map(|l| l.as_ref()).chain(std::iter::once(BStr::new(b""))).enumerate() {
             let past_end = i >= self.paragraphs.len();
 
             let line_filter = |h: &HighlightedRange<T, S>| h.parano == i || (past_end && h.parano > i);
@@ -189,25 +219,22 @@ impl<T, S: AsRef<BStr>> Text<T, S> {
                 continue
             }
 
-            let (x, y, _lineno) = super::wrap::wrap(line, highlights, None, width, initial_indent, super::wrap::NoCallback::None);
+            let (x, y, _lineno) = super::wrap::wrap(para, highlights, None, width, initial_indent, super::wrap::NoCallback::None);
             let x = x.saturating_sub(initial_indent);
-            pos.last_line_width = x;
-            pos.height += y;
-            if i == 0 {
-                pos.first_line_width = if y == 0 { x } else { width };
-            }
+            last_line_width = x;
+            height += y;
             initial_indent = 0;
 
             if i + 1 != self.paragraphs.len() {
-                pos.last_line_width = 0;
-                pos.height += 1;
+                last_line_width = 0;
+                height += 1;
             }
         }
 
-        if pos.height != 0 || pos.last_line_width != 0 {
-            pos.height += 1;
+        if height != 0 || last_line_width != 0 {
+            height += 1;
         }
-        pos
+        (last_line_width, height)
     }
 
     pub fn make_default_style_cell(&self) -> Option<Cell> {

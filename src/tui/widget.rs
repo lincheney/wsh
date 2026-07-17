@@ -73,7 +73,7 @@ impl Widget {
             max_width = max_width.saturating_sub(1);
         }
 
-        let mut height = self.inner.get_size(max_width as _, 0, self.cursor_space_hl.iter()).height as u16;
+        let mut height = self.inner.get_size(max_width as _, 0, self.cursor_space_hl.iter()).1 as u16;
         if self.border_show_empty || height > 0 {
             height += border_height;
         }

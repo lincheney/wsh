@@ -177,10 +177,7 @@ impl CommandLine<'_> {
         let prompt_size = match &self.prompt_mode {
             _ if !self.prompt_dirty => self.prompt_size,
             PromptMode::ShellVars(vars) => vars.prompt.size,
-            PromptMode::Custom{widget} => {
-                let size = widget.inner.get_size(width, 0, widget.cursor_space_hl.iter());
-                (size.last_line_width, size.height)
-            },
+            PromptMode::Custom{widget} => widget.inner.get_size(width, 0, widget.cursor_space_hl.iter()),
         };
 
         let mut rprompt_size = match &self.rprompt_mode {
@@ -189,17 +186,15 @@ impl CommandLine<'_> {
             RightPromptMode::ShellVars(vars) => (vars.size.0 + 1, vars.size.0),
             RightPromptMode::Custom{widget, ..} => {
                 let size = widget.inner.get_size(width, 0, widget.cursor_space_hl.iter());
-                (size.last_line_width + 1, size.height)
+                (size.0 + 1, size.1)
             },
         };
 
-        let mut buf_size = None;
         if (self.buffer.dirty || self.rprompt_size != rprompt_size) && self.rprompt_mode.can_disappear() {
-            let size = buf_size.insert(self.buffer.get_size(width, prompt_size.0 + rprompt_size.0));
-            if prompt_size.0 + size.first_line_width + rprompt_size.0 > width {
+            let first_line_width = self.buffer.get_first_line_width(width, prompt_size.0 + rprompt_size.0);
+            if prompt_size.0 + first_line_width + rprompt_size.0 > width {
                 rprompt_size = (0, 0);
                 self.rprompt_dirty = true;
-                buf_size = None;
             }
         }
 
@@ -211,13 +206,13 @@ impl CommandLine<'_> {
             self.prompt_size = prompt_size;
             self.rprompt_size = rprompt_size;
 
-            let buf_size = buf_size.get_or_insert_with(|| self.buffer.get_size(width, prompt_size.0 + rprompt_size.0));
+            let buf_size = self.buffer.get_size(width, prompt_size.0 + rprompt_size.0);
 
             // there is 1 overlapping line
             self.max_buffer_height_value = self.max_buffer_height_metric.resolve(Some(height as _));
-            let y = (buf_size.height + self.prompt_size.1).saturating_sub(2).min(self.max_buffer_height_value.saturating_sub(1) as _);
+            let y = (buf_size.1 + self.prompt_size.1).saturating_sub(2).min(self.max_buffer_height_value.saturating_sub(1) as _);
 
-            self.draw_end_pos = (buf_size.last_line_width as _, y as _);
+            self.draw_end_pos = (buf_size.0 as _, y as _);
             self.buffer.dirty = true;
         }
     }

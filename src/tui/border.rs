@@ -1,3 +1,4 @@
+use std::ops::ControlFlow;
 use std::borrow::Cow;
 use std::io::Write;
 use bstr::{ByteSlice};
@@ -62,18 +63,16 @@ impl Title {
         let first_line = first_line.lines().next()?;
 
         let highlights = self.text.highlights.iter();
-        let mut finished = false;
         let mut cells = vec![];
         super::wrap::wrap(first_line.into(), highlights, Some(&self.text.style), width - 2, 0, Some(|_, token: super::wrap::WrapToken, _wrapped_no, _lineno, style| {
-            if !finished && let Some(string) = token.as_str() {
+            if let Some(string) = token.as_str() {
                 let mut cell = Cell::new(string);
                 if let Some(style) = style {
                     cell.style = style;
                 }
                 cells.push(cell);
-            } else {
-                finished = true;
             }
+            ControlFlow::Break(())
         }));
         Some(cells)
     }
