@@ -1,24 +1,24 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use crate::lua::{LuaWrapper, auto_from_lua};
-use bstr::BString;
+use bstr::BStr;
 use anyhow::Result;
-use mlua::{prelude::*, Function};
+use mlua::prelude::*;
 use serde::{Serialize};
 use crate::ui::Ui;
 use crate::keybind;
 
 #[derive(Default)]
 struct CallbackVec {
-    inner: RefCell<Rc<Vec<(usize, Function)>>>,
+    inner: RefCell<Rc<Vec<(usize, LuaFunction)>>>,
 }
 
 impl CallbackVec {
-    fn get_owned(&self) -> Rc<Vec<(usize, Function)>> {
+    fn get_owned(&self) -> Rc<Vec<(usize, LuaFunction)>> {
         self.inner.borrow().clone()
     }
 
-    fn modify<F: FnOnce(&mut Vec<(usize, Function)>) -> T, T>(&self, f: F) -> T{
+    fn modify<F: FnOnce(&mut Vec<(usize, LuaFunction)>) -> T, T>(&self, f: F) -> T{
         let mut inner = self.inner.borrow_mut();
         if let Some(inner) = Rc::get_mut(&mut inner) {
             f(inner)
@@ -31,7 +31,7 @@ impl CallbackVec {
         }
     }
 
-    fn add(&self, id: usize, cb: Function) {
+    fn add(&self, id: usize, cb: LuaFunction) {
         self.modify(|vec| vec.push((id, cb)));
     }
 
@@ -47,7 +47,7 @@ impl CallbackVec {
     }
 }
 
-async fn trigger_callbacks_multi_value(ui: &Ui, callbacks: &[(usize, Function)], args: LuaMultiValue) {
+async fn trigger_callbacks_multi_value(ui: &Ui, callbacks: &[(usize, LuaFunction)], args: LuaMultiValue) {
     for (_, cb) in callbacks {
         crate::log_if_err(ui.call_lua_fn(false, cb.clone(), args.clone()).await);
     }
@@ -160,20 +160,20 @@ impl From<keybind::MouseEvent> for MouseEvent {
 
 event_types!(
     init(),
-    key(key: &KeyEvent, data: &BString),
-    mouse(event: &MouseEvent, data: &BString),
-    accept_line(data: &BString),
+    key(key: &KeyEvent, data: &BStr),
+    mouse(event: &MouseEvent, data: &BStr),
+    accept_line(data: &BStr),
     buffer_change(),
     buffer_cursor_move(),
-    precmd(data: Option<&BString>),
-    paste(data: &BString),
+    precmd(data: Option<&BStr>),
+    paste(data: &BStr),
     window_resize(width: u32, height: u32),
     message_resize(ids: &[usize]),
     exit(val: i32),
 );
 
 
-fn add_event_callback(ui: &Ui, _lua: &Lua, (typ, callback): (EventType, Function)) -> Result<usize> {
+fn add_event_callback(ui: &Ui, _lua: &Lua, (typ, callback): (EventType, LuaFunction)) -> Result<usize> {
     let events = &ui.event_callbacks;
     let counter = events.counter.get();
     events.get_callbacks(typ).add(counter, callback);

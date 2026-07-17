@@ -158,7 +158,7 @@ impl KeyHandler<'_> {
             },
 
             Event::BracketedPaste(data) => {
-                self.event_callbacks.paste(self, data).await?;
+                self.event_callbacks.paste(self, data.as_ref()).await?;
                 Ok(Some(Action::Done{exit: false}))
             },
 

@@ -1,7 +1,7 @@
 use std::ops::ControlFlow;
 use std::cell::{Cell, RefCell, BorrowError, BorrowMutError};
 use std::rc::Rc;
-use bstr::{BString};
+use bstr::{BString, BStr};
 use std::future::Future;
 use std::default::Default;
 use mlua::prelude::*;
@@ -146,7 +146,7 @@ impl Ui {
         self.inner.try_borrow_mut()
     }
 
-    pub async fn start_cmd(&self, buffer: Option<&BString>) -> Result<()> {
+    pub async fn start_cmd(&self, buffer: Option<&BStr>) -> Result<()> {
         self.event_callbacks.precmd(self, buffer).await?;
         self.draw().await
     }
@@ -287,8 +287,8 @@ impl Ui {
 
     pub async fn handle_event(&mut self, event: Event, event_buffer: BString) -> Result<bool> {
         match event {
-            Event::Key(ev) => self.event_callbacks.key(self, &ev.into(), &event_buffer).await?,
-            Event::Mouse(ev) => self.event_callbacks.mouse(self, &ev.into(), &event_buffer).await?,
+            Event::Key(ev) => self.event_callbacks.key(self, &ev.into(), event_buffer.as_ref()).await?,
+            Event::Mouse(ev) => self.event_callbacks.mouse(self, &ev.into(), event_buffer.as_ref()).await?,
             _ => (),
         }
 
@@ -329,7 +329,7 @@ impl Ui {
             ui.try_borrow_mut()?.reset();
             ui.event_callbacks.buffer_change(&ui).await?;
             ui.event_callbacks.buffer_cursor_move(&ui).await?;
-            ui.start_cmd(Some(&"".into())).await?;
+            ui.start_cmd(Some("".into())).await?;
             Ok(())
         });
 
@@ -516,7 +516,7 @@ impl Ui {
 
         // time to execute
         if let Some(buffer) = buffer {
-            self.event_callbacks.accept_line(self, &buffer).await?;
+            self.event_callbacks.accept_line(self, buffer.as_ref()).await?;
 
             {
                 let fg_lock = self.has_foreground_process.lock().await;
@@ -540,7 +540,7 @@ impl Ui {
 
             self.event_callbacks.buffer_change(self).await?;
             self.event_callbacks.buffer_cursor_move(self).await?;
-            self.start_cmd(Some(&buffer)).await?;
+            self.start_cmd(Some(buffer.as_ref())).await?;
 
         } else {
             self.insert_or_set_buffer(true, b"\n", None).await?;
