@@ -949,6 +949,7 @@ auto_from_lua! {
         Block,
         Bar,
         Underscore,
+        Invisible,
     }
 }
 
@@ -962,12 +963,13 @@ auto_from_lua! {
 
 async fn set_cursor_style(ui: Ui, _lua: Lua, options: LuaCursorStyle) -> Result<()> {
     let shape = match (options.shape, options.blinking.unwrap_or(false)) {
-        (LuaCursorShape::Block, true)       => SetCursorStyle::BlinkingBlock,
-        (LuaCursorShape::Block, false)      => SetCursorStyle::SteadyBlock,
-        (LuaCursorShape::Bar, true)         => SetCursorStyle::BlinkingBar,
-        (LuaCursorShape::Bar, false)        => SetCursorStyle::SteadyBar,
-        (LuaCursorShape::Underscore, true)  => SetCursorStyle::BlinkingUnderScore,
-        (LuaCursorShape::Underscore, false) => SetCursorStyle::SteadyUnderScore,
+        (LuaCursorShape::Block, true)       => crate::ui::CursorStyle::Set(SetCursorStyle::BlinkingBlock),
+        (LuaCursorShape::Block, false)      => crate::ui::CursorStyle::Set(SetCursorStyle::SteadyBlock),
+        (LuaCursorShape::Bar, true)         => crate::ui::CursorStyle::Set(SetCursorStyle::BlinkingBar),
+        (LuaCursorShape::Bar, false)        => crate::ui::CursorStyle::Set(SetCursorStyle::SteadyBar),
+        (LuaCursorShape::Underscore, true)  => crate::ui::CursorStyle::Set(SetCursorStyle::BlinkingUnderScore),
+        (LuaCursorShape::Underscore, false) => crate::ui::CursorStyle::Set(SetCursorStyle::SteadyUnderScore),
+        (LuaCursorShape::Invisible, _)      => crate::ui::CursorStyle::Hidden,
     };
 
     let locks = (
@@ -976,8 +978,8 @@ async fn set_cursor_style(ui: Ui, _lua: Lua, options: LuaCursorStyle) -> Result<
     );
 
     let mut ui = ui.try_borrow_mut()?;
-    ui.cursor_style = Some(shape);
-    ui.apply_cursor_style()?;
+    ui.cursor_style = shape;
+    ui.apply_cursor_style(None, true)?;
 
     drop(locks);
     Ok(())

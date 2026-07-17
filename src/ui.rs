@@ -65,10 +65,18 @@ pub struct UiInner {
 
     pub termios_input_flags: TermiosInputFlags,
     pub mouse_mode: bool,
-    pub cursor_style: Option<SetCursorStyle>,
+    pub cursor_style: CursorStyle,
 
     pub pid_map: PidMap,
     pub event_callbacks: EventCallbacks ,
+}
+
+#[derive(Clone, Copy, Default)]
+pub enum CursorStyle {
+    #[default]
+    Default,
+    Hidden,
+    Set(SetCursorStyle),
 }
 
 pub type WeakUi = std::rc::Weak<_Ui>;
@@ -101,7 +109,7 @@ impl Ui {
                 eof: termios.control_chars[termios::SpecialCharacterIndices::VEOF as usize],
             },
             mouse_mode: false,
-            cursor_style: None,
+            cursor_style: CursorStyle::Default,
             pid_map: Default::default(),
             event_callbacks: Default::default(),
         };
@@ -731,9 +739,7 @@ impl UiInner {
         if self.mouse_mode {
             queue!(stdout, ENABLE_SGR_MOUSE)?;
         }
-        if let Some(style) = self.cursor_style {
-            queue!(stdout, style)?;
-        }
+        self.apply_cursor_style(Some(&mut stdout), false)?;
         execute!(
             stdout,
             event::EnableBracketedPaste,
@@ -754,12 +760,18 @@ impl UiInner {
         )
     }
 
-    pub fn apply_cursor_style(&self) -> std::io::Result<()> {
-        if let Some(style) = self.cursor_style {
-            execute!(self.stdout.lock(), style)
-        } else {
-            Ok(())
+    pub fn apply_cursor_style(&self, stdout: Option<&mut std::io::StdoutLock<'_>>, execute: bool) -> std::io::Result<()> {
+        let mut lock = None;
+        let stdout = stdout.unwrap_or_else(|| lock.insert(self.stdout.lock()));
+        match self.cursor_style {
+            CursorStyle::Default => queue!(self.stdout.lock(), SetCursorStyle::SteadyBlock, crossterm::cursor::Show)?,
+            CursorStyle::Hidden => execute!(self.stdout.lock(), crossterm::cursor::Hide)?,
+            CursorStyle::Set(style) => execute!(self.stdout.lock(), style, crossterm::cursor::Show)?,
         }
+        if execute {
+            execute!(stdout)?;
+        }
+        Ok(())
     }
 
     pub fn apply_intr(&self, intr: u8) -> Result<()> {
@@ -779,6 +791,7 @@ impl UiInner {
         crate::log_if_err(execute!(
             self.stdout,
             SetCursorStyle::SteadyBlock,
+            crossterm::cursor::Show,
             DISABLE_SGR_MOUSE,
             event::DisableBracketedPaste,
             event::DisableFocusChange,
