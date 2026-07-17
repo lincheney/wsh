@@ -313,6 +313,7 @@ impl Ui {
             ui.try_borrow_mut()?.reset();
             ui.trigger_buffer_change_callbacks().await?;
             ui.start_cmd(Some(&"".into())).await?;
+            ui.trigger_buffer_cursor_move_callbacks().await?;
             Ok(())
         });
 
@@ -523,11 +524,13 @@ impl Ui {
 
             self.trigger_buffer_change_callbacks().await?;
             self.start_cmd(Some(&buffer)).await?;
+            self.trigger_buffer_cursor_move_callbacks().await?;
 
         } else {
             self.insert_or_set_buffer(true, b"\n", None).await?;
             self.trigger_buffer_change_callbacks().await?;
             self.draw().await?;
+            self.trigger_buffer_cursor_move_callbacks().await?;
         }
 
         Ok(true)

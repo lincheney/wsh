@@ -172,6 +172,7 @@ event_types!(
     mouse(event: &MouseEvent, data: &BString),
     accept_line(data: &BString),
     buffer_change(),
+    buffer_cursor_move(),
     precmd(data: Option<&BString>),
     paste(data: &BString),
     window_resize(width: u32, height: u32),

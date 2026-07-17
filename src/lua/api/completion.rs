@@ -76,6 +76,7 @@ async fn insert_completion(ui: Ui, _lua: Lua, val: Match) -> Result<()> {
     }
 
     ui.trigger_buffer_change_callbacks().await?;
+    ui.trigger_buffer_cursor_move_callbacks().await?;
     ui.queue_draw();
     Ok(())
 }

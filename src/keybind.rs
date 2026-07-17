@@ -129,6 +129,9 @@ impl KeyHandler<'_> {
                 if new_buffer.is_some() {
                     self.trigger_buffer_change_callbacks().await?;
                 }
+                if new_cursor.is_some() {
+                    self.trigger_buffer_cursor_move_callbacks().await?;
+                }
                 // anything could have happened, so trigger a redraw
                 self.queue_draw();
 
@@ -146,6 +149,7 @@ impl KeyHandler<'_> {
                 let c = c.encode_utf8(&mut buf).as_bytes();
                 self.insert_or_set_buffer(true, c, None).await?;
                 self.trigger_buffer_change_callbacks().await?;
+                self.trigger_buffer_cursor_move_callbacks().await?;
                 self.queue_draw();
                 Ok(Some(Action::Done{exit: false}))
             },
