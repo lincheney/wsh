@@ -356,8 +356,8 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
         let cell_modifier = cell.style.modifier;
         let cell_fg = cell.style.fg.unwrap_or(Color::Reset);
         let cell_bg = cell.style.bg.unwrap_or(Color::Reset);
-        let cell_uc = cell.style.underline_color.unwrap_or(Color::Reset);
-        let cell_ul = cell.style.underline.unwrap_or_default();
+        let cell_underline_color = cell.style.underline_color.unwrap_or(Color::Reset);
+        let cell_underline = cell.style.underline.unwrap_or_default();
 
         if cell.style.hyperlink != self.hyperlink {
             self.hyperlink.clone_from(&cell.style.hyperlink);
@@ -375,8 +375,8 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
             self.fg = cell_fg;
             self.bg = cell_bg;
         }
-        if cell_ul != self.underline {
-            queue!(self.writer, SetAttribute(match cell_ul {
+        if cell_underline != self.underline {
+            queue!(self.writer, SetAttribute(match cell_underline {
                 Underline::None   => CAttribute::NoUnderline,
                 Underline::Single => CAttribute::Underlined,
                 Underline::Double => CAttribute::DoubleUnderlined,
@@ -384,11 +384,11 @@ impl<W: Write, C: Canvas> Drawer<'_, '_, W, C> {
                 Underline::Dashed => CAttribute::Underdashed,
                 Underline::Dotted => CAttribute::Underdotted,
             }))?;
-            self.underline = cell_ul
+            self.underline = cell_underline;
         }
-        if cell_uc != self.underline_color {
-            queue!(self.writer, SetUnderlineColor(cell_uc))?;
-            self.underline_color = cell_uc;
+        if cell_underline_color != self.underline_color {
+            queue!(self.writer, SetUnderlineColor(cell_underline_color))?;
+            self.underline_color = cell_underline_color;
         }
         Ok(())
     }
