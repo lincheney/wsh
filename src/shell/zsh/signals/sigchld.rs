@@ -153,11 +153,11 @@ pub(super) fn sighandler(trapped: bool) -> c_int {
 
             jobtab_retain_iter(token, |proc| {
                 // found one
-                if proc.status >= 0 && let Some(added) = state.pids.remove(&proc.pid) {
+                if proc.status >= 0 {
                     notify = true;
                     state.output.push_back(Output::Status{pid: proc.pid, status: proc.status});
                     // pop it off
-                    if added {
+                    if matches!(state.pids.remove(&proc.pid), Some(true)) {
                         return false
                     }
                 }
