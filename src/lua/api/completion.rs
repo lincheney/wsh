@@ -1,6 +1,5 @@
 use crate::lua::LuaWrapper;
 use std::ops::ControlFlow;
-use crate::lua::{HasEventCallbacks};
 use crate::lua::{Ui};
 use anyhow::Result;
 use mlua::{prelude::*, UserData, UserDataMethods, MetaMethod};
@@ -75,8 +74,8 @@ async fn insert_completion(ui: Ui, _lua: Lua, val: Match) -> Result<()> {
         ui.buffer.replace_completion_suffix(suffix);
     }
 
-    ui.trigger_buffer_change_callbacks().await?;
-    ui.trigger_buffer_cursor_move_callbacks().await?;
+    ui.event_callbacks.buffer_change(&ui).await?;
+    ui.event_callbacks.buffer_cursor_move(&ui).await?;
     ui.queue_draw();
     Ok(())
 }

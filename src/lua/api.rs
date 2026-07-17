@@ -23,7 +23,7 @@ mod functions;
 mod regex;
 use crate::keybind::EventIndex;
 pub use keybind::KeybindMapping;
-pub use events::{EventCallbacks, HasEventCallbacks};
+pub use events::{EventCallbacks};
 
 auto_from_lua! {
     #[derive(Debug, Default)]
@@ -59,23 +59,23 @@ fn set_cursor(ui: &Ui, _lua: &Lua, val: number::PossiblyMaxUsize) -> Result<()> 
 async fn set_buffer(ui: Ui, _lua: Lua, (val, cursor): (mlua::String, Option<number::PossiblyMaxUsize>)) -> Result<()> {
     let cursor = cursor.map(|c| usize::from(c).saturating_sub(1));
     ui.insert_or_set_buffer(false, &val.as_bytes(), cursor).await?;
-    ui.trigger_buffer_change_callbacks().await?;
-    ui.trigger_buffer_cursor_move_callbacks().await?;
+    ui.event_callbacks.buffer_change(&ui).await?;
+    ui.event_callbacks.buffer_cursor_move(&ui).await?;
     ui.queue_draw();
     Ok(())
 }
 
 async fn insert_at_cursor(ui: Ui, _lua: Lua, val: mlua::String) -> Result<()> {
     ui.insert_or_set_buffer(true, &val.as_bytes(), None).await?;
-    ui.trigger_buffer_change_callbacks().await?;
-    ui.trigger_buffer_cursor_move_callbacks().await?;
+    ui.event_callbacks.buffer_change(&ui).await?;
+    ui.event_callbacks.buffer_cursor_move(&ui).await?;
     ui.queue_draw();
     Ok(())
 }
 
 async fn delete_at_cursor(ui: Ui, _lua: Lua, count: isize) -> Result<()> {
     ui.try_borrow_mut()?.buffer.delete_at_cursor(count.unsigned_abs(), count >= 0);
-    ui.trigger_buffer_change_callbacks().await?;
+    ui.event_callbacks.buffer_change(&ui).await?;
     // cursor does not move
     ui.queue_draw();
     Ok(())
@@ -83,8 +83,8 @@ async fn delete_at_cursor(ui: Ui, _lua: Lua, count: isize) -> Result<()> {
 
 async fn undo_buffer(ui: Ui, _lua: Lua, (): ()) -> Result<()> {
     if ui.try_borrow_mut()?.buffer.move_in_history(false) {
-        ui.trigger_buffer_change_callbacks().await?;
-        ui.trigger_buffer_cursor_move_callbacks().await?;
+        ui.event_callbacks.buffer_change(&ui).await?;
+        ui.event_callbacks.buffer_cursor_move(&ui).await?;
         ui.queue_draw();
     }
     Ok(())
@@ -92,8 +92,8 @@ async fn undo_buffer(ui: Ui, _lua: Lua, (): ()) -> Result<()> {
 
 async fn redo_buffer(ui: Ui, _lua: Lua, (): ()) -> Result<()> {
     if ui.try_borrow_mut()?.buffer.move_in_history(true) {
-        ui.trigger_buffer_change_callbacks().await?;
-        ui.trigger_buffer_cursor_move_callbacks().await?;
+        ui.event_callbacks.buffer_change(&ui).await?;
+        ui.event_callbacks.buffer_cursor_move(&ui).await?;
         ui.queue_draw();
     }
     Ok(())

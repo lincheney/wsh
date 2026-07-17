@@ -16,7 +16,6 @@ pub use api::{
     tui::EphemeralStyleOptions,
     KeybindMapping,
     EventCallbacks,
-    HasEventCallbacks,
 };
 
 // i must use atomics here as these are used in signal handlers

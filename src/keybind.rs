@@ -1,4 +1,3 @@
-use crate::lua::{HasEventCallbacks};
 use crate::shell::{KeybindValue};
 use crate::ui::Ui;
 use anyhow::Result;
@@ -127,10 +126,10 @@ impl KeyHandler<'_> {
                 }
 
                 if new_buffer.is_some() {
-                    self.trigger_buffer_change_callbacks().await?;
+                    self.event_callbacks.buffer_change(self).await?;
                 }
                 if new_cursor.is_some() {
-                    self.trigger_buffer_cursor_move_callbacks().await?;
+                    self.event_callbacks.buffer_cursor_move(self).await?;
                 }
                 // anything could have happened, so trigger a redraw
                 self.queue_draw();
@@ -148,8 +147,8 @@ impl KeyHandler<'_> {
                 let mut buf = [0; 4];
                 let c = c.encode_utf8(&mut buf).as_bytes();
                 self.insert_or_set_buffer(true, c, None).await?;
-                self.trigger_buffer_change_callbacks().await?;
-                self.trigger_buffer_cursor_move_callbacks().await?;
+                self.event_callbacks.buffer_change(self).await?;
+                self.event_callbacks.buffer_cursor_move(self).await?;
                 self.queue_draw();
                 Ok(Some(Action::Done{exit: false}))
             },
@@ -159,7 +158,7 @@ impl KeyHandler<'_> {
             },
 
             Event::BracketedPaste(data) => {
-                self.trigger_paste_callbacks(data).await?;
+                self.event_callbacks.paste(self, data).await?;
                 Ok(Some(Action::Done{exit: false}))
             },
 

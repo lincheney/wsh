@@ -10,7 +10,7 @@ use crate::keybind::{Event};
 use crate::print_lock::{PrintLock, PrintLockGuard};
 use nix::sys::termios;
 use crate::shell::{Shell, signals::sigchld::PidMap, ParserOptions};
-use crate::lua::{LuaWrapper, EventCallbacks, HasEventCallbacks};
+use crate::lua::{LuaWrapper, EventCallbacks};
 pub mod buffer;
 
 use crossterm::{
@@ -147,7 +147,7 @@ impl Ui {
     }
 
     pub async fn start_cmd(&self, buffer: Option<&BString>) -> Result<()> {
-        self.trigger_precmd_callbacks(buffer).await?;
+        self.event_callbacks.precmd(self, buffer).await?;
         self.draw().await
     }
 
@@ -177,7 +177,7 @@ impl Ui {
         if let Ok(mut lock) = self.print_lock.try_lock() && lock.get_value() == 0 {
             let resized = self.draw_with_lock(&mut lock).await?;
             if !resized.is_empty() {
-                self.trigger_message_resize_callbacks(&resized).await?;
+                self.event_callbacks.message_resize(self, &resized).await?;
             }
             Ok(())
         } else {
@@ -287,8 +287,8 @@ impl Ui {
 
     pub async fn handle_event(&mut self, event: Event, event_buffer: BString) -> Result<bool> {
         match event {
-            Event::Key(ev) => self.trigger_key_callbacks(&ev.into(), &event_buffer).await?,
-            Event::Mouse(ev) => self.trigger_mouse_callbacks(&ev.into(), &event_buffer).await?,
+            Event::Key(ev) => self.event_callbacks.key(self, &ev.into(), &event_buffer).await?,
+            Event::Mouse(ev) => self.event_callbacks.mouse(self, &ev.into(), &event_buffer).await?,
             _ => (),
         }
 
@@ -303,7 +303,7 @@ impl Ui {
     pub async fn handle_window_resize(&self, width: u32, height: u32) -> Result<bool> {
         self.try_borrow_mut()?.size = (width, height);
         self.queue_draw();
-        self.trigger_window_resize_callbacks(width, height).await?;
+        self.event_callbacks.window_resize(self, width, height).await?;
         Ok(true)
     }
 
@@ -327,8 +327,8 @@ impl Ui {
                 return Ok(())
             }
             ui.try_borrow_mut()?.reset();
-            ui.trigger_buffer_change_callbacks().await?;
-            ui.trigger_buffer_cursor_move_callbacks().await?;
+            ui.event_callbacks.buffer_change(&ui).await?;
+            ui.event_callbacks.buffer_cursor_move(&ui).await?;
             ui.start_cmd(Some(&"".into())).await?;
             Ok(())
         });
@@ -516,7 +516,7 @@ impl Ui {
 
         // time to execute
         if let Some(buffer) = buffer {
-            self.trigger_accept_line_callbacks(&buffer).await?;
+            self.event_callbacks.accept_line(self, &buffer).await?;
 
             {
                 let fg_lock = self.has_foreground_process.lock().await;
@@ -538,14 +538,14 @@ impl Ui {
                 drop(fg_lock);
             }
 
-            self.trigger_buffer_change_callbacks().await?;
-            self.trigger_buffer_cursor_move_callbacks().await?;
+            self.event_callbacks.buffer_change(self).await?;
+            self.event_callbacks.buffer_cursor_move(self).await?;
             self.start_cmd(Some(&buffer)).await?;
 
         } else {
             self.insert_or_set_buffer(true, b"\n", None).await?;
-            self.trigger_buffer_change_callbacks().await?;
-            self.trigger_buffer_cursor_move_callbacks().await?;
+            self.event_callbacks.buffer_change(self).await?;
+            self.event_callbacks.buffer_cursor_move(self).await?;
             self.draw().await?;
         }
 

@@ -2,7 +2,6 @@ use crate::lua::LuaWrapper;
 use crate::shell::{MetaString};
 use crate::{meta_str};
 use bstr::BString;
-use crate::lua::{HasEventCallbacks};
 use anyhow::Result;
 use mlua::{prelude::*};
 use crate::ui::{Ui};
@@ -62,8 +61,8 @@ async fn goto_history_internal(ui: Ui, index: HistoryIndex) -> Result<()> {
         new_buffer.is_some()
     };
     if changed {
-        ui.trigger_buffer_change_callbacks().await?;
-        ui.trigger_buffer_cursor_move_callbacks().await?;
+        ui.event_callbacks.buffer_change(&ui).await?;
+        ui.event_callbacks.buffer_cursor_move(&ui).await?;
     }
     Ok(())
 }

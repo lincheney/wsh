@@ -1,4 +1,3 @@
-use crate::lua::{HasEventCallbacks};
 pub(in crate::shell) mod fork;
 use crate::ui::{Ui};
 use std::os::raw::{c_char, c_int};
@@ -186,7 +185,7 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                                 ui.start_cmd(None).await?;
                                 Ok(())
                             }.await);
-                            teardown_if_err(&ui, ui.trigger_init_callbacks().await);
+                            teardown_if_err(&ui, ui.event_callbacks.init(&ui).await);
                         }
                     });
                     crate::log_if_err(result);

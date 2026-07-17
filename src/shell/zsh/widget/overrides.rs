@@ -1,4 +1,3 @@
-use crate::lua::{HasEventCallbacks};
 use std::cell::Cell;
 use std::os::raw::{c_char, c_int};
 use anyhow::{Result};
@@ -47,8 +46,8 @@ fn move_in_history(forward: bool) -> Result<()> {
     GlobalState::with(|ui| {
         if ui.try_borrow_mut()?.buffer.move_in_history(forward) {
             ui.shell_loop(false, async {
-                ui.trigger_buffer_change_callbacks().await?;
-                ui.trigger_buffer_cursor_move_callbacks().await?;
+                ui.event_callbacks.buffer_change(ui).await?;
+                ui.event_callbacks.buffer_cursor_move(ui).await?;
                 anyhow::Ok(())
             })??;
         }

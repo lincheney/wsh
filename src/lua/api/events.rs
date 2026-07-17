@@ -66,13 +66,11 @@ macro_rules! event_types {
             }
         }
 
-    paste::paste!{
-
         #[derive(Default)]
         pub struct EventCallbacks {
             counter: Cell<usize>,
         $(
-            [<callbacks_ $name>]: CallbackVec,
+            $name: CallbackVec,
         )*
         }
 
@@ -80,7 +78,7 @@ macro_rules! event_types {
 
             fn get_callbacks(&self, typ: EventType) -> &CallbackVec {
                 match typ {
-                $( EventType::$name => &self.[<callbacks_ $name>], )*
+                $( EventType::$name => &self.$name, )*
                 }
             }
 
@@ -93,35 +91,24 @@ macro_rules! event_types {
 
             fn remove_event_callback(&self, id: usize) {
             $(
-                if self.[<callbacks_ $name>].remove(id) {
+                if self.$name.remove(id) {
                     return;
                 }
             )*
             }
 
-        }
-
-        pub trait HasEventCallbacks {
         $(
-            #[allow(unused_parens)]
-            async fn [<trigger_ $name _callbacks>](&self, $($arg: $type),*) -> Result<()>;
-        )*
-        }
-
-        impl HasEventCallbacks for Ui {
-        $(
-            #[allow(unused_parens)]
-            async fn [<trigger_ $name _callbacks>](&self, $($arg: $type),*) -> Result<()> {
-                let callbacks = self.event_callbacks.get_callbacks(EventType::$name).get_owned();
+            pub async fn $name(&self, ui: &Ui, $($arg: $type),*) -> Result<()> {
+                let callbacks = self.$name.get_owned();
                 if !callbacks.is_empty() {
                     let args = ($(
-                        self.lua.to_value_with(
+                        ui.lua.to_value_with(
                             &$arg,
                             mlua::SerializeOptions::new().serialize_none_to_null(false),
                         ).unwrap()
                     ),*);
-                    let args = self.lua.pack_multi(args).unwrap();
-                    trigger_callbacks_multi_value(&self, &callbacks, args).await;
+                    let args = ui.lua.pack_multi(args).unwrap();
+                    trigger_callbacks_multi_value(&ui, &callbacks, args).await;
                 }
                 Ok(())
             }
@@ -131,15 +118,13 @@ macro_rules! event_types {
         async fn trigger_event_callback(ui: Ui, _lua: Lua, (event, args): (String, LuaMultiValue)) -> Result<()> {
             let callbacks = match event.as_ref() {
                 $(
-                stringify!($name) => ui.event_callbacks.get_callbacks(EventType::$name).get_owned(),
+                stringify!($name) => ui.event_callbacks.$name.get_owned(),
                 )*
                 _ => anyhow::bail!("invalid event {event}"),
             };
             trigger_callbacks_multi_value(&ui, &callbacks, args).await;
             Ok(())
         }
-
-    }
 
     )
 }
