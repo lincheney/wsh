@@ -141,6 +141,7 @@ function M.run_in_background(command)
             unfocus()
         end
         update_message(job)
+        wish.set_message{id = job.msg, max_height = '100%'}
         local output = wish.message_to_ansi_string(msg)
         jobs[msg] = nil
         wish.remove_message(msg)
