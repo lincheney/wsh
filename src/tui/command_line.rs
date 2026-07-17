@@ -212,7 +212,6 @@ impl CommandLine<'_> {
             self.rprompt_size = rprompt_size;
 
             let buf_size = buf_size.get_or_insert_with(|| self.buffer.get_size(width, prompt_size.0 + rprompt_size.0));
-            ::log::debug!("DEBUG(trust) \t{}\t= {:?}", stringify!(size), buf_size);
 
             // there is 1 overlapping line
             self.max_buffer_height_value = self.max_buffer_height_metric.resolve(Some(height as _));
@@ -255,7 +254,7 @@ impl CommandLine<'_> {
         }
 
         // redraw the buffer
-        if dirty || self.buffer.dirty || self.predisplay_dirty || self.postdisplay_dirty {
+        if dirty || self.buffer.dirty || self.predisplay_dirty || self.postdisplay_dirty || self.rprompt_dirty {
             // draw buffer starting from end of prompt
             if !drawer.try_move_to(prompt_end) {
                 // no space for the buffer

@@ -917,7 +917,8 @@ auto_from_lua! {
 
 fn set_rprompt(ui: &Ui, __lua: &Lua, val: Option<RPromptOptions>) -> Result<()> {
     ui.queue_draw();
-    let rprompt = if let Some(options) = val && let Some(message) = options.message {
+    let mut ui = ui.try_borrow_mut()?;
+    if let Some(options) = val && let Some(message) = options.message {
         match message.inner {
             MessageInner::Widget { style, contents } => {
                 let mut widget = tui::widget::Widget::default();
@@ -925,16 +926,16 @@ fn set_rprompt(ui: &Ui, __lua: &Lua, val: Option<RPromptOptions>) -> Result<()> 
                     parse_text_parts(contents, &mut widget.inner);
                 }
                 set_widget_options(&mut widget, style);
-                tui::command_line::RightPromptMode::Custom{widget, auto_disappear: options.auto_disappear.unwrap_or(true)}
+                ui.cmdline.rprompt_mode = tui::command_line::RightPromptMode::Custom{
+                    widget,
+                    auto_disappear: options.auto_disappear.unwrap_or(true),
+                };
             },
             MessageInner::Layout { .. } => anyhow::bail!("rprompt only accepts widget options"),
         }
     } else {
-        tui::command_line::RightPromptMode::ShellVars(Default::default())
-    };
-
-    let mut ui = ui.try_borrow_mut()?;
-    ui.cmdline.rprompt_mode = rprompt;
+        ui.cmdline.rprompt_mode = tui::command_line::RightPromptMode::ShellVars(Default::default());
+    }
     ui.cmdline.rprompt_dirty = true;
     Ok(())
 }
