@@ -2,8 +2,8 @@ use std::borrow::Cow;
 use byteyarn::ByteYarn;
 use std::io::Write;
 use bstr::{BStr, BString, ByteSlice};
-use crate::tui::{Drawer, Canvas, Cell};
-use crate::tui::text::{Text, HighlightedRange, Highlight};
+use crate::tui::{Drawer, Canvas, Cell, command_line::RightPromptMode};
+use crate::tui::text::{Text, HighlightedRange, Highlight, TextSize};
 use crate::utils::merge_sort_iter::SortedMergeable;
 pub mod suffix;
 
@@ -61,7 +61,7 @@ impl Buffer {
         self.dirty = true;
     }
 
-    pub fn get_size(&self, width: usize, initial_indent: usize) -> (usize, usize) {
+    pub fn get_size(&self, width: usize, initial_indent: usize) -> TextSize {
         self.contents.get_size(width, initial_indent, [].iter())
     }
 
@@ -275,6 +275,9 @@ impl Buffer {
         max_height: Option<usize>,
         predisplay: Option<Highlight<usize, Cow<'_, BStr>>>,
         postdisplay: Option<Highlight<usize, Cow<'_, BStr>>>,
+        rprompt: &RightPromptMode,
+        rprompt_size: (usize, usize),
+        rprompt_dirty: bool,
     ) -> std::io::Result<(u16, u16)> {
 
         let cursor = self.cursor_byte_pos();
@@ -308,7 +311,6 @@ impl Buffer {
             let mut line = lines.slice(slice);
 
             if first {
-                first = false;
                 // we don't truncate line 0
                 if first_lineno > 0 {
                     // draw zr_start_ellipsis instead
@@ -342,9 +344,22 @@ impl Buffer {
                     cursor_coord = drawer.get_pos();
                 }
             }
+
+            // draw rprompt
+            if first {
+                rprompt.render(drawer, rprompt_size, rprompt_dirty)?;
+            }
+
+            first = false;
         }
 
-        drawer.clear_to_end_of_line(None, crate::shell::is_interrupted())?;
+        // draw rprompt
+        if first {
+            rprompt.render(drawer, rprompt_size, rprompt_dirty)?;
+        } else {
+            drawer.clear_to_end_of_line(None, crate::shell::is_interrupted())?;
+        }
+
         Ok(cursor_coord)
     }
 

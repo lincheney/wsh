@@ -29,6 +29,7 @@ auto_from_lua! {
     #[derive(Debug, Default)]
     struct RedrawOptions {
         prompt: bool,
+        rprompt: bool,
         postdisplay: bool,
         predisplay: bool,
         buffer: bool,
@@ -103,6 +104,7 @@ async fn redraw(ui: Ui, _lua: Lua, val: Option<RedrawOptions>) -> Result<()> {
             let mut ui = ui.try_borrow_mut()?;
             if val.all { ui.dirty = true; }
             if val.prompt { ui.cmdline.prompt_dirty = true; }
+            if val.rprompt { ui.cmdline.rprompt_dirty = true; }
             if val.predisplay { ui.cmdline.predisplay_dirty = true; }
             if val.postdisplay { ui.cmdline.postdisplay_dirty = true; }
             if val.buffer { ui.buffer.dirty = true; }

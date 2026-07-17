@@ -24,6 +24,13 @@ pub enum Alignment {
     Right,
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+pub struct TextSize {
+    pub height: usize,
+    pub first_line_width: usize,
+    pub last_line_width: usize,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct Text<T=(), S=BString> {
     pub(in crate::tui) paragraphs: Vec<BString>,
@@ -157,13 +164,13 @@ impl<T, S: AsRef<BStr>> Text<T, S> {
         width: usize,
         mut initial_indent: usize,
         extra_highlights: I,
-    ) -> (usize, usize)
+    ) -> TextSize
     where
         T: 'a,
         I: Clone + Iterator<Item=&'a HighlightedRange<T, S>>,
     {
 
-        let mut pos = (0, 0);
+        let mut pos = TextSize::default();
         let mut start = 0;
 
         // add a dummy line at the end
@@ -183,17 +190,22 @@ impl<T, S: AsRef<BStr>> Text<T, S> {
             }
 
             let (x, y, _lineno) = super::wrap::wrap(line, highlights, None, width, initial_indent, super::wrap::NoCallback::None);
-            pos.0 = x;
-            pos.1 += y;
+            let x = x.saturating_sub(initial_indent);
+            pos.last_line_width = x;
+            pos.height += y;
+            if i == 0 {
+                pos.first_line_width = if y == 0 { x } else { width };
+            }
             initial_indent = 0;
 
             if i + 1 != self.paragraphs.len() {
-                pos = (0, pos.1 + 1);
+                pos.last_line_width = 0;
+                pos.height += 1;
             }
         }
 
-        if pos != (0, 0) {
-            pos.1 += 1;
+        if pos.height != 0 || pos.last_line_width != 0 {
+            pos.height += 1;
         }
         pos
     }

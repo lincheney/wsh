@@ -220,13 +220,12 @@ impl Ui {
         }
 
         // grab shell vars as late as possible
-        let shell_vars = if (ui.dirty || ui.cmdline.is_dirty()) && !ui.cmdline.is_custom() {
-            Some(crate::tui::command_line::CommandLineState::get_shell_vars(&self.shell, ui.size.0))
-        } else {
-            None
-        };
+        if (ui.dirty || ui.cmdline.is_dirty()) && ui.cmdline.uses_shell_vars() {
+            let width = ui.size.0;
+            ui.cmdline.update_shell_vars(&self.shell, width);
+        }
 
-        Ok(Some(ui.draw(shell_vars, cursor_y)?))
+        Ok(Some(ui.draw(cursor_y)?))
     }
 
     pub async fn call_lua_fn<T: IntoLuaMulti + 'static>(&self, draw: bool, callback: mlua::Function, arg: T) -> Result<Option<LuaValue>> {
@@ -817,10 +816,7 @@ impl UiInner {
     }
 
 
-    fn draw(&mut self, shell_vars: Option<crate::tui::command_line::ShellVars>, cursor_y: Option<u32>) -> Result<Vec<usize>> {
-        if !self.cmdline.is_custom() && let Some(shell_vars) = shell_vars {
-            self.cmdline.prompt_mode = crate::tui::command_line::PromptMode::ShellVars(shell_vars);
-        }
+    fn draw(&mut self, cursor_y: Option<u32>) -> Result<Vec<usize>> {
         let cmdline = self.cmdline.make_command_line(&mut self.buffer);
         let resized = self.tui.draw(
             &mut self.stdout,

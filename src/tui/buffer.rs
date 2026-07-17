@@ -82,7 +82,7 @@ impl Canvas for Buffer {
                 // log::error!("Trying to draw outside of bounds: len={len}, start={start:?}, end={end:?}");
             }
         }
-        &mut self.content[start..end]
+        &mut self.content[start.min(len)..end.min(len)]
     }
 
     fn get_size(&self) -> (u16, u16) {

@@ -895,7 +895,7 @@ fn set_prompt(ui: &Ui, __lua: &Lua, val: Option<MessageOptions>) -> Result<()> {
                     parse_text_parts(contents, &mut widget.inner);
                 }
                 set_widget_options(&mut widget, style);
-                ui.cmdline.prompt_mode = tui::command_line::PromptMode::Custom(widget);
+                ui.cmdline.prompt_mode = tui::command_line::PromptMode::Custom{widget};
             },
             MessageInner::Layout { .. } => anyhow::bail!("prompt only accepts widget options"),
         }
@@ -903,6 +903,39 @@ fn set_prompt(ui: &Ui, __lua: &Lua, val: Option<MessageOptions>) -> Result<()> {
         ui.cmdline.prompt_mode = tui::command_line::PromptMode::ShellVars(Default::default());
     }
     ui.cmdline.prompt_dirty = true;
+    Ok(())
+}
+
+auto_from_lua! {
+    #[derive(Debug, Default)]
+    struct RPromptOptions {
+        #[flatten]
+        message: Option<MessageOptions>,
+        auto_disappear: Option<bool>,
+    }
+}
+
+fn set_rprompt(ui: &Ui, __lua: &Lua, val: Option<RPromptOptions>) -> Result<()> {
+    ui.queue_draw();
+    let rprompt = if let Some(options) = val && let Some(message) = options.message {
+        match message.inner {
+            MessageInner::Widget { style, contents } => {
+                let mut widget = tui::widget::Widget::default();
+                if let Some(contents) = contents {
+                    parse_text_parts(contents, &mut widget.inner);
+                }
+                set_widget_options(&mut widget, style);
+                tui::command_line::RightPromptMode::Custom{widget, auto_disappear: options.auto_disappear.unwrap_or(true)}
+            },
+            MessageInner::Layout { .. } => anyhow::bail!("rprompt only accepts widget options"),
+        }
+    } else {
+        tui::command_line::RightPromptMode::ShellVars(Default::default())
+    };
+
+    let mut ui = ui.try_borrow_mut()?;
+    ui.cmdline.rprompt_mode = rprompt;
+    ui.cmdline.rprompt_dirty = true;
     Ok(())
 }
 
@@ -1021,6 +1054,7 @@ pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
     lua.set_fn("message_to_ansi_string", message_to_ansi_string)?;
     lua.set_fn("set_status_bar", set_status_bar)?;
     lua.set_fn("set_prompt", set_prompt)?;
+    lua.set_fn("set_rprompt", set_rprompt)?;
     lua.set_async_fn("enable_mouse_mode", enable_mouse_mode)?;
     lua.set_fn("get_message_geometry", get_message_geometry)?;
     lua.set_fn("get_status_bar_geometry", get_status_bar_geometry)?;
