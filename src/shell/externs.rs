@@ -20,8 +20,12 @@ pub(in crate::shell) fn teardown(exiting: bool) {
         crate::log_if_err(ui.runtime.shutdown());
         // this should be the last strong ref
         let is_running = IS_RUNNING.get();
-        debug_assert_eq!(std::rc::Rc::strong_count(&ui.0), 1 + usize::from(is_running));
-        if exiting && is_running && let Some(mut ui) = crate::log_if_err(ui.try_borrow_mut()) {
+        let force_destroy = is_running || crate::is_forked();
+        let count = std::rc::Rc::strong_count(&ui.0);
+        if !crate::is_forked() {
+            debug_assert_eq!(count, 1 + usize::from(is_running));
+        }
+        if exiting && force_destroy && count > 1 && let Some(mut ui) = crate::log_if_err(ui.try_borrow_mut()) {
             ui.destroy();
         }
     }

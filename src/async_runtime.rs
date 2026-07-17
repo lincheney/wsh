@@ -21,7 +21,11 @@ struct RuntimeInner {
 }
 
 impl Runtime {
-    pub fn new() -> std::io::Result<Self> {
+    pub fn new() -> Result<Self> {
+        if crate::is_forked() {
+            anyhow::bail!("cannot create new tokio runtime in forked process");
+        }
+
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?;
@@ -67,7 +71,10 @@ impl Runtime {
     }
 
     pub fn shutdown(&self) -> Result<()> {
-        self.inner.try_borrow_mut()?.take();
+        if let Some(runtime) = self.inner.try_borrow_mut()?.take() && crate::is_forked() {
+            // tokio does not like getting forked
+            std::mem::forget(runtime);
+        }
         Ok(())
     }
 
