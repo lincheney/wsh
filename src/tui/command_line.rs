@@ -199,7 +199,8 @@ impl CommandLine<'_> {
         };
 
         if (self.buffer.dirty || self.rprompt_size != rprompt_size) && self.rprompt_mode.can_disappear() {
-            let first_line_width = self.buffer.get_first_line_width(width, prompt_size.0 + rprompt_size.0);
+            // test without including rprompt
+            let first_line_width = self.buffer.get_first_line_width(width, prompt_size.0);
             if prompt_size.0 + first_line_width + rprompt_size.0 > width {
                 rprompt_size = (0, 0);
                 self.rprompt_dirty = true;
