@@ -21,12 +21,12 @@ local function update_message(job)
     local props = {
         id = job.msg,
         border = {
-            title = {
+            title_top = {text = {
                 {fg = M.BORDER_RUNNING, text = ''},
                 {text = ''},
                 {fg = 'black', bg = M.TITLE_WAITING, dim = false, bold = true, text = '' },
                 {fg = M.TITLE_RUNNING, bold = true, text = ' ' .. job.command .. ' '}
-            },
+            } },
         },
     }
 
@@ -41,22 +41,22 @@ local function update_message(job)
 
     if job.output_marker == 0 and not props.show_cursor then
         props.border.sides = 'Top'
-        props.border.title[1].text = '─'
+        props.border.title_top.text[1].text = '─'
     else
         props.border.sides = 'All'
     end
 
     if job.code then
         props.border.fg = job.code > 0 and M.BORDER_FAILED or M.BORDER_SUCCEEDED
-        props.border.title[1].fg = props.border.fg
-        props.border.title[4].fg = job.code > 0 and M.TITLE_FAILED or M.TITLE_SUCCEEDED
+        props.border.title_top.text[1].fg = props.border.fg
+        props.border.title_top.text[4].fg = job.code > 0 and M.TITLE_FAILED or M.TITLE_SUCCEEDED
         props.border.dim = false
 
     elseif job.waiting_for_input then
         props.border.fg = M.BORDER_WAITING
-        props.border.title[2].text = ' '
-        props.border.title[3].text = 'input'
-        props.border.title[4].fg = M.TITLE_WAITING
+        props.border.title_top.text[2].text = ' '
+        props.border.title_top.text[3].text = 'input'
+        props.border.title_top.text[4].fg = M.TITLE_WAITING
     else
         props.border.fg = M.BORDER_RUNNING
     end
