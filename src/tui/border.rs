@@ -71,8 +71,10 @@ impl Title {
                     cell.style = style;
                 }
                 cells.push(cell);
+                ControlFlow::Continue(())
+            } else {
+                ControlFlow::Break(())
             }
-            ControlFlow::Break(())
         }));
         Some(cells)
     }
