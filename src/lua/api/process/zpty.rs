@@ -108,11 +108,13 @@ pub async fn zpty(ui: Ui, lua: Lua, val: ZptyArgs) -> Result<LuaMultiValue> {
     // TODO capture shout
 
     // fork it now to get the pid
-    let (result, queue_result) = ui.shell.with_queued_signals::<Result<_>, _>(|| {
-        let zpty = ui.shell.zpty(name, cmd.as_ref(), opts)?;
-        let pid_waiter = crate::shell::signals::sigchld::register_pid(&ui, zpty.pid as _, true);
-        Ok((zpty, pid_waiter))
-    });
+    let (result, queue_result) = ui.clone().shell.trampoline_out_callback(move |ui, token| {
+        ui.shell.with_queued_signals::<Result<_>, _>(|| {
+            let zpty = ui.shell.zpty(token, name, cmd.as_ref(), opts)?;
+            let pid_waiter = crate::shell::signals::sigchld::register_pid(&ui, zpty.pid as _, true);
+            Ok((zpty, pid_waiter))
+        })
+    }).await?;
     crate::log_if_err(queue_result);
     let (zpty, pid_waiter) = result?;
     let pid_waiter = pid_waiter?;

@@ -276,7 +276,13 @@ impl Shell {
         Ok(unsafe{ zsh_sys::lastpid })
     }
 
-    pub fn zpty(&self, name: MetaString, cmd: &MetaStr, opts: ZptyOpts) -> Result<Zpty> {
+    pub fn zpty(
+        &self,
+        _token: TrampolineToken,
+        name: MetaString,
+        cmd: &MetaStr,
+        opts: ZptyOpts,
+    ) -> Result<Zpty> {
         zsh::zpty(name, cmd, opts)
     }
 
