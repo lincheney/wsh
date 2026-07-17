@@ -479,9 +479,9 @@ impl Ui {
                 buffer.clone(),
                 ParserOptions::default(),
             );
-            ::log::debug!("DEBUG(zloty) \t{}\t= {:?}", stringify!(_tokens), _tokens);
-            ::log::debug!("DEBUG(manses)\t{}\t= {:?}", stringify!(complete), complete);
-            ::log::debug!("DEBUG(judged)\t{}\t= {:?}", stringify!(buffer), buffer);
+            // ::log::debug!("DEBUG(zloty) \t{}\t= {:?}", stringify!(_tokens), _tokens);
+            // ::log::debug!("DEBUG(manses)\t{}\t= {:?}", stringify!(complete), complete);
+            // ::log::debug!("DEBUG(judged)\t{}\t= {:?}", stringify!(buffer), buffer);
             if complete {
                 Some(buffer)
             } else {
