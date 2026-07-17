@@ -18,7 +18,7 @@ M.escape = {fg = '#ffaaaa'}
 M.escape_space = wish.table.merge({}, M.escape, {bg = '#442222'})
 M.string = {fg = '#ffffaa', bg='#333300'}
 M.heredoc_tag = {fg = 'blue', bold = true}
-M.variable = {fg = 'lightmagenta'}
+M.variable = {fg = 'magenta'}
 M.command = {fg = '#aaffaa', bold = true}
 M.func = {fg = 'yellow'}
 M.keyword = {fg = 'red'}
