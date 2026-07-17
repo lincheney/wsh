@@ -155,8 +155,9 @@ unsafe extern "C" fn zle_entry_ptr_override(cmd: c_int, ap: *mut zsh_sys::__va_l
                 zsh::zlereadflags = *(flags_ptr as *const c_int);
                 zsh::histline = zsh_sys::curhist as _;
                 // need to do this or initundo() will fail
-                zsh::zleline = zsh_sys::zalloc((256 + 2) * 4).cast(); // is this big enough?
+                zsh::zleline = zsh_sys::zshcalloc((256 + 2) * 4).cast(); // is this big enough?
                 *zsh::zleline = 0;
+                zsh::zlell = 0;
                 zsh::selectkeymap(keymap.as_mut_ptr().cast(), 1);
                 zsh::initundo();
                 zsh::selectlocalmap(null_mut());
