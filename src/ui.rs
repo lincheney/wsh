@@ -48,6 +48,7 @@ pub struct _Ui {
     pub runtime: crate::async_runtime::Runtime,
     pub callbacks_are_scheduled: Cell<bool>,
     pub scheduled_callback_notify: tokio::sync::Notify,
+    pub event_callbacks: EventCallbacks,
 }
 
 pub struct UiInner {
@@ -70,7 +71,6 @@ pub struct UiInner {
     pub cursor_style: CursorStyle,
 
     pub pid_map: PidMap,
-    pub event_callbacks: EventCallbacks ,
 }
 
 #[derive(Clone, Copy, Default)]
@@ -113,7 +113,6 @@ impl Ui {
             mouse_mode: false,
             cursor_style: CursorStyle::Default,
             pid_map: Default::default(),
-            event_callbacks: Default::default(),
         };
         ui.keybinds.push(Default::default());
 
@@ -130,6 +129,7 @@ impl Ui {
             runtime,
             callbacks_are_scheduled: Cell::default(),
             scheduled_callback_notify: tokio::sync::Notify::new(),
+            event_callbacks: Default::default(),
         };
         let ui = Self(Rc::new(ui));
         ui.lua.ui.replace(ui.downgrade());

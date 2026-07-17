@@ -1,3 +1,5 @@
+use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 use crate::lua::{LuaWrapper, auto_from_lua};
 use bstr::BString;
 use anyhow::Result;
@@ -6,19 +8,48 @@ use serde::{Serialize};
 use crate::ui::Ui;
 use crate::keybind;
 
-fn get_non_empty_owned_callbacks(ui: &Ui, typ: EventType) -> Result<Option<Vec<(usize, Function)>>> {
-    let callbacks = &ui.try_borrow()?.event_callbacks;
-    let callbacks = callbacks.get_callbacks(typ);
-    if callbacks.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(callbacks.clone()))
+#[derive(Default)]
+struct CallbackVec {
+    inner: RefCell<Rc<Vec<(usize, Function)>>>,
+}
+
+impl CallbackVec {
+    fn get_owned(&self) -> Rc<Vec<(usize, Function)>> {
+        self.inner.borrow().clone()
+    }
+
+    fn modify<F: FnOnce(&mut Vec<(usize, Function)>) -> T, T>(&self, f: F) -> T{
+        let mut inner = self.inner.borrow_mut();
+        if let Some(inner) = Rc::get_mut(&mut inner) {
+            f(inner)
+        } else {
+            // only clone the entire vec if necessary
+            let mut vec = Rc::unwrap_or_clone(inner.clone());
+            let result = f(&mut vec);
+            *inner = Rc::new(vec);
+            result
+        }
+    }
+
+    fn add(&self, id: usize, cb: Function) {
+        self.modify(|vec| vec.push((id, cb)));
+    }
+
+    fn remove(&self, id: usize) -> bool {
+        self.modify(|vec| {
+            if let Some(ix) = vec.iter().position(|(i, _)| *i == id) {
+                vec.remove(ix);
+                true
+            } else {
+                false
+            }
+        })
     }
 }
 
-async fn trigger_callbacks_multi_value(ui: &Ui, callbacks: Vec<(usize, Function)>, args: LuaMultiValue) {
+async fn trigger_callbacks_multi_value(ui: &Ui, callbacks: &[(usize, Function)], args: LuaMultiValue) {
     for (_, cb) in callbacks {
-        crate::log_if_err(ui.call_lua_fn(false, cb, args.clone()).await);
+        crate::log_if_err(ui.call_lua_fn(false, cb.clone(), args.clone()).await);
     }
 }
 
@@ -39,36 +70,32 @@ macro_rules! event_types {
 
         #[derive(Default)]
         pub struct EventCallbacks {
-            counter: usize,
+            counter: Cell<usize>,
         $(
-            pub [<callbacks_ $name>]: Vec<(usize, Function)>,
+            [<callbacks_ $name>]: CallbackVec,
         )*
         }
 
         impl EventCallbacks {
-            #[allow(dead_code)]
-            fn get_callbacks(&self, typ: EventType) -> &Vec<(usize, Function)> {
+
+            fn get_callbacks(&self, typ: EventType) -> &CallbackVec {
                 match typ {
                 $( EventType::$name => &self.[<callbacks_ $name>], )*
                 }
             }
 
-            fn get_callbacks_mut(&mut self, typ: EventType) -> &mut Vec<(usize, Function)> {
-                match typ {
-                $( EventType::$name => &mut self.[<callbacks_ $name>], )*
-                }
-            }
-
-            fn add_event_callback(&mut self, typ: EventType, cb: Function) -> usize {
-                let counter = self.counter;
-                self.get_callbacks_mut(typ).push((counter, cb));
-                self.counter += 1;
+            fn add_event_callback(&self, typ: EventType, cb: Function) -> usize {
+                let counter = self.counter.get();
+                self.get_callbacks(typ).add(counter, cb);
+                self.counter.set(counter + 1);
                 counter
             }
 
-            fn remove_event_callback(&mut self, id: usize) {
+            fn remove_event_callback(&self, id: usize) {
             $(
-                self.[<callbacks_ $name>].retain(|(i, _)| *i != id);
+                if self.[<callbacks_ $name>].remove(id) {
+                    return;
+                }
             )*
             }
 
@@ -85,7 +112,8 @@ macro_rules! event_types {
         $(
             #[allow(unused_parens)]
             async fn [<trigger_ $name _callbacks>](&self, $($arg: $type),*) -> Result<()> {
-                if let Some(callbacks) = get_non_empty_owned_callbacks(&self, EventType::$name)? {
+                let callbacks = self.event_callbacks.get_callbacks(EventType::$name).get_owned();
+                if !callbacks.is_empty() {
                     let args = ($(
                         self.lua.to_value_with(
                             &$arg,
@@ -93,7 +121,7 @@ macro_rules! event_types {
                         ).unwrap()
                     ),*);
                     let args = self.lua.pack_multi(args).unwrap();
-                    trigger_callbacks_multi_value(&self, callbacks, args).await;
+                    trigger_callbacks_multi_value(&self, &callbacks, args).await;
                 }
                 Ok(())
             }
@@ -103,14 +131,11 @@ macro_rules! event_types {
         async fn trigger_event_callback(ui: Ui, _lua: Lua, (event, args): (String, LuaMultiValue)) -> Result<()> {
             let callbacks = match event.as_ref() {
                 $(
-                stringify!($name) => get_non_empty_owned_callbacks(&ui, EventType::$name)?,
+                stringify!($name) => ui.event_callbacks.get_callbacks(EventType::$name).get_owned(),
                 )*
                 _ => anyhow::bail!("invalid event {event}"),
             };
-
-            if let Some(callbacks) = callbacks {
-                trigger_callbacks_multi_value(&ui, callbacks, args).await;
-            }
+            trigger_callbacks_multi_value(&ui, &callbacks, args).await;
             Ok(())
         }
 
@@ -182,11 +207,11 @@ event_types!(
 
 
 fn add_event_callback(ui: &Ui, _lua: &Lua, (typ, callback): (EventType, Function)) -> Result<usize> {
-    Ok(ui.try_borrow_mut()?.event_callbacks.add_event_callback(typ, callback))
+    Ok(ui.event_callbacks.add_event_callback(typ, callback))
 }
 
 fn remove_event_callback(ui: &Ui, _lua: &Lua, id: usize) -> Result<()> {
-    ui.try_borrow_mut()?.event_callbacks.remove_event_callback(id);
+    ui.event_callbacks.remove_event_callback(id);
     Ok(())
 }
 
