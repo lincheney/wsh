@@ -331,7 +331,7 @@ impl RightPromptMode {
             }
         } else {
             // still need to clear these cells up to the rprompt
-            drawer.draw_cell_n_times(&Default::default(), false, width.saturating_sub(size.0 as usize + pos.0 as usize) as u16)?;
+            drawer.draw_cell_n_times(&Default::default(), false, width.saturating_sub(size.0 + pos.0 as usize) as u16)?;
             drawer.move_to((width as _, pos.1));
         }
 
