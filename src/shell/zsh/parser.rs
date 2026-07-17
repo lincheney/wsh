@@ -84,6 +84,9 @@ impl TokenKind {
             TokenKind::Lextok(lextok::FI) => false,
             TokenKind::Lextok(lextok::DONE) => false,
             TokenKind::Lextok(lextok::ESAC) => false,
+            TokenKind::Lextok(lextok::OUTPAR) => false,
+            TokenKind::Lextok(lextok::DOUTPAR) => false,
+            TokenKind::Lextok(lextok::OUTBRACE) => false,
             _ => true,
         }
     }
