@@ -15,6 +15,7 @@ enum Message {
     Exit(i32),
     Draw,
     WindowResize(u32, u32),
+    ScheduledCallbacks,
 }
 
 #[derive(Clone)]
@@ -56,6 +57,10 @@ impl EventController {
 
     pub fn queue_draw(&self) {
         let _ = self.queue.send(Message::Draw);
+    }
+
+    pub fn queue_scheduled_callbacks(&self) {
+        let _ = self.queue.send(Message::ScheduledCallbacks);
     }
 
     pub fn exit(&self, code: i32) {
@@ -163,6 +168,9 @@ impl EventStream {
                 },
                 Some(Message::Draw) => {
                     crate::log_if_err(ui.draw().await);
+                },
+                Some(Message::ScheduledCallbacks) => {
+                    ui.run_scheduled_callbacks();
                 },
                 Some(Message::Exit(code)) => return Ok(code),
                 None => return Ok(1),

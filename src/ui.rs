@@ -46,6 +46,8 @@ pub struct _Ui {
     pub print_lock: PrintLock,
     pub is_drawing: Cell<bool>,
     pub runtime: crate::async_runtime::Runtime,
+    pub callbacks_are_scheduled: Cell<bool>,
+    pub scheduled_callback_notify: tokio::sync::Notify,
 }
 
 pub struct UiInner {
@@ -126,6 +128,8 @@ impl Ui {
             print_lock: Default::default(),
             is_drawing: Default::default(),
             runtime,
+            callbacks_are_scheduled: Cell::default(),
+            scheduled_callback_notify: tokio::sync::Notify::new(),
         };
         let ui = Self(Rc::new(ui));
         ui.lua.ui.replace(ui.downgrade());
@@ -145,6 +149,18 @@ impl Ui {
     pub async fn start_cmd(&self, buffer: Option<&BString>) -> Result<()> {
         self.trigger_precmd_callbacks(buffer).await?;
         self.draw().await
+    }
+
+    pub fn queue_scheduled_callbacks(&self) {
+        let old = self.callbacks_are_scheduled.replace(true);
+        if !old {
+            self.events.queue_scheduled_callbacks();
+        }
+    }
+
+    pub fn run_scheduled_callbacks(&self) {
+        self.callbacks_are_scheduled.set(false);
+        self.scheduled_callback_notify.notify_waiters();
     }
 
     pub fn queue_draw(&self) {
@@ -312,8 +328,8 @@ impl Ui {
             }
             ui.try_borrow_mut()?.reset();
             ui.trigger_buffer_change_callbacks().await?;
-            ui.start_cmd(Some(&"".into())).await?;
             ui.trigger_buffer_cursor_move_callbacks().await?;
+            ui.start_cmd(Some(&"".into())).await?;
             Ok(())
         });
 
@@ -523,14 +539,14 @@ impl Ui {
             }
 
             self.trigger_buffer_change_callbacks().await?;
-            self.start_cmd(Some(&buffer)).await?;
             self.trigger_buffer_cursor_move_callbacks().await?;
+            self.start_cmd(Some(&buffer)).await?;
 
         } else {
             self.insert_or_set_buffer(true, b"\n", None).await?;
             self.trigger_buffer_change_callbacks().await?;
-            self.draw().await?;
             self.trigger_buffer_cursor_move_callbacks().await?;
+            self.draw().await?;
         }
 
         Ok(true)
