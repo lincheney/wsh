@@ -10,11 +10,11 @@ pub enum Metric {
 }
 
 impl Metric {
-    pub fn resolve(self, available: Option<Unit>) -> Unit {
+    pub fn resolve(self, available: Option<Unit>, default: Unit) -> Unit {
         match (self, available) {
             (Self::Fixed(x), _) => x,
             (Self::Percent(x), Some(available)) => ((available * x) as f64 / 100.) as Unit,
-            _ => 0, // this is good default?
+            _ => default,
         }
     }
 }
@@ -34,8 +34,8 @@ pub struct Constraint {
 
 impl Constraint {
     pub fn into_size(self, available: Option<Unit>, min: Option<Unit>) -> Size {
-        let max = self.max.map(|c| c.resolve(available));
-        let mut size = self.min.map_or(0, |c| c.resolve(available)).max(min.unwrap_or(0));
+        let max = self.max.map(|c| c.resolve(available, min.unwrap_or(0)));
+        let mut size = self.min.map_or(0, |c| c.resolve(available, 0)).max(min.unwrap_or(0));
         // clamp to the max
         if let Some(max) = max && size > max {
             size = max;

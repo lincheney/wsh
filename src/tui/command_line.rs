@@ -218,7 +218,7 @@ impl CommandLine<'_> {
             let buf_size = self.buffer.get_size(width, prompt_size.0 + rprompt_size.0);
 
             // there is 1 overlapping line
-            self.max_buffer_height_value = self.max_buffer_height_metric.resolve(Some(height as _));
+            self.max_buffer_height_value = self.max_buffer_height_metric.resolve(Some(height as _), 1);
             let y = (buf_size.1 + self.prompt_size.1).saturating_sub(2).min(self.max_buffer_height_value.saturating_sub(1) as _);
 
             self.draw_end_pos = (buf_size.0 as _, y as _);
