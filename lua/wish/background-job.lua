@@ -9,7 +9,7 @@ M.PROMPT_TIMEOUT = 0.04 -- same as rlwrap
 
 M.BORDER_RUNNING = 'blue'
 M.BORDER_WAITING = M.BORDER_RUNNING
-M.BORDER_SUCCEEDED = 'lightgreen'
+M.BORDER_SUCCEEDED = 'green'
 M.BORDER_FAILED = '#ffaaaa'
 
 M.TITLE_RUNNING = 'blue'

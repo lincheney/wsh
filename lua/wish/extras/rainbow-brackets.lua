@@ -5,9 +5,9 @@ return wish.plugin(function(wish, opts, plugin)
 
     local styles = opts.styles or {
         {fg = 'blue' },
-        {fg = 'lightred' },
-        {fg = 'lightgreen' },
-        {fg = 'lightyellow' },
+        {fg = 'red' },
+        {fg = 'green' },
+        {fg = 'yellow' },
     }
     local unmatched_style = opts.unmatched_style or {
         bg = 'red'
