@@ -71,7 +71,7 @@ impl FromLua for LuaSizeMetric {
         match mlua::Either::<u16, String>::from_lua(value, lua)? {
             mlua::Either::Left(x) => Ok(Self(sizing::Metric::Fixed(x))),
             mlua::Either::Right(x) => {
-                if x.ends_with('%') && let Ok(x) = x.parse::<u16>() {
+                if x.ends_with('%') && let Ok(x) = x[..x.len()-1].parse::<u16>() {
                     Ok(Self(sizing::Metric::Percent(x)))
                 } else {
                     Err(crate::lua::lua_error(format!("invalid metric: {x}")))
