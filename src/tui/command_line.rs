@@ -188,7 +188,7 @@ impl CommandLine<'_> {
         };
 
         let mut rprompt_size = match &self.rprompt_mode {
-            _ if !self.rprompt_dirty => self.rprompt_size,
+            _ if !self.rprompt_dirty && self.rprompt_size != (0, 0) => self.rprompt_size,
             RightPromptMode::None => (0, 0),
             // add extra space for the cursor
             RightPromptMode::ShellVars(vars) => (vars.size.0 + 1, vars.size.0),
