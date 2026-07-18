@@ -298,7 +298,7 @@ impl From<UnderlineStyle> for Underline {
 auto_from_lua! {
     #[derive(Debug, Clone, Serialize)]
     enum UnderlineOption {
-        Colored{style: UnderlineStyle, color: LuaColor,},
+        Colored{style: Option<UnderlineStyle>, color: LuaColor,},
         Styled(UnderlineStyle),
         Bool(bool),
     }
@@ -340,8 +340,8 @@ impl From<StyleOptions> for Style {
         let underline = style.underline.map(|ul| {
             match ul {
                 UnderlineOption::Bool(false) => Underline::None,
-                UnderlineOption::Bool(true) => Underline::Single,
-                UnderlineOption::Colored{style, ..} | UnderlineOption::Styled(style) => style.into(),
+                UnderlineOption::Bool(true) | UnderlineOption::Colored{style: None, ..} => Underline::Single,
+                UnderlineOption::Colored{style: Some(style), ..} | UnderlineOption::Styled(style) => style.into(),
             }
         });
 
@@ -432,7 +432,7 @@ impl From<Style> for StyleOptions {
                 },
                 (Some(style), Some(color)) => match Option::<UnderlineStyle>::from(style) {
                     None => Some(UnderlineOption::Bool(false)),
-                    Some(style) => Some(UnderlineOption::Colored{style, color: LuaColor(color)}),
+                    Some(style) => Some(UnderlineOption::Colored{style: Some(style), color: LuaColor(color)}),
                 },
             },
             strikethrough: get_modifier!(Modifier::CROSSED_OUT),
