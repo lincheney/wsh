@@ -49,9 +49,10 @@ fn get_buffer(ui: &Ui, lua: &Lua, (): ()) -> Result<(mlua::String, usize)> {
     Ok((lua.create_string(buffer.get_contents())?, buffer.get_cursor() + 1))
 }
 
-fn set_cursor(ui: &Ui, _lua: &Lua, val: number::PossiblyMaxUsize) -> Result<()> {
+async fn set_cursor(ui: Ui, _lua: Lua, val: number::PossiblyMaxUsize) -> Result<()> {
     let val: usize = val.into();
     ui.try_borrow_mut()?.buffer.set_cursor(val.saturating_sub(1));
+    ui.event_callbacks.buffer_cursor_move(&ui).await?;
     ui.queue_draw();
     Ok(())
 }
@@ -225,7 +226,7 @@ pub fn init_lua(lua: &LuaWrapper) -> Result<()> {
 
     lua.set_fn("get_cursor", get_cursor)?;
     lua.set_fn("get_buffer", get_buffer)?;
-    lua.set_fn("set_cursor", set_cursor)?;
+    lua.set_async_fn("set_cursor", set_cursor)?;
     lua.set_async_fn("set_buffer", set_buffer)?;
     lua.set_async_fn("insert_at_cursor", insert_at_cursor)?;
     lua.set_async_fn("delete_at_cursor", delete_at_cursor)?;

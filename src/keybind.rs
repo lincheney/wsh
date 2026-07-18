@@ -116,6 +116,7 @@ impl KeyHandler<'_> {
                     (new_buffer, new_cursor, accept_line) = result??;
                 }
 
+                let cursor_moved = new_cursor.is_some();
                 {
                     if let Some(buffer) = &new_buffer {
                         self.insert_or_set_buffer(false, buffer, new_cursor.take()).await?;
@@ -128,7 +129,7 @@ impl KeyHandler<'_> {
                 if new_buffer.is_some() {
                     self.event_callbacks.buffer_change(self).await?;
                 }
-                if new_cursor.is_some() {
+                if cursor_moved {
                     self.event_callbacks.buffer_cursor_move(self).await?;
                 }
                 // anything could have happened, so trigger a redraw
